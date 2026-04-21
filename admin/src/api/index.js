@@ -34,15 +34,31 @@ function unwrap(promise) {
   return promise.then(response => response.data.data)
 }
 
+function normalizeQueryParams(params) {
+  if (!params) {
+    return params
+  }
+
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      ([, value]) => value !== undefined && value !== null && value !== ''
+    )
+  )
+}
+
 export const authApi = {
   getEntityDetail(entityType, id) {
     return unwrap(http.get(`/${entityType}/detail`, { params: { id } }))
   },
   getEntityList(entityType, params) {
-    return unwrap(http.get(`/${entityType}/list`, { params }))
+    return unwrap(
+      http.get(`/${entityType}/list`, { params: normalizeQueryParams(params) })
+    )
   },
   getImportJobs(params) {
-    return unwrap(http.get('/import/job/list', { params }))
+    return unwrap(
+      http.get('/import/job/list', { params: normalizeQueryParams(params) })
+    )
   },
   getOptionList() {
     return unwrap(http.get('/option/list'))
@@ -51,13 +67,21 @@ export const authApi = {
     return unwrap(http.get('/post/detail', { params: { id } }))
   },
   getPostGroupList(params) {
-    return unwrap(http.get('/post/group/list', { params }))
+    return unwrap(
+      http.get('/post/group/list', { params: normalizeQueryParams(params) })
+    )
   },
   getPostList(params) {
-    return unwrap(http.get('/post/list', { params }))
+    return unwrap(
+      http.get('/post/list', { params: normalizeQueryParams(params) })
+    )
   },
   getTranslationLogs(params) {
-    return unwrap(http.get('/aitranslationlog/list', { params }))
+    return unwrap(
+      http.get('/aitranslationlog/list', {
+        params: normalizeQueryParams(params)
+      })
+    )
   },
   importPost(payload) {
     return unwrap(http.post('/import/post', payload))
