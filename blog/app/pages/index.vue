@@ -1,3 +1,7 @@
+<template>
+  <div />
+</template>
+
 <script setup>
 const runtimeConfig = useRuntimeConfig()
 const { data: options } = await useAsyncData('root-options', () =>

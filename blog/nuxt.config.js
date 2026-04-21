@@ -22,7 +22,8 @@ export default defineNuxtConfig({
         'http://127.0.0.1:3000',
       localizedPublicBasePath:
         process.env.NUXT_PUBLIC_LOCALIZED_PUBLIC_BASE_PATH || '/localized',
-      siteOrigin: process.env.NUXT_PUBLIC_SITE_ORIGIN || 'http://127.0.0.1:3101',
+      siteOrigin:
+        process.env.NUXT_PUBLIC_SITE_ORIGIN || 'http://127.0.0.1:3101',
       version: process.env.npm_package_version
     }
   },

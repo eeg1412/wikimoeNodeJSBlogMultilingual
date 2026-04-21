@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
         '@': resolve(__dirname, 'src')
       }
     },
-    base: isProduction ? '/multilingual-admin/' : '/',
+    base: '/multilingual-admin/',
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version)
     },
