@@ -18,6 +18,7 @@ dist/
 .nitro/
 .cache/
 .vite/
+server/front/multilingual-admin/
 coverage/
 .nyc_output/
 *.tsbuildinfo

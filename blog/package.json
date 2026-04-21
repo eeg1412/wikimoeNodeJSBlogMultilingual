@@ -1,0 +1,25 @@
+{
+  "name": "wikimoe-multilingual-blog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev --port 3101",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@nuxt/icon": "^2.2.1",
+    "@nuxtjs/color-mode": "^4.0.0",
+    "@nuxtjs/tailwindcss": "^6.13.1",
+    "@tailwindcss/typography": "^0.5.16",
+    "highlight.js": "^11.11.1",
+    "nuxt": "^4.0.3",
+    "photoswipe": "^5.4.4",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.15"
+  }
+}
