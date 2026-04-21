@@ -22,7 +22,8 @@ http.interceptors.response.use(
       ? errorItem.details.filter(item => typeof item === 'string' && item)
       : []
     const messageBase = errorItem?.message || error.message || '请求失败'
-    const message = details.length > 0 ? `${messageBase}: ${details.join('; ')}` : messageBase
+    const message =
+      details.length > 0 ? `${messageBase}: ${details.join('; ')}` : messageBase
     if (error.response?.status === 401) {
       store.commit('clearAuth')
       const loginPath = `${import.meta.env.BASE_URL}login`

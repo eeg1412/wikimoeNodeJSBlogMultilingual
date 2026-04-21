@@ -5,7 +5,10 @@ const HttpError = require('../utils/httpError')
 const { asyncHandler } = require('../utils/async')
 const { validate } = require('../utils/validation')
 const optionsService = require('../services/optionsService')
-const { POST_STATUS, ATTACHMENT_SOURCE_TYPE } = require('../../common/constants')
+const {
+  POST_STATUS,
+  ATTACHMENT_SOURCE_TYPE
+} = require('../../common/constants')
 const { resolveSourceAssetUrl } = require('../utils/sourceUrl')
 const env = require('../config/env')
 
@@ -148,7 +151,10 @@ router.get(
       filter.tags = await resolveTagFilter(query.tag, query.lang)
     }
     if (query.mappoint) {
-      filter.mappointList = await resolveMappointFilter(query.mappoint, query.lang)
+      filter.mappointList = await resolveMappointFilter(
+        query.mappoint,
+        query.lang
+      )
     }
     if (query.archive) {
       const [year, month] = String(query.archive).split('-').map(Number)

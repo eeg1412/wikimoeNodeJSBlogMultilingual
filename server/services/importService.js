@@ -4,13 +4,19 @@ const db = require('../mongodb')
 const env = require('../config/env')
 const HttpError = require('../utils/httpError')
 const { hashObject, sha256 } = require('../utils/hash')
-const { normalizeSourceValueDeep, normalizeSourceUrl } = require('../utils/sourceUrl')
+const {
+  normalizeSourceValueDeep,
+  normalizeSourceUrl
+} = require('../utils/sourceUrl')
 const {
   normalizeInternalUrlsInHtml,
   extractHtmlMediaReferences,
   extractPlainTextFromHtml
 } = require('../utils/html')
-const { getEntityConfig, getEntityInitialTranslationStatus } = require('./entityRegistry')
+const {
+  getEntityConfig,
+  getEntityInitialTranslationStatus
+} = require('./entityRegistry')
 const sourceBlogClient = require('./sourceBlogClient')
 const {
   ATTACHMENT_IMPORT_ORIGIN,
@@ -81,7 +87,13 @@ async function updateImportJob(importJobId, payload) {
   await db.utils.importJobs.updateOne({ _id: importJobId }, { $set: payload })
 }
 
-function buildSourceSyncedDocument(existing, mappedData, entityType, snapshot, sourceHash) {
+function buildSourceSyncedDocument(
+  existing,
+  mappedData,
+  entityType,
+  snapshot,
+  sourceHash
+) {
   const config = getEntityConfig(entityType)
   const baseData = {
     ...mappedData,
@@ -92,7 +104,10 @@ function buildSourceSyncedDocument(existing, mappedData, entityType, snapshot, s
   if (!existing) {
     return {
       ...baseData,
-      translationStatus: getEntityInitialTranslationStatus(entityType, mappedData),
+      translationStatus: getEntityInitialTranslationStatus(
+        entityType,
+        mappedData
+      ),
       isManualEdited: false
     }
   }
@@ -144,7 +159,9 @@ function normalizeAttachmentCandidate(source) {
       filename:
         source.filename ||
         (source.filepath || source.photo || source.src || source.url
-          ? path.basename(source.filepath || source.photo || source.src || source.url)
+          ? path.basename(
+              source.filepath || source.photo || source.src || source.url
+            )
           : '')
     }
   }
@@ -169,7 +186,8 @@ async function upsertRemoteAttachment(rawSource, languageCode, importOrigin) {
     env.SOURCE_BLOG_PUBLIC_ORIGIN
   )
   const sourceHash = hashObject(sourceSnapshot)
-  const isInternal = typeof normalizedPath === 'string' && normalizedPath.startsWith('/')
+  const isInternal =
+    typeof normalizedPath === 'string' && normalizedPath.startsWith('/')
 
   const filter = {
     languageCode,
@@ -186,7 +204,9 @@ async function upsertRemoteAttachment(rawSource, languageCode, importOrigin) {
   const existing = await db.utils.attachments.findOne(filter)
   const mappedData = {
     attachmentSourceType: ATTACHMENT_SOURCE_TYPE.REMOTE,
-    attachmentGroupKey: candidate._id ? toId(candidate._id) : sha256(normalizedPath),
+    attachmentGroupKey: candidate._id
+      ? toId(candidate._id)
+      : sha256(normalizedPath),
     sourceId: candidate._id ? toId(candidate._id) : null,
     languageCode,
     sourcePath: isInternal ? normalizedPath : null,
@@ -223,12 +243,20 @@ async function upsertRemoteAttachment(rawSource, languageCode, importOrigin) {
   return db.utils.attachments.upsertOne(filter, syncedDocument)
 }
 
-async function syncSharedEntity(entityType, rawSource, languageCode, context = {}) {
+async function syncSharedEntity(
+  entityType,
+  rawSource,
+  languageCode,
+  context = {}
+) {
   if (!rawSource?._id) {
     return null
   }
   const config = getEntityConfig(entityType)
-  const snapshot = normalizeSourceValueDeep(rawSource, env.SOURCE_BLOG_PUBLIC_ORIGIN)
+  const snapshot = normalizeSourceValueDeep(
+    rawSource,
+    env.SOURCE_BLOG_PUBLIC_ORIGIN
+  )
   const sourceHash = hashObject(snapshot)
   const filter = {
     sourceId: toId(rawSource._id),
@@ -268,7 +296,10 @@ async function syncSharedEntity(entityType, rawSource, languageCode, context = {
 }
 
 async function registerHtmlDiscoveredAttachments(content, languageCode) {
-  const refs = extractHtmlMediaReferences(content, env.SOURCE_BLOG_PUBLIC_ORIGIN)
+  const refs = extractHtmlMediaReferences(
+    content,
+    env.SOURCE_BLOG_PUBLIC_ORIGIN
+  )
   const results = []
   for (const ref of refs) {
     if (ref.tagName === 'a') {
@@ -292,7 +323,9 @@ async function registerHtmlDiscoveredAttachments(content, languageCode) {
 
 async function upsertRelatedEntityLists(detail, languageCode) {
   const results = {}
-  for (const [fieldName, entityType] of Object.entries(RELATED_ENTITY_LIST_MAP)) {
+  for (const [fieldName, entityType] of Object.entries(
+    RELATED_ENTITY_LIST_MAP
+  )) {
     results[fieldName] = []
     for (const item of asArray(detail[fieldName])) {
       const doc = await syncSharedEntity(entityType, item, languageCode)
@@ -339,7 +372,10 @@ async function upsertRelatedPosts(detail, languageCode, warnings) {
           }
         }
 
-        const sourceSnapshot = normalizeSourceValueDeep(item, env.SOURCE_BLOG_PUBLIC_ORIGIN)
+        const sourceSnapshot = normalizeSourceValueDeep(
+          item,
+          env.SOURCE_BLOG_PUBLIC_ORIGIN
+        )
         existing = await db.utils.posts.upsertOne(
           { sourceId, languageCode },
           {
@@ -375,7 +411,7 @@ async function upsertRelatedPosts(detail, languageCode, warnings) {
             isManualEdited: false
           }
         )
-        warnings.push(`已为关联文章 ${item.title || sourceId} 创建 stub`) 
+        warnings.push(`已为关联文章 ${item.title || sourceId} 创建 stub`)
       }
       results[fieldName].push(existing._id)
     }
@@ -384,7 +420,14 @@ async function upsertRelatedPosts(detail, languageCode, warnings) {
   return results
 }
 
-function buildPostDocument(detail, languageCode, dependencies, sourceIdentifier, importJobId, existingPost) {
+function buildPostDocument(
+  detail,
+  languageCode,
+  dependencies,
+  sourceIdentifier,
+  importJobId,
+  existingPost
+) {
   const normalizedContent = normalizeInternalUrlsInHtml(
     detail.content || '',
     env.SOURCE_BLOG_PUBLIC_ORIGIN
@@ -400,7 +443,9 @@ function buildPostDocument(detail, languageCode, dependencies, sourceIdentifier,
     env.SOURCE_BLOG_PUBLIC_ORIGIN
   )
   const sourceHash = hashObject(sourceSnapshot)
-  const sourceChanged = existingPost ? existingPost.sourceHash !== sourceHash : false
+  const sourceChanged = existingPost
+    ? existingPost.sourceHash !== sourceHash
+    : false
 
   return {
     sourceId: toId(detail._id),
@@ -462,7 +507,12 @@ function buildPostDocument(detail, languageCode, dependencies, sourceIdentifier,
   }
 }
 
-async function importPost({ sourceIdentifier, languageCode, confirmOverwrite, adminId }) {
+async function importPost({
+  sourceIdentifier,
+  languageCode,
+  confirmOverwrite,
+  adminId
+}) {
   const importJob = await db.utils.importJobs.save(
     buildImportJobPayload(sourceIdentifier, languageCode, adminId)
   )
@@ -471,7 +521,8 @@ async function importPost({ sourceIdentifier, languageCode, confirmOverwrite, ad
     const result = await importLock.acquire(
       `post-import:${languageCode}:${sourceIdentifier}`,
       async () => {
-        const detail = await sourceBlogClient.resolveImportablePost(sourceIdentifier)
+        const detail =
+          await sourceBlogClient.resolveImportablePost(sourceIdentifier)
         const sourceResolvedId = toId(detail._id)
 
         await updateImportJob(importJob._id, {
@@ -494,7 +545,8 @@ async function importPost({ sourceIdentifier, languageCode, confirmOverwrite, ad
           languageCode
         })
         const canOverwriteWithoutConfirm =
-          existingPost && existingPost.translationStatus === TRANSLATION_STATUS.STUB
+          existingPost &&
+          existingPost.translationStatus === TRANSLATION_STATUS.STUB
 
         if (existingPost && !confirmOverwrite && !canOverwriteWithoutConfirm) {
           throw new HttpError(409, '当前语言文章已存在')
@@ -502,12 +554,18 @@ async function importPost({ sourceIdentifier, languageCode, confirmOverwrite, ad
 
         const warnings = []
         const normalizedAuthor = detail.author
-          ? normalizeSourceValueDeep(detail.author, env.SOURCE_BLOG_PUBLIC_ORIGIN)
+          ? normalizeSourceValueDeep(
+              detail.author,
+              env.SOURCE_BLOG_PUBLIC_ORIGIN
+            )
           : null
 
         const authorPhotoAttachment = normalizedAuthor?.photo
           ? await upsertRemoteAttachment(
-              { filepath: normalizedAuthor.photo, name: `${normalizedAuthor.nickname || 'author'} photo` },
+              {
+                filepath: normalizedAuthor.photo,
+                name: `${normalizedAuthor.nickname || 'author'} photo`
+              },
               languageCode,
               ATTACHMENT_IMPORT_ORIGIN.SOURCE_ATTACHMENT
             )
@@ -569,8 +627,15 @@ async function importPost({ sourceIdentifier, languageCode, confirmOverwrite, ad
           stage: 'upsertSharedEntities'
         })
 
-        const relatedEntityLists = await upsertRelatedEntityLists(detail, languageCode)
-        const relatedPostLists = await upsertRelatedPosts(detail, languageCode, warnings)
+        const relatedEntityLists = await upsertRelatedEntityLists(
+          detail,
+          languageCode
+        )
+        const relatedPostLists = await upsertRelatedPosts(
+          detail,
+          languageCode,
+          warnings
+        )
 
         const postDocument = buildPostDocument(
           { ...detail, content: normalizedContent },

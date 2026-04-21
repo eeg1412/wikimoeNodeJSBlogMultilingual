@@ -8,10 +8,18 @@ const {
   extractPlainTextFromHtml,
   validateHtmlContent
 } = require('../utils/html')
-const { ATTACHMENT_SOURCE_TYPE, POST_STATUS, SUPPORTED_LANGUAGE_CODES, TRANSLATION_STATUS } = require('../../common/constants')
+const {
+  ATTACHMENT_SOURCE_TYPE,
+  POST_STATUS,
+  SUPPORTED_LANGUAGE_CODES,
+  TRANSLATION_STATUS
+} = require('../../common/constants')
 
 function isApprovedStatus(status) {
-  return [TRANSLATION_STATUS.APPROVED, TRANSLATION_STATUS.NOT_REQUIRED].includes(status)
+  return [
+    TRANSLATION_STATUS.APPROVED,
+    TRANSLATION_STATUS.NOT_REQUIRED
+  ].includes(status)
 }
 
 function pushTranslationError(errors, label, doc) {
@@ -26,7 +34,11 @@ function pushTranslationError(errors, label, doc) {
 
 async function validateAttachments(post, errors) {
   for (const attachment of post.coverImages || []) {
-    pushTranslationError(errors, `附件 ${attachment.name || attachment.filename || attachment._id}`, attachment)
+    pushTranslationError(
+      errors,
+      `附件 ${attachment.name || attachment.filename || attachment._id}`,
+      attachment
+    )
     if (attachment.attachmentSourceType === ATTACHMENT_SOURCE_TYPE.LOCALIZED) {
       if (attachment.languageCode !== post.languageCode) {
         errors.push('本地化附件语言与文章语言不一致')
@@ -43,7 +55,10 @@ async function validateAttachments(post, errors) {
 
 async function validateHtmlReferences(post, errors) {
   const content = validateHtmlContent(post.content || '')
-  const mediaRefs = extractHtmlMediaReferences(content, env.SOURCE_BLOG_PUBLIC_ORIGIN)
+  const mediaRefs = extractHtmlMediaReferences(
+    content,
+    env.SOURCE_BLOG_PUBLIC_ORIGIN
+  )
   for (const ref of mediaRefs) {
     const value = ref.normalizedValue
     if (ref.tagName === 'a') {
@@ -107,7 +122,9 @@ async function ensurePostExcerpt(post) {
 }
 
 async function validatePostForPublish(postId) {
-  const post = await db.utils.posts.findOne({ _id: postId }, undefined, { scope: 'detail' })
+  const post = await db.utils.posts.findOne({ _id: postId }, undefined, {
+    scope: 'detail'
+  })
   if (!post) {
     throw new HttpError(404, '文章不存在')
   }
@@ -153,7 +170,11 @@ async function validatePostForPublish(postId) {
     pushTranslationError(errors, `标签 ${tag.tagname || tag._id}`, tag)
   }
   for (const mappoint of post.mappointList || []) {
-    pushTranslationError(errors, `地点 ${mappoint.title || mappoint._id}`, mappoint)
+    pushTranslationError(
+      errors,
+      `地点 ${mappoint.title || mappoint._id}`,
+      mappoint
+    )
   }
 
   const relationKeys = [
@@ -187,7 +208,9 @@ async function validatePostForPublish(postId) {
       continue
     }
     if (relatedPost.translationStatus === TRANSLATION_STATUS.STUB) {
-      errors.push(`关联文章仍为 stub: ${relatedPost.title || relatedPost.sourceId}`)
+      errors.push(
+        `关联文章仍为 stub: ${relatedPost.title || relatedPost.sourceId}`
+      )
     }
   }
 
@@ -200,7 +223,10 @@ async function validatePostForPublish(postId) {
     isValid: errors.length === 0
   }
 
-  await db.utils.posts.updateOne({ _id: post._id }, { $set: { validationState } })
+  await db.utils.posts.updateOne(
+    { _id: post._id },
+    { $set: { validationState } }
+  )
 
   return { post, validationState }
 }
@@ -222,7 +248,9 @@ async function publishPost(postId) {
     }
   )
   global.$cacheData.public.clear()
-  return db.utils.posts.findOne({ _id: post._id }, undefined, { scope: 'detail' })
+  return db.utils.posts.findOne({ _id: post._id }, undefined, {
+    scope: 'detail'
+  })
 }
 
 async function unpublishPost(postId) {
@@ -239,7 +267,9 @@ async function unpublishPost(postId) {
     }
   )
   global.$cacheData.public.clear()
-  return db.utils.posts.findOne({ _id: post._id }, undefined, { scope: 'detail' })
+  return db.utils.posts.findOne({ _id: post._id }, undefined, {
+    scope: 'detail'
+  })
 }
 
 module.exports = {

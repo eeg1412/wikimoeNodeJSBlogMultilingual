@@ -3,14 +3,22 @@
     <section class="glass-panel overflow-hidden p-8 sm:p-10">
       <div class="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
         <div class="space-y-5">
-          <div class="text-xs uppercase tracking-[0.28em] text-accent-700 dark:text-accent-300">
+          <div
+            class="text-xs uppercase tracking-[0.28em] text-accent-700 dark:text-accent-300"
+          >
             {{ post.type === 1 ? 'POST' : 'TWEET' }}
           </div>
-          <h1 class="font-display text-4xl leading-tight sm:text-5xl">{{ post.title }}</h1>
-          <p class="max-w-2xl text-lg leading-8 text-stone-600 dark:text-stone-300">
+          <h1 class="font-display text-4xl leading-tight sm:text-5xl">
+            {{ post.title }}
+          </h1>
+          <p
+            class="max-w-2xl text-lg leading-8 text-stone-600 dark:text-stone-300"
+          >
             {{ post.excerpt }}
           </p>
-          <div class="flex flex-wrap gap-4 text-sm text-stone-500 dark:text-stone-400">
+          <div
+            class="flex flex-wrap gap-4 text-sm text-stone-500 dark:text-stone-400"
+          >
             <span>{{ formatDate(post.date) }}</span>
             <span v-if="post.author">作者：{{ post.author.nickname }}</span>
             <span v-if="post.sort">分类：{{ post.sort.sortname }}</span>
@@ -26,8 +34,15 @@
             </NuxtLink>
           </div>
         </div>
-        <div v-if="coverUrl" class="overflow-hidden rounded-3xl border border-stone-200/70 dark:border-white/10">
-          <img :src="coverUrl" :alt="post.title" class="h-full w-full object-cover" />
+        <div
+          v-if="coverUrl"
+          class="overflow-hidden rounded-3xl border border-stone-200/70 dark:border-white/10"
+        >
+          <img
+            :src="coverUrl"
+            :alt="post.title"
+            class="h-full w-full object-cover"
+          />
         </div>
       </div>
     </section>
