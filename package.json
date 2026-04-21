@@ -1,0 +1,25 @@
+{
+  "name": "wikimoe-nodejs-blog-multilingual",
+  "version": "0.1.0",
+  "private": true,
+  "description": "多语言附属站：基于原站博客公开接口的多语言内容导入、翻译、编辑与发布平台。",
+  "workspaces": [
+    "admin",
+    "blog",
+    "server",
+    "common"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace server run dev",
+    "dev:admin": "npm --workspace admin run dev",
+    "dev:blog": "npm --workspace blog run dev",
+    "build": "node build-all.js",
+    "build:admin": "npm --workspace admin run build",
+    "build:blog": "npm --workspace blog run build",
+    "start": "npm --workspace server run start"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "license": "MIT"
+}

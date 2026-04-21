@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+
+# environment files
+.env
+.env.*
+admin/.env
+admin/.env.*
+blog/.env
+blog/.env.*
+server/.env
+server/.env.*
+
+# build output
+dist/
+.nuxt/
+.output/
+.nitro/
+.cache/
+.vite/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# runtime data
+server/public/localized/
+server/log/
+server/secret/
+server/cache/
+server/backups/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# system files
+.DS_Store
+Thumbs.db
