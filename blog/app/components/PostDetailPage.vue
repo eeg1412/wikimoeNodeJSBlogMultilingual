@@ -74,7 +74,7 @@ const { data: post } = await useAsyncData(
         id: route.params.id,
         lang: languageCode.value
       }
-    }),
+    }).then(response => response.data),
   {
     watch: [() => route.fullPath]
   }

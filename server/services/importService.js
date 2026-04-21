@@ -5,7 +5,11 @@ const env = require('../config/env')
 const HttpError = require('../utils/httpError')
 const { hashObject, sha256 } = require('../utils/hash')
 const { normalizeSourceValueDeep, normalizeSourceUrl } = require('../utils/sourceUrl')
-const { normalizeInternalUrlsInHtml, extractHtmlMediaReferences } = require('../utils/html')
+const {
+  normalizeInternalUrlsInHtml,
+  extractHtmlMediaReferences,
+  extractPlainTextFromHtml
+} = require('../utils/html')
 const { getEntityConfig, getEntityInitialTranslationStatus } = require('./entityRegistry')
 const sourceBlogClient = require('./sourceBlogClient')
 const {
@@ -41,6 +45,19 @@ function toId(value) {
 
 function asArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : []
+}
+
+function buildExcerptFallback(excerpt, html) {
+  if (typeof excerpt === 'string' && excerpt.trim()) {
+    return excerpt
+  }
+
+  const plainText = extractPlainTextFromHtml(html || '')
+  if (!plainText) {
+    return ''
+  }
+
+  return plainText.slice(0, 200)
 }
 
 function buildImportJobPayload(sourceIdentifier, languageCode, adminId) {
@@ -372,10 +389,12 @@ function buildPostDocument(detail, languageCode, dependencies, sourceIdentifier,
     detail.content || '',
     env.SOURCE_BLOG_PUBLIC_ORIGIN
   )
+  const excerpt = buildExcerptFallback(detail.excerpt, normalizedContent)
 
   const sourceSnapshot = normalizeSourceValueDeep(
     {
       ...detail,
+      excerpt,
       content: normalizedContent
     },
     env.SOURCE_BLOG_PUBLIC_ORIGIN
@@ -390,7 +409,7 @@ function buildPostDocument(detail, languageCode, dependencies, sourceIdentifier,
     languageCode,
     type: detail.type,
     title: detail.title || '',
-    excerpt: detail.excerpt || '',
+    excerpt,
     content: normalizedContent,
     alias: detail.alias || toId(detail._id),
     date: detail.date || new Date(),

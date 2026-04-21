@@ -3,7 +3,11 @@ const path = require('path')
 const db = require('../mongodb')
 const env = require('../config/env')
 const HttpError = require('../utils/httpError')
-const { extractHtmlMediaReferences, validateHtmlContent } = require('../utils/html')
+const {
+  extractHtmlMediaReferences,
+  extractPlainTextFromHtml,
+  validateHtmlContent
+} = require('../utils/html')
 const { ATTACHMENT_SOURCE_TYPE, POST_STATUS, SUPPORTED_LANGUAGE_CODES, TRANSLATION_STATUS } = require('../../common/constants')
 
 function isApprovedStatus(status) {
@@ -86,12 +90,29 @@ async function validateHtmlReferences(post, errors) {
   }
 }
 
+async function ensurePostExcerpt(post) {
+  if (post.excerpt?.trim()) {
+    return post.excerpt
+  }
+
+  const excerpt = extractPlainTextFromHtml(post.content || '').slice(0, 200)
+  if (!excerpt) {
+    return ''
+  }
+
+  post.excerpt = excerpt
+  await db.utils.posts.updateOne({ _id: post._id }, { $set: { excerpt } })
+
+  return excerpt
+}
+
 async function validatePostForPublish(postId) {
   const post = await db.utils.posts.findOne({ _id: postId }, undefined, { scope: 'detail' })
   if (!post) {
     throw new HttpError(404, '文章不存在')
   }
 
+  const resolvedExcerpt = await ensurePostExcerpt(post)
   const errors = []
   if (![1, 2].includes(post.type)) {
     errors.push('文章类型必须为 1 或 2')
@@ -102,7 +123,7 @@ async function validatePostForPublish(postId) {
   if (!post.title?.trim()) {
     errors.push('标题不能为空')
   }
-  if (!post.excerpt?.trim()) {
+  if (!resolvedExcerpt) {
     errors.push('摘要不能为空')
   }
   if (!post.content?.trim()) {
@@ -121,8 +142,12 @@ async function validatePostForPublish(postId) {
     errors.push('当前语言下 alias 已存在')
   }
 
-  pushTranslationError(errors, '作者', post.author)
-  pushTranslationError(errors, '分类', post.sort)
+  if (post.author) {
+    pushTranslationError(errors, '作者', post.author)
+  }
+  if (post.sort) {
+    pushTranslationError(errors, '分类', post.sort)
+  }
 
   for (const tag of post.tags || []) {
     pushTranslationError(errors, `标签 ${tag.tagname || tag._id}`, tag)

@@ -177,7 +177,13 @@ function validateHtmlContent(html) {
   return $('body').html() || $.root().html() || ''
 }
 
+function extractPlainTextFromHtml(html) {
+  const $ = loadHtml(html)
+  return normalizeText($.text() || '')
+}
+
 module.exports = {
+  extractPlainTextFromHtml,
   applyTranslatedHtmlSegments,
   extractHtmlMediaReferences,
   extractTranslatableHtmlSegments,

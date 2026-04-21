@@ -8,7 +8,7 @@ export async function useSiteOptions(languageCode) {
     () =>
       $fetch(`${runtimeConfig.public.apiDomain}/api/blog/options`, {
         params: { lang: lang.value }
-      }),
+      }).then(response => response.data),
     {
       watch: [lang]
     }

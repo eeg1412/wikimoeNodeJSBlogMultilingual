@@ -17,8 +17,12 @@ http.interceptors.request.use(config => {
 http.interceptors.response.use(
   response => response,
   error => {
-    const message =
-      error.response?.data?.errors?.[0]?.message || error.message || '请求失败'
+    const errorItem = error.response?.data?.errors?.[0]
+    const details = Array.isArray(errorItem?.details)
+      ? errorItem.details.filter(item => typeof item === 'string' && item)
+      : []
+    const messageBase = errorItem?.message || error.message || '请求失败'
+    const message = details.length > 0 ? `${messageBase}: ${details.join('; ')}` : messageBase
     if (error.response?.status === 401) {
       store.commit('clearAuth')
       const loginPath = `${import.meta.env.BASE_URL}login`

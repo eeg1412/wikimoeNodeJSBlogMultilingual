@@ -113,7 +113,7 @@ const { data: listData, pending } = await useAsyncData(
   () =>
     $fetch(`${runtimeConfig.public.apiDomain}/api/blog/post/list`, {
       params: listParams.value
-    }),
+    }).then(response => response.data),
   {
     watch: [() => route.fullPath, options]
   }
@@ -135,7 +135,7 @@ const { data: detailData } = await useAsyncData(
         id: props.filterId,
         lang: languageCode.value
       }
-    })
+    }).then(response => response.data)
   },
   {
     watch: [() => route.fullPath],
