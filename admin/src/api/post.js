@@ -2,6 +2,9 @@ import http from './http'
 
 export const listPostsApi = params => http.get('/post/list', { params })
 
+export const listPostGroupsApi = params =>
+  http.get('/post/group/list', { params })
+
 export const getPostApi = id => http.get('/post/detail', { params: { id } })
 
 export const updatePostApi = payload => http.post('/post/update', payload)

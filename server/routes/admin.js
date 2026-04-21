@@ -18,6 +18,10 @@ router.use(adminAuth)
 
 router.get('/me', asyncHandler(require('../api/admin/auth/me')))
 router.get('/site/info', asyncHandler(require('../api/admin/site/siteInfo')))
+router.get(
+  '/dashboard/summary',
+  asyncHandler(require('../api/admin/dashboard/getDashboardSummary'))
+)
 
 // 导入
 router.post(
@@ -72,6 +76,10 @@ router.post(
 
 // 文章
 router.get('/post/list', asyncHandler(require('../api/admin/post/listPosts')))
+router.get(
+  '/post/group/list',
+  asyncHandler(require('../api/admin/post/listPostGroups'))
+)
 router.get('/post/detail', asyncHandler(require('../api/admin/post/getPost')))
 router.post(
   '/post/update',

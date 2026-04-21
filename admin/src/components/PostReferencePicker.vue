@@ -5,9 +5,9 @@
     filterable
     remote
     clearable
+    :placeholder="placeholder"
     :remote-method="onSearch"
     :loading="loading"
-    placeholder="搜索并选择"
     style="width: 100%"
     @update:model-value="onChange"
     @visible-change="onVisibleChange"
@@ -17,27 +17,41 @@
       :key="item._id"
       :label="labelOf(item)"
       :value="item._id"
-    />
+    >
+      <div class="post-reference-picker-option">
+        <div class="post-reference-picker-title">{{ labelOf(item) }}</div>
+        <div class="post-reference-picker-meta">
+          <span>{{ item.languageCode }}</span>
+          <span>{{
+            item.status === 1
+              ? '已发布'
+              : item.status === 99
+                ? '回收站'
+                : '草稿'
+          }}</span>
+        </div>
+      </div>
+    </el-option>
   </el-select>
 </template>
 
 <script>
-import { ref, computed, watch } from 'vue'
-import { getEntityDetailApi, listEntityApi } from '@/api/entity'
+import { computed, ref, watch } from 'vue'
+import { getPostApi, listPostsApi } from '@/api/post'
 
 export default {
-  name: 'EntityPicker',
+  name: 'PostReferencePicker',
   props: {
     modelValue: { type: [String, Array], default: null },
-    type: { type: String, required: true },
     languageCode: { type: String, default: '' },
-    multiple: { type: Boolean, default: false }
+    multiple: { type: Boolean, default: false },
+    postType: { type: Number, required: true },
+    placeholder: { type: String, default: '搜索文章并选择' }
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
     const options = ref([])
     const loading = ref(false)
-    const labelField = ref('')
 
     const selected = computed(() => {
       if (props.multiple) {
@@ -48,36 +62,25 @@ export default {
 
     function labelOf(item) {
       if (!item) return ''
-      if (labelField.value && labelField.value.indexOf('.') > -1) {
-        const parts = labelField.value.split('.')
-        let v = item
-        for (const p of parts) {
-          v = v && v[p]
-          if (v === undefined) break
-        }
-        return v || item.sourceId || item._id
+      const main = item.title || item.excerpt || '(未命名)'
+      if (item.alias) {
+        return `${main} / ${item.alias}`
       }
-      return (
-        (labelField.value && item[labelField.value]) ||
-        item.nickname ||
-        item.sortname ||
-        item.tagname ||
-        item.title ||
-        item.sourceId ||
-        item._id
-      )
+      return main
     }
 
     async function load(keyword) {
       loading.value = true
       try {
-        const params = { page: 1, limit: 50 }
+        const params = {
+          page: 1,
+          limit: 50,
+          type: props.postType
+        }
         if (props.languageCode) params.languageCode = props.languageCode
         if (keyword) params.keyword = keyword
-        const resp = await listEntityApi(props.type, params)
-        const data = (resp && resp.data) || {}
-        options.value = data.list || []
-        labelField.value = data.labelField || ''
+        const resp = await listPostsApi(params)
+        options.value = (resp && resp.data && resp.data.list) || []
         await loadSelectedMissing()
       } finally {
         loading.value = false
@@ -96,7 +99,7 @@ export default {
       const missing = ids.filter(id => id && !exists.has(id))
       if (!missing.length) return
       const appended = await Promise.all(
-        missing.map(id => getEntityDetailApi(props.type, id).catch(() => null))
+        missing.map(id => getPostApi(id).catch(() => null))
       )
       const next = options.value.slice()
       appended.forEach(resp => {
@@ -107,14 +110,18 @@ export default {
       options.value = next
     }
 
-    function onSearch(q) {
-      load(q || '')
+    function onSearch(keyword) {
+      load(keyword || '')
     }
-    function onVisibleChange(v) {
-      if (v && !options.value.length) load('')
+
+    function onVisibleChange(visible) {
+      if (visible && !options.value.length) {
+        load('')
+      }
     }
-    function onChange(v) {
-      emit('update:modelValue', props.multiple ? v || [] : v || null)
+
+    function onChange(value) {
+      emit('update:modelValue', props.multiple ? value || [] : value || null)
     }
 
     load('')
@@ -123,8 +130,9 @@ export default {
       () => props.languageCode,
       () => load('')
     )
+
     watch(
-      () => props.type,
+      () => props.postType,
       () => load('')
     )
     watch(
@@ -145,3 +153,22 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.post-reference-picker-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.post-reference-picker-title {
+  color: var(--el-text-color-primary);
+}
+
+.post-reference-picker-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+</style>
