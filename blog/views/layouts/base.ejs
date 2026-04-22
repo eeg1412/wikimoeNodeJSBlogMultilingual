@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="<%= page.lang %>" class="<%= site.themeMode === 'dark' ? 'dark' : '' %>">
+  <head>
+    <%- include('../partials/head', { page: page, site: site }) %>
+  </head>
+  <body class="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
+    <div class="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-7xl flex-col gap-6">
+      <%- include('../partials/header', { page: page, site: site }) %>
+      <main class="flex-1">
+        <%- body %>
+      </main>
+      <%- include('../partials/footer', { page: page, site: site }) %>
+    </div>
+  </body>
+</html>

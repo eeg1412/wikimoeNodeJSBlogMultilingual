@@ -1,0 +1,18 @@
+<article class="surface-card">
+  <p class="chip"><%= post.typeText %></p>
+  <h1 class="mt-4 text-4xl font-black leading-tight text-slate-900 dark:text-white"><%= post.title %></h1>
+  <%- include('./post-meta', { meta: {
+    author: post.author ? post.author.nickname : '',
+    date: post.date ? new Date(post.date).toLocaleDateString('zh-CN') : '',
+    sort: post.sort ? post.sort.sortname : '',
+    tags: post.tags || []
+  } }) %>
+  <% if (post.coverImage) { %>
+    <div class="mt-6 overflow-hidden rounded-[24px] border border-slate-200/70 dark:border-slate-700/70">
+      <img src="<%= post.coverImage.url %>" alt="<%= post.title %>" class="w-full object-cover" />
+    </div>
+  <% } %>
+  <div class="prose prose-slate mt-8 max-w-none dark:prose-invert">
+    <%- post.contentHtml %>
+  </div>
+</article>
