@@ -1,15 +1,46 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">系统设置</h2>
+  <AdminPage
+    title="系统设置"
+    description="集中管理源站连接、AI 配置、站点展示信息与后台安全项，减少隐藏配置入口。"
+  >
+    <template #actions>
+      <el-button
+        :loading="regeneratingJwt"
+        type="warning"
+        @click="handleRegenerateJwtSecret"
+      >
+        重置管理端 JWT 密钥
+      </el-button>
+    </template>
+
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">当前页签</div>
+          <div class="admin-stat-card__value">
+            {{ activeTab === 'system' ? '系统配置' : '站点配置' }}
+          </div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">保存状态</div>
+          <div class="admin-stat-card__value">
+            {{ saving.system || saving.site ? '保存中' : '空闲' }}
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <el-alert
+      title="重置 JWT 密钥会让所有已登录后台会话失效，请在确认无人操作时执行。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="系统配置" name="system">
-        <el-card v-if="systemConfig">
-          <el-form
-            :model="systemConfig"
-            label-position="top"
-            label-width="200px"
-          >
+        <el-card v-if="systemConfig" shadow="never">
+          <el-form :model="systemConfig" label-position="top">
             <el-form-item label="源博客接口地址（sourceBlogApiBaseUrl）">
               <el-input
                 v-model="systemConfig.sourceBlogApiBaseUrl"
@@ -55,15 +86,16 @@
                 type="primary"
                 :loading="saving.system"
                 @click="saveSystem"
-                >保存系统配置</el-button
               >
+                保存系统配置
+              </el-button>
             </el-form-item>
           </el-form>
         </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="站点配置" name="site">
-        <el-card v-if="siteConfig">
+        <el-card v-if="siteConfig" shadow="never">
           <el-form :model="siteConfig" label-position="top">
             <el-divider content-position="left">站点名称（多语言）</el-divider>
             <el-form-item label="站点名称 - 默认（siteName）">
@@ -90,6 +122,7 @@
                 placeholder="優先級高於預設值"
               />
             </el-form-item>
+
             <el-divider content-position="left">站点描述（多语言）</el-divider>
             <el-form-item label="站点描述 - 默认（description）">
               <el-input
@@ -120,6 +153,7 @@
                 :rows="2"
               />
             </el-form-item>
+
             <el-divider content-position="left">其他配置</el-divider>
             <el-form-item label="站点 URL（siteUrl）">
               <el-input
@@ -176,30 +210,36 @@
               />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" :loading="saving.site" @click="saveSite"
-                >保存站点配置</el-button
-              >
+              <el-button type="primary" :loading="saving.site" @click="saveSite">
+                保存站点配置
+              </el-button>
             </el-form-item>
           </el-form>
         </el-card>
       </el-tab-pane>
     </el-tabs>
-  </div>
+  </AdminPage>
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import AdminPage from '../components/AdminPage.vue'
+import { regenerateJwtSecret } from '../api/auth.js'
 import { getOptions, updateOptions } from '../api/option.js'
-import { ElMessage } from 'element-plus'
+import { useAuthStore } from '../store/auth.js'
 
 export default {
   name: 'Settings',
+  components: { AdminPage },
   setup() {
+    const authStore = useAuthStore()
     const activeTab = ref('system')
     const systemConfig = ref(null)
     const siteConfig = ref(null)
     const systemConfigSnapshot = ref(null)
     const siteConfigSnapshot = ref(null)
+    const regeneratingJwt = ref(false)
     const saving = reactive({ system: false, site: false })
 
     function cloneConfig(config) {
@@ -281,8 +321,46 @@ export default {
       }
     }
 
+    async function handleRegenerateJwtSecret() {
+      try {
+        await ElMessageBox.confirm(
+          '重置后所有已登录的后台用户都会被强制退出，是否继续？',
+          '确认重置 JWT 密钥',
+          {
+            type: 'warning',
+            confirmButtonText: '确认重置',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch {
+        return
+      }
+
+      regeneratingJwt.value = true
+      try {
+        await regenerateJwtSecret()
+        ElMessage.success('JWT 密钥已重置，请重新登录')
+        authStore.logout()
+        window.location.href = '/multilingual-admin/login'
+      } catch {
+        ElMessage.error('JWT 密钥重置失败')
+      } finally {
+        regeneratingJwt.value = false
+      }
+    }
+
     onMounted(fetchOptions)
-    return { activeTab, systemConfig, siteConfig, saving, saveSystem, saveSite }
+
+    return {
+      activeTab,
+      systemConfig,
+      siteConfig,
+      saving,
+      regeneratingJwt,
+      saveSystem,
+      saveSite,
+      handleRegenerateJwtSecret
+    }
   }
 }
 </script>

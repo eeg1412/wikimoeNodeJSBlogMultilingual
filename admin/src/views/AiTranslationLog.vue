@@ -1,8 +1,26 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">AI 翻译日志</h2>
-    <el-card>
-      <div class="flex gap-3 mb-4">
+  <AdminPage
+    title="AI 翻译日志"
+    description="对照原文摘要、模型输出和失败信息，快速分析翻译链路的质量与稳定性。"
+  >
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">日志总数</div>
+          <div class="admin-stat-card__value">{{ total }}</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">当前语言</div>
+          <div class="admin-stat-card__value">
+            {{ query.languageCode || '全部' }}
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <el-card shadow="never">
+      <div class="admin-filter-row">
+        <div class="admin-filter-row__main">
         <el-select
           v-model="query.languageCode"
           placeholder="语言"
@@ -14,6 +32,10 @@
           <el-option label="tw" value="tw" />
         </el-select>
         <el-button type="primary" @click="fetchList">查询</el-button>
+        </div>
+        <div class="admin-filter-row__hint">
+          便于追踪模型输出、接口报错和字段级翻译结果。
+        </div>
       </div>
 
         <ResponsiveTable :data="list" :loading="loading">
@@ -70,7 +92,7 @@
         </template>
       </ResponsiveTable>
 
-      <div class="flex justify-end mt-4">
+      <div class="admin-pagination">
         <el-pagination
           v-model:current-page="query.page"
           :page-size="20"
@@ -80,18 +102,19 @@
         />
       </div>
     </el-card>
-  </div>
+  </AdminPage>
 </template>
 
 <script>
 import { ref, reactive, onMounted } from 'vue'
 import { getAiTranslationLogList } from '../api/translation.js'
+import AdminPage from '../components/AdminPage.vue'
 import ResponsiveTable from '../components/ResponsiveTable.vue'
 import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
 
 export default {
   name: 'AiTranslationLog',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { AdminPage, ResponsiveTable, ResponsiveTableColumn },
   setup() {
     const list = ref([])
     const total = ref(0)

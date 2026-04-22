@@ -1,8 +1,9 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">导入文章</h2>
-
-    <el-card>
+  <AdminPage
+    title="导入文章"
+    description="输入源文章 ID、别名或完整链接即可触发导入，必要时可直接覆盖已存在的语言版本。"
+  >
+    <el-card shadow="never">
         <el-form
         ref="formRef"
         :model="form"
@@ -43,18 +44,20 @@
         :description="result.message"
         show-icon
         class="mt-4"
-      />
-    </el-card>
-  </div>
+        />
+      </el-card>
+  </AdminPage>
 </template>
 
 <script>
 import { ref, reactive } from 'vue'
 import { importPost } from '../api/importJob.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AdminPage from '../components/AdminPage.vue'
 
 export default {
   name: 'Import',
+  components: { AdminPage },
   setup() {
     const formRef = ref(null)
     const loading = ref(false)

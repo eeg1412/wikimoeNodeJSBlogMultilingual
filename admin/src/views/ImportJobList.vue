@@ -1,9 +1,26 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">导入记录</h2>
+  <AdminPage
+    title="导入记录"
+    description="查看每一次导入任务的处理阶段、错误信息和创建时间，快速定位失败原因。"
+  >
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">任务总数</div>
+          <div class="admin-stat-card__value">{{ total }}</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">当前语言</div>
+          <div class="admin-stat-card__value">
+            {{ query.languageCode || '全部' }}
+          </div>
+        </div>
+      </div>
+    </template>
 
-    <el-card>
-      <div class="flex gap-3 mb-4">
+    <el-card shadow="never">
+      <div class="admin-filter-row">
+        <div class="admin-filter-row__main">
         <el-select
           v-model="query.languageCode"
           placeholder="语言"
@@ -15,6 +32,10 @@
           <el-option label="tw" value="tw" />
         </el-select>
         <el-button type="primary" @click="fetchList">查询</el-button>
+        </div>
+        <div class="admin-filter-row__hint">
+          适合排查覆盖导入、队列失败和重复导入确认。
+        </div>
       </div>
 
       <ResponsiveTable :data="list" :loading="loading">
@@ -71,7 +92,7 @@
         </template>
       </ResponsiveTable>
 
-      <div class="flex justify-end mt-4">
+      <div class="admin-pagination">
         <el-pagination
           v-model:current-page="query.page"
           :page-size="20"
@@ -81,18 +102,19 @@
         />
       </div>
     </el-card>
-  </div>
+  </AdminPage>
 </template>
 
 <script>
 import { ref, reactive, onMounted } from 'vue'
 import { getImportJobList } from '../api/importJob.js'
+import AdminPage from '../components/AdminPage.vue'
 import ResponsiveTable from '../components/ResponsiveTable.vue'
 import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
 
 export default {
   name: 'ImportJobList',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { AdminPage, ResponsiveTable, ResponsiveTableColumn },
   setup() {
     const list = ref([])
     const total = ref(0)
@@ -112,37 +134,37 @@ export default {
     }
 
     function statusTagType(status) {
-        const map = {
-          success: 'success',
-          failed: 'danger',
-          cancelled: 'warning',
-          running: 'primary'
-        }
-        return map[status] || 'info'
+      const map = {
+        success: 'success',
+        failed: 'danger',
+        cancelled: 'warning',
+        running: 'primary'
       }
+      return map[status] || 'info'
+    }
 
-      function formatDate(val) {
-        if (!val) return '-'
-        return new Date(val).toLocaleString()
-      }
+    function formatDate(val) {
+      if (!val) return '-'
+      return new Date(val).toLocaleString()
+    }
 
-      function formatErrors(errors) {
-        if (!Array.isArray(errors) || errors.length === 0) return ''
-        return errors.join('；')
-      }
+    function formatErrors(errors) {
+      if (!Array.isArray(errors) || errors.length === 0) return ''
+      return errors.join('；')
+    }
 
-      onMounted(fetchList)
+    onMounted(fetchList)
 
-      return {
-        list,
-        total,
-        loading,
-        query,
-        fetchList,
-        statusTagType,
-        formatDate,
-        formatErrors
-      }
+    return {
+      list,
+      total,
+      loading,
+      query,
+      fetchList,
+      statusTagType,
+      formatDate,
+      formatErrors
+    }
   }
 }
 </script>

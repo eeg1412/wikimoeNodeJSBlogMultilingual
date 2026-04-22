@@ -1,39 +1,69 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">文章管理</h2>
+  <AdminPage
+    title="文章管理"
+    description="集中查看每篇原文在不同语言下的发布状态，快速进入编辑器处理标题、正文与发布元数据。"
+  >
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">文章组数量</div>
+          <div class="admin-stat-card__value">{{ total }}</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">当前筛选语言</div>
+          <div class="admin-stat-card__value">
+            {{ query.languageCode || '全部' }}
+          </div>
+        </div>
+      </div>
+    </template>
 
-    <el-card>
-      <div class="flex flex-wrap gap-3 mb-4">
-        <el-select
-          v-model="query.languageCode"
-          placeholder="语言"
-          clearable
-          style="width: 120px"
-        >
-          <el-option label="en" value="en" />
-          <el-option label="jp" value="jp" />
-          <el-option label="tw" value="tw" />
-        </el-select>
-        <el-select
-          v-model="query.status"
-          placeholder="状态"
-          clearable
-          style="width: 120px"
-        >
-          <el-option label="草稿" :value="0" />
-          <el-option label="已发布" :value="1" />
-        </el-select>
-        <el-input
-          v-model="query.keyword"
-          placeholder="搜索 sourceId / 标题"
-          clearable
-          style="width: 200px"
-          @keyup.enter="fetchList"
-        />
-        <el-button type="primary" @click="fetchList">查询</el-button>
+    <el-card shadow="never">
+      <div class="admin-filter-row">
+        <div class="admin-filter-row__main">
+          <el-select
+            v-model="query.languageCode"
+            placeholder="语言"
+            clearable
+            style="width: 140px"
+          >
+            <el-option label="en" value="en" />
+            <el-option label="jp" value="jp" />
+            <el-option label="tw" value="tw" />
+          </el-select>
+          <el-select
+            v-model="query.status"
+            placeholder="状态"
+            clearable
+            style="width: 140px"
+          >
+            <el-option label="草稿" :value="0" />
+            <el-option label="已发布" :value="1" />
+          </el-select>
+          <el-select
+            v-model="query.type"
+            placeholder="内容类型"
+            clearable
+            style="width: 160px"
+          >
+            <el-option label="文章" :value="1" />
+            <el-option label="推文" :value="2" />
+          </el-select>
+          <el-input
+            v-model="query.keyword"
+            placeholder="搜索 sourceId / 标题"
+            clearable
+            style="min-width: 220px; max-width: 320px"
+            @keyup.enter="fetchList"
+          />
+          <el-button type="primary" @click="fetchList">查询</el-button>
+        </div>
+        <div class="admin-filter-row__hint">
+          支持按语言、发布状态、内容类型和关键词交叉筛选。
+        </div>
       </div>
 
-      <ResponsiveTable :data="list" :loading="loading">
+      <ResponsiveTable :data="list" :loading="loading" row-key="groupKey">
         <ResponsiveTableColumn prop="sourceId" label="Source ID" width="120" />
         <ResponsiveTableColumn
           prop="sourceAlias"
@@ -132,7 +162,7 @@
         </template>
       </ResponsiveTable>
 
-      <div class="flex justify-end mt-4">
+      <div class="admin-pagination">
         <el-pagination
           v-model:current-page="query.page"
           :page-size="20"
@@ -142,19 +172,20 @@
         />
       </div>
     </el-card>
-  </div>
+  </AdminPage>
 </template>
 
 <script>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getPostGroupList } from '../api/post.js'
+import AdminPage from '../components/AdminPage.vue'
 import ResponsiveTable from '../components/ResponsiveTable.vue'
 import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
 
 export default {
   name: 'PostGroupList',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { AdminPage, ResponsiveTable, ResponsiveTableColumn },
   setup() {
     const router = useRouter()
     const list = ref([])
@@ -165,6 +196,7 @@ export default {
       page: 1,
       languageCode: '',
       status: null,
+      type: null,
       keyword: ''
     })
 
@@ -173,6 +205,7 @@ export default {
       try {
         const params = { ...query }
         if (params.status === null || params.status === '') delete params.status
+        if (params.type === null || params.type === '') delete params.type
         if (!params.keyword) delete params.keyword
         if (!params.languageCode) delete params.languageCode
 

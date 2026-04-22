@@ -1,26 +1,36 @@
 <template>
-  <!-- 桌面端：标准表格 -->
-  <el-table v-if="!isMobile" v-bind="$attrs" :data="data" v-loading="loading">
-    <slot />
-  </el-table>
+  <div class="responsive-table">
+    <div v-if="!isMobile" class="responsive-table__desktop">
+      <el-table
+        v-bind="$attrs"
+        :data="data"
+        :row-key="rowKey"
+        v-loading="loading"
+        empty-text="暂无数据"
+      >
+        <slot />
+      </el-table>
+    </div>
 
-  <!-- 移动端：卡片列表 -->
-  <div v-else v-loading="loading" class="responsive-card-list">
-    <el-card
-      v-for="(row, rowIndex) in data"
-      :key="rowIndex"
-      class="mb-3"
-      shadow="hover"
-    >
-      <slot name="mobile-card" :row="row" :$index="rowIndex" />
-    </el-card>
-
-    <el-empty v-if="!data || data.length === 0" description="暂无数据" />
+    <div v-else v-loading="loading" class="responsive-card-list">
+      <template v-if="hasData">
+        <el-card
+          v-for="(row, rowIndex) in data"
+          :key="resolveRowKey(row, rowIndex)"
+          shadow="never"
+        >
+          <slot name="mobile-card" :row="row" :$index="rowIndex" />
+        </el-card>
+      </template>
+      <el-card v-else class="admin-empty-card" shadow="never">
+        <el-empty description="暂无数据" />
+      </el-card>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 export default {
   name: 'ResponsiveTable',
@@ -33,19 +43,40 @@ export default {
     loading: {
       type: Boolean,
       default: false
+    },
+    rowKey: {
+      type: [String, Function],
+      default: '_id'
     }
   },
-  setup() {
-    const isMobile = ref(window.innerWidth < 768)
+  setup(props) {
+    const isMobile = ref(window.innerWidth < 960)
+    const hasData = computed(() => Array.isArray(props.data) && props.data.length > 0)
 
     function handleResize() {
-      isMobile.value = window.innerWidth < 768
+      isMobile.value = window.innerWidth < 960
+    }
+
+    function resolveRowKey(row, rowIndex) {
+      if (typeof props.rowKey === 'function') {
+        return props.rowKey(row)
+      }
+
+      if (props.rowKey && row && row[props.rowKey] !== undefined) {
+        return row[props.rowKey]
+      }
+
+      return rowIndex
     }
 
     onMounted(() => window.addEventListener('resize', handleResize))
     onUnmounted(() => window.removeEventListener('resize', handleResize))
 
-    return { isMobile }
+    return {
+      isMobile,
+      hasData,
+      resolveRowKey
+    }
   }
 }
 </script>

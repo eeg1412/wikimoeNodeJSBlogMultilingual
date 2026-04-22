@@ -1,196 +1,236 @@
 <template>
-  <div v-loading="loading" class="post-editor">
-    <div class="flex items-center justify-between mb-6">
-      <div class="flex items-center gap-3">
-        <el-button @click="$router.back()">返回</el-button>
-        <h2 class="text-xl font-bold truncate max-w-lg">
-          {{ post?.title || '文章编辑' }}
-        </h2>
-        <el-tag
-          v-if="post"
-          :type="post.status === 1 ? 'success' : 'info'"
-          size="small"
-        >
-          {{ post.status === 1 ? '已发布' : '草稿' }}
-        </el-tag>
-        <el-tag v-if="post" size="small">{{ post.languageCode }}</el-tag>
+  <AdminPage
+    v-loading="loading"
+    :title="post?.title || '文章编辑'"
+    description="保留现有内容编辑能力，并补齐别名、发布时间与统一富文本媒体插入能力。"
+  >
+    <template #actions>
+      <el-button @click="$router.back()">返回列表</el-button>
+      <el-button type="success" :loading="saving" @click="handleSave">
+        保存
+      </el-button>
+      <el-button
+        v-if="post && post.status !== 1"
+        type="primary"
+        :loading="publishing"
+        @click="handlePublish"
+      >
+        发布
+      </el-button>
+      <el-button
+        v-if="post && post.status === 1"
+        type="warning"
+        :loading="publishing"
+        @click="handleUnpublish"
+      >
+        取消发布
+      </el-button>
+    </template>
+
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">语言</div>
+          <div class="admin-stat-card__value">
+            {{ post?.languageCode || '-' }}
+          </div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">发布状态</div>
+          <div class="admin-stat-card__value">
+            {{ post?.status === 1 ? '已发布' : '草稿' }}
+          </div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">翻译状态</div>
+          <div class="admin-stat-card__value">
+            {{ post?.translationStatus || '-' }}
+          </div>
+        </div>
       </div>
+    </template>
 
-      <div class="flex gap-2">
-        <el-button type="success" :loading="saving" @click="handleSave"
-          >保存</el-button
-        >
-        <el-button
-          v-if="post && post.status !== 1"
-          type="primary"
-          :loading="publishing"
-          @click="handlePublish"
-        >
-          发布
-        </el-button>
-        <el-button
-          v-if="post && post.status === 1"
-          type="warning"
-          :loading="publishing"
-          @click="handleUnpublish"
-        >
-          取消发布
-        </el-button>
-      </div>
-    </div>
-
-    <el-row :gutter="20" v-if="post">
-      <el-col :span="16">
-        <!-- 标题 -->
-        <el-card class="mb-4">
+    <div v-if="post" class="post-editor__grid">
+      <div class="post-editor__stack">
+        <el-card shadow="never">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span>标题</span>
-              <el-button
-                size="small"
-                :loading="translating.title"
-                @click="handleTranslate('title')"
-                >AI 翻译</el-button
-              >
+            <div class="flex items-center justify-between gap-3">
+              <span>标题与摘要</span>
+              <div class="flex gap-2">
+                <el-button
+                  size="small"
+                  :loading="translating.title"
+                  @click="handleTranslate('title')"
+                >
+                  AI 翻译标题
+                </el-button>
+                <el-button
+                  size="small"
+                  :loading="translating.excerpt"
+                  @click="handleTranslate('excerpt')"
+                >
+                  AI 翻译摘要
+                </el-button>
+              </div>
             </div>
           </template>
-          <el-input v-model="form.title" placeholder="文章标题" />
-        </el-card>
 
-        <!-- 摘要 -->
-        <el-card class="mb-4">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <span>摘要</span>
-              <el-button
-                size="small"
-                :loading="translating.excerpt"
-                @click="handleTranslate('excerpt')"
-                >AI 翻译</el-button
-              >
-            </div>
-          </template>
-          <el-input
-            v-model="form.excerpt"
-            type="textarea"
-            :rows="3"
-            placeholder="文章摘要"
-          />
-        </el-card>
-
-        <!-- 正文 -->
-        <el-card class="mb-4">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <span>正文</span>
-              <el-button
-                size="small"
-                :loading="translating.content"
-                @click="handleTranslate('content')"
-                >AI 翻译正文</el-button
-              >
-            </div>
-          </template>
-          <div class="rich-editor-wrap">
-            <Toolbar
-              :editor="editorRef"
-              :default-config="toolbarConfig"
-              mode="default"
-              style="border-bottom: 1px solid #e5e7eb"
-            />
-            <Editor
-              v-model="form.content"
-              :default-config="editorConfig"
-              mode="default"
-              style="min-height: 400px"
-              @on-created="handleEditorCreated"
-            />
+          <div class="space-y-3">
+            <el-form label-position="top">
+              <el-form-item label="文章标题">
+                <el-input v-model="form.title" placeholder="请输入文章标题" />
+              </el-form-item>
+              <el-form-item label="文章摘要">
+                <el-input
+                  v-model="form.excerpt"
+                  type="textarea"
+                  :rows="4"
+                  placeholder="请输入文章摘要"
+                />
+              </el-form-item>
+            </el-form>
           </div>
         </el-card>
-      </el-col>
 
-      <el-col :span="8">
-        <!-- 分类 -->
-        <el-card class="mb-4">
-          <template #header><span>分类</span></template>
-          <el-select
-            v-model="form.sort"
-            placeholder="选择分类"
-            clearable
-            class="w-full"
-          >
-            <el-option
-              v-for="s in sortList"
-              :key="s._id"
-              :label="s.sortname"
-              :value="s._id"
-            />
-          </el-select>
+        <el-card shadow="never">
+          <template #header>
+            <div class="flex items-center justify-between gap-3">
+              <span>正文</span>
+              <div class="post-editor__editor-actions">
+                <el-button
+                  size="small"
+                  :loading="translating.content"
+                  @click="handleTranslate('content')"
+                >
+                  AI 翻译正文
+                </el-button>
+              </div>
+            </div>
+          </template>
+
+          <RichEditor5
+            v-model:content="form.content"
+            :language-code="post.languageCode"
+            :is-post="true"
+          />
+        </el-card>
+      </div>
+
+      <div class="post-editor__stack">
+        <el-card shadow="never">
+          <template #header>
+            <span>发布元数据</span>
+          </template>
+
+          <el-form label-position="top">
+            <el-form-item label="URL 别名">
+              <el-input
+                v-model="form.alias"
+                placeholder="留空则继续使用系统生成逻辑"
+              />
+            </el-form-item>
+            <el-form-item label="发布时间">
+              <el-date-picker
+                v-model="form.date"
+                type="datetime"
+                placeholder="选择发布时间"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="分类">
+              <el-select
+                v-model="form.sort"
+                placeholder="选择分类"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="sort in sortList"
+                  :key="sort._id"
+                  :label="sort.sortname"
+                  :value="sort._id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-form>
         </el-card>
 
-        <!-- 翻译状态信息 -->
-        <el-card class="mb-4">
-          <template #header><span>翻译状态</span></template>
-          <el-descriptions :column="1" size="small">
-            <el-descriptions-item label="文章状态">
+        <el-card shadow="never">
+          <template #header>
+            <span>状态与来源</span>
+          </template>
+
+          <div class="space-y-3">
+            <div class="post-editor__status-row">
+              <el-tag :type="post.status === 1 ? 'success' : 'info'">
+                {{ post.status === 1 ? '已发布' : '草稿' }}
+              </el-tag>
+              <el-tag size="small">{{ post.languageCode }}</el-tag>
               <el-tag size="small" :type="statusType(post.translationStatus)">
                 {{ post.translationStatus || '-' }}
               </el-tag>
-            </el-descriptions-item>
-          </el-descriptions>
+            </div>
+            <div class="text-sm text-gray-500">
+              sourceId：{{ post.sourceId || '-' }}
+            </div>
+            <div class="text-sm text-gray-500">
+              alias：{{ post.alias || '未设置' }}
+            </div>
+            <div class="text-sm text-gray-500">
+              更新时间：{{ formatDate(post.updatedAt) }}
+            </div>
+          </div>
         </el-card>
-      </el-col>
-    </el-row>
-  </div>
+      </div>
+    </div>
+  </AdminPage>
 </template>
 
 <script>
-import { ref, reactive, onBeforeUnmount, shallowRef, onMounted } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import '@wangeditor/editor/dist/css/style.css'
+import { ElMessage } from 'element-plus'
+import AdminPage from '../components/AdminPage.vue'
+import RichEditor5 from '../components/RichEditor5.vue'
 import {
   getPostDetail,
-  updatePost,
-  translatePost,
   publishPost,
-  unpublishPost
+  translatePost,
+  unpublishPost,
+  updatePost
 } from '../api/post.js'
 import { getSortList } from '../api/taxonomy.js'
-import { ElMessage } from 'element-plus'
 
 export default {
   name: 'PostEditor',
-  components: { Editor, Toolbar },
+  components: {
+    AdminPage,
+    RichEditor5
+  },
   setup() {
     const route = useRoute()
     const router = useRouter()
     const postId = route.params.id
 
     const post = ref(null)
+    const sortList = ref([])
     const loading = ref(false)
     const saving = ref(false)
     const publishing = ref(false)
-    const sortList = ref([])
 
-    const form = reactive({ title: '', excerpt: '', content: '', sort: '' })
+    const form = reactive({
+      title: '',
+      excerpt: '',
+      content: '',
+      sort: '',
+      alias: '',
+      date: null
+    })
+
     const translating = reactive({
       title: false,
       excerpt: false,
       content: false
-    })
-
-    // WangEditor
-    const editorRef = shallowRef(null)
-    const toolbarConfig = {}
-    const editorConfig = { placeholder: '请输入正文...' }
-
-    function handleEditorCreated(editor) {
-      editorRef.value = editor
-    }
-
-    onBeforeUnmount(() => {
-      if (editorRef.value) editorRef.value.destroy()
     })
 
     async function fetchPost() {
@@ -202,6 +242,8 @@ export default {
         form.excerpt = res.data.excerpt || ''
         form.content = res.data.content || ''
         form.sort = res.data.sort?._id || res.data.sort || ''
+        form.alias = res.data.alias || ''
+        form.date = res.data.date ? new Date(res.data.date) : null
       } catch {
         ElMessage.error('加载文章失败')
         router.back()
@@ -211,7 +253,10 @@ export default {
     }
 
     async function fetchSorts() {
-      if (!post.value) return
+      if (!post.value) {
+        return
+      }
+
       const res = await getSortList({
         languageCode: post.value.languageCode,
         page: 1,
@@ -227,7 +272,9 @@ export default {
           title: form.title,
           excerpt: form.excerpt,
           content: form.content,
-          sort: form.sort || null
+          sort: form.sort || null,
+          alias: form.alias,
+          date: form.date || null
         })
         ElMessage.success('保存成功')
         await fetchPost()
@@ -291,6 +338,13 @@ export default {
       return map[status] || 'info'
     }
 
+    function formatDate(value) {
+      if (!value) {
+        return '-'
+      }
+      return new Date(value).toLocaleString()
+    }
+
     onMounted(async () => {
       await fetchPost()
       await fetchSorts()
@@ -299,29 +353,18 @@ export default {
     return {
       post,
       form,
+      sortList,
       loading,
       saving,
       publishing,
-      sortList,
       translating,
-      editorRef,
-      toolbarConfig,
-      editorConfig,
-      handleEditorCreated,
       handleSave,
       handlePublish,
       handleUnpublish,
       handleTranslate,
-      statusType
+      statusType,
+      formatDate
     }
   }
 }
 </script>
-
-<style scoped>
-.rich-editor-wrap {
-  border: 1px solid #e5e7eb;
-  border-radius: 4px;
-  overflow: hidden;
-}
-</style>

@@ -1,8 +1,26 @@
 <template>
-  <div>
-    <h2 class="text-xl font-bold mb-6">翻译记忆库</h2>
-    <el-card>
-      <div class="flex gap-3 mb-4">
+  <AdminPage
+    title="翻译记忆库"
+    description="统一审核 AI 和人工积累的翻译条目，减少重复翻译并提升术语一致性。"
+  >
+    <template #meta>
+      <div class="admin-stat-grid">
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">条目总数</div>
+          <div class="admin-stat-card__value">{{ total }}</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-card__label">筛选状态</div>
+          <div class="admin-stat-card__value">
+            {{ query.status || '全部' }}
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <el-card shadow="never">
+      <div class="admin-filter-row">
+        <div class="admin-filter-row__main">
         <el-select
           v-model="query.languageCode"
           placeholder="语言"
@@ -23,6 +41,10 @@
           <el-option label="已批准" value="approved" />
         </el-select>
         <el-button type="primary" @click="fetchList">查询</el-button>
+        </div>
+        <div class="admin-filter-row__hint">
+          支持只看待审核内容，快速完成翻译记忆库清理。
+        </div>
       </div>
 
       <ResponsiveTable :data="list" :loading="loading">
@@ -89,7 +111,7 @@
         </template>
       </ResponsiveTable>
 
-      <div class="flex justify-end mt-4">
+      <div class="admin-pagination">
         <el-pagination
           v-model:current-page="query.page"
           :page-size="20"
@@ -99,7 +121,7 @@
         />
       </div>
     </el-card>
-  </div>
+  </AdminPage>
 </template>
 
 <script>
@@ -108,13 +130,14 @@ import {
   getTranslationMemoryList,
   approveTranslationMemory
 } from '../api/translation.js'
+import AdminPage from '../components/AdminPage.vue'
 import ResponsiveTable from '../components/ResponsiveTable.vue'
 import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
 import { ElMessage } from 'element-plus'
 
 export default {
   name: 'TranslationMemory',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { AdminPage, ResponsiveTable, ResponsiveTableColumn },
   setup() {
     const list = ref([])
     const total = ref(0)

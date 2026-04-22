@@ -4,8 +4,8 @@
   </el-config-provider>
 </template>
 
-<script>
-export default {
-  name: 'App'
-}
+<script setup>
+import { useAdminTheme } from './composables/useAdminTheme.js'
+
+useAdminTheme()
 </script>
