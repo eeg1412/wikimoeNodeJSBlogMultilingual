@@ -7,3 +7,7 @@ export function getOptions() {
 export function updateOption(data) {
   return request.put('/option/update', data)
 }
+
+export function updateOptions(optionList) {
+  return request.put('/option/update', { optionList })
+}

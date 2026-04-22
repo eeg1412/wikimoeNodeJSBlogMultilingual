@@ -1,4 +1,5 @@
 import Author from '../models/author.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 export async function findAuthorPage({
   query = {},
@@ -11,6 +12,21 @@ export async function findAuthorPage({
     Author.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findAuthorGroupPage({
+  query = {},
+  page = 1,
+  limit = 20
+} = {}) {
+  return findGroupedDocumentPage({
+    Model: Author,
+    query,
+    page,
+    limit,
+    groupField: 'sourceId',
+    preGroupSort: { createdAt: -1 }
+  })
 }
 
 export async function findAuthorBySourceIdLang(sourceId, languageCode) {

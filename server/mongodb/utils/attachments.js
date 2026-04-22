@@ -1,4 +1,5 @@
 import Attachment from '../models/attachment.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 export async function findAttachmentPage({
   query = {},
@@ -15,6 +16,21 @@ export async function findAttachmentPage({
     Attachment.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findAttachmentGroupPage({
+  query = {},
+  page = 1,
+  limit = 20
+} = {}) {
+  return findGroupedDocumentPage({
+    Model: Attachment,
+    query,
+    page,
+    limit,
+    groupField: 'attachmentGroupKey',
+    preGroupSort: { createdAt: -1 }
+  })
 }
 
 export async function findAttachmentById(id) {

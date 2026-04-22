@@ -1,4 +1,5 @@
 import Tag from '../models/tag.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 export async function findTagPage({ query = {}, page = 1, limit = 50 } = {}) {
   const skip = (page - 1) * limit
@@ -7,6 +8,21 @@ export async function findTagPage({ query = {}, page = 1, limit = 50 } = {}) {
     Tag.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findTagGroupPage({
+  query = {},
+  page = 1,
+  limit = 50
+} = {}) {
+  return findGroupedDocumentPage({
+    Model: Tag,
+    query,
+    page,
+    limit,
+    groupField: 'sourceId',
+    preGroupSort: { createdAt: -1 }
+  })
 }
 
 export async function findTagBySourceIdLang(sourceId, languageCode) {

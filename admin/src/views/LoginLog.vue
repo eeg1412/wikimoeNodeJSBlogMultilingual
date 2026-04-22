@@ -13,12 +13,12 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="IP" width="160">
           <template #default="{ row }">
-            <IpInfoDisplay :ip="row.ip" :geo="row.geo" />
+            <IpInfoDisplay :ip="row.IP" :ip-info="row.ipInfo" />
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="设备" show-overflow-tooltip>
           <template #default="{ row }">
-            <DeviceInfoDisplay :device="row.device" />
+            <DeviceInfoDisplay :device="row.deviceInfo" />
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="时间" width="160">
@@ -35,8 +35,8 @@
                 row.success ? '成功' : '失败'
               }}</el-tag>
             </div>
-            <div><IpInfoDisplay :ip="row.ip" :geo="row.geo" /></div>
-            <div><DeviceInfoDisplay :device="row.device" /></div>
+            <div><IpInfoDisplay :ip="row.IP" :ip-info="row.ipInfo" /></div>
+            <div><DeviceInfoDisplay :device="row.deviceInfo" /></div>
             <div class="text-xs text-gray-400">
               {{ new Date(row.createdAt).toLocaleString() }}
             </div>

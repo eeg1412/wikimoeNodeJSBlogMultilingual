@@ -1,66 +1,104 @@
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-6">分类管理</h2>
-    <el-card>
-      <div class="flex gap-3 mb-4">
-        <el-select
-          v-model="query.languageCode"
-          placeholder="语言"
-          clearable
-          style="width: 120px"
-        >
-          <el-option label="en" value="en" />
-          <el-option label="jp" value="jp" />
-          <el-option label="tw" value="tw" />
-        </el-select>
-        <el-button type="primary" @click="fetchList">查询</el-button>
-      </div>
+    <GroupedLanguageManager
+      ref="groupedManagerRef"
+      title="分类管理"
+      :get-list="getSortList"
+    >
+      <template #source="{ row, sourceSnapshot, primaryEntry }">
+        <div class="space-y-1">
+          <div class="font-medium">
+            {{
+              sourceSnapshot?.sortname || primaryEntry?.sortname || row.sourceId
+            }}
+          </div>
+          <div class="text-xs text-gray-500">
+            alias: {{ sourceSnapshot?.alias || primaryEntry?.alias || '-' }} ·
+            排序: {{ sourceSnapshot?.taxis || primaryEntry?.taxis || 0 }}
+          </div>
+          <div class="text-xs text-gray-500 line-clamp-2">
+            {{
+              sourceSnapshot?.description ||
+              primaryEntry?.description ||
+              '暂无源简介'
+            }}
+          </div>
+          <SourceSnapshotPreview :snapshot="sourceSnapshot" />
+        </div>
+      </template>
 
-      <ResponsiveTable :data="list" :loading="loading">
-        <ResponsiveTableColumn prop="languageCode" label="语言" width="80" />
-        <ResponsiveTableColumn prop="sortname" label="分类名称" />
-        <ResponsiveTableColumn prop="alias" label="别名" width="160" />
-        <ResponsiveTableColumn label="操作" width="100">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEdit(row)"
-              >编辑</el-button
+      <template #language="{ entry }">
+        <div v-if="entry" class="space-y-2">
+          <div class="font-medium truncate">{{ entry.sortname || '-' }}</div>
+          <div class="text-xs text-gray-500">
+            alias: {{ entry.alias || '-' }} · 排序: {{ entry.taxis || 0 }}
+          </div>
+          <div class="text-xs text-gray-500 line-clamp-2">
+            {{ entry.description || '暂无简介' }}
+          </div>
+          <div class="flex items-center gap-2">
+            <el-tag
+              size="small"
+              :type="getTranslationStatusTagType(entry.translationStatus)"
             >
-          </template>
-        </ResponsiveTableColumn>
-
-        <template #mobile-card="{ row }">
-          <div class="flex justify-between items-center">
-            <div>
-              <div class="font-medium">{{ row.sortname }}</div>
-              <div class="text-xs text-gray-500">
-                {{ row.languageCode }} · {{ row.alias }}
-              </div>
-            </div>
-            <el-button type="primary" link size="small" @click="openEdit(row)"
+              {{ getTranslationStatusLabel(entry.translationStatus) }}
+            </el-tag>
+            <el-button type="primary" link size="small" @click="openEdit(entry)"
               >编辑</el-button
             >
           </div>
-        </template>
-      </ResponsiveTable>
+        </div>
+        <el-tag v-else size="small" type="info">缺失</el-tag>
+      </template>
 
-      <div class="flex justify-end mt-4">
-        <el-pagination
-          v-model:current-page="query.page"
-          :page-size="20"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="fetchList"
-        />
-      </div>
-    </el-card>
+      <template #mobile-card="{ row, sourceSnapshot, getLangEntry }">
+        <div class="space-y-3">
+          <div>
+            <div class="font-medium">
+              {{ sourceSnapshot?.sortname || row.sourceId }}
+            </div>
+            <div class="text-xs text-gray-500 break-all">
+              alias: {{ sourceSnapshot?.alias || '-' }}
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div
+              v-for="languageCode in languageCodes"
+              :key="languageCode"
+              class="rounded border border-gray-200 px-3 py-2"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs uppercase text-gray-500">{{
+                  languageCode
+                }}</span>
+                <el-button
+                  v-if="getLangEntry(row, languageCode)"
+                  type="primary"
+                  link
+                  size="small"
+                  @click="openEdit(getLangEntry(row, languageCode))"
+                  >编辑</el-button
+                >
+              </div>
+              <div class="mt-1 text-sm">
+                {{ getLangEntry(row, languageCode)?.sortname || '缺失' }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </GroupedLanguageManager>
 
-    <el-dialog v-model="dialogVisible" title="编辑分类" width="480px">
+    <el-dialog v-model="dialogVisible" title="编辑分类" width="520px">
       <el-form :model="editForm" label-position="top">
         <el-form-item label="分类名称">
           <el-input v-model="editForm.sortname" />
         </el-form-item>
         <el-form-item label="别名（URL Slug）">
           <el-input v-model="editForm.alias" placeholder="留空则不使用别名" />
+        </el-form-item>
+        <el-form-item label="简介">
+          <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="editForm.taxis" :min="0" />
@@ -77,44 +115,39 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
-import { getSortList, updateSort } from '../api/taxonomy.js'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
-import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getSortList, updateSort } from '../api/taxonomy.js'
+import GroupedLanguageManager from '../components/GroupedLanguageManager.vue'
+import SourceSnapshotPreview from '../components/SourceSnapshotPreview.vue'
+import {
+  getTranslationStatusLabel,
+  getTranslationStatusTagType
+} from '../utils/translationStatus.js'
+
+const LANGUAGE_CODES = ['en', 'jp', 'tw']
 
 export default {
   name: 'SortList',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { GroupedLanguageManager, SourceSnapshotPreview },
   setup() {
-    const list = ref([])
-    const total = ref(0)
-    const loading = ref(false)
+    const groupedManagerRef = ref(null)
     const saving = ref(false)
     const dialogVisible = ref(false)
-    const currentId = ref(null)
+    const currentId = ref('')
+    const editForm = reactive({
+      sortname: '',
+      alias: '',
+      description: '',
+      taxis: 0
+    })
 
-    const query = reactive({ page: 1, languageCode: '' })
-    const editForm = reactive({ sortname: '', alias: '', taxis: 0 })
-
-    async function fetchList() {
-      loading.value = true
-      try {
-        const params = { ...query }
-        if (!params.languageCode) delete params.languageCode
-        const res = await getSortList(params)
-        list.value = res.data?.list || []
-        total.value = res.data?.total || 0
-      } finally {
-        loading.value = false
-      }
-    }
-
-    function openEdit(row) {
-      currentId.value = row._id
-      editForm.sortname = row.sortname || ''
-      editForm.alias = row.alias || ''
-      editForm.taxis = row.taxis || 0
+    function openEdit(entry) {
+      currentId.value = entry._id
+      editForm.sortname = entry.sortname || ''
+      editForm.alias = entry.alias || ''
+      editForm.description = entry.description || ''
+      editForm.taxis = entry.taxis || 0
       dialogVisible.value = true
     }
 
@@ -124,28 +157,31 @@ export default {
         await updateSort(currentId.value, {
           sortname: editForm.sortname,
           alias: editForm.alias,
+          description: editForm.description,
           taxis: editForm.taxis
         })
         ElMessage.success('保存成功')
         dialogVisible.value = false
-        fetchList()
+
+        if (groupedManagerRef.value) {
+          groupedManagerRef.value.fetchList()
+        }
       } finally {
         saving.value = false
       }
     }
 
-    onMounted(fetchList)
     return {
-      list,
-      total,
-      loading,
+      groupedManagerRef,
+      getSortList,
       saving,
       dialogVisible,
-      query,
       editForm,
-      fetchList,
+      languageCodes: LANGUAGE_CODES,
       openEdit,
-      handleSave
+      handleSave,
+      getTranslationStatusLabel,
+      getTranslationStatusTagType
     }
   }
 }

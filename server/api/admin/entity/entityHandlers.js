@@ -1,5 +1,5 @@
 import {
-  findEntityPage,
+  findEntityGroupPage,
   updateEntityById
 } from '../../../mongodb/utils/entities.js'
 import { sharedEntityUpdateSchema } from '../../../../common/validation/schemas.js'
@@ -16,7 +16,7 @@ function createEntityHandlers(entityType) {
       const limit = Math.min(parseInt(req.query.limit) || 20, 100)
       const query = {}
       if (req.query.languageCode) query.languageCode = req.query.languageCode
-      const { list, total } = await findEntityPage({
+      const { list, total } = await findEntityGroupPage({
         entityType,
         query,
         page,

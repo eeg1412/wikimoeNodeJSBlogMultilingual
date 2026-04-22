@@ -15,18 +15,33 @@ export default {
       type: String,
       default: ''
     },
+    ipInfo: {
+      type: Object,
+      default: null
+    },
     geo: {
       type: Object,
       default: null
     }
   },
   setup(props) {
+    const normalizedGeo = computed(() => {
+      if (props.ipInfo) {
+        return {
+          country: props.ipInfo.countryLong,
+          region: props.ipInfo.region,
+          city: props.ipInfo.city
+        }
+      }
+      return props.geo
+    })
+
     const tooltipContent = computed(() => {
-      if (!props.geo) return props.ip || '-'
+      if (!normalizedGeo.value) return props.ip || '-'
       const parts = [
-        props.geo.country,
-        props.geo.region,
-        props.geo.city
+        normalizedGeo.value.country,
+        normalizedGeo.value.region,
+        normalizedGeo.value.city
       ].filter(Boolean)
       return parts.length > 0 ? parts.join(' / ') : props.ip
     })

@@ -89,6 +89,7 @@ export const sortUpdateSchema = Joi.object({
     .allow('')
     .max(200)
     .pattern(/^[a-zA-Z0-9_-]*$/),
+  taxis: Joi.number().integer().min(0),
   description: Joi.string().allow('').max(2000),
   translationStatus: Joi.string().valid(
     'pending',
@@ -154,11 +155,18 @@ export const attachmentUpdateSchema = Joi.object({
 
 // ────────────── Option 更新 ──────────────
 
-export const optionUpdateSchema = Joi.object({
+const optionUpdateItemSchema = Joi.object({
   namespace: Joi.string().valid('system', 'site').required(),
   key: Joi.string().required(),
   value: Joi.any().required()
 })
+
+export const optionUpdateSchema = Joi.alternatives().try(
+  optionUpdateItemSchema,
+  Joi.object({
+    optionList: Joi.array().items(optionUpdateItemSchema).min(1).required()
+  })
+)
 
 // ────────────── 翻译字段请求 ──────────────
 

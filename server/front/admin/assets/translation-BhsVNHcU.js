@@ -1,1 +1,0 @@
-import{r}from"./index-CnKl1dmn.js";function o(t){return r.get("/translation-memory/list",{params:t})}function a(t){return r.post(`/translation-memory/approve/${t}`)}function e(t){return r.get("/aitranslationlog/list",{params:t})}export{a,e as b,o as g};

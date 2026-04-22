@@ -1,0 +1,1 @@
+import{r as n}from"./index-DZBSvVJ1.js";function o(t){return{getList:e=>n.get(`/${t}/list`,{params:e}),update:(e,a)=>n.put(`/${t}/update/${e}`,a)}}const s=o("bangumi"),u=o("movie"),p=o("game"),m=o("book"),r=o("event");function c(t){return n.get("/vote/list",{params:t})}function g(t,e){return n.put(`/vote/update/${t}`,e)}export{m as a,s as b,c,r as e,p as g,u as m,g as u};

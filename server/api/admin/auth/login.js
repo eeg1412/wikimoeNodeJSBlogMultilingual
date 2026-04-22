@@ -103,15 +103,19 @@ export default async function loginHandler(req, res, next) {
 
     const token = signJwt(payload, getAdminJwtSecret(), { expiresIn })
 
+    const userInfo = {
+      _id: admin._id,
+      username: admin.username,
+      nickname: admin.nickname,
+      role: admin.role
+    }
+
     return res.json({
       data: {
         token,
-        adminInfo: {
-          _id: admin._id,
-          username: admin.username,
-          nickname: admin.nickname,
-          role: admin.role
-        }
+        userInfo,
+        // 保留旧字段，避免已有前端缓存或旧调用方立即失效。
+        adminInfo: userInfo
       }
     })
   } catch (err) {

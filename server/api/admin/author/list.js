@@ -1,4 +1,4 @@
-import { findAuthorPage } from '../../../mongodb/utils/authors.js'
+import { findAuthorGroupPage } from '../../../mongodb/utils/authors.js'
 
 export default async function authorListHandler(req, res, next) {
   try {
@@ -6,7 +6,7 @@ export default async function authorListHandler(req, res, next) {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100)
     const query = {}
     if (req.query.languageCode) query.languageCode = req.query.languageCode
-    const { list, total } = await findAuthorPage({ query, page, limit })
+    const { list, total } = await findAuthorGroupPage({ query, page, limit })
     return res.json({ data: { list, total, page, limit } })
   } catch (err) {
     next(err)

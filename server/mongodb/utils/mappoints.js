@@ -1,4 +1,5 @@
 import Mappoint from '../models/mappoint.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 export async function findMappointPage({
   query = {},
@@ -15,6 +16,21 @@ export async function findMappointPage({
     Mappoint.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findMappointGroupPage({
+  query = {},
+  page = 1,
+  limit = 50
+} = {}) {
+  return findGroupedDocumentPage({
+    Model: Mappoint,
+    query,
+    page,
+    limit,
+    groupField: 'sourceId',
+    preGroupSort: { zIndex: -1, createdAt: -1 }
+  })
 }
 
 export async function findMappointBySourceIdLang(sourceId, languageCode) {

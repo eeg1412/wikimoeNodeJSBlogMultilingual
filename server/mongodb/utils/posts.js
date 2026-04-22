@@ -21,7 +21,10 @@ export async function findPostPage({
           path: 'photoAttachment'
         }
       })
-      .populate('sort', 'sortname')
+      .populate('sort', 'sortname alias')
+      .populate('tags', 'tagname')
+      .populate('mappointList', 'title longitude latitude')
+      .populate('coverImages')
       .lean(),
     Post.countDocuments(query)
   ])
@@ -87,10 +90,7 @@ export async function findPostForDetail(idOrAlias, languageCode) {
   let post = await Post.findOne({ alias: idOrAlias, languageCode, status: 1 })
     .populate({
       path: 'author',
-      populate: [
-        { path: 'photoAttachment' },
-        { path: 'coverAttachment' }
-      ]
+      populate: [{ path: 'photoAttachment' }, { path: 'coverAttachment' }]
     })
     .populate('sort')
     .populate('tags')
@@ -122,10 +122,7 @@ export async function findPostForDetail(idOrAlias, languageCode) {
       post = await Post.findOne({ _id: idOrAlias, languageCode, status: 1 })
         .populate({
           path: 'author',
-          populate: [
-            { path: 'photoAttachment' },
-            { path: 'coverAttachment' }
-          ]
+          populate: [{ path: 'photoAttachment' }, { path: 'coverAttachment' }]
         })
         .populate('sort')
         .populate('tags')

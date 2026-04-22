@@ -1,6 +1,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title><%= (typeof pageTitle !== 'undefined' && pageTitle) ? pageTitle + ' - ' + (typeof siteTitle !== 'undefined' ? siteTitle : (siteConfig.siteName || '')) : (typeof siteTitle !== 'undefined' ? siteTitle : (siteConfig.siteName || '')) %></title>
+<%
+  const resolvedSiteTitle = typeof siteTitle !== 'undefined' ? siteTitle : (siteConfig.siteName || '')
+  const resolvedPageTitle = typeof pageTitle !== 'undefined' ? pageTitle : ''
+  let documentTitle = resolvedSiteTitle
+  if (resolvedPageTitle && resolvedSiteTitle) {
+    documentTitle = resolvedPageTitle + ' - ' + resolvedSiteTitle
+  } else if (resolvedPageTitle) {
+    documentTitle = resolvedPageTitle
+  }
+%>
+<title><%= documentTitle %></title>
 
 <% if (typeof metaDescription !== 'undefined' && metaDescription) { %>
   <meta name="description" content="<%= metaDescription %>" />

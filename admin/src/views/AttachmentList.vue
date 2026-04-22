@@ -1,28 +1,21 @@
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-6">附件管理</h2>
-    <el-card>
-      <!-- 上传本地附件 -->
-      <el-upload
-        action=""
-        :http-request="handleUpload"
-        :show-file-list="false"
-        accept="image/*,video/*,audio/*"
-        class="mb-4"
-      >
-        <el-button type="primary">上传本地附件</el-button>
-      </el-upload>
-
-      <div class="flex gap-3 mb-4">
-        <el-select
-          v-model="uploadLanguageCode"
-          placeholder="上传语言"
-          style="width: 140px"
+    <GroupedLanguageManager
+      ref="groupedManagerRef"
+      title="附件管理"
+      :get-list="getAttachmentList"
+      :initial-query="initialQuery"
+      source-id-label="资源组"
+    >
+      <template #filters="{ query, fetchList }">
+        <el-upload
+          action=""
+          :http-request="options => handleUpload(options, query, fetchList)"
+          :show-file-list="false"
+          accept="image/*,video/*,audio/*"
         >
-          <el-option label="English (en)" value="en" />
-          <el-option label="日本語 (jp)" value="jp" />
-          <el-option label="繁體中文 (tw)" value="tw" />
-        </el-select>
+          <el-button type="primary">上传本地附件</el-button>
+        </el-upload>
         <el-select
           v-model="query.attachmentSourceType"
           placeholder="类型"
@@ -32,41 +25,46 @@
           <el-option label="远程（源站）" value="remote" />
           <el-option label="本地上传" value="localized" />
         </el-select>
-        <el-button type="primary" @click="fetchList">查询</el-button>
-      </div>
+      </template>
 
-      <ResponsiveTable :data="list" :loading="loading">
-        <ResponsiveTableColumn label="预览" width="80">
-          <template #default="{ row }">
-            <el-image
-              :src="getPreviewUrl(row)"
-              style="width: 48px; height: 48px; object-fit: cover"
-            />
-          </template>
-        </ResponsiveTableColumn>
-        <ResponsiveTableColumn
-          prop="attachmentSourceType"
-          label="类型"
-          width="100"
-        />
-        <ResponsiveTableColumn
-          prop="name"
-          label="文件名"
-          show-overflow-tooltip
-        />
-        <ResponsiveTableColumn prop="mimetype" label="MIME" width="120" />
-        <ResponsiveTableColumn label="操作" width="100">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEdit(row)"
-              >编辑</el-button
-            >
-          </template>
-        </ResponsiveTableColumn>
+      <template #source="{ row, primaryEntry, sourceSnapshot }">
+        <div class="flex gap-3 items-start">
+          <el-image
+            :src="getPreviewUrl(primaryEntry)"
+            style="width: 56px; height: 56px; object-fit: cover; flex-shrink: 0"
+          />
+          <div class="space-y-1 min-w-0">
+            <div class="font-medium truncate">
+              {{ sourceSnapshot?.name || primaryEntry?.name || row.groupKey }}
+            </div>
+            <div class="text-xs text-gray-500 line-clamp-2">
+              {{
+                sourceSnapshot?.description ||
+                primaryEntry?.description ||
+                '暂无描述'
+              }}
+            </div>
+            <div class="text-xs text-gray-500 break-all">
+              {{
+                primaryEntry?.sourcePath ||
+                primaryEntry?.externalUrl ||
+                primaryEntry?.filepath ||
+                row.groupKey
+              }}
+            </div>
+            <div class="flex items-center gap-2 text-xs text-gray-500">
+              <span>{{ primaryEntry?.attachmentSourceType || '-' }}</span>
+              <SourceSnapshotPreview :snapshot="sourceSnapshot" />
+            </div>
+          </div>
+        </div>
+      </template>
 
-        <template #mobile-card="{ row }">
-          <div class="flex gap-3 items-center">
+      <template #language="{ entry }">
+        <div v-if="entry" class="space-y-2">
+          <div class="flex gap-2 items-start">
             <el-image
-              :src="getPreviewUrl(row)"
+              :src="getPreviewUrl(entry)"
               style="
                 width: 48px;
                 height: 48px;
@@ -74,34 +72,92 @@
                 flex-shrink: 0;
               "
             />
-            <div class="flex-1 min-w-0">
-              <div class="text-sm truncate">{{ row.name }}</div>
-              <div class="text-xs text-gray-400">
-                {{ row.attachmentSourceType }}
+            <div class="min-w-0 flex-1">
+              <div class="font-medium truncate">{{ entry.name || '-' }}</div>
+              <div class="text-xs text-gray-500 truncate">
+                {{ entry.mimetype || '-' }}
               </div>
             </div>
-            <el-button type="primary" link size="small" @click="openEdit(row)"
+          </div>
+          <div class="text-xs text-gray-500 line-clamp-2">
+            {{ entry.description || '暂无描述' }}
+          </div>
+          <div class="flex items-center gap-2">
+            <el-tag
+              size="small"
+              :type="getTranslationStatusTagType(entry.translationStatus)"
+            >
+              {{ getTranslationStatusLabel(entry.translationStatus) }}
+            </el-tag>
+            <el-button type="primary" link size="small" @click="openEdit(entry)"
               >编辑</el-button
             >
           </div>
-        </template>
-      </ResponsiveTable>
+        </div>
+        <el-tag v-else size="small" type="info">缺失</el-tag>
+      </template>
 
-      <div class="flex justify-end mt-4">
-        <el-pagination
-          v-model:current-page="query.page"
-          :page-size="20"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="fetchList"
-        />
-      </div>
-    </el-card>
+      <template #mobile-card="{ row, primaryEntry, getLangEntry }">
+        <div class="space-y-3">
+          <div class="flex gap-3 items-center">
+            <el-image
+              :src="getPreviewUrl(primaryEntry)"
+              style="
+                width: 52px;
+                height: 52px;
+                object-fit: cover;
+                flex-shrink: 0;
+              "
+            />
+            <div class="min-w-0 flex-1">
+              <div class="font-medium truncate">
+                {{ primaryEntry?.name || row.groupKey }}
+              </div>
+              <div class="text-xs text-gray-500 break-all">
+                {{
+                  primaryEntry?.sourcePath ||
+                  primaryEntry?.externalUrl ||
+                  primaryEntry?.filepath ||
+                  row.groupKey
+                }}
+              </div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div
+              v-for="languageCode in languageCodes"
+              :key="languageCode"
+              class="rounded border border-gray-200 px-3 py-2"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs uppercase text-gray-500">{{
+                  languageCode
+                }}</span>
+                <el-button
+                  v-if="getLangEntry(row, languageCode)"
+                  type="primary"
+                  link
+                  size="small"
+                  @click="openEdit(getLangEntry(row, languageCode))"
+                  >编辑</el-button
+                >
+              </div>
+              <div class="mt-1 text-sm">
+                {{ getLangEntry(row, languageCode)?.name || '缺失' }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </GroupedLanguageManager>
 
-    <el-dialog v-model="dialogVisible" title="编辑附件" width="480px">
+    <el-dialog v-model="dialogVisible" title="编辑附件" width="520px">
       <el-form :model="editForm" label-position="top">
         <el-form-item label="文件名">
           <el-input v-model="editForm.name" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -115,47 +171,41 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import {
   getAttachmentList,
   updateAttachment,
   uploadLocalizedAttachment
 } from '../api/attachment.js'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
-import ResponsiveTableColumn from '../components/ResponsiveTableColumn.vue'
-import { ElMessage } from 'element-plus'
+import GroupedLanguageManager from '../components/GroupedLanguageManager.vue'
+import SourceSnapshotPreview from '../components/SourceSnapshotPreview.vue'
+import {
+  getTranslationStatusLabel,
+  getTranslationStatusTagType
+} from '../utils/translationStatus.js'
+
+const LANGUAGE_CODES = ['en', 'jp', 'tw']
 
 export default {
   name: 'AttachmentList',
-  components: { ResponsiveTable, ResponsiveTableColumn },
+  components: { GroupedLanguageManager, SourceSnapshotPreview },
   setup() {
-    const list = ref([])
-    const total = ref(0)
-    const loading = ref(false)
+    const groupedManagerRef = ref(null)
     const saving = ref(false)
     const dialogVisible = ref(false)
-    const currentId = ref(null)
-    const uploadLanguageCode = ref('en')
-    const query = reactive({ page: 1, attachmentSourceType: '' })
-    const editForm = reactive({ name: '' })
-
-    async function fetchList() {
-      loading.value = true
-      try {
-        const params = { ...query }
-        if (!params.attachmentSourceType) delete params.attachmentSourceType
-        const res = await getAttachmentList(params)
-        list.value = res.data?.list || []
-        total.value = res.data?.total || 0
-      } finally {
-        loading.value = false
-      }
+    const currentId = ref('')
+    const editForm = reactive({ name: '', description: '' })
+    const initialQuery = {
+      page: 1,
+      languageCode: 'en',
+      attachmentSourceType: ''
     }
 
-    async function handleUpload({ file }) {
+    async function handleUpload({ file }, query, fetchList) {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('languageCode', uploadLanguageCode.value)
+      formData.append('languageCode', query.languageCode)
       try {
         await uploadLocalizedAttachment(formData)
         ElMessage.success('上传成功')
@@ -165,52 +215,59 @@ export default {
       }
     }
 
-    function openEdit(row) {
-      currentId.value = row._id
-      editForm.name = row.name || ''
+    function openEdit(entry) {
+      currentId.value = entry._id
+      editForm.name = entry.name || ''
+      editForm.description = entry.description || ''
       dialogVisible.value = true
     }
 
-    function getPreviewUrl(row) {
-      if (!row) {
+    function getPreviewUrl(entry) {
+      if (!entry) {
         return ''
       }
-      if (row.attachmentSourceType === 'localized') {
-        return row.filepath || ''
+      if (entry.previewUrl) {
+        return entry.previewUrl
       }
-      if (row.externalUrl) {
-        return row.externalUrl
+      if (entry.externalUrl) {
+        return entry.externalUrl
       }
-      return row.filepath || ''
+
+      return entry.filepath || ''
     }
 
     async function handleSave() {
       saving.value = true
       try {
-        await updateAttachment(currentId.value, { name: editForm.name })
+        await updateAttachment(currentId.value, {
+          name: editForm.name,
+          description: editForm.description
+        })
         ElMessage.success('保存成功')
         dialogVisible.value = false
-        fetchList()
+
+        if (groupedManagerRef.value) {
+          groupedManagerRef.value.fetchList()
+        }
       } finally {
         saving.value = false
       }
     }
 
-    onMounted(fetchList)
     return {
-      list,
-      total,
-      loading,
+      groupedManagerRef,
+      getAttachmentList,
+      initialQuery,
       saving,
       dialogVisible,
-      uploadLanguageCode,
-      query,
       editForm,
-      fetchList,
+      languageCodes: LANGUAGE_CODES,
       handleUpload,
       openEdit,
+      getPreviewUrl,
       handleSave,
-      getPreviewUrl
+      getTranslationStatusLabel,
+      getTranslationStatusTagType
     }
   }
 }

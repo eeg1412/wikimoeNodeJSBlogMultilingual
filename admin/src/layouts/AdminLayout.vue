@@ -53,7 +53,7 @@
             </el-menu-item>
           </el-menu-item-group>
 
-          <el-menu-item-group title="实体">
+          <el-menu-item-group title="关联">
             <el-menu-item index="/multilingual-admin/bangumi">
               <el-icon><VideoPlay /></el-icon>
               <span>Bangumi</span>

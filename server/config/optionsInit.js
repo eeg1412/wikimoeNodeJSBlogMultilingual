@@ -118,9 +118,54 @@ export async function getOptionValue(namespace, key) {
  * @param {string} operatorId
  */
 export async function setOptionValue(namespace, key, value, operatorId = null) {
-  await Option.findOneAndUpdate(
-    { namespace, key },
-    { $set: { value, updatedBy: operatorId } },
-    { upsert: true, new: true }
+  await setOptionValues([{ namespace, key, value }], operatorId)
+}
+
+function shouldSkipMaskedSecret(namespace, key, value) {
+  if (namespace !== 'system') {
+    return false
+  }
+  if (!SYSTEM_SECRET_KEYS.has(key)) {
+    return false
+  }
+  return value === '***'
+}
+
+/**
+ * 批量更新配置值。
+ * - 只发起一次数据库批量写入，避免前端逐字段调用接口。
+ * - 对敏感字段的掩码占位符（***）执行跳过，防止误覆盖真实密钥。
+ * @param {Array<{namespace: 'system'|'site', key: string, value: any}>} optionList
+ * @param {string|null} operatorId
+ */
+export async function setOptionValues(optionList, operatorId = null) {
+  const normalizedOptionList = (optionList || []).filter(item => {
+    if (!item) {
+      return false
+    }
+    return !shouldSkipMaskedSecret(item.namespace, item.key, item.value)
+  })
+
+  if (normalizedOptionList.length === 0) {
+    return
+  }
+
+  await Option.bulkWrite(
+    normalizedOptionList.map(item => ({
+      updateOne: {
+        filter: { namespace: item.namespace, key: item.key },
+        update: {
+          $set: {
+            value: item.value,
+            updatedBy: operatorId
+          },
+          $setOnInsert: {
+            isSecret:
+              item.namespace === 'system' && SYSTEM_SECRET_KEYS.has(item.key)
+          }
+        },
+        upsert: true
+      }
+    }))
   )
 }

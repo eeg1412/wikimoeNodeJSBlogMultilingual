@@ -10,6 +10,12 @@
             label-position="top"
             label-width="200px"
           >
+            <el-form-item label="源博客接口地址（sourceBlogApiBaseUrl）">
+              <el-input
+                v-model="systemConfig.sourceBlogApiBaseUrl"
+                placeholder="https://example.com/api/blog"
+              />
+            </el-form-item>
             <el-form-item label="源博客公共域名（sourceBlogPublicOrigin）">
               <el-input
                 v-model="systemConfig.sourceBlogPublicOrigin"
@@ -183,7 +189,7 @@
 
 <script>
 import { ref, reactive, onMounted } from 'vue'
-import { getOptions, updateOption } from '../api/option.js'
+import { getOptions, updateOptions } from '../api/option.js'
 import { ElMessage } from 'element-plus'
 
 export default {
@@ -192,22 +198,57 @@ export default {
     const activeTab = ref('system')
     const systemConfig = ref(null)
     const siteConfig = ref(null)
+    const systemConfigSnapshot = ref(null)
+    const siteConfigSnapshot = ref(null)
     const saving = reactive({ system: false, site: false })
+
+    function cloneConfig(config) {
+      return { ...(config || {}) }
+    }
+
+    function isSameValue(left, right) {
+      return JSON.stringify(left) === JSON.stringify(right)
+    }
+
+    function buildOptionList(namespace, currentConfig, snapshotConfig) {
+      const optionList = []
+      const current = currentConfig || {}
+      const snapshot = snapshotConfig || {}
+
+      for (const [key, value] of Object.entries(current)) {
+        if (isSameValue(value, snapshot[key])) {
+          continue
+        }
+        optionList.push({ namespace, key, value })
+      }
+
+      return optionList
+    }
 
     async function fetchOptions() {
       const res = await getOptions()
-      systemConfig.value = { ...res.data?.system }
-      siteConfig.value = { ...res.data?.site }
+      systemConfig.value = cloneConfig(res.data?.system)
+      siteConfig.value = cloneConfig(res.data?.site)
+      systemConfigSnapshot.value = cloneConfig(res.data?.system)
+      siteConfigSnapshot.value = cloneConfig(res.data?.site)
     }
 
     async function saveSystem() {
       saving.system = true
       try {
-        const payload = { ...systemConfig.value }
-        // 不发送脱敏 key（后端识别 '***' 则跳过更新）
-        for (const [key, value] of Object.entries(payload)) {
-          await updateOption({ namespace: 'system', key, value })
+        const optionList = buildOptionList(
+          'system',
+          systemConfig.value,
+          systemConfigSnapshot.value
+        )
+
+        if (optionList.length === 0) {
+          ElMessage.info('没有可保存的系统配置更改')
+          return
         }
+
+        await updateOptions(optionList)
+        await fetchOptions()
         ElMessage.success('系统配置保存成功')
       } catch {
         ElMessage.error('保存失败')
@@ -219,10 +260,19 @@ export default {
     async function saveSite() {
       saving.site = true
       try {
-        const payload = { ...siteConfig.value }
-        for (const [key, value] of Object.entries(payload)) {
-          await updateOption({ namespace: 'site', key, value })
+        const optionList = buildOptionList(
+          'site',
+          siteConfig.value,
+          siteConfigSnapshot.value
+        )
+
+        if (optionList.length === 0) {
+          ElMessage.info('没有可保存的站点配置更改')
+          return
         }
+
+        await updateOptions(optionList)
+        await fetchOptions()
         ElMessage.success('站点配置保存成功')
       } catch {
         ElMessage.error('保存失败')

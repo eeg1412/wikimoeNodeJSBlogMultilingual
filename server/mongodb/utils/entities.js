@@ -1,4 +1,5 @@
 import { Bangumi, Movie, Game, Book, Event } from '../models/entities.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 const modelMap = { Bangumi, Movie, Game, Book, Event }
 
@@ -21,6 +22,23 @@ export async function findEntityPage({
     Model.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findEntityGroupPage({
+  entityType,
+  query = {},
+  page = 1,
+  limit = 20
+} = {}) {
+  const Model = getModel(entityType)
+  return findGroupedDocumentPage({
+    Model,
+    query,
+    page,
+    limit,
+    groupField: 'sourceId',
+    preGroupSort: { createdAt: -1 }
+  })
 }
 
 export async function findEntityBySourceIdLang(

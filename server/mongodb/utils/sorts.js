@@ -1,4 +1,5 @@
 import Sort from '../models/sort.js'
+import { findGroupedDocumentPage } from './groupedDocuments.js'
 
 export async function findSortPage({ query = {}, page = 1, limit = 50 } = {}) {
   const skip = (page - 1) * limit
@@ -11,6 +12,21 @@ export async function findSortPage({ query = {}, page = 1, limit = 50 } = {}) {
     Sort.countDocuments(query)
   ])
   return { list, total }
+}
+
+export async function findSortGroupPage({
+  query = {},
+  page = 1,
+  limit = 50
+} = {}) {
+  return findGroupedDocumentPage({
+    Model: Sort,
+    query,
+    page,
+    limit,
+    groupField: 'sourceId',
+    preGroupSort: { taxis: 1, createdAt: -1 }
+  })
 }
 
 export async function findSortBySourceIdLang(sourceId, languageCode) {
