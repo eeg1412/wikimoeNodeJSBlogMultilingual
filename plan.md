@@ -1,6 +1,6 @@
 # wikimoeNodeJSBlogMultilingual 实施计划
 
-更新时间：2026-04-21
+更新时间：2026-04-22
 
 ## 1. 目标与硬约束
 
@@ -12,19 +12,25 @@
 
 ### 1.2 已确认且必须严格执行的规则
 
-- 技术栈与原项目保持一致：博客端使用 Nuxt 4，服务端使用 Express，管理端使用 Vue 3 + Vite，数据库使用 MongoDB。
+- 技术栈总体延续原项目的 Node.js + Express + MongoDB 主干，但博客端不再使用 Nuxt 4，改为基于 Express 的 EJS 5.0.2 服务端渲染，样式统一使用 TailwindCSS 3.4.17；管理端使用 Vue 3 + Vite，数据库使用 MongoDB。
 - 管理后台访问路径固定为 /multilingual-admin。
 - 表单校验统一改为 joi 18.1.2。
 - AI 翻译统一使用 @google/genai 1.50.1。
 - AI 翻译必须采用工具调用模式，不允许直接依赖自由文本输出作为最终写库结果。
-- 必须支持 AI_GATEWAY_URL 配置。
+- 必须支持后台系统配置项 system.aiGatewayUrl。
+- 后台 JWT 管理密钥不通过 env 明文提供，服务启动时必须检查 server/secret/JWTSecretAdmin.key；若不存在则自动生成新密钥并写入文件。
+- 管理后台必须提供“重新生成后台 JWT 密钥”能力；密钥轮换后所有既有后台 JWT 立即失效。
+- 后台所有受保护接口都必须执行 Authorization Bearer JWT 校验、管理员 disabled 校验、pwversion 校验和 role 校验。
+- 后台登录必须记录 IP、ipInfo、deviceInfo、成功失败结果与失败原因，并按 IP 维度限制短时间内的失败重试次数。
+- 翻译站附件上传必须执行 MIME 白名单、扩展名白名单、文件头校验、大小限制、路径规范化与脚本文件拦截。
+- 富文本 HTML 在导入、翻译回填、保存和发布前都必须执行危险标签、危险属性与危险 URL 校验，阻止 XSS 落库与渲染。
 - 仅支持导入和翻译博文与推文。
 - 页面类型文章必须禁止导入，并给出明确错误提示。
 - 附件体系拆分为远程附件和翻译站附件两类。
 - 远程附件用于映射原站资源，默认只保存原站相对路径，运行时再拼接原站域名配置。
 - 翻译站附件用于存储多语言站本地上传的语言专属媒体文件。
 - 当前语言文章可以继续使用远程附件，也可以替换为当前语言的翻译站附件。
-- 所有来自原站的内部链接、媒体路径、作者头像路径、作者封面路径、来源快照、导入任务载荷都不允许保存完整原站 URL，只允许保存相对路径；运行时通过 SOURCE_BLOG_PUBLIC_ORIGIN 配置拼接。
+- 所有来自原站的内部链接、媒体路径、作者头像路径、作者封面路径、来源快照、导入任务载荷都不允许保存完整原站 URL，只允许保存相对路径；运行时通过 system.sourceBlogPublicOrigin 配置拼接。
 - 评论、点赞、分享、浏览计数、投票互动在多语言站全部关闭。
 - 投票在翻译站统一按只读信息处理，只展示，不允许提交、不允许写入、不允许统计。
 - languageCode 直接使用 en、jp、tw。
@@ -49,7 +55,7 @@
 
 ### 2.1 原项目已确认技术基线
 
-- 原博客端：Nuxt 4 + TailwindCSS。
+- 原博客端：Nuxt 4 + TailwindCSS；本项目博客端改为 EJS 5.0.2 + TailwindCSS 3.4.17，保留原有内容组织与视觉语言，不复用 Nuxt 运行时。
 - 原服务端：Express 4.22.1 + Mongoose 9.0.1。
 - 原管理端：Vue 3 + Vite + Element Plus。
 - 原后台富文本：Wangeditor 5。
@@ -71,7 +77,7 @@
 
 ## 3.1 目录结构
 
-项目目录按原项目三端结构拆分，并增加 shared/common 层：
+项目目录按原项目三端结构拆分，但博客端不再是独立 Nuxt 应用，而是“服务端渲染模板层 + 样式构建层”的组合，并增加 shared/common 层：
 
 ```text
 wikimoeNodeJSBlogMultilingual/
@@ -85,10 +91,25 @@ wikimoeNodeJSBlogMultilingual/
 │  └─ src/
 ├─ blog/
 │  ├─ package.json
-│  └─ app/
+│  ├─ tailwind.config.js
+│  ├─ postcss.config.js
+│  ├─ src/
+│  │  └─ styles/
+│  ├─ views/
+│  │  ├─ layouts/
+│  │  ├─ partials/
+│  │  ├─ pages/
+│  │  └─ components/
+│  └─ public/
 ├─ server/
 │  ├─ package.json
-│  └─ src/ 或沿用原 server 结构
+│  ├─ app.js
+│  ├─ routes/
+│  ├─ api/
+│  ├─ services/
+│  ├─ controllers/
+│  ├─ viewmodels/
+│  └─ middleware/
 └─ common/
    ├─ constants/
    ├─ validation/
@@ -101,17 +122,38 @@ wikimoeNodeJSBlogMultilingual/
 
 - server 侧：路由注册模式、MongoDB utils 模式、JWT 工具、日志配置、缓存配置模式。
 - admin 侧：RichEditor5、RichEditorEventSelectorDialog、AttachmentsDialog、ResponsiveTable、ResponsiveTableColumn、IpInfoDisplay、DeviceInfoDisplay、axios API 封装层、登录页骨架。
-- blog 侧：公共布局组件、文章列表卡片、文章详情展示组件、颜色模式切换、部分 wui 组件、SEO 工具函数。
+- blog 侧：文章卡片与详情页的视觉层级、SEO 字段映射规则、颜色模式交互约束、部分可拆分的样式 token 和通用 DOM 结构。
 
 必须重写或显著改造的部分：
 
 - 所有表单校验逻辑，统一切换到 joi 18.1.2。
 - 所有文章、作者、分类、标签、地点、关联实体的模型与接口。
 - 管理后台路由基座，从 /admin 改为 /multilingual-admin。
-- 前台路由结构，统一增加语言前缀。
+- 博客端渲染基座，统一改为 Express Controller + ViewModel + EJS Template 结构。
+- 前台路由结构，统一增加语言前缀，并由服务端直接渲染 HTML。
 - 所有与评论、点赞、分享、投票、浏览写入相关的接口与前端行为。
 - 原后台 users 表相关逻辑，拆分为 adminUsers 和 authors 两套模型。
 - AI 翻译服务和 HTML 文本抽取回填服务。
+
+### 3.3 博客端渲染框架
+
+博客端采用“单 Node 进程内的 SSR 页面系统”，不再引入 Nuxt、Nitro、前台独立服务或页面级 hydration 框架。
+
+版本锁定：
+
+- EJS 固定为 5.0.2。
+- TailwindCSS 固定为 3.4.17。
+- 选择 TailwindCSS 3.4.17 而不是 4.x 的原因是：当前方案以 EJS 模板扫描、PostCSS 构建和稳定的 class dark mode 为核心，3.4.17 的 content 配置、模板扫描行为、插件生态和已有工程经验更成熟，适合先把多语言站 SSR 页面体系落稳，不在一期额外承担 Tailwind 4 配置范式变化的迁移成本。
+
+- 请求链路固定为：语言中间件 -> 页面控制器 -> Query Service -> ViewModel Mapper -> EJS 模板 -> HTML 输出。
+- 页面控制器只负责参数校验、语言识别、缓存命中与模板选择；不直接拼装 Mongo 原始数据。
+- Query Service 直接读取本地 MongoDB，不允许博客端页面在服务端内部回环调用 /api/blog 自己的 HTTP 接口。
+- ViewModel 层负责把 posts、authors、sorts、tags、attachments 等实体整理成模板可直接消费的数据结构，避免在 EJS 中写复杂判断。
+- 模板层采用 layout + partial + page 三级拆分，至少包含 base layout、head、header、footer、post-card、post-detail、entity-panel、vote-readonly-card 等模板片段。
+- TailwindCSS 只承担样式生成，不承担路由、状态管理或数据获取职责；构建产物输出到 blog/public 或 server/public 下的静态目录，由 Express 统一托管。
+- Tailwind 的 content 扫描范围必须显式覆盖 blog/views/**/\*.ejs、blog/src/**/_.js 以及可能复用的 server/viewmodels/\*\*/_.js，避免 SSR 模板中的类名在构建时被错误裁剪。
+- 前台默认不引入客户端框架，仅保留少量原生脚本用于颜色模式切换、广告位延迟加载和必要的交互增强。
+- 页面首屏内容必须由服务端完整输出，前台 JSON 接口仅作为补充能力，不作为首屏渲染主链路。
 
 ## 4. 数据模型设计
 
@@ -154,6 +196,35 @@ wikimoeNodeJSBlogMultilingual/
 
 - adminUsers 不允许存放作者展示信息。
 - 后台登录接口只能查询 adminUsers，不能查询 authors。
+- adminUsers.password 必须使用 bcrypt 哈希存储，不允许保存明文或可逆密文。
+- 管理员修改密码后必须递增 pwversion，用于使旧 JWT 立即失效。
+
+### 4.2.1 adminLoginLogs
+
+用途：记录后台登录成功与失败事件，并为登录风控提供数据基础。
+
+字段：
+
+- username
+- adminId，失败时可为空
+- IP
+- ipInfo
+- deviceInfo
+- success
+- reason
+- createdAt
+
+索引：
+
+- IP + createdAt 组合索引。
+- username + createdAt 组合索引。
+- success + createdAt 组合索引。
+
+规则：
+
+- 每次后台登录尝试都必须写入 adminLoginLogs，不允许只记录成功不记录失败。
+- 登录失败限流必须基于 adminLoginLogs 统计，不允许只靠进程内内存计数。
+- adminLoginLogs 不保存明文密码、JWT 原文或完整密钥内容。
 
 ### 4.3 authors
 
@@ -310,7 +381,7 @@ wikimoeNodeJSBlogMultilingual/
 规则：
 
 - 原站资源型远程附件只允许保存 sourcePath 和 filepath 的相对路径，不允许保存完整原站 URL。
-- 原站资源型远程附件在渲染阶段通过 sourceAssetResolver 使用 SOURCE_BLOG_PUBLIC_ORIGIN 与相对路径拼接最终访问地址。
+- 原站资源型远程附件在渲染阶段通过 sourceAssetResolver 使用 system.sourceBlogPublicOrigin 与相对路径拼接最终访问地址。
 - 第三方外链型远程附件允许保存 externalUrl，但不允许误存为原站完整 URL。
 - 远程附件在导入阶段只登记元数据和远程地址，不复制原文件二进制。
 - 翻译站附件的 filepath 必须指向多语言站本地可访问地址，storagePath 必须指向本地持久化存储位置。
@@ -586,10 +657,11 @@ votes 额外规则：
 - 解析到相对地址时，必须直接保存为相对路径，不允许在数据库中拼接完整原站域名。
 - 解析到绝对地址且域名属于原站时，必须剥离域名，仅保存相对路径。
 - 解析到第三方外链时，原样保留，并登记为 htmlDiscovered 第三方远程附件或第三方外链。
+- 解析到 javascript:、data:text/html、vbscript: 等危险协议时，必须直接拒绝写入并记为导入错误。
 - 导入阶段从原站识别出的所有媒体都先登记为 remote 类型 attachments。
 - 编辑阶段若用户为当前语言上传翻译站附件并替换某个媒体引用，则当前语言文章改引用 localized 类型 attachments，原 remote 附件记录保留。
 - 正文中的原站内部 a[href]、img[src]、video[src]、source[src] 等定位符在落库前必须统一改写为相对路径。
-- 前台渲染正文时，若检测到原站相对路径资源，则由 sourceAssetResolver 在渲染时拼接 SOURCE_BLOG_PUBLIC_ORIGIN。
+- 前台渲染正文时，若检测到原站相对路径资源，则由 sourceAssetResolver 在渲染时拼接 system.sourceBlogPublicOrigin。
 
 ### 5.5 重复导入处理规则
 
@@ -613,7 +685,10 @@ votes 额外规则：
 
 - 统一使用 @google/genai 1.50.1。
 - 统一封装 GoogleGenAI 单例客户端。
-- 若 AI_GATEWAY_URL 有值，则所有 GenAI 请求都必须通过该网关转发。
+- @google/genai 的客户端初始化、模型调用、函数调用、错误处理与可选能力设计，必须以 https://googleapis.github.io/js-genai/release_docs/index.html 为唯一基准文档，不允许凭经验猜测 SDK 参数结构或沿用旧版 Google AI SDK 写法。
+- 计划落地时必须显式核对官方 release docs 中的 Initialization、Function Calling、Error Handling 章节；若文档与既有经验冲突，以文档为准。
+- 必须支持后台系统配置项 aiGatewayUrl；若有值，则所有 GenAI 请求都必须通过该网关转发。
+- Gemini 凭据、模型、网关与翻译批处理策略属于后台系统配置，不属于启动引导 env。
 - AI 输出只接受工具调用结果，不接受自由文本直接落库。
 
 ### 6.2 工具调用接口设计
@@ -788,8 +863,10 @@ votes 额外规则：
 - 所有附件引用都必须能解析到合法的 remote 或 localized attachments 记录。
 - 若文章使用 localized 类型 attachments，则这些附件必须属于当前 languageCode，且本地文件必须真实存在。
 - HTML 回填后的 content 必须可被 DOM 正常解析。
+- HTML 回填后的 content 必须通过 HTML 安全清洗，不允许保留 script、object、embed、form、内联事件处理器或危险协议 URL。
 - 正文中的资源定位符必须全部为可解析的原站相对路径、第三方外链 URL 或多语言站本地合法媒体路由。
-- 对原站相对路径资源的最终访问地址必须由运行时 resolver 基于 SOURCE_BLOG_PUBLIC_ORIGIN 拼接，不能在数据库中预存。
+- localized 附件的 storagePath 必须位于 LOCAL_ATTACHMENT_STORAGE_DIR 内，禁止路径穿越或越权引用其他本地文件。
+- 对原站相对路径资源的最终访问地址必须由运行时 resolver 基于 system.sourceBlogPublicOrigin 拼接，不能在数据库中预存。
 
 ### 8.2 发布动作
 
@@ -806,9 +883,17 @@ votes 额外规则：
 - 撤回发布后 status 变回 0。
 - 保留已翻译内容，不清空正文与关联关系。
 
-## 9. 前台路由与展示方案
+## 9. 博客端渲染、路由与展示方案
 
-### 9.1 语言路由规则
+### 9.1 博客端运行方式
+
+- 博客端统一由 Express 挂载 EJS 视图引擎进行服务端渲染，不单独启动 Nuxt 或 Nitro 进程。
+- 请求先进入语言识别中间件，再进入页面控制器；页面控制器直接调用本地 Query Service，禁止通过 HTTP 自调 /api/blog。
+- TailwindCSS 3.4.17 通过独立构建脚本产出单份前台样式文件，模板只消费编译结果，不在运行时动态生成样式。
+- EJS 模板必须按 layout、partial、page、component 四层组织，避免把页面逻辑和展示逻辑混杂在单文件里。
+- 颜色模式采用“服务端输出初始主题 class + 客户端极小脚本持久化”的方式实现，不引入前台框架状态管理。
+
+### 9.2 语言路由规则
 
 前台只允许以下语言前缀：
 
@@ -818,10 +903,10 @@ votes 额外规则：
 
 根路径 / 的处理规则：
 
-- 统一 302 跳转到 siteDefaultLanguageCode。
-- siteDefaultLanguageCode 存在数据库 options 中，默认值为 en。
+- 统一 302 跳转到 site.defaultLanguageCode。
+- site.defaultLanguageCode 存在数据库站点配置中，默认值为 en。
 
-### 9.2 路由清单
+### 9.3 路由清单
 
 必须提供以下公开页面：
 
@@ -842,20 +927,43 @@ votes 额外规则：
 - 详情页只支持 post 和 tweet。
 - page 详情页一期不提供。
 
-### 9.3 前台交互约束
+### 9.4 页面模板结构
+
+博客端至少拆分为以下模板层级：
+
+- layouts/base.ejs：统一 head、主题 class、公共 meta、静态资源引入。
+- partials/head.ejs：title、description、canonical、hreflang、open graph、结构化数据入口。
+- partials/header.ejs 与 partials/footer.ejs：站点级公共框架，不提供语言切换器。
+- components/post-card.ejs：普通文章与推文列表卡片。
+- components/post-meta.ejs：作者、发布日期、分类、标签、地点等元信息片段。
+- components/entity-panel.ejs：bangumi、movie、game、book、event、vote 等关联信息块。
+- components/vote-readonly-card.ejs：只读投票卡片，明确无交互入口。
+- pages/home.ejs、pages/post-list.ejs、pages/post-detail.ejs：实际页面模板。
+
+模板设计要求：
+
+- 复杂条件判断、URL 拼接、状态翻译必须前移到 ViewModel 层，EJS 内只保留轻量分支。
+- 原站相对路径资源在进入模板前必须先过 sourceAssetResolver，模板只消费可直接渲染的最终地址或解析结果。
+- EJS 默认必须使用转义输出；只有经过安全清洗且通过发布校验的 content HTML 字段允许使用非转义输出。
+- 移动端和暗黑模式为默认设计约束，不作为后补适配。
+
+### 9.5 前台交互约束
 
 - 不渲染评论区。
 - 不渲染点赞、分享、投票提交、浏览计数上报按钮。
 - 若文章包含 voteList 或 contentVoteList，只允许渲染只读投票信息卡片，不允许渲染可选择项、提交按钮和结果写入逻辑。
-- 若正文或实体中包含原站相对路径资源，前台必须通过统一 resolver 在运行时拼接 SOURCE_BLOG_PUBLIC_ORIGIN。
+- 若正文或实体中包含原站相对路径资源，前台必须通过统一 resolver 在运行时拼接 system.sourceBlogPublicOrigin。
+- 博客端不提供语言切换器；访问什么语言路径，就只渲染该语言内容。
 - 若复用原组件，必须用 feature flag 显式关闭这些区域，不能依赖样式隐藏。
 
-### 9.4 SEO 规则
+### 9.6 SEO 与缓存规则
 
 - 每篇文章详情页必须输出 canonical。
 - 同 groupSourceId 下已发布的其他语言版本必须输出 hreflang alternate。
 - sitemap 只收录 status=1 的页面。
 - sitemap URL 必须带语言前缀。
+- 列表页与详情页的 meta、open graph、结构化数据由服务端渲染时直接输出，不依赖客户端二次补写。
+- EJS 页面缓存与 /api/blog 只读数据缓存统一复用同一组语言维度缓存键，避免页面和接口缓存不一致。
 
 ## 10. 服务端接口计划
 
@@ -864,6 +972,8 @@ votes 额外规则：
 必须实现以下后台接口组：
 
 - auth
+- security
+- adminLoginLog
 - import
 - post
 - author
@@ -883,6 +993,8 @@ votes 额外规则：
 关键接口最小清单：
 
 - POST /api/admin/login
+- PUT /api/admin/security/admin-jwt-secret/regenerate
+- GET /api/admin/adminloginlog/list
 - POST /api/admin/import/post
 - GET /api/admin/import/job/list
 - GET /api/admin/post/list
@@ -931,9 +1043,18 @@ votes 额外规则：
 - PUT /api/admin/option/update
 - GET /api/admin/aitranslationlog/list
 
-### 10.2 前台公开接口
+### 10.2 后台认证与安全约束
 
-多语言站前台读取本地数据库，建议仍沿用 /api/blog 前缀，但每个接口都必须带 languageCode 过滤。
+- 除登录接口外，所有 /api/admin/\* 接口默认要求 Authorization: Bearer <token>。
+- 鉴权链路必须依次校验：JWT 签名、token version、adminUsers 是否存在、disabled 是否为 false、pwversion 是否匹配当前数据库记录。
+- 角色不足必须返回统一“权限不足”错误，不允许静默降级执行。
+- 重新生成后台 JWT 密钥接口只能由最高权限管理员调用，并且必须写入结构化安全审计日志。
+- 登录接口必须按 IP 维度做失败次数限制，默认设计为“窗口期 + 最大失败次数”双参数，可通过后台系统配置调整。
+- import、publish、translate-all、attachment upload-localized、admin-jwt-secret regenerate 等高风险接口必须追加限流或加锁策略，避免暴力调用和并发踩踏。
+
+### 10.3 前台公开接口
+
+EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/api/blog 仅保留为只读公开数据接口，用于轻量异步场景、调试或后续扩展，但不是页面首屏渲染的数据来源。所有接口都必须带 languageCode 过滤。
 
 最小清单：
 
@@ -956,91 +1077,132 @@ votes 额外规则：
 - comment/like/log
 - vote 提交接口
 
-## 11. 配置落点规划
+## 11. 配置分层设计
 
-### 11.1 必须放在 env 的配置
+配置必须拆成四层：启动引导 env、后台系统配置、站点展示配置、代码常量。判断标准很简单：缺失后会导致服务无法启动的，才允许进入 env；缺失后只是某项业务暂不可用或需要后台补齐的，必须放到后台配置，不允许偷懒塞进 env。
 
-符合“长期不常改且缺失会导致服务无法正常启动”的配置，统一进入 env：
+数据库配置建议采用带命名空间和可见性控制的 settings/options 结构：
 
-- PORT
-- DB_HOST
-- JSON_LIMIT
-- URLENCODED_LIMIT
-- MAX_HISTORYLOGS_SIZE
-- IP2LOCATION_FILE_NAME
-- NITRO_PORT
-- NUXT_API_DOMAIN
-- SOURCE_BLOG_API_BASE_URL
-- SOURCE_BLOG_PUBLIC_ORIGIN
-- LOCAL_ATTACHMENT_STORAGE_DIR
-- LOCAL_ATTACHMENT_PUBLIC_BASE_PATH
-- JWT_SECRET_ADMIN
-- GEMINI_API_KEY
-- GEMINI_MODEL
-- GEMINI_THINKING_BUDGET
-- AI_GATEWAY_URL
-- INIT_ADMIN_USERNAME
-- INIT_ADMIN_PASSWORD
-- INIT_ADMIN_NICKNAME
+- system.\*：后台可改、仅服务端可读、可包含敏感字段。
+- site.\*：后台可改、服务端可读、其中允许前台消费的字段可进入模板渲染或 /api/blog/options。
+- isSecret=true 的字段必须密文存储、后台接口只返回掩码值、操作日志记录更新人和更新时间。
+
+### 11.1 启动引导级 env
+
+只有缺失后服务应直接拒绝启动的部署引导项进入 env：
+
+- DB_HOST，MongoDB 连接串。
+- LOCAL_ATTACHMENT_STORAGE_DIR，翻译站附件本地存储根目录。
+- INIT_ADMIN_USERNAME，首次初始化管理员账号。
+- INIT_ADMIN_PASSWORD，首次初始化管理员密码。
+- INIT_ADMIN_NICKNAME，首次初始化管理员昵称。
 
 说明：
 
-- SOURCE_BLOG_API_BASE_URL 用于调用原站公开接口。
-- SOURCE_BLOG_PUBLIC_ORIGIN 用于在运行时把 /upload、/content 等原站相对路径拼接成最终访问地址。
-- LOCAL_ATTACHMENT_STORAGE_DIR 用于存放翻译站附件的本地文件。
-- LOCAL_ATTACHMENT_PUBLIC_BASE_PATH 用于生成翻译站附件的公开访问路径。
-- 多语言站由于关闭博客侧登录，不需要 JWT_SECRET_BLOG。
+- PORT、JSON_LIMIT、URLENCODED_LIMIT、日志大小上限等存在合理默认值的运行参数，不列为“必须 env”，可在实现时作为可选覆盖项处理。
+- 后台 JWT 密钥不进入 env，不进入数据库，不进入 example.env，而是固定采用 secret 目录下的密钥文件机制。
+- 原站数据源、AI 翻译、站点 SEO、广告等业务配置均不属于启动引导项，不能放在 env。
 
-### 11.2 必须放在数据库 options 的配置
+### 11.2 后台系统配置
 
-符合“可以在后台长期调整、调整后无需重启”的配置，统一进 options：
+这类配置由管理员在后台维护，保存在数据库中，仅服务端读取，不允许通过前台公开接口暴露：
 
-- siteTitle
-- siteSubTitle
-- siteDescription
-- siteKeywords
-- siteUrl
-- siteLogo
-- siteDarkLogo
-- siteFavicon
-- siteFooterInfo
-- siteExtraCss
-- siteExtraJs
-- siteThemeMode
-- siteAllowSwitchTheme
-- sitePageSize
-- siteTimeZone
-- siteShowBlogVersion
-- siteEnableSitemap
-- siteRobotsTxt
-- siteDefaultLanguageCode
-- googleAdEnabled
-- googleAdId
-- googleAdPostBottomEnabled
-- googleAdPostBottomParams
-- AdAdsTxt
-- translationSystemPrompt
-- translationHtmlBatchMaxSegments
-- translationHtmlBatchMaxChars
-- translationRetryLimit
+- system.sourceBlogApiBaseUrl，原站公开接口基地址。
+- system.sourceBlogPublicOrigin，原站静态资源访问域名，用于运行时拼接相对路径。
+- system.sourceBlogRequestTimeoutMs，原站接口请求超时。
+- system.aiTranslationEnabled，AI 翻译总开关。
+- system.aiProvider，固定为 google-genai。
+- system.aiModel，当前翻译模型。
+- system.aiApiKey，Gemini Developer API 凭据，密文存储。
+- system.aiApiVersion，可选，显式控制 @google/genai 调用的 API 版本。
+- system.aiGatewayUrl，可选，若配置则所有 GenAI 请求走网关。
+- system.aiThinkingBudget，可选，按模型能力启用。
+- system.translationSystemPrompt，翻译系统提示词。
+- system.translationHtmlBatchMaxSegments，HTML 翻译单批最大 segment 数。
+- system.translationHtmlBatchMaxChars，HTML 翻译单批最大字符数。
+- system.translationRetryLimit，翻译失败重试次数。
+- system.adminTokenDefaultTtlHours，后台默认登录时长。
+- system.adminTokenRememberMeTtlDays，后台记住登录时长。
+- system.adminLoginAttemptWindowMinutes，后台登录失败统计窗口。
+- system.adminLoginMaxAttempts，后台登录失败最大次数。
 
-### 11.3 固定写在代码常量中的内容
+设计要求：
+
+- 原站数据源与 AI 翻译都属于“可在后台调整的业务系统配置”，不是部署引导参数。
+- system.aiApiKey、system.aiGatewayUrl 等敏感字段必须支持单独更新、掩码回显和审计日志。
+- 若 system.sourceBlogApiBaseUrl 或 system.aiApiKey 未配置，系统仍可启动，但相关导入或翻译功能必须在后台显式提示“未配置，不可用”。
+- system.adminTokenDefaultTtlHours、system.adminTokenRememberMeTtlDays、system.adminLoginAttemptWindowMinutes、system.adminLoginMaxAttempts 属于安全策略配置，只允许高权限管理员修改。
+
+### 11.3 站点展示与运营配置
+
+这类配置同样存数据库，但职责是控制博客端输出效果与运营行为，其中允许公开给前台消费的字段可进入 /api/blog/options：
+
+- site.title
+- site.subTitle
+- site.description
+- site.keywords
+- site.url
+- site.favicon
+- site.footerInfo
+- site.extraCss
+- site.extraJs
+- site.themeMode
+- site.allowSwitchTheme
+- site.pageSize
+- site.timeZone
+- site.enableSitemap
+- site.robotsTxt
+- site.defaultLanguageCode
+- site.showBlogVersion
+- site.googleAdEnabled
+- site.googleAdClientId
+- site.googleAdPostBottomEnabled
+- site.googleAdPostBottomParams
+- site.adsTxtContent
+
+说明：
+
+- 本项目明确不需要 logo 图片，因此不设计 siteLogo、siteDarkLogo 一类配置。
+- site.url 用于 canonical、hreflang、sitemap 等 SEO 输出，不属于启动引导项。
+- 站点展示配置允许后台即时修改并生效，不应要求重启服务。
+
+### 11.4 固定写在代码常量中的内容
 
 - 支持语言枚举：en、jp、tw。
 - 文章类型白名单：1、2。
 - 页面类型禁入：3。
 - 后台根路径：/multilingual-admin。
 - 原站资源相对路径白名单：/upload、/content、/ucloudImg、/up_works、/web_demo。
+- 本地上传附件 MIME 白名单与扩展名白名单。
+- 富文本内容禁止标签与危险协议白名单策略。
+- 前台固定关闭的功能：评论、点赞、分享、投票提交、浏览计数上报、语言切换器。
+
+### 11.5 密钥与安全控制基线
+
+- 后台 JWT 密钥固定存放于 server/secret/JWTSecretAdmin.key，启动时执行 ensure 逻辑：目录不存在则先创建，文件不存在则生成新密钥，再加载到进程内存中使用。
+- 新密钥必须通过安全随机源生成，不允许使用固定字符串、项目名哈希或可预测默认值兜底。
+- 密钥文件写入后必须限制文件权限，避免被静态目录、日志、接口或仓库提交暴露。
+- 管理后台提供“重新生成后台 JWT 密钥”操作，但该操作必须要求高权限、二次确认，并写入结构化安全审计日志。
+- 重新生成后台 JWT 密钥后，服务端必须立即替换内存中的密钥引用，并让既有后台 token 全部失效。
+- 管理员改密时必须递增 pwversion；鉴权中只要发现 token 中的 pwversion 与数据库不一致，就必须拒绝通过。
+- 后台登录必须记录 adminLoginLogs，登录失败限流基于数据库日志统计，不依赖单进程内存状态。
+- EJS 模板默认必须使用转义输出；只有经过清洗并通过发布校验的 content HTML 字段允许使用非转义输出。
+- 翻译站附件上传必须验证文件头与 MIME 是否匹配，storagePath 必须规范化并限制在 LOCAL_ATTACHMENT_STORAGE_DIR 之内，禁止路径穿越。
+- 发布前必须执行 HTML 安全校验，拒绝 script、object、embed、form、内联事件处理器和 javascript: 等危险内容。
 
 ## 12. 依赖与版本计划
 
 ### 12.1 服务端
 
 - express 4.x，保持与原项目同代。
+- ejs 5.0.2，用于博客端服务端模板渲染。
+- helmet，用于基础安全响应头。
 - mongoose 9.x，保持与原项目同代。
 - joi 18.1.2。
-- @google/genai 1.50.1。
+- @google/genai 1.50.1，落地时必须以官方 release docs 为准，重点核对 Initialization、Function Calling、Error Handling 章节。
 - async-lock，用于导入与发布加锁。
+- sanitize-html 或等价 HTML 安全清洗库，用于正文与翻译回填结果的安全过滤。
+- file-type 或等价文件头识别库，用于 localized 附件上传时的 MIME 校验。
 - cheerio 或等价 DOM 解析库，用于 HTML 文本抽取与回填。
 
 ### 12.2 管理端
@@ -1048,25 +1210,29 @@ votes 额外规则：
 - vue 3。
 - vite。
 - element-plus。
-- tailwindcss
+- tailwindcss 3.4.17。
 - @wangeditor/editor。
 - @wangeditor/editor-for-vue。
 - joi 18.1.2。
 
 ### 12.3 博客端
 
-- nuxt 4。
-- @nuxtjs/tailwindcss。
-- @nuxtjs/color-mode。
-- 复用原项目中已验证的展示依赖。
+- tailwindcss 3.4.17。
+- postcss 8.x，与 TailwindCSS 3.4.17 配套。
+- autoprefixer 10.x，与 TailwindCSS 3.4.17 配套。
+- EJS 模板体系，不引入 Nuxt、Nitro 或前台 SPA 框架。
+- 复用原项目中已验证的展示依赖与样式语言，但按 EJS 模板方式重组。
 
 ## 13. 详细实施拆解
 
 ### Phase 0：仓库骨架与依赖初始化
 
 - [ ] 按原项目结构创建 admin、blog、server、common 四层目录。
+- [ ] 建立博客端 EJS 模板目录、Tailwind 构建目录和静态资源目录。
+- [ ] 锁定 ejs 5.0.2、tailwindcss 3.4.17，并确定 Tailwind content 扫描范围覆盖 EJS 模板与相关 ViewModel 文件。
 - [ ] 创建根 package.json、build-all.js、README 草稿、example.env。
 - [ ] 复制并适配原项目可复用的公共组件和工具函数。
+- [ ] 建立 server/secret 目录约定、管理员 JWT 密钥文件 ensure 逻辑与密钥轮换入口设计。
 - [ ] 将后台路由基座统一改为 /multilingual-admin。
 - [ ] 在 common/constants 中建立语言、状态、类型、资源路径常量。
 
@@ -1075,13 +1241,15 @@ votes 额外规则：
 - [ ] 在 common/validation 中建立 Joi schema。
 - [ ] 将 import、post update、publish、shared entity update、settings update 全部接入 Joi。
 - [ ] 建立服务端 env 加载器与必填项校验器。
-- [ ] 建立 options 初始化逻辑与默认值。
-- [ ] 初始化谷歌广告配置项和默认语言配置项。
+- [ ] 建立带命名空间的 settings/options 初始化逻辑、默认值和密文字段存储方案。
+- [ ] 初始化原站数据源、AI 翻译、站点 SEO、广告和默认语言配置项。
+- [ ] 建立安全响应头、中间件级鉴权链路与敏感配置掩码回显规则。
 - [ ] 建立 sourceUrlNormalizer 和 sourceAssetResolver，统一处理原站相对路径存储与运行时拼接。
 
 ### Phase 2：MongoDB 模型与索引
 
 - [ ] 建立 adminUsers 模型。
+- [ ] 建立 adminLoginLogs 模型，并为登录限流与审计建立索引。
 - [ ] 建立 authors 模型。
 - [ ] 建立 sorts、tags、mappoints、attachments 模型，并完成 remote/local 双类型字段与索引设计。
 - [ ] 建立 bangumis、movies、games、books、events、votes 模型。
@@ -1105,7 +1273,8 @@ votes 额外规则：
 ### Phase 4：AI 翻译服务
 
 - [ ] 建立 GoogleGenAI 单例客户端。
-- [ ] 接入 AI_GATEWAY_URL。
+- [ ] 严格按 https://googleapis.github.io/js-genai/release_docs/index.html 校对客户端初始化、函数调用和错误处理实现。
+- [ ] 接入后台系统配置项 aiGatewayUrl。
 - [ ] 建立工具调用定义 submit_translation_segments。
 - [ ] 建立文本翻译服务。
 - [ ] 建立 HTML 文本抽取、分批、回填服务。
@@ -1117,6 +1286,8 @@ votes 额外规则：
 
 - [ ] 建立 adminUsers 登录接口。
 - [ ] 建立首次启动管理员初始化逻辑。
+- [ ] 建立后台 JWT 密钥文件启动检查、自动生成与后台重新生成接口。
+- [ ] 建立后台登录失败限流、adminLoginLogs 写入与 pwversion 失效链路。
 - [ ] 完成 /multilingual-admin/login。
 - [ ] 完成 /multilingual-admin/import。
 - [ ] 完成 /multilingual-admin/post/group/list。
@@ -1129,6 +1300,7 @@ votes 额外规则：
 - [ ] 完成作者编辑抽屉。
 - [ ] 完成分类、标签、地点编辑抽屉。
 - [ ] 完成远程附件与翻译站附件双面板、上传、替换和编辑抽屉。
+- [ ] 为 localized 附件上传补齐 MIME、文件头、大小、路径和文件名安全校验。
 - [ ] 完成关联实体编辑区。
 - [ ] 完成正文内关联实体编辑区。
 - [ ] 完成 AI 按钮区。
@@ -1152,8 +1324,11 @@ votes 额外规则：
 
 ### Phase 8：前台博客端
 
-- [ ] 建立语言前缀路由层。
-- [ ] 建立根路径按 siteDefaultLanguageCode 跳转逻辑。
+- [ ] 建立 Express + EJS 博客端渲染基座。
+- [ ] 建立语言前缀路由层与语言中间件。
+- [ ] 建立根路径按 site.defaultLanguageCode 跳转逻辑。
+- [ ] 建立 Query Service -> ViewModel -> EJS Template 的页面组装链路。
+- [ ] 建立 TailwindCSS 编译与静态资源发布流程。
 - [ ] 完成 /:lang 首页列表。
 - [ ] 完成 /:lang/post/list。
 - [ ] 完成 /:lang/post/:id。
@@ -1166,6 +1341,7 @@ votes 额外规则：
 
 - [ ] 建立 publishValidator。
 - [ ] 建立发布与撤回发布接口。
+- [ ] 将 HTML 安全清洗、危险 URL 校验与本地附件路径安全检查纳入发布前强校验。
 - [ ] 建立多语言缓存刷新逻辑。
 - [ ] 建立站点 options 管理页。
 - [ ] 建立翻译站附件本地存储与公开静态访问路径。
@@ -1176,8 +1352,11 @@ votes 额外规则：
 
 - [ ] 编写导入流程集成测试。
 - [ ] 编写 HTML 文本抽取与回填单元测试。
+- [ ] 编写管理员 JWT 密钥自动生成、密钥轮换和旧 token 失效测试。
+- [ ] 编写后台登录失败限流与 pwversion 失效测试。
 - [ ] 编写发布校验单元测试。
 - [ ] 编写重复导入与 stub 处理测试。
+- [ ] 编写 localized 附件上传安全校验测试。
 - [ ] 编写后台编辑流程端到端测试。
 - [ ] 编写前台多语言路由访问测试。
 - [ ] 完成 example.env。
@@ -1194,8 +1373,14 @@ votes 额外规则：
 - 重复导入时会提示，确认后目标文章回到草稿并覆盖更新。
 - 富文本编辑器体验与原后台一致。
 - 正文 HTML 翻译不会破坏标签结构。
+- 博客端首屏页面由 EJS 服务端完整输出，不依赖 Nuxt 或前台 SPA hydration。
+- 首次启动时若 server/secret/JWTSecretAdmin.key 不存在，系统会自动生成管理员 JWT 密钥文件并正常启动。
+- 后台重新生成管理员 JWT 密钥后，既有后台 token 会立即失效。
+- 后台登录在连续失败超限后会临时阻断，并且后台可查看 adminLoginLogs。
 - 可以为 en、jp、tw 分别替换或上传各自语言专属的翻译站附件，且只影响对应语言文章。
-- 修改 SOURCE_BLOG_PUBLIC_ORIGIN 后，不需要迁移数据库即可继续正确解析原站内部资源。
+- 修改 system.sourceBlogPublicOrigin 后，不需要迁移数据库即可继续正确解析原站内部资源。
+- localized 附件上传会拒绝不在白名单内的 MIME、伪装文件头和路径穿越文件。
+- 发布前会拦截包含 script、危险事件属性或 javascript: URL 的 HTML 内容。
 - 共享实体不会因为重复导入产生重复翻译副本。
 - 共享实体在后台独立修改后，会立即反映到对应语言下的已发布文章。
 - 作者、分类、标签、地点、附件、bangumi、movie、game、book、event、vote 都可以在后台独立管理。
@@ -1203,7 +1388,7 @@ votes 额外规则：
 - 发布成功后，可通过 /en、/jp、/tw 访问对应语言文章列表和详情页。
 - 分类、标签、地点列表都能在对应语言前缀下独立工作。
 - 多语言站不会向原站写入任何评论、点赞、分享、投票、浏览计数数据。
-- 谷歌广告配置可在后台 options 中调整并即时生效。
+- 谷歌广告配置可在后台 site.\* 配置中调整并即时生效。
 
 ## 15. 风险与规避策略
 
@@ -1247,6 +1432,29 @@ votes 额外规则：
 - 结果数量、类型、顺序全部由服务端校验。
 - 失败后允许按批次重试。
 
+### 15.6 localized 附件上传被伪装文件绕过
+
+规避：
+
+- 同时校验扩展名、声明 MIME 和文件头，不信任客户端单侧信息。
+- 存储路径统一由服务端生成并限制在 LOCAL_ATTACHMENT_STORAGE_DIR 下。
+- 拒绝脚本、可执行文件和路径穿越。
+
+### 15.7 富文本内容携带危险脚本或危险 URL
+
+规避：
+
+- 导入、翻译回填、保存、发布四个阶段都执行 HTML 安全清洗。
+- 发布前再次校验 script、危险属性和危险协议，避免绕过单点校验。
+
+### 15.8 后台 JWT 密钥丢失或轮换导致会话失效
+
+规避：
+
+- 密钥采用 secret 文件持久化，不依赖 env 临时值。
+- 轮换动作只允许高权限管理员执行，并明确提示“会让当前后台登录全部失效”。
+- 密钥文件缺失时自动重建，但旧 token 失效属于预期安全行为。
+
 ## 16. 本计划的强制执行结论
 
 - 用户表必须拆分为 adminUsers 与 authors，两者职责完全不同。
@@ -1254,7 +1462,7 @@ votes 额外规则：
 - 共享实体的后台独立修改对对应语言下已发布文章立即生效，不做历史版本冻结。
 - 多语言文章全部采用 sourceId 分组，不允许脱离原文章分组单独漂移。
 - 前台公开页面只服务本地多语言数据，不在运行期回查原站文章接口。
-- 原站作为导入数据源和远程附件来源存在，但所有原站内部资源都只存相对路径，由运行时按 SOURCE_BLOG_PUBLIC_ORIGIN 拼接；多语言站同时支持本地翻译站附件，不依赖原站参与运行期渲染。
+- 原站作为导入数据源和远程附件来源存在，但所有原站内部资源都只存相对路径，由运行时按 system.sourceBlogPublicOrigin 拼接；多语言站同时支持本地翻译站附件，不依赖原站参与运行期渲染。
 
 ## 补充
 
