@@ -13,11 +13,14 @@
 ### 1.2 已确认且必须严格执行的规则
 
 - 技术栈总体延续原项目的 Node.js + Express + MongoDB 主干，但博客端不再使用 Nuxt 4，改为基于 Express 的 EJS 5.0.2 服务端渲染，样式统一使用 TailwindCSS 3.4.17；管理端使用 Vue 3 + Vite，数据库使用 MongoDB。
+- 凡涉及对齐、复用、迁移 wikimoeNodeJSBlog 的行为、组件、样式、接口和交互，必须先查阅 https://github.com/eeg1412/wikimoeNodeJSBlog 源码，禁止凭记忆或二手资料推断实现。
 - 管理后台访问路径固定为 /multilingual-admin。
+- SEO 不是后补优化项，必须作为一级设计目标贯穿路由、ViewModel、模板输出、canonical、hreflang、sitemap、结构化数据和缓存设计。
 - 表单校验统一改为 joi 18.1.2。
 - AI 翻译统一使用 @google/genai 1.50.1。
 - AI 翻译必须采用工具调用模式，不允许直接依赖自由文本输出作为最终写库结果。
 - 必须支持后台系统配置项 system.aiGatewayUrl。
+- 必须保存原站原始结构化数据，作为未来派生更多语言内容的长期上游来源；命中原站内部域名的 URL 仍按既有规则相对化后再入库。
 - 后台 JWT 管理密钥不通过 env 明文提供，服务启动时必须检查 server/secret/JWTSecretAdmin.key；若不存在则自动生成新密钥并写入文件。
 - 管理后台必须提供“重新生成后台 JWT 密钥”能力；密钥轮换后所有既有后台 JWT 立即失效。
 - 后台所有受保护接口都必须执行 Authorization Bearer JWT 校验、管理员 disabled 校验、pwversion 校验和 role 校验。
@@ -39,6 +42,7 @@
 - 作者与管理员必须拆成两张表管理，不能共用 users 表。
 - 多语言站需要复制原站作者信息到 authors 表，并支持作者信息翻译流程。
 - 每种语言都是独立文章，但必须按原始文章 sourceId 分组。
+- 后台所有多语言相关列表页必须统一采用组表展示，父级展示原始数据，子表格展示各语言版本，不允许把不同语言版本平铺成同一层重复行。
 - 前台公开访问路径必须支持 /en、/jp、/tw。
 - 列表路径规则必须在原博客路径前面增加语言路径前缀。
 - 编辑页富文本体验必须与 wikimoeNodeJSBlog 一致，优先复制原后台 RichEditor5 相关实现。
@@ -73,11 +77,17 @@
   4. 若第二次仍 404，则报错“文章不存在”。
 - 多语言站前台运行时不再依赖原站公开接口，前台统一读取本地 MongoDB 中的多语言数据。
 
+### 2.3 原项目源码参考准则
+
+- 所有涉及 wikimoeNodeJSBlog 的复用、比对、移植、视觉对齐和行为判断，都必须以 GitHub 仓库 https://github.com/eeg1412/wikimoeNodeJSBlog 的源码为准。
+- 若 GitHub 源码中没有找到对应实现，不允许把猜测性的行为描述写入本计划，也不允许把“印象中的原项目行为”当作实现依据。
+- RichEditor5、列表与详情页结构、SEO 字段映射、server 侧工具函数、管理端公共组件等复用项，都必须以源码比对结果为准再落地。
+
 ## 3. 总体架构
 
 ## 3.1 目录结构
 
-项目目录按原项目三端结构拆分，但博客端不再是独立 Nuxt 应用，而是“服务端渲染模板层 + 样式构建层”的组合，并增加 shared/common 层：
+项目目录按原项目三端结构拆分，但不引入 workspace 或独立 shared/common 层；公共能力按所属端就近归位，博客端改为“服务端渲染模板层 + 样式构建层”的组合：
 
 ```text
 wikimoeNodeJSBlogMultilingual/
@@ -106,19 +116,19 @@ wikimoeNodeJSBlogMultilingual/
 │  ├─ app.js
 │  ├─ routes/
 │  ├─ api/
+│  ├─ constants/
+│  ├─ validation/
 │  ├─ services/
 │  ├─ controllers/
 │  ├─ viewmodels/
 │  └─ middleware/
-└─ common/
-   ├─ constants/
-   ├─ validation/
-   └─ utils/
 ```
+
+- 不建立独立 common 目录；服务端写入规则、校验与常量集中放在 server/constants、server/validation 等端内目录，管理端和博客端通过接口契约或各自端内模块消费。
 
 ### 3.2 代码复用策略
 
-从 wikimoeNodeJSBlog 可直接复制并在新项目中适配的部分：
+从 wikimoeNodeJSBlog 可直接复制并在新项目中适配的部分。所有复用工作都必须先对照 GitHub 仓库 https://github.com/eeg1412/wikimoeNodeJSBlog 源码确认后再执行：
 
 - server 侧：路由注册模式、MongoDB utils 模式、JWT 工具、日志配置、缓存配置模式。
 - admin 侧：RichEditor5、RichEditorEventSelectorDialog、AttachmentsDialog、ResponsiveTable、ResponsiveTableColumn、IpInfoDisplay、DeviceInfoDisplay、axios API 封装层、登录页骨架。
@@ -149,6 +159,7 @@ wikimoeNodeJSBlogMultilingual/
 - 页面控制器只负责参数校验、语言识别、缓存命中与模板选择；不直接拼装 Mongo 原始数据。
 - Query Service 直接读取本地 MongoDB，不允许博客端页面在服务端内部回环调用 /api/blog 自己的 HTTP 接口。
 - ViewModel 层负责把 posts、authors、sorts、tags、attachments 等实体整理成模板可直接消费的数据结构，避免在 EJS 中写复杂判断。
+- SEO ViewModel 与内容 ViewModel 必须同步生成，title、description、canonical、hreflang、open graph 和结构化数据不允许在模板层临时拼装。
 - 模板层采用 layout + partial + page 三级拆分，至少包含 base layout、head、header、footer、post-card、post-detail、entity-panel、vote-readonly-card 等模板片段。
 - TailwindCSS 只承担样式生成，不承担路由、状态管理或数据获取职责；前台样式构建产物固定输出到 blog/public/assets/blog.css，由 Express 统一托管，不允许在 blog/public 和 server/public 之间二选一实现。
 - Tailwind 的 content 扫描范围固定为 blog/views/**/\*.ejs、blog/src/**/_.js、server/viewmodels/\*\*/_.js；若后续模板类名进入其他目录，必须先修改本计划后再扩展扫描范围，不允许实现时自行猜测。
@@ -164,12 +175,14 @@ wikimoeNodeJSBlogMultilingual/
 - 除 attachments 集合中 attachmentSourceType=localized 的记录外，其余受本节约束的业务集合都必须包含 sourceId 字段，用于记录原站对应实体 ID；本计划不存在其他 sourceId 例外集合。
 - 必须包含 languageCode 字段，值只允许 en、jp、tw。
 - 必须包含 sourceSnapshot 字段，用于保存最近一次来源快照。原站同步实体保存经过“原站内部 URL 相对化”后的快照，翻译站附件保存本地上传快照。
+- sourceSnapshot 是归一化后的业务快照，不等同于原始数据主档；原站原始结构化数据必须额外独立保存。
 - 必须包含 sourceHash 字段，用于检测来源内容是否变化。原站同步实体保存相对路径归一化后的原文哈希，翻译站附件保存文件与元数据哈希。
 - 必须包含 translationStatus 字段。
 - translationStatus 取值固定为：pending、ai_draft、manual_draft、approved、not_required、stub、outdated。
 - 必须包含 createdAt、updatedAt。
 - 所有“共享实体”必须通过稳定唯一键做唯一约束。原站同步实体使用 sourceId + languageCode，翻译站附件使用 attachmentGroupKey + languageCode + attachmentSourceType。
 - 所有原站来源数据在写入数据库前都必须先经过 sourceUrlNormalizer，把命中原站域名的内部 URL 统一转换为相对路径。
+- 原始数据主档必须保留原站字段结构、原文字段值和关联关系，供未来新增语言时直接派生，不允许只保留已经拆解过的多语言业务字段。
 
 ### 4.2 adminUsers
 
@@ -487,7 +500,36 @@ votes 额外规则：
 - postList 与 tweetList 中若目标语言对应文章不存在，则必须建立 stub 记录并阻止当前文章发布。
 - coverImages 以及所有媒体引用都指向 attachments，attachments 可为 remote 或 localized 两种类型。
 
-### 4.10 importJobs
+### 4.10 sourceContents
+
+用途：保存原站原始结构化数据主档，作为未来派生任意语言内容的稳定上游来源。
+
+字段：
+
+- sourceId
+- sourceAlias
+- sourceType
+- sourcePayload
+- sourcePayloadHash
+- fetchedAt
+- lastImportedAt
+- createdAt
+- updatedAt
+
+索引：
+
+- sourceId 唯一索引。
+- sourceAlias 普通索引。
+- sourceType + updatedAt 组合索引。
+
+规则：
+
+- sourcePayload 必须保留原站 detail 返回的原始字段结构、原文字段值和关联关系，供未来新增语言时复用。
+- 命中原站内部域名的 URL 在写入 sourcePayload 前仍需先相对化，以满足全局 URL 存储约束；除该安全归一化外，不对原文内容做裁剪、翻译或重排。
+- 每次导入或刷新同一 sourceId 时，必须先 upsert sourceContents，再从 sourceContents 派生共享实体和语言文章。
+- sourceContents 只作为上游主档，不直接承担前台渲染或后台编辑结果写入目标。
+
+### 4.11 importJobs
 
 用途：记录导入任务全流程。
 
@@ -498,7 +540,7 @@ votes 额外规则：
 - languageCode
 - operatorAdminId
 - status，值为 running、success、failed、cancelled
-- stage，值为 resolveSource、extractDependencies、upsertSharedEntities、upsertPost、finalize
+- stage，值为 resolveSource、persistSourceContent、extractDependencies、upsertSharedEntities、upsertPost、finalize
 - sourcePayload
 - sourcePayloadHash
 - resultPostId
@@ -516,7 +558,7 @@ votes 额外规则：
 - sourcePayloadHash 必须基于归一化后的 sourcePayload 计算。
 - 同一 sourceResolvedId + languageCode 的 running 任务必须加锁，禁止并发导入。
 
-### 4.11 translationMemories
+### 4.12 translationMemories
 
 用途：复用重复文本的翻译结果，降低重复调用 AI 的成本。
 
@@ -537,7 +579,7 @@ votes 额外规则：
 
 - sourceTextHash + targetLanguageCode + fieldKind 唯一索引。
 
-### 4.12 aiTranslationLogs
+### 4.13 aiTranslationLogs
 
 用途：审计每一次 AI 翻译操作。
 
@@ -586,15 +628,16 @@ votes 额外规则：
 1. 校验入参。
 2. 调用原站 post/detail 并按 2.2 节规则确认实体存在且类型合法。
 3. 取回原文详情数据。
-4. 分析文章主数据。
-5. 提取作者、分类、标签、地点、封面图远程附件、关联实体、正文内关联实体、正文内媒体 URL。
-6. 对原站内部 URL 执行相对路径归一化，对第三方外链保持原样。
-7. 生成 sourceHash。
-8. 对共享实体和远程附件执行 upsert。
-9. 对 post/tweet 关联文章执行 stub 建档或已有记录复用。
-10. 对目标多语言文章执行新建或覆盖更新。
-11. 落 importJobs 日志。
-12. 返回目标文章编辑页跳转信息。
+4. 将原站原始结构化载荷按 sourceContents 规则持久化，保留原始字段结构、原文字段值和关联关系。
+5. 基于 sourceContents 分析文章主数据。
+6. 提取作者、分类、标签、地点、封面图远程附件、关联实体、正文内关联实体、正文内媒体 URL。
+7. 对原站内部 URL 执行相对路径归一化，对第三方外链保持原样。
+8. 生成 sourceHash。
+9. 对共享实体和远程附件执行 upsert。
+10. 对 post/tweet 关联文章执行 stub 建档或已有记录复用。
+11. 对目标多语言文章执行新建或覆盖更新。
+12. 落 importJobs 日志。
+13. 返回目标文章编辑页跳转信息。
 
 ### 5.3 文章关联内容提取清单
 
@@ -674,6 +717,7 @@ votes 额外规则：
    - 覆盖所有 source 同步字段。
    - 清空该文章自己的发布校验通过标记。
    - 重新计算 sourceHash。
+   - 同步刷新 sourceContents.sourcePayload、sourcePayloadHash 和 lastImportedAt。
    - 将该文章 translationStatus 重置为 pending 或 outdated，具体取决于源文本是否变化。
 4. 共享实体不直接重复插入，只做 upsert。
 5. 共享实体若 sourceHash 未变化，保留现有翻译结果。
@@ -801,9 +845,17 @@ votes 额外规则：
 
 列表维度：
 
-- 按 groupSourceId 聚合。
-- 每行展示原文章 sourceId、sourceAlias、原类型、en 状态、jp 状态、tw 状态。
+- 按 groupSourceId 聚合，以 sourceContents 原始数据主档作为父级。
+- 父表行展示原文章 sourceId、sourceAlias、原类型、原始标题、最近抓取时间和原始数据哈希。
+- 展开的子表格展示 en、jp、tw 对应文章的 status、translationStatus、更新时间、发布时间和编辑入口。
 - 支持按文章类型、语言状态、发布日期、翻译状态筛选。
+
+### 7.1.1 组表 UI 规则
+
+- 所有涉及多语言实体的后台列表页统一采用“父表 + 子表格”的组表 UI，不允许把原始数据和各语言版本混排为单层重复行。
+- 父级表格负责展示原始数据主档或原文快照，子表格按 en、jp、tw 展示语言化记录、状态和操作按钮。
+- 文章列表的父级数据来自 sourceContents；作者、分类、标签、地点、附件和关联实体列表的父级数据来自各自的原文快照或原始数据主档。
+- 父表与子表都必须使用 ResponsiveTable 和 ResponsiveTableColumn 组件实现，确保小屏设备可读性。
 
 ### 7.2 后台文章编辑页
 
@@ -822,13 +874,14 @@ votes 额外规则：
 - 正文内关联区：按 contentBangumiList、contentMovieList、contentGameList、contentBookList、contentPostList、contentTweetList、contentEventList、contentVoteList 分组展示。
 - AI 操作区：提供分字段和整篇翻译按钮。
 - 发布校验区：展示未完成项、过期项、stub 项。
-- 原文快照区：展示 sourceSnapshot 和最近一次导入时间。
+- 原文快照区：展示 sourceSnapshot、sourceContents 原始主档摘要和最近一次导入时间。
 
 ### 7.3 共享实体编辑规则
 
 - 作者、分类、标签、地点、媒体、关联实体都属于共享实体。
 - 翻译站附件虽然是本地文件，但仍按语言维度作为共享媒体实体管理，可被同语言下多个文章复用。
 - 所有共享实体都必须提供独立的后台列表页和编辑入口，允许不进入文章编辑页直接维护。
+- 共享实体独立列表页同样必须采用组表 UI，父级展示原始数据，子表格展示各语言版本。
 - 文章编辑页中的相关区域只作为快捷入口和上下文入口，不能替代独立管理页。
 - 编辑共享实体时，后台必须提示“此修改会影响当前语言下所有引用该实体的文章”。
 - 共享实体保存成功后，对当前 languageCode 下所有已发布文章立即生效，不做版本冻结，不自动打回草稿。
@@ -962,12 +1015,15 @@ votes 额外规则：
 - 博客端不提供语言切换器；访问什么语言路径，就只渲染该语言内容。
 - 若复用原组件或原模板结构，互动相关区域必须在服务端模板分支层直接不渲染，不允许引入单独 feature flag 系统，也不能依赖样式隐藏或前端脚本卸载。
 
-### 9.6 SEO 与缓存规则
+### 9.6 SEO 优先设计与缓存规则
 
+- SEO 属于一期主链路，不是上线前的附加优化；首页、列表页、详情页、分类页、标签页和地点页都必须有各自独立的 SEO 输出。
+- SEO 字段必须在服务端 ViewModel 阶段生成，包括 title、description、canonical、hreflang、open graph、twitter card 和结构化数据，不允许在客户端补写首屏 SEO。
 - 每篇文章详情页必须输出 canonical。
 - 同 groupSourceId 下已发布的其他语言版本必须输出 hreflang alternate。
 - sitemap 只收录 status=1 的页面。
 - sitemap URL 必须带语言前缀。
+- 分页列表页必须输出与当前分页一致的 canonical 和可用的分页 SEO 元数据，不允许所有分页页共用第一页 SEO。
 - 列表页与详情页的 meta、open graph、结构化数据由服务端渲染时直接输出，不依赖客户端二次补写。
 - EJS 页面缓存与 /api/blog 只读数据缓存统一复用同一组语言维度缓存键，避免页面和接口缓存不一致。
 
@@ -1255,18 +1311,18 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 ### Phase 0：仓库骨架与依赖初始化
 
-- [ ] 按原项目结构创建 admin、blog、server、common 四层目录。
+- [ ] 按原项目结构创建 admin、blog、server 三层目录，并将公共规则按端内归位，不新增独立 common 层。
 - [ ] 建立博客端 EJS 模板目录、Tailwind 构建目录和静态资源目录。
 - [ ] 锁定 ejs 5.0.2、tailwindcss 3.4.17，并确定 Tailwind content 扫描范围覆盖 EJS 模板与相关 ViewModel 文件。
 - [ ] 创建根 package.json、build-all.js、README 草稿、example.env，其中 example.env 只能包含第 11.1 节定义的 5 个启动引导级键，且不得为 system._、site._ 或安全策略补充任何旁路 env。
 - [ ] 复制并适配原项目可复用的公共组件和工具函数。
 - [ ] 建立 server/secret 目录约定、管理员 JWT 密钥文件 ensure 逻辑与密钥轮换入口设计。
 - [ ] 将后台路由基座统一改为 /multilingual-admin。
-- [ ] 在 common/constants 中建立语言、状态、类型、资源路径常量。
+- [ ] 在 server/constants 中建立语言、状态、类型、资源路径常量。
 
 ### Phase 1：共享校验与基础配置
 
-- [ ] 在 common/validation 中建立 Joi schema。
+- [ ] 在 server/validation 中建立 Joi schema。
 - [ ] 将 import、post update、publish、shared entity update、settings update 全部接入 Joi。
 - [ ] 建立服务端 env 加载器与必填项校验器，只读取第 11.1 节定义的启动引导级键，并拒绝把其他业务键接入 process.env 读取链路。
 - [ ] 建立带命名空间的 settings/options 初始化逻辑、默认值和密文字段存储方案；第 11.2 节和第 11.3 节的默认值只能从这里写入数据库。
@@ -1282,6 +1338,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - [ ] 建立 sorts、tags、mappoints、attachments 模型，并完成 remote/local 双类型字段与索引设计。
 - [ ] 建立 bangumis、movies、games、books、events、votes 模型。
 - [ ] 建立 posts 模型。
+- [ ] 建立 sourceContents 原始数据主档模型，用于保存原站原始结构化数据并支撑未来新增语言派生。
 - [ ] 建立 importJobs、translationMemories、aiTranslationLogs 模型。
 - [ ] 为原站同步实体建立 sourceId + languageCode 唯一索引，并为附件建立 remote/local 分类型唯一索引。
 - [ ] 为 posts 建立 alias、列表筛选和分组索引。
@@ -1290,6 +1347,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 - [ ] 封装 sourceBlogClient。
 - [ ] 实现“先 type=[1,2]，后无 type 回查”的类型确认逻辑。
+- [ ] 实现 sourceContents 原始数据主档 upsert，并建立“先保存原始数据，再派生多语言实体”的导入链路。
 - [ ] 实现原站资源 URL 规范化。
 - [ ] 实现文章关联内容提取器。
 - [ ] 实现正文内媒体 URL 解析器与远程附件登记逻辑。
@@ -1318,7 +1376,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - [ ] 建立后台登录失败限流、adminLoginLogs 写入与 pwversion 失效链路。
 - [ ] 完成 /multilingual-admin/login。
 - [ ] 完成 /multilingual-admin/import。
-- [ ] 完成 /multilingual-admin/post/group/list。
+- [ ] 完成 /multilingual-admin/post/group/list 组表 UI，父级为 sourceContents，子表为各语言文章记录。
 - [ ] 完成 /multilingual-admin/post/list。
 
 ### Phase 6：后台文章编辑页
@@ -1337,6 +1395,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 ### Phase 7：共享实体独立管理页
 
+- [ ] 共享实体独立管理页统一采用组表 UI，父级展示原始数据，子表展示 en、jp、tw 版本。
 - [ ] 完成 /multilingual-admin/author/list。
 - [ ] 完成 /multilingual-admin/sort/list。
 - [ ] 完成 /multilingual-admin/tag/list。
@@ -1363,7 +1422,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - [ ] 完成分类、标签、地点列表页。
 - [ ] 接入本地多语言公开接口。
 - [ ] 关闭评论、点赞、分享、投票、浏览上报相关 UI 和调用。
-- [ ] 接入 hreflang、canonical、sitemap。
+- [ ] 接入 hreflang、canonical、sitemap、open graph、twitter card 和结构化数据。
 
 ### Phase 9：发布、缓存与广告
 
@@ -1397,6 +1456,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 - 管理员可以在 /multilingual-admin 输入原文章 ID 或别名并选择 en、jp、tw 发起导入。
 - 页面类型文章会被明确拒绝导入。
+- 原站原始结构化数据会在本地 sourceContents 主档中保留，后续新增语言时可以直接以该主档作为派生上游。
 - 导入后，文章与关联作者、分类、标签、地点、媒体、关联实体均能在本地库中看到对应语言副本。
 - 重复导入时会提示，确认后目标文章回到草稿并覆盖更新。
 - 富文本编辑器体验与原后台一致。
@@ -1413,11 +1473,13 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 发布前会拦截包含 script、危险事件属性或 javascript: URL 的 HTML 内容。
 - 共享实体不会因为重复导入产生重复翻译副本。
 - 共享实体在后台独立修改后，会立即反映到对应语言下的已发布文章。
+- 后台文章列表和共享实体列表统一采用组表 UI，父级展示原始数据，子表展示语言版本。
 - 作者、分类、标签、地点、附件、bangumi、movie、game、book、event、vote 都可以在后台独立管理。
 - 发布前能准确指出哪些关联内容尚未完成翻译。
 - 发布成功后，可通过 /en、/jp、/tw 访问对应语言文章列表和详情页。
 - 分类、标签、地点列表都能在对应语言前缀下独立工作。
 - 多语言站不会向原站写入任何评论、点赞、分享、投票、浏览计数数据。
+- 首页、列表页、详情页、分类页、标签页和地点页都能输出独立的 title、description、canonical、hreflang、open graph 和结构化数据。
 - 谷歌广告配置可在后台 site.\* 配置中调整并即时生效。
 
 ## 15. 风险与规避策略
@@ -1489,7 +1551,9 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 - 用户表必须拆分为 adminUsers 与 authors，两者职责完全不同。
 - 多语言共享实体采用稳定唯一键复用。原站同步实体使用 sourceId + languageCode，附件使用 remote/local 分类型唯一键。
+- 必须保留可重复派生的原始数据主档 sourceContents，未来新增语言优先从本地原始数据派生，而不是重新依赖临时抓取结果。
 - 共享实体的后台独立修改对对应语言下已发布文章立即生效，不做历史版本冻结。
+- 后台多语言列表统一采用“父级原始数据 + 子表格语言版本”的组表 UI。
 - 多语言文章全部采用 sourceId 分组，不允许脱离原文章分组单独漂移。
 - 前台公开页面只服务本地多语言数据，不在运行期回查原站文章接口。
 - 原站作为导入数据源和远程附件来源存在，但所有原站内部资源都只存相对路径，由运行时按 system.sourceBlogPublicOrigin 拼接；多语言站同时支持本地翻译站附件，不依赖原站参与运行期渲染。
