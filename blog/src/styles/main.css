@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 博客正文样式增强 */
+.post-content img {
+  @apply max-w-full rounded-lg my-4;
+}
+
+.post-content a {
+  @apply text-blue-600 hover:underline;
+}
+
+.dark .post-content a {
+  @apply text-blue-400;
+}
+
+/* 代码块 */
+.post-content pre {
+  @apply bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto text-sm;
+}
+
+.post-content code:not(pre code) {
+  @apply bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm;
+}
+
+/* 引用块 */
+.post-content blockquote {
+  @apply border-l-4 border-blue-400 pl-4 italic text-gray-600 dark:text-gray-400 my-4;
+}
+
+/* 行截断工具类 */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

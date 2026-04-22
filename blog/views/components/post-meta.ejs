@@ -1,0 +1,29 @@
+<%# 文章元信息组件 %>
+<%# 参数：post (ViewModel), lang (string) %>
+<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+  <% if (post.author) { %>
+    <span class="flex items-center gap-1">
+      <% if (post.author.photoSrc) { %>
+        <img src="<%= post.author.photoSrc %>"
+             alt="<%= post.author.nickname %>"
+             class="w-4 h-4 rounded-full object-cover" />
+      <% } %>
+      <span><%= post.author.nickname %></span>
+    </span>
+  <% } %>
+
+  <% if (post.dateFormatted) { %>
+    <time datetime="<%= post.date %>"><%= post.dateFormatted %></time>
+  <% } %>
+
+  <% if (post.tags && post.tags.length > 0) { %>
+    <div class="flex flex-wrap gap-1">
+      <% post.tags.slice(0, 3).forEach(function(tag) { %>
+        <a href="/<%= lang %>/post/list/tag/<%= tag._id %>"
+           class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700">
+          #<%= tag.tagname %>
+        </a>
+      <% }); %>
+    </div>
+  <% } %>
+</div>

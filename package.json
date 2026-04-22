@@ -1,0 +1,18 @@
+{
+  "name": "wikimoenodejsblogmultilingual",
+  "version": "1.0.0",
+  "description": "Multilingual satellite blog based on wikimoeNodeJSBlog",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/bin/www",
+    "build-all": "node build-all.js",
+    "dev:server": "node --watch server/bin/www",
+    "build:admin": "cd admin && npm run build",
+    "build:blog": "cd blog && npm run build"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2",
+    "joi": "^17.13.3"
+  }
+}

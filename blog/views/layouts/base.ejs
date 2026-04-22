@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>" class="<%= siteConfig.themeMode === 'dark' ? 'dark' : '' %>">
+<head>
+  <%- include('../partials/head') %>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col">
+  <%- include('../partials/header') %>
+
+  <main class="flex-1 container mx-auto px-4 max-w-4xl">
+    <%- body %>
+  </main>
+
+  <%- include('../partials/footer') %>
+
+  <!-- 颜色模式持久化脚本（极小、无框架依赖） -->
+  <script>
+    (function() {
+      try {
+        var mode = localStorage.getItem('colorMode');
+        var html = document.documentElement;
+        if (mode === 'dark') {
+          html.classList.add('dark');
+        } else if (mode === 'light') {
+          html.classList.remove('dark');
+        }
+        if (<%- siteConfig.allowSwitchTheme ? 'true' : 'false' %>) {
+          var btn = document.getElementById('theme-toggle');
+          if (btn) {
+            btn.addEventListener('click', function() {
+              var isDark = html.classList.contains('dark');
+              if (isDark) {
+                html.classList.remove('dark');
+                localStorage.setItem('colorMode', 'light');
+              } else {
+                html.classList.add('dark');
+                localStorage.setItem('colorMode', 'dark');
+              }
+            });
+          }
+        }
+      } catch(e) {}
+    })();
+  </script>
+
+  <% if (siteConfig.extraJs) { %>
+    <%- siteConfig.extraJs %>
+  <% } %>
+
+  <% if (siteConfig.googleAdEnabled && siteConfig.googleAdClientId) { %>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=<%= siteConfig.googleAdClientId %>" crossorigin="anonymous"></script>
+  <% } %>
+</body>
+</html>

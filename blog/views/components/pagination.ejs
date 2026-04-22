@@ -1,0 +1,31 @@
+<%# 分页组件 %>
+<%# 参数：page (number), totalPages (number), baseUrl (string, 不含页码) %>
+<% if (totalPages > 1) { %>
+  <nav class="flex justify-center items-center gap-2 mt-10" aria-label="Pagination">
+    <% if (page > 1) { %>
+      <a href="<%= baseUrl %>/<%= page - 1 %>"
+         class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
+        &laquo;
+      </a>
+    <% } %>
+
+    <% var startPage = Math.max(1, page - 2); var endPage = Math.min(totalPages, page + 2); %>
+    <% for (var i = startPage; i <= endPage; i++) { %>
+      <% if (i === page) { %>
+        <span class="px-3 py-1 rounded border border-blue-500 bg-blue-500 text-white text-sm"><%= i %></span>
+      <% } else { %>
+        <a href="<%= baseUrl %>/<%= i %>"
+           class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
+          <%= i %>
+        </a>
+      <% } %>
+    <% } %>
+
+    <% if (page < totalPages) { %>
+      <a href="<%= baseUrl %>/<%= page + 1 %>"
+         class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 text-sm">
+        &raquo;
+      </a>
+    <% } %>
+  </nav>
+<% } %>
