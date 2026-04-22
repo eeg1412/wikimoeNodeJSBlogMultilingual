@@ -1103,7 +1103,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 强制实现边界：
 
 - 根目录 env 体系只承担第 11.1 节定义的 5 个启动引导级键；本项目不设计第二套“业务 env”“前台公开 env”或“子应用专属 env”作为配置来源。
-- 除第 11.1 节定义的 5 个键外，服务端、管理端、博客端代码都不得把 process.env 作为业务配置读取入口；不得新增 SOURCE*BLOG*_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、NUXT*_、NITRO\__、NUXT*PUBLIC*_、VITE\__ 一类同义变量作为旁路配置源。
+- 除第 11.1 节定义的 5 个键外，服务端、管理端、博客端代码都不得把 process.env 作为业务配置读取入口；不得新增 SOURCE*BLOG*\_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、NUXT*_、NITRO\__、NUXT*PUBLIC*_、VITE\_\_ 一类同义变量作为旁路配置源。
 - 第 11.2 节和第 11.3 节中的默认值只能通过数据库初始化逻辑写入 settings/options 集合，不允许通过 env 回填，不允许通过第二份配置文件回填，也不允许在运行时偷偷退回硬编码业务值。
 - 若第 11.2 节或第 11.3 节中的某项配置尚未设置，系统行为只能是“服务可启动，但对应功能显式不可用或按数据库默认记录运行”，不允许自动改读 env 兜底。
 
@@ -1191,7 +1191,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 本项目明确不需要 logo 图片，因此不设计 siteLogo、siteDarkLogo 一类配置。
 - site.url 用于 canonical、hreflang、sitemap 等 SEO 输出，不属于启动引导项。
 - 站点展示配置允许后台即时修改并生效，不应要求重启服务。
-- 第 11.3 节中的字段若需要首次默认值，必须由数据库初始化逻辑写入 site._ 记录，不允许回退为 SITE\__、VITE\_\* 或其他 env 变量。
+- 第 11.3 节中的字段若需要首次默认值，必须由数据库初始化逻辑写入 site.\_ 记录，不允许回退为 SITE\_\_、VITE\_\* 或其他 env 变量。
 - 除本计划已经显式给出默认值的字段外，site.\* 初始化时不得猜测站点标题、站点域名、广告位参数或其他运营值；缺什么就保持空值或关闭状态，等待后台填写。
 
 ### 11.4 固定写在代码常量中的内容
@@ -1405,7 +1405,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 首次启动时若 server/secret/JWTSecretAdmin.key 不存在，系统会自动生成管理员 JWT 密钥文件并正常启动。
 - 后台重新生成管理员 JWT 密钥后，既有后台 token 会立即失效。
 - 后台登录在连续失败超限后会临时阻断，并且后台可查看 adminLoginLogs。
-- example.env 只包含 DB*HOST、LOCAL_ATTACHMENT_STORAGE_DIR、INIT_ADMIN_USERNAME、INIT_ADMIN_PASSWORD、INIT_ADMIN_NICKNAME 这 5 个启动引导级键，不包含任何 NUXT*_、NITRO\__、VITE*\*、SOURCE_BLOG*_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、SITE*_ 或 GOOGLE*AD*_。
+- example.env 只包含 DB*HOST、LOCAL_ATTACHMENT_STORAGE_DIR、INIT_ADMIN_USERNAME、INIT_ADMIN_PASSWORD、INIT_ADMIN_NICKNAME 这 5 个启动引导级键，不包含任何 NUXT*\_、NITRO\__、VITE*\*、SOURCE_BLOG*_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、SITE*_ 或 GOOGLE*AD*\_。
 - 服务端、管理端、博客端代码不会把第 11.2 节和第 11.3 节字段从 process.env 读取为业务配置来源。
 - 可以为 en、jp、tw 分别替换或上传各自语言专属的翻译站附件，且只影响对应语言文章。
 - 修改 system.sourceBlogPublicOrigin 后，不需要迁移数据库即可继续正确解析原站内部资源。
@@ -1499,3 +1499,4 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 响应式设计，支持暗模式和亮模式切换。
 - 不要LOGO图片。
 - 博客端不需要语言切换，访问什么路径就是什么语言。
+- 你不用设成 workspaces
