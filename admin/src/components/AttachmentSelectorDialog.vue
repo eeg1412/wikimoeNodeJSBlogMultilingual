@@ -257,6 +257,9 @@ export default {
         if (query.attachmentSourceType) {
           params.attachmentSourceType = query.attachmentSourceType
         }
+        if (query.keyword) {
+          params.keyword = query.keyword
+        }
 
         const res = await getAttachmentList(params)
         const groups = res.data?.list || []

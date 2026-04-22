@@ -4,6 +4,7 @@
       ref="groupedManagerRef"
       title="投票管理"
       :get-list="getVoteList"
+      keyword-placeholder="搜索 sourceId / 标题 / 选项"
     >
       <template #source="{ row, sourceSnapshot, primaryEntry }">
         <div class="space-y-1">
@@ -84,23 +85,32 @@
     </GroupedLanguageManager>
 
     <el-dialog v-model="dialogVisible" title="编辑投票" width="560px">
-      <el-form :model="editForm" label-position="top">
-        <el-form-item label="标题">
-          <el-input v-model="editForm.title" />
-        </el-form-item>
-        <el-form-item label="选项">
-          <div
-            v-for="(opt, index) in editForm.options"
-            :key="opt.sourceOptionId || index"
-            class="flex gap-2 mb-2"
-          >
+        <el-form :model="editForm" label-position="top">
+          <el-form-item label="标题">
+            <el-input v-model="editForm.title" />
+          </el-form-item>
+          <el-form-item label="选项">
+            <div class="mb-2">
+              <el-button size="small" @click="addOption">新增选项</el-button>
+            </div>
+            <div
+              v-for="(opt, index) in editForm.options"
+              :key="opt.sourceOptionId || index"
+              class="flex gap-2 mb-2"
+            >
             <el-input
-              v-model="opt.title"
-              :placeholder="'选项 ' + (index + 1)"
-            />
-          </div>
-        </el-form-item>
-      </el-form>
+                v-model="opt.title"
+                :placeholder="'选项 ' + (index + 1)"
+              />
+              <el-button
+                :disabled="editForm.options.length <= 1"
+                @click="removeOption(index)"
+              >
+                删除
+              </el-button>
+            </div>
+          </el-form-item>
+        </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="handleSave"
@@ -141,7 +151,24 @@ export default {
         title: option.title || '',
         sourceOptionId: option.sourceOptionId
       }))
+      if (editForm.options.length === 0) {
+        editForm.options = [{ title: '', sourceOptionId: '' }]
+      }
       dialogVisible.value = true
+    }
+
+    function addOption() {
+      editForm.options.push({
+        title: '',
+        sourceOptionId: ''
+      })
+    }
+
+    function removeOption(index) {
+      if (editForm.options.length <= 1) {
+        return
+      }
+      editForm.options.splice(index, 1)
     }
 
     async function handleSave() {
@@ -149,7 +176,9 @@ export default {
       try {
         await updateVote(currentId.value, {
           title: editForm.title,
-          options: editForm.options
+          options: editForm.options.filter(
+            option => option.title || option.sourceOptionId
+          )
         })
         ElMessage.success('保存成功')
         dialogVisible.value = false
@@ -182,6 +211,8 @@ export default {
       editForm,
       languageCodes: LANGUAGE_CODES,
       openEdit,
+      addOption,
+      removeOption,
       handleSave,
       formatVoteOptions,
       getTranslationStatusLabel,

@@ -1,4 +1,5 @@
 import { findAttachmentGroupPage } from '../../../mongodb/utils/attachments.js'
+import { buildKeywordQuery } from '../../../mongodb/utils/buildKeywordQuery.js'
 import { resolveAttachmentSrc } from '../../../utils/sourceAssetResolver.js'
 
 export default async function attachmentListHandler(req, res, next) {
@@ -9,6 +10,17 @@ export default async function attachmentListHandler(req, res, next) {
     if (req.query.languageCode) query.languageCode = req.query.languageCode
     if (req.query.attachmentSourceType)
       query.attachmentSourceType = req.query.attachmentSourceType
+    const keywordQuery = buildKeywordQuery(req.query.keyword, [
+      'sourceId',
+      'attachmentGroupKey',
+      'name',
+      'filename',
+      'description',
+      'sourcePath',
+      'externalUrl',
+      'filepath'
+    ])
+    if (keywordQuery) Object.assign(query, keywordQuery)
     const { list, total } = await findAttachmentGroupPage({
       query,
       page,

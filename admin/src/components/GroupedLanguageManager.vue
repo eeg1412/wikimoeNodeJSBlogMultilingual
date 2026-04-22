@@ -31,6 +31,14 @@
               :value="languageCode"
             />
           </el-select>
+          <el-input
+            v-if="keywordPlaceholder"
+            v-model="query.keyword"
+            :placeholder="keywordPlaceholder"
+            clearable
+            style="min-width: 220px; max-width: 320px"
+            @keyup.enter="fetchList"
+          />
           <slot name="filters" :query="query" :fetch-list="fetchList" />
           <el-button type="primary" @click="fetchList">查询</el-button>
         </div>
@@ -157,6 +165,7 @@ export default {
     },
     pageSize: { type: Number, default: 20 },
     sourceIdLabel: { type: String, default: 'Source ID' },
+    keywordPlaceholder: { type: String, default: '' },
     languageCodes: {
       type: Array,
       default: () => [...DEFAULT_LANGUAGE_CODES]

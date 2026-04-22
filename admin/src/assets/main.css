@@ -826,6 +826,29 @@ select {
   gap: 8px;
 }
 
+.post-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.post-cover-card {
+  overflow: hidden;
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  background: var(--admin-surface);
+}
+
+.post-cover-card__body {
+  padding: 10px 12px 0;
+}
+
+.post-cover-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 12px;
+}
+
 .rich-editor-wrap {
   overflow: hidden;
   border: 1px solid var(--admin-border);

@@ -4,6 +4,7 @@
       ref="groupedManagerRef"
       title="标签管理"
       :get-list="getTagList"
+      keyword-placeholder="搜索 sourceId / 标签"
     >
       <template #source="{ row, sourceSnapshot, primaryEntry }">
         <div class="space-y-1">

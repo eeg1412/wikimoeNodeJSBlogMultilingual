@@ -27,6 +27,9 @@ export const postUpdateSchema = Joi.object({
   excerpt: Joi.string().allow('').max(2000),
   content: Joi.string().allow(''),
   sort: Joi.string().allow('', null),
+  author: Joi.string().allow('', null),
+  tags: Joi.array().items(Joi.string()).default([]),
+  coverImages: Joi.array().items(Joi.string()).default([]),
   alias: Joi.string()
     .allow('')
     .max(200)

@@ -222,7 +222,8 @@
 </template>
 
 <script>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdminPage from '../components/AdminPage.vue'
 import { regenerateJwtSecret } from '../api/auth.js'
@@ -272,6 +273,18 @@ export default {
       systemConfigSnapshot.value = cloneConfig(res.data?.system)
       siteConfigSnapshot.value = cloneConfig(res.data?.site)
     }
+
+    const hasSystemChanges = computed(() => {
+      return !isSameValue(systemConfig.value, systemConfigSnapshot.value)
+    })
+
+    const hasSiteChanges = computed(() => {
+      return !isSameValue(siteConfig.value, siteConfigSnapshot.value)
+    })
+
+    const hasUnsavedChanges = computed(() => {
+      return hasSystemChanges.value || hasSiteChanges.value
+    })
 
     async function saveSystem() {
       saving.system = true
@@ -349,7 +362,48 @@ export default {
       }
     }
 
-    onMounted(fetchOptions)
+    function handleBeforeUnload(event) {
+      if (!hasUnsavedChanges.value) {
+        return
+      }
+
+      event.preventDefault()
+      event.returnValue = ''
+    }
+
+    async function confirmLeave() {
+      if (!hasUnsavedChanges.value) {
+        return true
+      }
+
+      try {
+        await ElMessageBox.confirm(
+          '当前有未保存的设置更改，离开后将会丢失，是否继续？',
+          '未保存的设置',
+          {
+            type: 'warning',
+            confirmButtonText: '继续离开',
+            cancelButtonText: '留在当前页'
+          }
+        )
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    onBeforeRouteLeave(async () => {
+      return confirmLeave()
+    })
+
+    onMounted(() => {
+      fetchOptions()
+      window.addEventListener('beforeunload', handleBeforeUnload)
+    })
+
+    onUnmounted(() => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    })
 
     return {
       activeTab,
@@ -357,6 +411,7 @@ export default {
       siteConfig,
       saving,
       regeneratingJwt,
+      hasUnsavedChanges,
       saveSystem,
       saveSite,
       handleRegenerateJwtSecret

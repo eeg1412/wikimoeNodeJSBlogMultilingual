@@ -6,6 +6,7 @@
       :get-list="getAttachmentList"
       :initial-query="initialQuery"
       source-id-label="资源组"
+      keyword-placeholder="搜索文件名 / 描述 / 路径"
     >
       <template #filters="{ query, fetchList }">
         <el-upload
@@ -199,7 +200,8 @@ export default {
     const initialQuery = {
       page: 1,
       languageCode: 'en',
-      attachmentSourceType: ''
+      attachmentSourceType: '',
+      keyword: ''
     }
 
     async function handleUpload({ file }, query, fetchList) {

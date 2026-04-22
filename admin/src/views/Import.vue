@@ -44,13 +44,20 @@
         :description="result.message"
         show-icon
         class="mt-4"
-        />
-      </el-card>
+      />
+
+      <div v-if="result?.success && result?.postId" class="mt-4">
+        <el-button type="primary" link @click="openImportedPost">
+          直接打开导入后的文章
+        </el-button>
+      </div>
+    </el-card>
   </AdminPage>
 </template>
 
 <script>
 import { ref, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import { importPost } from '../api/importJob.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdminPage from '../components/AdminPage.vue'
@@ -59,6 +66,7 @@ export default {
   name: 'Import',
   components: { AdminPage },
   setup() {
+    const router = useRouter()
     const formRef = ref(null)
     const loading = ref(false)
     const result = ref(null)
@@ -96,6 +104,7 @@ export default {
         const res = await submitImport(false)
         result.value = {
           success: true,
+          postId: res.data?.postId || '',
           message: `导入成功，文章 ID: ${res.data?.postId || ''}${res.data?.isNew ? '（新建）' : '（已更新）'}`
         }
         form.sourceIdentifier = ''
@@ -116,6 +125,7 @@ export default {
             const res = await submitImport(true)
             result.value = {
               success: true,
+              postId: res.data?.postId || '',
               message: `覆盖导入成功，文章 ID: ${res.data?.postId || ''}`
             }
             form.sourceIdentifier = ''
@@ -146,7 +156,22 @@ export default {
       }
     }
 
-    return { formRef, form, rules, loading, result, handleSubmit }
+    function openImportedPost() {
+      if (!result.value?.postId) {
+        return
+      }
+      router.push(`/multilingual-admin/posts/edit/${result.value.postId}`)
+    }
+
+    return {
+      formRef,
+      form,
+      rules,
+      loading,
+      result,
+      handleSubmit,
+      openImportedPost
+    }
   }
 }
 </script>

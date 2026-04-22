@@ -28,7 +28,12 @@ export default async function postUpdateHandler(req, res, next) {
       Object.prototype.hasOwnProperty.call(value, 'title') ||
       Object.prototype.hasOwnProperty.call(value, 'excerpt') ||
       Object.prototype.hasOwnProperty.call(value, 'content') ||
-      Object.prototype.hasOwnProperty.call(value, 'sort')
+      Object.prototype.hasOwnProperty.call(value, 'sort') ||
+      Object.prototype.hasOwnProperty.call(value, 'alias') ||
+      Object.prototype.hasOwnProperty.call(value, 'date') ||
+      Object.prototype.hasOwnProperty.call(value, 'author') ||
+      Object.prototype.hasOwnProperty.call(value, 'tags') ||
+      Object.prototype.hasOwnProperty.call(value, 'coverImages')
     ) {
       value.translationStatus = TRANSLATION_STATUS.MANUAL_DRAFT
       value.isManualEdited = true

@@ -21,17 +21,39 @@
     <el-card shadow="never">
       <div class="admin-filter-row">
         <div class="admin-filter-row__main">
-        <el-select
-          v-model="query.languageCode"
-          placeholder="语言"
-          clearable
-          style="width: 120px"
-        >
-          <el-option label="en" value="en" />
-          <el-option label="jp" value="jp" />
-          <el-option label="tw" value="tw" />
-        </el-select>
-        <el-button type="primary" @click="fetchList">查询</el-button>
+          <el-select
+            v-model="query.languageCode"
+            placeholder="语言"
+            clearable
+            style="width: 120px"
+          >
+            <el-option label="en" value="en" />
+            <el-option label="jp" value="jp" />
+            <el-option label="tw" value="tw" />
+          </el-select>
+          <el-select
+            v-model="query.success"
+            placeholder="状态"
+            clearable
+            style="width: 140px"
+          >
+            <el-option label="成功" :value="true" />
+            <el-option label="失败" :value="false" />
+          </el-select>
+          <el-select
+            v-model="query.entityType"
+            placeholder="实体类型"
+            clearable
+            style="width: 160px"
+          >
+            <el-option
+              v-for="item in entityTypeOptions"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
+          </el-select>
+          <el-button type="primary" @click="fetchList">查询</el-button>
         </div>
         <div class="admin-filter-row__hint">
           便于追踪模型输出、接口报错和字段级翻译结果。
@@ -64,33 +86,47 @@
               </el-tag>
             </template>
           </ResponsiveTableColumn>
+          <ResponsiveTableColumn prop="entityType" label="实体" width="120" />
           <ResponsiveTableColumn prop="model" label="模型" width="140" />
-        <ResponsiveTableColumn label="时间" width="160">
-          <template #default="{ row }">{{
-            new Date(row.createdAt).toLocaleString()
-          }}</template>
-        </ResponsiveTableColumn>
+          <ResponsiveTableColumn label="时间" width="160">
+            <template #default="{ row }">{{
+              new Date(row.createdAt).toLocaleString()
+            }}</template>
+          </ResponsiveTableColumn>
+          <ResponsiveTableColumn label="详情" width="100">
+            <template #default="{ row }">
+              <el-button type="primary" link size="small" @click="openDetail(row)">
+                查看
+              </el-button>
+            </template>
+          </ResponsiveTableColumn>
 
-        <template #mobile-card="{ row }">
-          <div class="space-y-1 text-sm">
-            <div class="text-xs text-gray-400">
-              {{ row.languageCode }} · {{ row.fieldPath || '-' }} · {{ row.model }}
+          <template #mobile-card="{ row }">
+            <div class="space-y-1 text-sm">
+              <div class="text-xs text-gray-400">
+                {{ row.languageCode }} · {{ row.fieldPath || '-' }} ·
+                {{ row.model }}
+              </div>
+              <div class="truncate text-gray-700">
+                {{ row.requestPayload?.sourceTextPreview || '-' }}
+              </div>
+              <div
+                class="truncate"
+                :class="row.success ? 'text-blue-600' : 'text-red-500'"
+              >
+                {{ row.normalizedResult?.text || row.errorMessage || '-' }}
+              </div>
+              <div class="text-xs text-gray-400">
+                {{ new Date(row.createdAt).toLocaleString() }}
+              </div>
+              <div>
+                <el-button type="primary" link size="small" @click="openDetail(row)">
+                  查看完整详情
+                </el-button>
+              </div>
             </div>
-            <div class="truncate text-gray-700">
-              {{ row.requestPayload?.sourceTextPreview || '-' }}
-            </div>
-            <div
-              class="truncate"
-              :class="row.success ? 'text-blue-600' : 'text-red-500'"
-            >
-              {{ row.normalizedResult?.text || row.errorMessage || '-' }}
-            </div>
-            <div class="text-xs text-gray-400">
-              {{ new Date(row.createdAt).toLocaleString() }}
-            </div>
-          </div>
-        </template>
-      </ResponsiveTable>
+          </template>
+        </ResponsiveTable>
 
       <div class="admin-pagination">
         <el-pagination
@@ -102,6 +138,32 @@
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="detailVisible" title="翻译日志详情" width="760px">
+      <div v-if="currentLog" class="space-y-3">
+        <div class="text-sm text-gray-500">
+          {{ currentLog.entityType }} · {{ currentLog.fieldPath || '-' }} ·
+          {{ currentLog.model || '-' }}
+        </div>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="原文预览">
+            {{ currentLog.requestPayload?.sourceTextPreview || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="翻译结果">
+            {{ currentLog.normalizedResult?.text || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="错误信息">
+            {{ currentLog.errorMessage || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="请求载荷">
+            <pre class="source-snapshot-preview">{{ formatJson(currentLog.requestPayload) }}</pre>
+          </el-descriptions-item>
+          <el-descriptions-item label="响应载荷">
+            <pre class="source-snapshot-preview">{{ formatJson(currentLog.responsePayload) }}</pre>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
   </AdminPage>
 </template>
 
@@ -119,13 +181,36 @@ export default {
     const list = ref([])
     const total = ref(0)
     const loading = ref(false)
-    const query = reactive({ page: 1, languageCode: '' })
+    const detailVisible = ref(false)
+    const currentLog = ref(null)
+    const entityTypeOptions = [
+      'post',
+      'author',
+      'sort',
+      'tag',
+      'mappoint',
+      'attachment',
+      'Bangumi',
+      'Movie',
+      'Game',
+      'Book',
+      'Event',
+      'Vote'
+    ]
+    const query = reactive({
+      page: 1,
+      languageCode: '',
+      success: '',
+      entityType: ''
+    })
 
     async function fetchList() {
       loading.value = true
       try {
         const params = { ...query }
         if (!params.languageCode) delete params.languageCode
+        if (params.success === '') delete params.success
+        if (!params.entityType) delete params.entityType
         const res = await getAiTranslationLogList(params)
         list.value = res.data?.list || []
         total.value = res.data?.total || 0
@@ -134,8 +219,31 @@ export default {
       }
     }
 
+    function openDetail(row) {
+      currentLog.value = row
+      detailVisible.value = true
+    }
+
+    function formatJson(value) {
+      if (!value) {
+        return '-'
+      }
+      return JSON.stringify(value, null, 2)
+    }
+
     onMounted(fetchList)
-    return { list, total, loading, query, fetchList }
+    return {
+      list,
+      total,
+      loading,
+      query,
+      detailVisible,
+      currentLog,
+      entityTypeOptions,
+      fetchList,
+      openDetail,
+      formatJson
+    }
   }
 }
 </script>

@@ -4,6 +4,7 @@
       ref="groupedManagerRef"
       title="作者管理"
       :get-list="getAuthorList"
+      keyword-placeholder="搜索 sourceId / 昵称 / 简介"
     >
       <template #source="{ row, sourceSnapshot, primaryEntry }">
         <div class="space-y-1">

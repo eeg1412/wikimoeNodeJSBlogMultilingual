@@ -4,6 +4,7 @@
       ref="groupedManagerRef"
       title="地点管理"
       :get-list="getMappointList"
+      keyword-placeholder="搜索 sourceId / 地点 / 简介"
     >
       <template #source="{ row, sourceSnapshot, primaryEntry }">
         <div class="space-y-1">

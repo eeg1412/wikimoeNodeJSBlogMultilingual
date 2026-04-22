@@ -2,6 +2,7 @@ import {
   findEntityGroupPage,
   updateEntityById
 } from '../../../mongodb/utils/entities.js'
+import { buildKeywordQuery } from '../../../mongodb/utils/buildKeywordQuery.js'
 import { sharedEntityUpdateSchema } from '../../../../common/validation/schemas.js'
 import { validateData } from '../../../../common/validation/validate.js'
 
@@ -16,6 +17,12 @@ function createEntityHandlers(entityType) {
       const limit = Math.min(parseInt(req.query.limit) || 20, 100)
       const query = {}
       if (req.query.languageCode) query.languageCode = req.query.languageCode
+      const keywordQuery = buildKeywordQuery(req.query.keyword, [
+        'sourceId',
+        'title',
+        'description'
+      ])
+      if (keywordQuery) Object.assign(query, keywordQuery)
       const { list, total } = await findEntityGroupPage({
         entityType,
         query,
