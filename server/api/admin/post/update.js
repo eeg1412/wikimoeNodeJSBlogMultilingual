@@ -2,6 +2,8 @@ import Post from '../../../mongodb/models/post.js'
 import { postUpdateSchema } from '../../../../common/validation/schemas.js'
 import { validateData } from '../../../../common/validation/validate.js'
 import { cacheData } from '../../../config/cacheData.js'
+import { sanitizeHtml } from '../../../services/htmlSanitizer.js'
+import { TRANSLATION_STATUS } from '../../../../common/constants/index.js'
 
 export default async function postUpdateHandler(req, res, next) {
   try {
@@ -18,6 +20,19 @@ export default async function postUpdateHandler(req, res, next) {
 
     // allowRemark 强制为 false
     value.allowRemark = false
+    if (typeof value.content === 'string') {
+      value.content = sanitizeHtml(value.content)
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(value, 'title') ||
+      Object.prototype.hasOwnProperty.call(value, 'excerpt') ||
+      Object.prototype.hasOwnProperty.call(value, 'content') ||
+      Object.prototype.hasOwnProperty.call(value, 'sort')
+    ) {
+      value.translationStatus = TRANSLATION_STATUS.MANUAL_DRAFT
+      value.isManualEdited = true
+    }
 
     Object.assign(post, value)
     await post.save()

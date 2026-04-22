@@ -8,6 +8,7 @@ export default async function aiTranslationLogListHandler(req, res, next) {
     if (req.query.success !== undefined)
       query.success = req.query.success === 'true'
     if (req.query.entityType) query.entityType = req.query.entityType
+    if (req.query.languageCode) query.languageCode = req.query.languageCode
     const { list, total } = await findAiTranslationLogPage({
       query,
       page,

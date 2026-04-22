@@ -3,20 +3,22 @@
     <h2 class="text-xl font-bold mb-6">导入文章</h2>
 
     <el-card>
-      <el-form
+        <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
         label-position="top"
         @submit.prevent="handleSubmit"
       >
-        <el-form-item label="源博客文章 URL" prop="sourceUrl">
+        <el-form-item label="源文章 ID 或别名" prop="sourceIdentifier">
           <el-input
-            v-model="form.sourceUrl"
-            placeholder="https://example.com/post/some-post"
+            v-model="form.sourceIdentifier"
+            placeholder="输入原文章 ID、别名，或完整文章 URL"
             clearable
           />
-          <div class="text-xs text-gray-500 mt-1">填入源博客文章的完整 URL</div>
+          <div class="text-xs text-gray-500 mt-1">
+            支持直接输入 ID/别名，也支持粘贴完整文章 URL
+          </div>
         </el-form-item>
 
         <el-form-item label="目标语言" prop="languageCode">
@@ -49,7 +51,7 @@
 <script>
 import { ref, reactive } from 'vue'
 import { importPost } from '../api/importJob.js'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 export default {
   name: 'Import',
@@ -59,17 +61,25 @@ export default {
     const result = ref(null)
 
     const form = reactive({
-      sourceUrl: '',
+      sourceIdentifier: '',
       languageCode: 'en'
     })
 
     const rules = {
-      sourceUrl: [
-        { required: true, message: '请填入源博客文章 URL', trigger: 'blur' }
+      sourceIdentifier: [
+        { required: true, message: '请填入源文章 ID、别名或 URL', trigger: 'blur' }
       ],
       languageCode: [
         { required: true, message: '请选择目标语言', trigger: 'change' }
       ]
+    }
+
+    async function submitImport(confirmOverwrite = false) {
+      return importPost({
+        sourceIdentifier: form.sourceIdentifier,
+        languageCode: form.languageCode,
+        confirmOverwrite
+      })
     }
 
     async function handleSubmit() {
@@ -80,18 +90,45 @@ export default {
       result.value = null
 
       try {
-        const res = await importPost({
-          sourceUrl: form.sourceUrl,
-          languageCode: form.languageCode
-        })
+        const res = await submitImport(false)
         result.value = {
           success: true,
           message: `导入成功，文章 ID: ${res.data?.postId || ''}${res.data?.isNew ? '（新建）' : '（已更新）'}`
         }
-        form.sourceUrl = ''
+        form.sourceIdentifier = ''
         ElMessage.success('导入成功')
       } catch (err) {
         const data = err?.response?.data
+        if (err?.response?.status === 409) {
+          try {
+            await ElMessageBox.confirm(
+              data?.message || '当前语言文章已存在，是否覆盖导入？',
+              '重复导入确认',
+              {
+                type: 'warning',
+                confirmButtonText: '确认覆盖',
+                cancelButtonText: '取消'
+              }
+            )
+            const res = await submitImport(true)
+            result.value = {
+              success: true,
+              message: `覆盖导入成功，文章 ID: ${res.data?.postId || ''}`
+            }
+            form.sourceIdentifier = ''
+            ElMessage.success('覆盖导入成功')
+            return
+          } catch (confirmError) {
+            if (confirmError === 'cancel') {
+              result.value = {
+                success: false,
+                message: data?.message || '已取消覆盖导入'
+              }
+              return
+            }
+            throw confirmError
+          }
+        }
         const errorMsg =
           data?.message ||
           data?.errors?.[0]?.message ||

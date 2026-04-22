@@ -5,13 +5,31 @@
 
 const _cache = {}
 
+function isExpired(entry) {
+  if (!entry) {
+    return true
+  }
+  if (!entry.expiresAt) {
+    return false
+  }
+  return Date.now() > entry.expiresAt
+}
+
 export const cacheData = {
   /**
    * 获取缓存
    * @param {string} key
    */
   get(key) {
-    return _cache[key] ?? null
+    const entry = _cache[key]
+    if (!entry) {
+      return null
+    }
+    if (isExpired(entry)) {
+      delete _cache[key]
+      return null
+    }
+    return entry.value
   },
 
   /**
@@ -19,8 +37,15 @@ export const cacheData = {
    * @param {string} key
    * @param {*} value
    */
-  set(key, value) {
-    _cache[key] = value
+  set(key, value, ttlSeconds = 0) {
+    const entry = {
+      value,
+      expiresAt: null
+    }
+    if (ttlSeconds > 0) {
+      entry.expiresAt = Date.now() + ttlSeconds * 1000
+    }
+    _cache[key] = entry
   },
 
   /**
@@ -37,7 +62,7 @@ export const cacheData = {
    */
   delByPrefix(prefix) {
     for (const key of Object.keys(_cache)) {
-      if (key.startsWith(prefix)) {
+      if (key.startsWith(prefix) || key.includes(`:${prefix}:`)) {
         delete _cache[key]
       }
     }

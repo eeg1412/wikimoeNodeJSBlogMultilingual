@@ -69,7 +69,7 @@
           <el-input v-model="editForm.nickname" />
         </el-form-item>
         <el-form-item label="简介">
-          <el-input v-model="editForm.bio" type="textarea" :rows="3" />
+          <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -101,7 +101,7 @@ export default {
     const currentId = ref(null)
 
     const query = reactive({ page: 1, languageCode: '' })
-    const editForm = reactive({ nickname: '', bio: '' })
+    const editForm = reactive({ nickname: '', description: '' })
 
     async function fetchList() {
       loading.value = true
@@ -119,7 +119,7 @@ export default {
     function openEdit(row) {
       currentId.value = row._id
       editForm.nickname = row.nickname || ''
-      editForm.bio = row.bio || ''
+      editForm.description = row.description || ''
       dialogVisible.value = true
     }
 
@@ -128,7 +128,7 @@ export default {
       try {
         await updateAuthor(currentId.value, {
           nickname: editForm.nickname,
-          bio: editForm.bio
+          description: editForm.description
         })
         ElMessage.success('保存成功')
         dialogVisible.value = false

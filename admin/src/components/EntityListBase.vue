@@ -29,9 +29,7 @@
           width="120"
         >
           <template #default="{ row }">
-            <el-tag size="small">{{
-              row.translationStatus?.title || '-'
-            }}</el-tag>
+            <el-tag size="small">{{ row.translationStatus || '-' }}</el-tag>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="操作" width="100">

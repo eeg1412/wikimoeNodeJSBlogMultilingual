@@ -15,7 +15,12 @@ export async function findPostPage({
       .sort(sort)
       .skip(skip)
       .limit(limit)
-      .populate('author', 'nickname')
+      .populate({
+        path: 'author',
+        populate: {
+          path: 'photoAttachment'
+        }
+      })
       .populate('sort', 'sortname')
       .lean(),
     Post.countDocuments(query)
@@ -80,7 +85,13 @@ export async function findPostBySourceIdLang(sourceId, languageCode) {
  */
 export async function findPostForDetail(idOrAlias, languageCode) {
   let post = await Post.findOne({ alias: idOrAlias, languageCode, status: 1 })
-    .populate('author')
+    .populate({
+      path: 'author',
+      populate: [
+        { path: 'photoAttachment' },
+        { path: 'coverAttachment' }
+      ]
+    })
     .populate('sort')
     .populate('tags')
     .populate('mappointList')
@@ -91,13 +102,31 @@ export async function findPostForDetail(idOrAlias, languageCode) {
     .populate('bookList')
     .populate('voteList')
     .populate('eventList')
+    .populate('postList')
+    .populate('tweetList')
+    .populate('seriesSortList')
+    .populate('contentBangumiList')
+    .populate('contentMovieList')
+    .populate('contentGameList')
+    .populate('contentBookList')
+    .populate('contentPostList')
+    .populate('contentTweetList')
+    .populate('contentEventList')
+    .populate('contentVoteList')
+    .populate('contentSeriesSortList')
     .lean()
 
   if (!post) {
     // 尝试按 _id
     try {
       post = await Post.findOne({ _id: idOrAlias, languageCode, status: 1 })
-        .populate('author')
+        .populate({
+          path: 'author',
+          populate: [
+            { path: 'photoAttachment' },
+            { path: 'coverAttachment' }
+          ]
+        })
         .populate('sort')
         .populate('tags')
         .populate('mappointList')
@@ -108,6 +137,18 @@ export async function findPostForDetail(idOrAlias, languageCode) {
         .populate('bookList')
         .populate('voteList')
         .populate('eventList')
+        .populate('postList')
+        .populate('tweetList')
+        .populate('seriesSortList')
+        .populate('contentBangumiList')
+        .populate('contentMovieList')
+        .populate('contentGameList')
+        .populate('contentBookList')
+        .populate('contentPostList')
+        .populate('contentTweetList')
+        .populate('contentEventList')
+        .populate('contentVoteList')
+        .populate('contentSeriesSortList')
         .lean()
     } catch {
       // 无效 ID 格式

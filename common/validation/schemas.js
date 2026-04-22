@@ -6,10 +6,11 @@ const languageCode = Joi.string().valid(...SUPPORTED_LANGUAGES)
 // ────────────── 导入 ──────────────
 
 export const importPostSchema = Joi.object({
-  sourceUrl: Joi.string().trim().max(512).required(),
+  sourceIdentifier: Joi.string().trim().max(64),
+  sourceUrl: Joi.string().trim().max(512),
   languageCode: languageCode.required(),
   confirmOverwrite: Joi.boolean().default(false)
-})
+}).or('sourceIdentifier', 'sourceUrl')
 
 // ────────────── 登录 ──────────────
 
@@ -25,6 +26,7 @@ export const postUpdateSchema = Joi.object({
   title: Joi.string().allow('').max(500),
   excerpt: Joi.string().allow('').max(2000),
   content: Joi.string().allow(''),
+  sort: Joi.string().allow('', null),
   alias: Joi.string()
     .allow('')
     .max(200)
@@ -161,10 +163,12 @@ export const optionUpdateSchema = Joi.object({
 // ────────────── 翻译字段请求 ──────────────
 
 export const translateFieldSchema = Joi.object({
-  entityType: Joi.string().required(),
-  entityId: Joi.string().required(),
-  fieldPath: Joi.string().required(),
-  languageCode: languageCode.required()
+  field: Joi.string().valid('title', 'excerpt', 'content'),
+  fields: Joi.array()
+    .items(Joi.string().valid('title', 'excerpt', 'content'))
+    .min(1)
+    .max(3),
+  languageCode: languageCode.optional()
 })
 
 // ────────────── 列表查询（通用分页） ──────────────

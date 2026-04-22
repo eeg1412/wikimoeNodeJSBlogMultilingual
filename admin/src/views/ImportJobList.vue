@@ -20,8 +20,8 @@
       <ResponsiveTable :data="list" :loading="loading">
         <ResponsiveTableColumn prop="languageCode" label="语言" width="80" />
         <ResponsiveTableColumn
-          prop="sourceUrl"
-          label="源 URL"
+          prop="sourceIdentifier"
+          label="来源标识"
           show-overflow-tooltip
         />
         <ResponsiveTableColumn prop="status" label="状态" width="120">
@@ -35,11 +35,11 @@
           width="120"
           show-overflow-tooltip
         />
-        <ResponsiveTableColumn
-          prop="errorMessage"
-          label="错误"
-          show-overflow-tooltip
-        />
+        <ResponsiveTableColumn label="错误" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatErrors(row.errors) }}
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="时间" width="160">
           <template #default="{ row }">
             {{ formatDate(row.createdAt) }}
@@ -59,13 +59,13 @@
               }}</el-tag>
             </div>
             <div class="text-gray-500 text-xs truncate">
-              {{ row.sourceUrl }}
+              {{ row.sourceIdentifier }}
             </div>
             <div class="text-gray-400 text-xs">
               {{ formatDate(row.createdAt) }}
             </div>
-            <div v-if="row.errorMessage" class="text-red-500 text-xs">
-              {{ row.errorMessage }}
+            <div v-if="formatErrors(row.errors)" class="text-red-500 text-xs">
+              {{ formatErrors(row.errors) }}
             </div>
           </div>
         </template>
@@ -112,23 +112,37 @@ export default {
     }
 
     function statusTagType(status) {
-      const map = {
-        success: 'success',
-        failed: 'danger',
-        pending: 'warning',
-        running: 'primary'
+        const map = {
+          success: 'success',
+          failed: 'danger',
+          cancelled: 'warning',
+          running: 'primary'
+        }
+        return map[status] || 'info'
       }
-      return map[status] || 'info'
-    }
 
-    function formatDate(val) {
-      if (!val) return '-'
-      return new Date(val).toLocaleString()
-    }
+      function formatDate(val) {
+        if (!val) return '-'
+        return new Date(val).toLocaleString()
+      }
 
-    onMounted(fetchList)
+      function formatErrors(errors) {
+        if (!Array.isArray(errors) || errors.length === 0) return ''
+        return errors.join('；')
+      }
 
-    return { list, total, loading, query, fetchList, statusTagType, formatDate }
+      onMounted(fetchList)
+
+      return {
+        list,
+        total,
+        loading,
+        query,
+        fetchList,
+        statusTagType,
+        formatDate,
+        formatErrors
+      }
   }
 }
 </script>

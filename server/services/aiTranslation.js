@@ -162,15 +162,23 @@ export async function translateField({
       entityType,
       entityId,
       fieldPath,
-      targetLanguageCode,
-      fieldKind,
-      sourceTextHash,
-      requestPayload: JSON.stringify(requestPayload).substring(0, 4096),
-      responsePayload: JSON.stringify(responsePayload || err.message).substring(
-        0,
-        4096
-      ),
-      normalizedResult: '',
+      languageCode: targetLanguageCode,
+      sourceHash: sourceTextHash,
+      requestPayload: {
+        model: requestPayload.model,
+        fieldKind,
+        sourceTextPreview: sourceText.substring(0, 2000)
+      },
+      responsePayload: {
+        error: err.message,
+        raw: responsePayload
+      },
+      normalizedResult: {
+        text: ''
+      },
+      provider: 'google-genai',
+      model: systemConfig.aiModel || '',
+      promptVersion: 'v1',
       tokenUsage: {},
       success: false,
       errorMessage: err.message
@@ -183,12 +191,20 @@ export async function translateField({
     entityType,
     entityId,
     fieldPath,
-    targetLanguageCode,
-    fieldKind,
-    sourceTextHash,
-    requestPayload: JSON.stringify(requestPayload).substring(0, 4096),
-    responsePayload: JSON.stringify(responsePayload).substring(0, 4096),
-    normalizedResult: translatedText,
+    languageCode: targetLanguageCode,
+    sourceHash: sourceTextHash,
+    requestPayload: {
+      model: requestPayload.model,
+      fieldKind,
+      sourceTextPreview: sourceText.substring(0, 2000)
+    },
+    responsePayload,
+    normalizedResult: {
+      text: translatedText
+    },
+    provider: 'google-genai',
+    model: systemConfig.aiModel || '',
+    promptVersion: 'v1',
     tokenUsage,
     success: true,
     errorMessage: ''

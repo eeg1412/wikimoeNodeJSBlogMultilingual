@@ -132,28 +132,9 @@
         <el-card class="mb-4">
           <template #header><span>翻译状态</span></template>
           <el-descriptions :column="1" size="small">
-            <el-descriptions-item label="标题">
-              <el-tag
-                size="small"
-                :type="statusType(post.translationStatus?.title)"
-              >
-                {{ post.translationStatus?.title || '-' }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="摘要">
-              <el-tag
-                size="small"
-                :type="statusType(post.translationStatus?.excerpt)"
-              >
-                {{ post.translationStatus?.excerpt || '-' }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="正文">
-              <el-tag
-                size="small"
-                :type="statusType(post.translationStatus?.content)"
-              >
-                {{ post.translationStatus?.content || '-' }}
+            <el-descriptions-item label="文章状态">
+              <el-tag size="small" :type="statusType(post.translationStatus)">
+                {{ post.translationStatus || '-' }}
               </el-tag>
             </el-descriptions-item>
           </el-descriptions>
@@ -246,7 +227,7 @@ export default {
           title: form.title,
           excerpt: form.excerpt,
           content: form.content,
-          sort: form.sort || undefined
+          sort: form.sort || null
         })
         ElMessage.success('保存成功')
         await fetchPost()
@@ -298,7 +279,15 @@ export default {
     }
 
     function statusType(status) {
-      const map = { approved: 'success', pending: 'warning', none: 'info' }
+      const map = {
+        approved: 'success',
+        not_required: 'success',
+        ai_draft: 'warning',
+        manual_draft: 'warning',
+        pending: 'info',
+        outdated: 'danger',
+        stub: 'danger'
+      }
       return map[status] || 'info'
     }
 

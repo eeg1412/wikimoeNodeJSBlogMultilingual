@@ -24,8 +24,8 @@
           <el-option label="已发布" :value="1" />
         </el-select>
         <el-input
-          v-model="query.title"
-          placeholder="搜索标题"
+          v-model="query.keyword"
+          placeholder="搜索 sourceId / 标题"
           clearable
           style="width: 200px"
           @keyup.enter="fetchList"
@@ -34,49 +34,99 @@
       </div>
 
       <ResponsiveTable :data="list" :loading="loading">
-        <ResponsiveTableColumn prop="languageCode" label="语言" width="80" />
+        <ResponsiveTableColumn prop="sourceId" label="Source ID" width="120" />
         <ResponsiveTableColumn
-          prop="title"
-          label="标题"
+          prop="sourceAlias"
+          label="原始别名"
           show-overflow-tooltip
         />
-        <ResponsiveTableColumn prop="status" label="状态" width="90">
+        <ResponsiveTableColumn prop="type" label="类型" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? '已发布' : '草稿' }}
-            </el-tag>
+            {{ row.type === 2 ? '推文' : '文章' }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="120">
+        <ResponsiveTableColumn label="en" width="120">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="goEdit(row._id)"
-              >编辑</el-button
-            >
+            <div class="flex items-center gap-2">
+              <el-tag size="small" :type="statusType(getLangEntry(row, 'en'))">
+                {{ statusLabel(getLangEntry(row, 'en')) }}
+              </el-tag>
+              <el-button
+                v-if="getLangEntry(row, 'en')"
+                type="primary"
+                link
+                size="small"
+                @click="goEdit(getLangEntry(row, 'en')._id)"
+                >编辑</el-button
+              >
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="jp" width="120">
+          <template #default="{ row }">
+            <div class="flex items-center gap-2">
+              <el-tag size="small" :type="statusType(getLangEntry(row, 'jp'))">
+                {{ statusLabel(getLangEntry(row, 'jp')) }}
+              </el-tag>
+              <el-button
+                v-if="getLangEntry(row, 'jp')"
+                type="primary"
+                link
+                size="small"
+                @click="goEdit(getLangEntry(row, 'jp')._id)"
+                >编辑</el-button
+              >
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="tw" width="120">
+          <template #default="{ row }">
+            <div class="flex items-center gap-2">
+              <el-tag size="small" :type="statusType(getLangEntry(row, 'tw'))">
+                {{ statusLabel(getLangEntry(row, 'tw')) }}
+              </el-tag>
+              <el-button
+                v-if="getLangEntry(row, 'tw')"
+                type="primary"
+                link
+                size="small"
+                @click="goEdit(getLangEntry(row, 'tw')._id)"
+                >编辑</el-button
+              >
+            </div>
           </template>
         </ResponsiveTableColumn>
 
         <template #mobile-card="{ row }">
-          <div class="flex justify-between items-start">
-            <div class="flex-1 min-w-0">
-              <div class="font-medium truncate">{{ row.title }}</div>
-              <div class="text-xs text-gray-500 mt-1">
-                {{ row.languageCode }}
-              </div>
+          <div class="space-y-2">
+            <div class="font-medium truncate">
+              {{ row.sourceAlias || row.sourceId }}
             </div>
-            <div class="flex-shrink-0 flex flex-col items-end gap-1">
-              <el-tag
-                :type="row.status === 1 ? 'success' : 'info'"
-                size="small"
+            <div class="text-xs text-gray-500">sourceId: {{ row.sourceId }}</div>
+            <div class="text-xs text-gray-500">
+              类型：{{ row.type === 2 ? '推文' : '文章' }}
+            </div>
+            <div class="space-y-1">
+              <div
+                v-for="lang in ['en', 'jp', 'tw']"
+                :key="lang"
+                class="flex items-center justify-between"
               >
-                {{ row.status === 1 ? '已发布' : '草稿' }}
-              </el-tag>
-              <el-button
-                type="primary"
-                link
-                size="small"
-                @click="goEdit(row._id)"
-                >编辑</el-button
-              >
+                <div class="flex items-center gap-2">
+                  <span class="text-xs uppercase text-gray-500">{{ lang }}</span>
+                  <el-tag size="small" :type="statusType(getLangEntry(row, lang))">
+                    {{ statusLabel(getLangEntry(row, lang)) }}
+                  </el-tag>
+                </div>
+                <el-button
+                  v-if="getLangEntry(row, lang)"
+                  type="primary"
+                  link
+                  size="small"
+                  @click="goEdit(getLangEntry(row, lang)._id)"
+                  >编辑</el-button
+                >
+              </div>
             </div>
           </div>
         </template>
@@ -115,7 +165,7 @@ export default {
       page: 1,
       languageCode: '',
       status: null,
-      title: ''
+      keyword: ''
     })
 
     async function fetchList() {
@@ -123,7 +173,7 @@ export default {
       try {
         const params = { ...query }
         if (params.status === null || params.status === '') delete params.status
-        if (!params.title) delete params.title
+        if (!params.keyword) delete params.keyword
         if (!params.languageCode) delete params.languageCode
 
         const res = await getPostGroupList(params)
@@ -138,9 +188,46 @@ export default {
       router.push(`/multilingual-admin/posts/edit/${id}`)
     }
 
+    function getLangEntry(row, languageCode) {
+      if (!row || !Array.isArray(row.langs)) {
+        return null
+      }
+      return row.langs.find(item => item.languageCode === languageCode) || null
+    }
+
+    function statusType(entry) {
+      if (!entry) {
+        return 'info'
+      }
+      if (entry.status === 1) {
+        return 'success'
+      }
+      return 'warning'
+    }
+
+    function statusLabel(entry) {
+      if (!entry) {
+        return '缺失'
+      }
+      if (entry.status === 1) {
+        return '已发布'
+      }
+      return '草稿'
+    }
+
     onMounted(fetchList)
 
-    return { list, total, loading, query, fetchList, goEdit }
+    return {
+      list,
+      total,
+      loading,
+      query,
+      fetchList,
+      goEdit,
+      getLangEntry,
+      statusType,
+      statusLabel
+    }
   }
 }
 </script>

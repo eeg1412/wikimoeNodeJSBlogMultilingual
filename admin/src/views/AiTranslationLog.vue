@@ -16,20 +16,33 @@
         <el-button type="primary" @click="fetchList">查询</el-button>
       </div>
 
-      <ResponsiveTable :data="list" :loading="loading">
-        <ResponsiveTableColumn prop="languageCode" label="语言" width="80" />
-        <ResponsiveTableColumn prop="fieldKind" label="字段类型" width="110" />
-        <ResponsiveTableColumn
-          prop="sourceText"
-          label="原文"
-          show-overflow-tooltip
-        />
-        <ResponsiveTableColumn
-          prop="translatedText"
-          label="译文"
-          show-overflow-tooltip
-        />
-        <ResponsiveTableColumn prop="model" label="模型" width="140" />
+        <ResponsiveTable :data="list" :loading="loading">
+          <ResponsiveTableColumn prop="languageCode" label="语言" width="80" />
+          <ResponsiveTableColumn prop="fieldPath" label="字段" width="110" />
+          <ResponsiveTableColumn
+            label="原文摘要"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.requestPayload?.sourceTextPreview || '-' }}
+            </template>
+          </ResponsiveTableColumn>
+          <ResponsiveTableColumn
+            label="结果"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.normalizedResult?.text || row.errorMessage || '-' }}
+            </template>
+          </ResponsiveTableColumn>
+          <ResponsiveTableColumn prop="success" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.success ? 'success' : 'danger'" size="small">
+                {{ row.success ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </ResponsiveTableColumn>
+          <ResponsiveTableColumn prop="model" label="模型" width="140" />
         <ResponsiveTableColumn label="时间" width="160">
           <template #default="{ row }">{{
             new Date(row.createdAt).toLocaleString()
@@ -39,10 +52,17 @@
         <template #mobile-card="{ row }">
           <div class="space-y-1 text-sm">
             <div class="text-xs text-gray-400">
-              {{ row.languageCode }} · {{ row.fieldKind }} · {{ row.model }}
+              {{ row.languageCode }} · {{ row.fieldPath || '-' }} · {{ row.model }}
             </div>
-            <div class="truncate text-gray-700">{{ row.sourceText }}</div>
-            <div class="truncate text-blue-600">{{ row.translatedText }}</div>
+            <div class="truncate text-gray-700">
+              {{ row.requestPayload?.sourceTextPreview || '-' }}
+            </div>
+            <div
+              class="truncate"
+              :class="row.success ? 'text-blue-600' : 'text-red-500'"
+            >
+              {{ row.normalizedResult?.text || row.errorMessage || '-' }}
+            </div>
             <div class="text-xs text-gray-400">
               {{ new Date(row.createdAt).toLocaleString() }}
             </div>

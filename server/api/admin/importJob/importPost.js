@@ -3,19 +3,19 @@ import { validateData } from '../../../../common/validation/validate.js'
 import { importPost } from '../../../services/importService.js'
 
 /**
- * 从用户输入的 sourceUrl 中提取文章标识符（alias 或 ID）
+ * 从用户输入的 sourceIdentifier/sourceUrl 中提取文章标识符（alias 或 ID）
  * 支持完整 URL（如 https://example.com/post/my-alias）或直接输入标识符
  * @param {string} sourceUrl
  * @returns {string}
  */
-function extractSourceIdentifier(sourceUrl) {
+function extractSourceIdentifier(sourceIdentifier) {
   try {
-    const url = new URL(sourceUrl)
+    const url = new URL(sourceIdentifier)
     const segments = url.pathname.split('/').filter(Boolean)
-    return segments[segments.length - 1] || sourceUrl
+    return segments[segments.length - 1] || sourceIdentifier
   } catch {
     // 不是有效 URL，直接作为标识符使用
-    return sourceUrl.trim()
+    return sourceIdentifier.trim()
   }
 }
 
@@ -28,7 +28,8 @@ export default async function importPostHandler(req, res, next) {
         .json({ message: error, errors: [{ message: error }] })
     }
 
-    const sourceIdentifier = extractSourceIdentifier(value.sourceUrl)
+    const sourceIdentifierInput = value.sourceIdentifier || value.sourceUrl || ''
+    const sourceIdentifier = extractSourceIdentifier(sourceIdentifierInput)
     if (!sourceIdentifier) {
       return res
         .status(400)

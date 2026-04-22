@@ -19,8 +19,8 @@ import { cacheData } from '../config/cacheData.js'
 function cacheGet(key) {
   return cacheData.get(key)
 }
-function cacheSet(key, val) {
-  cacheData.set(key, val)
+function cacheSet(key, val, ttlSeconds) {
+  cacheData.set(key, val, ttlSeconds)
 }
 
 /**
@@ -196,8 +196,8 @@ export async function postListBySortController(req, res, next) {
       filterType: type,
       siteConfig,
       siteTitle: getSiteNameByLang(siteConfig, lang),
-      siteDescription: getSiteDescriptionByLang(siteConfig, lang),
-      pageTitle: currentSort.sortname || ''
+      pageTitle: currentSort.sortname || '',
+      metaDescription: getSiteDescriptionByLang(siteConfig, lang)
     }
 
     cacheSet(cacheKey, vm, 300)
@@ -227,6 +227,11 @@ export async function postListByTagController(req, res, next) {
     }
 
     const sortList = await querySortList(lang)
+    const cacheKey = `page:tag-list:${lang}:${tagid}:${page}:${type || 'all'}`
+    let cached = cacheGet(cacheKey)
+    if (cached) {
+      return res.render('pages/post-list', cached)
+    }
 
     const { list, total } = await queryPostList({
       languageCode: lang,
@@ -248,10 +253,11 @@ export async function postListByTagController(req, res, next) {
       filterType: type,
       siteConfig,
       siteTitle: getSiteNameByLang(siteConfig, lang),
-      siteDescription: getSiteDescriptionByLang(siteConfig, lang),
-      pageTitle: currentTag.tagname || ''
+      pageTitle: currentTag.tagname || '',
+      metaDescription: getSiteDescriptionByLang(siteConfig, lang)
     }
 
+    cacheSet(cacheKey, vm, 300)
     return res.render('pages/post-list', vm)
   } catch (err) {
     next(err)
@@ -278,6 +284,11 @@ export async function postListByMappointController(req, res, next) {
     }
 
     const sortList = await querySortList(lang)
+    const cacheKey = `page:mappoint-list:${lang}:${mappointid}:${page}:${type || 'all'}`
+    let cached = cacheGet(cacheKey)
+    if (cached) {
+      return res.render('pages/post-list', cached)
+    }
 
     const { list, total } = await queryPostList({
       languageCode: lang,
@@ -299,10 +310,11 @@ export async function postListByMappointController(req, res, next) {
       filterType: type,
       siteConfig,
       siteTitle: getSiteNameByLang(siteConfig, lang),
-      siteDescription: getSiteDescriptionByLang(siteConfig, lang),
-      pageTitle: currentMappoint.title || ''
+      pageTitle: currentMappoint.title || '',
+      metaDescription: getSiteDescriptionByLang(siteConfig, lang)
     }
 
+    cacheSet(cacheKey, vm, 300)
     return res.render('pages/post-list', vm)
   } catch (err) {
     next(err)
@@ -338,7 +350,6 @@ export async function postDetailController(req, res, next) {
       sortList,
       siteConfig,
       siteTitle: getSiteNameByLang(siteConfig, lang),
-      siteDescription: getSiteDescriptionByLang(siteConfig, lang),
       pageTitle: post.title || ''
     }
 

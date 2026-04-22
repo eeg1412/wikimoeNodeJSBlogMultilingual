@@ -6,6 +6,8 @@ import Attachment from '../../../mongodb/models/attachment.js'
 import {
   ATTACHMENT_SOURCE_TYPE,
   ATTACHMENT_IMPORT_ORIGIN,
+  LOCALIZED_UPLOAD_EXT_WHITELIST,
+  LOCALIZED_UPLOAD_MAX_SIZE,
   LOCALIZED_UPLOAD_MIME_WHITELIST,
   TRANSLATION_STATUS
 } from '../../../../common/constants/index.js'
@@ -47,6 +49,12 @@ export default async function attachmentUploadHandler(req, res, next) {
     const relativeDir = languageCode
     const relativePath = `/${relativeDir}/${filename}`
 
+    if (!LOCALIZED_UPLOAD_EXT_WHITELIST.includes(ext.toLowerCase())) {
+      return res
+        .status(400)
+        .json({ errors: [{ message: `文件扩展名 ${ext} 不在白名单内` }] })
+    }
+
     // 路径穿越防护：确保 relativeDir 只包含允许的语言代码
     if (!/^[a-z]{2,5}$/.test(languageCode)) {
       return res.status(400).json({ errors: [{ message: '无效的语言代码' }] })
@@ -66,14 +74,16 @@ export default async function attachmentUploadHandler(req, res, next) {
 
     const doc = await Attachment.create({
       attachmentSourceType: ATTACHMENT_SOURCE_TYPE.LOCALIZED,
+      attachmentGroupKey: uuid,
       languageCode,
       filename,
       filepath: relativePath,
+      storagePath: relativePath,
       name,
       description,
       filesize: req.file.size,
       mimetype: mime,
-      importOrigin: ATTACHMENT_IMPORT_ORIGIN.UPLOAD,
+      importOrigin: ATTACHMENT_IMPORT_ORIGIN.LOCALIZED_UPLOAD,
       translationStatus: TRANSLATION_STATUS.NOT_REQUIRED
     })
 
@@ -86,5 +96,5 @@ export default async function attachmentUploadHandler(req, res, next) {
 // multer 内存存储（文件类型验证后再写盘）
 export const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+  limits: { fileSize: LOCALIZED_UPLOAD_MAX_SIZE }
 }).single('file')

@@ -1,4 +1,3 @@
-import * as cheerio from 'cheerio'
 import { translateField } from './aiTranslation.js'
 import { FIELD_KIND } from '../../common/constants/index.js'
 
@@ -17,7 +16,7 @@ export async function translateHtml(html, targetLanguageCode, entityId = '') {
   const { result } = await translateField({
     sourceText: html,
     targetLanguageCode,
-    fieldKind: FIELD_KIND.RICH_TEXT,
+    fieldKind: FIELD_KIND.CONTENT_HTML,
     entityType: 'Post',
     entityId,
     fieldPath: 'content'

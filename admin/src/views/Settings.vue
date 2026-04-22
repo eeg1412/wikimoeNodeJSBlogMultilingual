@@ -152,8 +152,22 @@
                 :rows="3"
               />
             </el-form-item>
-            <el-form-item label="页脚文字（footerText）">
-              <el-input v-model="siteConfig.footerText" />
+            <el-form-item label="页脚说明（footerInfo）">
+              <el-input v-model="siteConfig.footerInfo" />
+            </el-form-item>
+            <el-form-item label="额外 CSS（extraCss）">
+              <el-input
+                v-model="siteConfig.extraCss"
+                type="textarea"
+                :rows="4"
+              />
+            </el-form-item>
+            <el-form-item label="额外 JS（extraJs）">
+              <el-input
+                v-model="siteConfig.extraJs"
+                type="textarea"
+                :rows="4"
+              />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="saving.site" @click="saveSite"

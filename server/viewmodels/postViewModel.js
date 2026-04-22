@@ -2,15 +2,12 @@ import {
   resolveAttachmentSrc,
   resolveContentHtmlAssets
 } from '../utils/sourceAssetResolver.js'
-import { getSystemConfig, getSiteConfig } from '../config/globalConfig.js'
+import { getSiteConfig } from '../config/globalConfig.js'
 
 /**
  * 把原始 Post lean 文档映射为模板可直接消费的 ViewModel
  */
 export function mapPostToViewModel(post, options = {}) {
-  const systemConfig = getSystemConfig()
-  const sourceBlogPublicOrigin = systemConfig.sourceBlogPublicOrigin || ''
-
   return {
     _id: String(post._id),
     title: post.title || '',
@@ -24,7 +21,7 @@ export function mapPostToViewModel(post, options = {}) {
     // 封面图（第一张）
     coverSrc:
       post.coverImages && post.coverImages.length > 0
-        ? resolveAttachmentSrc(post.coverImages[0], sourceBlogPublicOrigin)
+        ? resolveAttachmentSrc(post.coverImages[0])
         : '',
 
     // 作者
@@ -33,10 +30,7 @@ export function mapPostToViewModel(post, options = {}) {
           _id: String(post.author._id),
           nickname: post.author.nickname || '',
           photoSrc: post.author.photoAttachment
-            ? resolveAttachmentSrc(
-                post.author.photoAttachment,
-                sourceBlogPublicOrigin
-              )
+            ? resolveAttachmentSrc(post.author.photoAttachment)
             : ''
         }
       : null,
@@ -70,16 +64,14 @@ export function mapPostToViewModel(post, options = {}) {
  * 把原始 Post lean 文档映射为详情页 ViewModel（含正文）
  */
 export function mapPostDetailToViewModel(post, hreflangAlternates = []) {
-  const systemConfig = getSystemConfig()
   const siteConfig = getSiteConfig()
-  const sourceBlogPublicOrigin = systemConfig.sourceBlogPublicOrigin || ''
   const siteUrl = siteConfig.url || siteConfig.siteUrl || ''
 
   const base = mapPostToViewModel(post)
 
   // 处理正文中的内部资源路径
   const content = post.content
-    ? resolveContentHtmlAssets(post.content, sourceBlogPublicOrigin)
+    ? resolveContentHtmlAssets(post.content)
     : ''
 
   const pageUrl = `${siteUrl}/${post.languageCode}/post/${post.alias || post._id}`
@@ -126,7 +118,7 @@ export function mapPostDetailToViewModel(post, hreflangAlternates = []) {
     metaDescription: post.excerpt || '',
     entities,
     coverImages: (post.coverImages || []).map(img => ({
-      src: resolveAttachmentSrc(img, sourceBlogPublicOrigin),
+      src: resolveAttachmentSrc(img),
       name: img.name || '',
       width: img.width || 0,
       height: img.height || 0

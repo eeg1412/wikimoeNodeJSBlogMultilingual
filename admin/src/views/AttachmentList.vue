@@ -7,7 +7,7 @@
         action=""
         :http-request="handleUpload"
         :show-file-list="false"
-        accept="image/*"
+        accept="image/*,video/*,audio/*"
         class="mb-4"
       >
         <el-button type="primary">上传本地附件</el-button>
@@ -15,7 +15,16 @@
 
       <div class="flex gap-3 mb-4">
         <el-select
-          v-model="query.type"
+          v-model="uploadLanguageCode"
+          placeholder="上传语言"
+          style="width: 140px"
+        >
+          <el-option label="English (en)" value="en" />
+          <el-option label="日本語 (jp)" value="jp" />
+          <el-option label="繁體中文 (tw)" value="tw" />
+        </el-select>
+        <el-select
+          v-model="query.attachmentSourceType"
           placeholder="类型"
           clearable
           style="width: 140px"
@@ -30,18 +39,22 @@
         <ResponsiveTableColumn label="预览" width="80">
           <template #default="{ row }">
             <el-image
-              :src="row.url"
+              :src="getPreviewUrl(row)"
               style="width: 48px; height: 48px; object-fit: cover"
             />
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn prop="type" label="类型" width="100" />
+        <ResponsiveTableColumn
+          prop="attachmentSourceType"
+          label="类型"
+          width="100"
+        />
         <ResponsiveTableColumn
           prop="name"
           label="文件名"
           show-overflow-tooltip
         />
-        <ResponsiveTableColumn prop="mimeType" label="MIME" width="120" />
+        <ResponsiveTableColumn prop="mimetype" label="MIME" width="120" />
         <ResponsiveTableColumn label="操作" width="100">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEdit(row)"
@@ -53,7 +66,7 @@
         <template #mobile-card="{ row }">
           <div class="flex gap-3 items-center">
             <el-image
-              :src="row.url"
+              :src="getPreviewUrl(row)"
               style="
                 width: 48px;
                 height: 48px;
@@ -63,7 +76,9 @@
             />
             <div class="flex-1 min-w-0">
               <div class="text-sm truncate">{{ row.name }}</div>
-              <div class="text-xs text-gray-400">{{ row.type }}</div>
+              <div class="text-xs text-gray-400">
+                {{ row.attachmentSourceType }}
+              </div>
             </div>
             <el-button type="primary" link size="small" @click="openEdit(row)"
               >编辑</el-button
@@ -120,14 +135,15 @@ export default {
     const saving = ref(false)
     const dialogVisible = ref(false)
     const currentId = ref(null)
-    const query = reactive({ page: 1, type: '' })
+    const uploadLanguageCode = ref('en')
+    const query = reactive({ page: 1, attachmentSourceType: '' })
     const editForm = reactive({ name: '' })
 
     async function fetchList() {
       loading.value = true
       try {
         const params = { ...query }
-        if (!params.type) delete params.type
+        if (!params.attachmentSourceType) delete params.attachmentSourceType
         const res = await getAttachmentList(params)
         list.value = res.data?.list || []
         total.value = res.data?.total || 0
@@ -139,6 +155,7 @@ export default {
     async function handleUpload({ file }) {
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('languageCode', uploadLanguageCode.value)
       try {
         await uploadLocalizedAttachment(formData)
         ElMessage.success('上传成功')
@@ -152,6 +169,19 @@ export default {
       currentId.value = row._id
       editForm.name = row.name || ''
       dialogVisible.value = true
+    }
+
+    function getPreviewUrl(row) {
+      if (!row) {
+        return ''
+      }
+      if (row.attachmentSourceType === 'localized') {
+        return row.filepath || ''
+      }
+      if (row.externalUrl) {
+        return row.externalUrl
+      }
+      return row.filepath || ''
     }
 
     async function handleSave() {
@@ -173,12 +203,14 @@ export default {
       loading,
       saving,
       dialogVisible,
+      uploadLanguageCode,
       query,
       editForm,
       fetchList,
       handleUpload,
       openEdit,
-      handleSave
+      handleSave,
+      getPreviewUrl
     }
   }
 }
