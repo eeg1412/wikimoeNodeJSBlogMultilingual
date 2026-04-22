@@ -1,0 +1,28 @@
+<h1 class="page-title"><%= pageTitle || '足迹' %></h1>
+<div class="ol-map-container">
+  <div id="<%= mapDomId || 'ol-map' %>" class="ol-map" tabindex="0"></div>
+  <div id="<%= popupDomId || 'ol-popup' %>" class="ol-popup" style="display:none;">
+    <button id="<%= popupCloseDomId || 'ol-popup-close' %>" class="ol-popup-close">&times;</button>
+    <div id="<%= popupContentDomId || 'ol-popup-content' %>"></div>
+  </div>
+</div>
+
+<% if (locations && locations.length) { %>
+<div class="footprints-list">
+  <div class="footprints-list-title"><%= locationsTitle || '所有足迹' %><small><%= locationsMeta || `(${locations.length} 个地点)` %></small></div>
+  <div class="footprints-grid">
+    <% locations.forEach(location => { %>
+    <a class="footprints-grid-item" href="<%= location.href %>">
+      <span><%= location.label || location.title %></span>
+      <% if (typeof location.count === 'number') { %><span class="footprints-count"><%= location.count %></span><% } %>
+    </a>
+    <% }) %>
+  </div>
+</div>
+<% } %>
+
+<% if (footprintsMap) { %>
+<script>
+window.__WIKIMOE_FOOTPRINTS__ = <%- JSON.stringify(footprintsMap) %>
+</script>
+<% } %>

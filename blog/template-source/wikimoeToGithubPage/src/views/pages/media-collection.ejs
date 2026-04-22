@@ -1,0 +1,22 @@
+<h1 class="page-title"><%= pageTitle %><% if (pageTitleMeta) { %><small><%= pageTitleMeta %></small><% } %></h1>
+<% if (groups && groups.length) { %>
+  <% groups.forEach(group => { %>
+  <% if (group.title) { %><div class="media-season-header"><%= group.title %></div><% } %>
+  <div class="media-list">
+    <% group.items.forEach(item => { %>
+    <%- include('../components/media-card', { item }) %>
+    <% }) %>
+  </div>
+  <% }) %>
+<% } else if (items && items.length) { %>
+<div class="media-list">
+  <% items.forEach(item => { %>
+  <%- include('../components/media-card', { item }) %>
+  <% }) %>
+</div>
+<% } else { %>
+<div class="empty-state">暂无条目</div>
+<% } %>
+<% if (paginationHtml) { %>
+<%- paginationHtml %>
+<% } %>

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="<%= seo?.lang || seo?.htmlLang || 'zh-CN' %>">
+<head>
+  <%- include('../partials/head', { site, seo, assets, page }) %>
+</head>
+<body class="<%= page?.bodyClass || '' %>" data-page-type="<%= page?.type || 'page' %>">
+  <%- include('../partials/header', { site, page, nav, currentPath }) %>
+  <main>
+    <div class="container">
+      <% if (page?.template) { %>
+      <%- include(page.template, page.data || {}) %>
+      <% } else { %>
+      <%- body %>
+      <% } %>
+    </div>
+  </main>
+  <%- include('../partials/footer', { site }) %>
+  <%- include('../partials/page-scripts', { assets, page, scriptsData }) %>
+</body>
+</html>

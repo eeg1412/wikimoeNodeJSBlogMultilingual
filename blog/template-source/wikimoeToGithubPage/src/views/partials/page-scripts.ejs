@@ -1,0 +1,18 @@
+<script>
+document.getElementById('copyright-year').textContent = new Date().getFullYear()
+</script>
+<script src="<%= assets.glightboxJsUrl %>"></script>
+<script type="module" src="<%= assets.siteJsUrl %>"></script>
+<% if (page.enableHighlight) { %>
+<script src="<%= assets.highlightJsUrl %>"></script>
+<script type="module" src="<%= assets.postDetailJsUrl %>"></script>
+<% } %>
+<% if (page.includeFootprintsMap) { %>
+<script src="<%= assets.openlayersJsUrl %>"></script>
+<script type="module" src="<%= assets.footprintsMapJsUrl %>"></script>
+<% } %>
+<% if (page.extraInlineScript) { %>
+<script>
+<%- page.extraInlineScript %>
+</script>
+<% } %>

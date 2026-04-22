@@ -1,0 +1,51 @@
+<%
+  const isTweet = post?.isTweet || post?.kind === 'tweet' || post?.type === 2
+  const typeLabel = post?.typeLabel || (isTweet ? '推文' : '博文')
+  const typeClass = post?.typeClass || (isTweet ? 'tweet' : 'blog')
+%>
+<article class="post-detail">
+  <div class="post-header">
+    <% if (post?.title) { %>
+    <h1><%= post.title %></h1>
+    <% } %>
+    <div class="post-meta">
+      <span class="post-type-badge <%= typeClass %>"><%= typeLabel %></span>
+      <% if (post?.authorText || post?.authorName) { %><span>作者：<%= post.authorText || post.authorName %></span><% } %>
+      <% if (post?.dateText) { %><span>时间：<time datetime="<%= post.dateTime || '' %>"><%= post.dateText %></time></span><% } %>
+      <% if (post?.category || (post?.sortName && post?.sortUrl)) { %>
+      <% const category = post.category || { href: post.sortUrl, label: post.sortName } %>
+      <span>分类：<a href="<%= category.href %>"><%= category.label %></a></span>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="post-content">
+    <% if (isTweet) { %>
+    <div class="tweet-detail-text"><%- post?.tweetHtml || '' %></div>
+    <% if (post?.contentSections?.length) { %>
+    <%- include('../components/content-series', { sections: post.contentSections }) %>
+    <% } else if (post?.mediaItems?.length) { %>
+    <%- include('../components/media-grid', { mediaItems: post.mediaItems, galleryKey: post.galleryKey || post.slug || post.id }) %>
+    <% } %>
+    <%- post?.inlineSectionsHtml || '' %>
+    <% } else { %>
+    <div class="rich-content"><%- post?.contentHtml || post?.richContentHtml || '' %></div>
+    <% } %>
+  </div>
+
+  <% if (post?.sourceUrl) { %>
+  <div class="post-source">原文：<a href="<%= post.sourceUrl %>" target="_blank" rel="noopener noreferrer"><%= post.sourceUrl %></a></div>
+  <% } %>
+
+  <%- include('../components/tags-and-mappoints', { tags: post?.tags || [], mappoints: post?.mappoints || [] }) %>
+
+  <% if (post?.relatedPanels?.length) { %>
+  <% post.relatedPanels.forEach(panel => { %>
+  <%- include('../components/entity-panel', { panel }) %>
+  <% }) %>
+  <% } %>
+
+  <div class="post-footer">
+    <a href="<%= post?.backHref || backHref || '/' %>">&laquo; 返回列表</a>
+  </div>
+</article>

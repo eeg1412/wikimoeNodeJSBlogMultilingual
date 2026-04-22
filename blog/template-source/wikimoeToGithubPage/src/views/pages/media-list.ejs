@@ -1,0 +1,16 @@
+<h1 class="page-title"><%= pageTitle %><small><%= countText %></small></h1>
+<div class="media-list-wrap">
+  <% for (const group of groups || []) { %>
+    <% if (group.label) { %>
+    <div class="media-season-header"><%= group.label %></div>
+    <% } %>
+    <div class="media-list">
+      <% for (const card of group.items || []) { %>
+      <%- include('../components/media-card', { card }) %>
+      <% } %>
+    </div>
+  <% } %>
+</div>
+<% if (paginationHtml) { %>
+<%- paginationHtml %>
+<% } %>

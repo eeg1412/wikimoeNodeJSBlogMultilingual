@@ -1,0 +1,24 @@
+<% if (vote) { %>
+<div class="vote-card">
+  <div class="vote-header">
+    <div class="vote-title"><%= vote.title || '投票' %></div>
+  </div>
+  <div class="vote-body">
+    <% (vote.options || []).forEach(option => { %>
+    <div class="vote-option">
+      <div class="vote-option-header">
+        <span class="vote-option-title"><%= option.title %></span>
+        <span class="vote-option-votes"><%= option.votesText || '0票' %></span>
+      </div>
+      <div class="vote-option-bar">
+        <div class="vote-option-bar-inner<%= option.isMax ? ' max-vote' : '' %>" style="width: <%= option.percentage || 0 %>%"></div>
+      </div>
+    </div>
+    <% }) %>
+  </div>
+  <% if (vote.statusText) { %>
+  <div class="vote-footer"><%= vote.statusText %></div>
+  <% } %>
+  <div class="vote-note">以上数据仅供结果展示</div>
+</div>
+<% } %>

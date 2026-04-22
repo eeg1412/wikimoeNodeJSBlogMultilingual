@@ -1,0 +1,49 @@
+<% if (mediaItems && mediaItems.length) { %>
+<% if (mediaItems.length === 1) { %>
+<%
+  const item = mediaItems[0]
+  const styleParts = []
+  if (item.wrapperStyle) styleParts.push(item.wrapperStyle)
+  if (item.containerStyle) styleParts.push(item.containerStyle)
+  if (item.aspectRatio) styleParts.push(`aspect-ratio:${item.aspectRatio}`)
+  const styleAttr = styleParts.length ? ` style="${styleParts.join(';')}"` : ''
+%>
+<div class="single-media-wrap<%= item.isPortrait ? ' is-portrait' : '' %>"<%- styleAttr %>>
+  <a
+    class="single-media-inner<%= item.isVideo ? ' media-play-btn glightbox' : ' glightbox' %>"
+    href="<%= item.fullUrl %>"
+    <% if (item.galleryGroup || galleryKey) { %>data-gallery="<%= item.galleryGroup || galleryKey %>"<% } %>
+    <% if (item.isVideo) { %>data-type="video"<% } %>
+    <% if (item.isPanorama) { %>data-type="panorama360"<% } %>
+    <% if (item.description) { %>data-description="<%= item.description %>"<% } %>
+  >
+    <% if (item.thumbUrl || item.imageUrl || item.fullUrl) { %>
+    <img src="<%= item.thumbUrl || item.imageUrl || item.fullUrl %>" alt="<%= item.alt || '' %>" loading="lazy">
+    <% } %>
+    <% if (item.description) { %>
+    <span class="media-desc-tag" data-desc="<%= item.description %>">描述</span>
+    <% } %>
+  </a>
+</div>
+<% } else { %>
+<div class="media-grid">
+  <% mediaItems.forEach(item => { %>
+  <a
+    class="media-item<%= item.isVideo ? ' media-play-btn' : '' %> glightbox"
+    href="<%= item.fullUrl %>"
+    <% if (item.galleryGroup || galleryKey) { %>data-gallery="<%= item.galleryGroup || galleryKey %>"<% } %>
+    <% if (item.isVideo) { %>data-type="video"<% } %>
+    <% if (item.isPanorama) { %>data-type="panorama360"<% } %>
+    <% if (item.description) { %>data-description="<%= item.description %>"<% } %>
+  >
+    <% if (item.thumbUrl || item.imageUrl || item.fullUrl) { %>
+    <img src="<%= item.thumbUrl || item.imageUrl || item.fullUrl %>" alt="<%= item.alt || '' %>" loading="lazy">
+    <% } %>
+    <% if (item.description) { %>
+    <span class="media-desc-tag" data-desc="<%= item.description %>">描述</span>
+    <% } %>
+  </a>
+  <% }) %>
+</div>
+<% } %>
+<% } %>

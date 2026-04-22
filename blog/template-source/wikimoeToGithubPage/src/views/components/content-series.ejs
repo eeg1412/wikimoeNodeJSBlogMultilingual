@@ -1,0 +1,35 @@
+<% for (const section of sections || []) { %>
+<div class="content-series-section content-series-<%= section.kind %>">
+  <% if (section.kind === 'events') { %>
+    <% for (const eventItem of section.items || []) { %>
+    <div class="event-item">
+      <span class="event-type-badge" style="background-color: <%= eventItem.typeColor %>"><%= eventItem.typeName %></span>
+      <span class="event-title"><%= eventItem.title %></span>
+    </div>
+    <% } %>
+  <% } else if (section.kind === 'votes') { %>
+    <% for (const vote of section.items || []) { %>
+    <%- include('./vote-readonly-card', { vote }) %>
+    <% } %>
+  <% } else if (section.kind === 'links') { %>
+    <% for (const linkItem of section.items || []) { %>
+    <a class="content-link-item" href="<%= linkItem.href %>">
+      <%= linkItem.title %>
+      <% if (linkItem.meta) { %>
+      <div class="content-link-meta"><%= linkItem.meta %></div>
+      <% } %>
+    </a>
+    <% } %>
+  <% } else if (section.kind === 'media-cards') { %>
+    <div class="media-list">
+      <% for (const card of section.items || []) { %>
+      <%- include('./media-card', { card }) %>
+      <% } %>
+    </div>
+  <% } else if (section.kind === 'media-grid') { %>
+    <%- include('./media-grid', { mediaItems: section.items }) %>
+  <% } else if (section.kind === 'raw-html') { %>
+    <%- section.html %>
+  <% } %>
+</div>
+<% } %>

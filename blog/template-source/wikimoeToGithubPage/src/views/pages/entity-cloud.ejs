@@ -1,0 +1,15 @@
+<h1 class="page-title"><%= pageTitle %><% if (pageTitleMeta) { %><small><%= pageTitleMeta %></small><% } %></h1>
+<div class="cloud-list">
+  <% if (items && items.length) { %>
+  <% items.forEach(item => { %>
+  <a class="cloud-item" href="<%= item.href %>">
+    <span><%= item.label %></span>
+    <% if (typeof item.count === 'number') { %>
+    <span class="cloud-count"><%= item.count %></span>
+    <% } %>
+  </a>
+  <% }) %>
+  <% } else { %>
+  <div class="empty-state">暂无条目</div>
+  <% } %>
+</div>

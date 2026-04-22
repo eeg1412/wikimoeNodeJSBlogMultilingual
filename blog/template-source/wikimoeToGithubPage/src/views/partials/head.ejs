@@ -1,0 +1,43 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= seo?.title || site?.title || '' %></title>
+<meta name="description" content="<%= seo?.description || site?.description || '' %>">
+<meta name="keywords" content="<%= seo?.keywords || site?.keywords || '' %>">
+<meta name="author" content="<%= site?.author || '' %>">
+<% if (seo?.canonicalUrl || seo?.canonical) { %>
+<link rel="canonical" href="<%= seo?.canonicalUrl || seo?.canonical %>">
+<% } %>
+<link rel="stylesheet" href="<%= assets?.stylesheetUrl || assets?.templateCssPath || '/assets/blog.css' %>">
+<% if (page?.needsLightbox || page?.enableLightbox) { %>
+<link rel="stylesheet" href="<%= assets?.glightboxCssUrl || assets?.glightboxCssPath || '/glightbox/glightbox.min.css' %>">
+<% } %>
+<% if (page?.enableHighlight || page?.needsHighlight) { %>
+<link rel="stylesheet" href="<%= assets?.highlightCssUrl || assets?.highlightCssPath || '/highlight/style.css' %>">
+<% } %>
+<% if (seo?.rssUrl || site?.rssUrl) { %>
+<link rel="alternate" type="application/rss+xml" title="<%= site?.title || '' %>" href="<%= seo?.rssUrl || site?.rssUrl %>">
+<% } %>
+<meta property="og:title" content="<%= seo?.ogTitle || seo?.title || site?.title || '' %>">
+<meta property="og:description" content="<%= seo?.ogDescription || seo?.description || site?.description || '' %>">
+<meta property="og:type" content="<%= seo?.ogType || 'website' %>">
+<% if (seo?.canonicalUrl || seo?.canonical) { %>
+<meta property="og:url" content="<%= seo?.canonicalUrl || seo?.canonical %>">
+<% } %>
+<meta property="og:site_name" content="<%= site?.title || '' %>">
+<% if (seo?.ogImage) { %>
+<meta property="og:image" content="<%= seo.ogImage %>">
+<% } %>
+<% if (seo?.twitterCard) { %>
+<meta name="twitter:card" content="<%= seo.twitterCard %>">
+<% } %>
+<% if (seo?.hreflangs?.length) { %>
+<% seo.hreflangs.forEach(item => { %>
+<link rel="alternate" hreflang="<%= item.lang %>" href="<%= item.href %>">
+<% }) %>
+<% } %>
+<% if (seo?.structuredDataJson) { %>
+<script type="application/ld+json"><%- seo.structuredDataJson %></script>
+<% } %>
+<% if (seo?.extraHeadHtml) { %>
+<%- seo.extraHeadHtml %>
+<% } %>

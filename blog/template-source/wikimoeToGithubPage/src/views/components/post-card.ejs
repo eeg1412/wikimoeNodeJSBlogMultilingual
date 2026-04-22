@@ -1,0 +1,47 @@
+<%
+  const isTweet = post?.isTweet || post?.kind === 'tweet' || post?.type === 2
+  const typeLabel = post?.typeLabel || (isTweet ? '推文' : '博文')
+  const typeClass = post?.typeClass || (isTweet ? 'tweet' : 'blog')
+  const href = post?.href || post?.url || '/'
+%>
+<article class="post-card <%= isTweet ? 'tweet-card' : 'blog-card' %>" data-href="<%= href %>">
+  <div class="post-meta">
+    <span class="post-type-badge <%= typeClass %>"><%= typeLabel %></span>
+    <% if (post?.authorText || post?.authorName) { %><span class="post-author"><%= post.authorText || post.authorName %></span><% } %>
+    <% if (post?.dateText) { %><time class="post-date" datetime="<%= post.dateTime || '' %>"><%= post.dateText %></time><% } %>
+    <% if (post?.category || (post?.sortName && post?.sortUrl)) { %>
+    <% const category = post.category || { href: post.sortUrl, label: post.sortName } %>
+    <a class="post-category" href="<%= category.href %>"><%= category.label %></a>
+    <% } %>
+  </div>
+
+  <% if (isTweet) { %>
+  <div class="tweet-body">
+    <div class="tweet-text"><%- post?.tweetHtml || '' %></div>
+    <% if (post?.contentSections?.length) { %>
+    <%- include('./content-series', { sections: post.contentSections }) %>
+    <% } else if (post?.mediaItems?.length) { %>
+    <%- include('./media-grid', { mediaItems: post.mediaItems, galleryKey: post.galleryKey || post.slug || post.id }) %>
+    <% } %>
+    <%- post?.inlineSectionsHtml || '' %>
+  </div>
+  <%- include('./tags-and-mappoints', { tags: post?.tags || [], mappoints: post?.mappoints || [] }) %>
+  <div class="tweet-footer">
+    <a href="<%= href %>">查看详情 &rarr;</a>
+  </div>
+  <% } else { %>
+  <% if (post?.excerpt) { %>
+  <p class="post-excerpt"><%= post.excerpt %></p>
+  <% } %>
+  <%- include('./tags-and-mappoints', { tags: post?.tags || [], mappoints: post?.mappoints || [] }) %>
+  <a class="blog-card-panel" href="<%= href %>">
+    <div class="blog-card-cover">
+      <% if (post?.coverImage?.src || post?.coverImage) { %>
+      <% const coverImage = post.coverImage?.src ? post.coverImage : { src: post.coverImage, alt: post.title } %>
+      <img src="<%= coverImage.src %>" alt="<%= coverImage.alt || post?.title || '' %>" loading="lazy"<% if (coverImage.width && coverImage.height) { %> width="<%= coverImage.width %>" height="<%= coverImage.height %>"<% } %>>
+      <% } %>
+    </div>
+    <div class="blog-card-title"><%= post?.title || '无题' %></div>
+  </a>
+  <% } %>
+</article>

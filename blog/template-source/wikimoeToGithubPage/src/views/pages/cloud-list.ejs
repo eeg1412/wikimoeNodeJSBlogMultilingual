@@ -1,0 +1,11 @@
+<h1 class="page-title"><%= pageTitle %></h1>
+<div class="cloud-list">
+  <% for (const item of items || []) { %>
+  <a class="cloud-item" href="<%= item.href %>">
+    <span><%= item.label %></span>
+    <% if (item.countText) { %>
+    <span class="cloud-count"><%= item.countText %></span>
+    <% } %>
+  </a>
+  <% } %>
+</div>

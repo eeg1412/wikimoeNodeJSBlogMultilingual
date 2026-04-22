@@ -1,0 +1,52 @@
+<% if (card || item) { %>
+<% const mediaCard = card || item %>
+<div class="acgn-card">
+  <% if (mediaCard.coverSrc) { %>
+  <div class="acgn-cover">
+    <img src="<%= mediaCard.coverSrc %>" alt="<%= mediaCard.title || '' %>" loading="lazy">
+    <% if (typeof mediaCard.ratingPercent === 'number' ? mediaCard.ratingPercent > 0 : mediaCard.rating > 0) { %>
+    <% const ratingValue = typeof mediaCard.ratingPercent === 'number' ? mediaCard.ratingPercent : mediaCard.rating %>
+    <div class="acgn-rating">
+      <div class="acgn-rating-text">
+        <span><%= ratingValue %>分</span><span class="acgn-rating-sep"></span><span><%= mediaCard.ratingText || '' %></span>
+      </div>
+      <div class="acgn-rating-pbar">
+        <div class="acgn-rating-pbar-inner" style="width:<%= ratingValue %>%"></div>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="acgn-no-rating"><div class="acgn-no-rating-inner">暂无评分</div></div>
+    <% } %>
+  </div>
+  <% } %>
+  <div class="acgn-info">
+    <div class="acgn-title">
+      <% if (mediaCard.giveUpLabel || mediaCard.statusText) { %><span class="acgn-status-badge"><%= mediaCard.giveUpLabel || mediaCard.statusText %></span><% } %>
+      <% if (mediaCard.typeBadge) { %><span class="acgn-type-badge" style="background-color:<%= mediaCard.typeBadge.color %>"><%= mediaCard.typeBadge.label %></span><% } %>
+      <%= mediaCard.title || '' %>
+    </div>
+    <% const metaItems = mediaCard.metaItems || mediaCard.metaList || [] %>
+    <% if (metaItems.length) { %>
+    <div class="acgn-meta">
+      <% metaItems.forEach(metaItem => { %>
+      <span><%= metaItem %></span>
+      <% }) %>
+    </div>
+    <% } %>
+    <% if (mediaCard.summary) { %>
+    <div class="acgn-summary"><%= mediaCard.summary %></div>
+    <% } %>
+    <% const labelList = mediaCard.labels || mediaCard.labelList || [] %>
+    <% if (labelList.length) { %>
+    <div class="acgn-label">
+      <span class="acgn-label-prefix">标记：</span>
+      <div class="acgn-label-tags">
+        <% labelList.forEach(label => { %>
+        <span class="acgn-label-tag"><%= label %></span>
+        <% }) %>
+      </div>
+    </div>
+    <% } %>
+  </div>
+</div>
+<% } %>

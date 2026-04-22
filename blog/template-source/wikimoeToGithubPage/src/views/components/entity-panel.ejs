@@ -1,0 +1,15 @@
+<% if (panel && panel.items && panel.items.length) { %>
+<section class="entity-panel content-series-section">
+  <% if (panel.title) { %>
+  <h2 class="entity-panel-title"><%= panel.title %></h2>
+  <% } %>
+  <% if (panel.note) { %>
+  <p class="entity-panel-note"><%= panel.note %></p>
+  <% } %>
+  <div class="entity-panel-body">
+    <% panel.items.forEach(item => { %>
+    <%- item.html %>
+    <% }) %>
+  </div>
+</section>
+<% } %>

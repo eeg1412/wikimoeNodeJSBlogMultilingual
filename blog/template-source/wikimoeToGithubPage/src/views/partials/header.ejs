@@ -1,0 +1,41 @@
+<%
+  const mediaNav = nav?.mediaSections || site?.mediaNav || []
+  const homeUrl = site?.homeUrl || '/'
+  const footprintsUrl = nav?.footprintsUrl || site?.footprintsUrl
+  const categoriesUrl = nav?.categoriesUrl || site?.categoriesUrl
+  const tagsUrl = nav?.tagsUrl || site?.tagsUrl
+  const activeNav = page?.activeNav || currentPath || 'home'
+%>
+<header class="site-header">
+  <div class="container">
+    <h1><a href="<%= homeUrl %>"><%= site?.title || '' %></a></h1>
+    <% if (site?.subTitle || site?.description) { %>
+    <p class="site-desc"><%= site?.subTitle || site?.description %></p>
+    <% } %>
+    <nav class="site-nav">
+      <a href="<%= homeUrl %>" class="<%= activeNav === 'home' ? 'active' : '' %>">首页</a>
+      <% if (mediaNav.length) { %>
+      <div class="nav-dropdown">
+        <span class="nav-dropdown-trigger">页面 ▾</span>
+        <div class="nav-dropdown-menu">
+          <% mediaNav.forEach(item => { %>
+          <a href="<%= item.href %>"><%= item.label %></a>
+          <% }) %>
+        </div>
+      </div>
+      <% } %>
+      <% if (footprintsUrl) { %>
+      <a href="<%= footprintsUrl %>" class="<%= activeNav === 'footprints' ? 'active' : '' %>">足迹</a>
+      <% } %>
+      <% if (categoriesUrl) { %>
+      <a href="<%= categoriesUrl %>" class="<%= activeNav === 'categories' ? 'active' : '' %>">分类</a>
+      <% } %>
+      <% if (tagsUrl) { %>
+      <a href="<%= tagsUrl %>" class="<%= activeNav === 'tags' ? 'active' : '' %>">标签</a>
+      <% } %>
+      <% if (site?.rssUrl) { %>
+      <a href="<%= site.rssUrl %>">RSS</a>
+      <% } %>
+    </nav>
+  </div>
+</header>

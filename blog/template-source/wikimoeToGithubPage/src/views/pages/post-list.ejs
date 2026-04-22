@@ -1,0 +1,18 @@
+<% if (pageTitle) { %>
+<h1 class="page-title"><%= pageTitle %><% if (pageCountText || pageTitleMeta) { %><small><%= pageCountText || pageTitleMeta %></small><% } %></h1>
+<% } %>
+<% if (introHtml) { %>
+<div class="page-intro"><%- introHtml %></div>
+<% } %>
+<div class="post-list">
+  <% if (posts && posts.length) { %>
+  <% posts.forEach(post => { %>
+  <%- include('../components/post-card', { post }) %>
+  <% }) %>
+  <% } else { %>
+  <div class="empty-state">暂无内容</div>
+  <% } %>
+</div>
+<% if (paginationHtml) { %>
+<%- paginationHtml %>
+<% } %>
