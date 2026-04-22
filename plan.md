@@ -150,9 +150,9 @@ wikimoeNodeJSBlogMultilingual/
 - Query Service 直接读取本地 MongoDB，不允许博客端页面在服务端内部回环调用 /api/blog 自己的 HTTP 接口。
 - ViewModel 层负责把 posts、authors、sorts、tags、attachments 等实体整理成模板可直接消费的数据结构，避免在 EJS 中写复杂判断。
 - 模板层采用 layout + partial + page 三级拆分，至少包含 base layout、head、header、footer、post-card、post-detail、entity-panel、vote-readonly-card 等模板片段。
-- TailwindCSS 只承担样式生成，不承担路由、状态管理或数据获取职责；构建产物输出到 blog/public 或 server/public 下的静态目录，由 Express 统一托管。
-- Tailwind 的 content 扫描范围必须显式覆盖 blog/views/**/\*.ejs、blog/src/**/_.js 以及可能复用的 server/viewmodels/\*\*/_.js，避免 SSR 模板中的类名在构建时被错误裁剪。
-- 前台默认不引入客户端框架，仅保留少量原生脚本用于颜色模式切换、广告位延迟加载和必要的交互增强。
+- TailwindCSS 只承担样式生成，不承担路由、状态管理或数据获取职责；前台样式构建产物固定输出到 blog/public/assets/blog.css，由 Express 统一托管，不允许在 blog/public 和 server/public 之间二选一实现。
+- Tailwind 的 content 扫描范围固定为 blog/views/**/\*.ejs、blog/src/**/_.js、server/viewmodels/\*\*/_.js；若后续模板类名进入其他目录，必须先修改本计划后再扩展扫描范围，不允许实现时自行猜测。
+- 前台不引入客户端框架；一期只允许原生脚本处理颜色模式切换和广告位延迟加载，不允许额外加入页面级 hydration、前台状态管理、客户端路由或“必要交互增强”这类未定义范围的脚本逻辑。
 - 页面首屏内容必须由服务端完整输出，前台 JSON 接口仅作为补充能力，不作为首屏渲染主链路。
 
 ## 4. 数据模型设计
@@ -161,7 +161,7 @@ wikimoeNodeJSBlogMultilingual/
 
 除 adminUsers、importJobs、aiTranslationLogs、translationMemories 外，其余多语言业务集合统一遵守以下规则：
 
-- 除翻译站附件外，其余业务集合原则上都必须包含 sourceId 字段，用于记录原站对应实体 ID。
+- 除 attachments 集合中 attachmentSourceType=localized 的记录外，其余受本节约束的业务集合都必须包含 sourceId 字段，用于记录原站对应实体 ID；本计划不存在其他 sourceId 例外集合。
 - 必须包含 languageCode 字段，值只允许 en、jp、tw。
 - 必须包含 sourceSnapshot 字段，用于保存最近一次来源快照。原站同步实体保存经过“原站内部 URL 相对化”后的快照，翻译站附件保存本地上传快照。
 - 必须包含 sourceHash 字段，用于检测来源内容是否变化。原站同步实体保存相对路径归一化后的原文哈希，翻译站附件保存文件与元数据哈希。
@@ -279,7 +279,7 @@ wikimoeNodeJSBlogMultilingual/
 索引：
 
 - sourceId + languageCode 唯一索引。
-- languageCode + alias 普通唯一索引，空 alias 允许为空。
+- languageCode + alias 唯一索引；当 alias 为空时不写入该字段，不参与唯一约束，不允许以空字符串占位。
 
 规则：
 
@@ -851,7 +851,9 @@ votes 额外规则：
 
 - type 必须为 1 或 2。
 - languageCode 必须为 en、jp、tw。
-- title、excerpt、content 必须满足类型要求。
+- title 必须为去首尾空白后的非空字符串。
+- excerpt 必须为字符串；允许为空字符串，但不允许为 null、数组、对象或其他非字符串类型。
+- content 必须为字符串；在 HTML 安全清洗完成后，正文必须仍然至少包含可见文本节点、合法媒体节点或合法只读关联信息节点之一。
 - alias 必须存在且在当前 languageCode 下唯一。
 - author 必须存在且 translationStatus 为 approved 或 not_required。
 - sort 必须存在且 translationStatus 为 approved 或 not_required。
@@ -923,7 +925,11 @@ votes 额外规则：
 
 说明：
 
-- 路由命名、分页模式、列表逻辑尽量与原博客保持一致。
+- 路由命名、分页模式、type 过滤语义和列表筛选行为以本节列出的路径与参数规则为唯一实现依据；若原博客实现与本计划不一致，以本计划为准，不允许额外补充同义路径。
+- :page 缺失时默认按 1 处理，只允许正整数。
+- :type 缺失时表示同时查询 type=1 和 type=2；若提供值，则只允许 1 或 2。
+- :id 在详情页中先按当前 languageCode 下的 posts.alias 查询，未命中再按当前语言文章本地 \_id 查询；前台详情路由不允许把 sourceId 暴露为公开路径参数。
+- :sortid、:tagid、:mappointid 只按当前 languageCode 下的本地实体 \_id 解析，不允许跨语言复用 sourceId 作为前台列表路由参数。
 - 详情页只支持 post 和 tweet。
 - page 详情页一期不提供。
 
@@ -954,7 +960,7 @@ votes 额外规则：
 - 若文章包含 voteList 或 contentVoteList，只允许渲染只读投票信息卡片，不允许渲染可选择项、提交按钮和结果写入逻辑。
 - 若正文或实体中包含原站相对路径资源，前台必须通过统一 resolver 在运行时拼接 system.sourceBlogPublicOrigin。
 - 博客端不提供语言切换器；访问什么语言路径，就只渲染该语言内容。
-- 若复用原组件，必须用 feature flag 显式关闭这些区域，不能依赖样式隐藏。
+- 若复用原组件或原模板结构，互动相关区域必须在服务端模板分支层直接不渲染，不允许引入单独 feature flag 系统，也不能依赖样式隐藏或前端脚本卸载。
 
 ### 9.6 SEO 与缓存规则
 
@@ -1067,6 +1073,11 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - GET /api/blog/tag/detail?lang=en&id=tagid
 - GET /api/blog/mappoint/detail?lang=en&id=mappointid
 
+参数语义固定为：
+
+- post/detail 的 id 解析顺序与第 9.3 节详情页一致：先 alias，后当前语言文章本地 \_id，不允许接受 sourceId。
+- sort/detail、tag/detail、mappoint/detail 的 id 只接受当前 languageCode 下的本地实体 \_id，不接受 sourceId，不做跨语言回退。
+
 明确不提供的公开写接口：
 
 - comment/create
@@ -1081,11 +1092,20 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 配置必须拆成四层：启动引导 env、后台系统配置、站点展示配置、代码常量。判断标准很简单：缺失后会导致服务无法启动的，才允许进入 env；缺失后只是某项业务暂不可用或需要后台补齐的，必须放到后台配置，不允许偷懒塞进 env。
 
-数据库配置建议采用带命名空间和可见性控制的 settings/options 结构：
+本计划中的 example.env 不是“通用部署模板”，而只是“启动引导最小样例”。生成器、实现者或后续 AI 不允许因为原项目存在更多运行参数，就把旧项目的 env 变量整包迁移到本项目的 example.env。
+
+数据库配置固定采用带命名空间和可见性控制的 settings/options 结构：
 
 - system.\*：后台可改、仅服务端可读、可包含敏感字段。
 - site.\*：后台可改、服务端可读、其中允许前台消费的字段可进入模板渲染或 /api/blog/options。
 - isSecret=true 的字段必须密文存储、后台接口只返回掩码值、操作日志记录更新人和更新时间。
+
+强制实现边界：
+
+- 根目录 env 体系只承担第 11.1 节定义的 5 个启动引导级键；本项目不设计第二套“业务 env”“前台公开 env”或“子应用专属 env”作为配置来源。
+- 除第 11.1 节定义的 5 个键外，服务端、管理端、博客端代码都不得把 process.env 作为业务配置读取入口；不得新增 SOURCE*BLOG*_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、NUXT*_、NITRO\__、NUXT*PUBLIC*_、VITE\__ 一类同义变量作为旁路配置源。
+- 第 11.2 节和第 11.3 节中的默认值只能通过数据库初始化逻辑写入 settings/options 集合，不允许通过 env 回填，不允许通过第二份配置文件回填，也不允许在运行时偷偷退回硬编码业务值。
+- 若第 11.2 节或第 11.3 节中的某项配置尚未设置，系统行为只能是“服务可启动，但对应功能显式不可用或按数据库默认记录运行”，不允许自动改读 env 兜底。
 
 ### 11.1 启动引导级 env
 
@@ -1099,9 +1119,12 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 说明：
 
-- PORT、JSON_LIMIT、URLENCODED_LIMIT、日志大小上限等存在合理默认值的运行参数，不列为“必须 env”，可在实现时作为可选覆盖项处理。
+- example.env 中只允许出现以上 5 个赋值键。允许写注释，但不允许出现重复键、不允许出现空壳占位键、不允许追加第 11.2 节、第 11.3 节和第 11.5 节中的任何键。
+- PORT、JSON_LIMIT、URLENCODED_LIMIT、日志大小上限等运行参数不属于启动引导 env。它们在一期实现中固定由代码默认配置层处理，不出现在 example.env；任何实现若想把这些项重新开放为 env，必须先修改本计划，不能自行扩展。
 - 后台 JWT 密钥不进入 env，不进入数据库，不进入 example.env，而是固定采用 secret 目录下的密钥文件机制。
 - 原站数据源、AI 翻译、站点 SEO、广告等业务配置均不属于启动引导项，不能放在 env。
+- 因博客端已改为单 Express 进程内的 EJS SSR，本项目不存在 Nuxt/Nitro 独立运行时配置，也不存在 Vite 前台公开 env 方案；任何 NUXT*\*、NITRO*_、NUXT*PUBLIC*_、VITE\_\* 变量出现在 example.env 都视为违反本计划。
+- 以下键名或同类键名出现在 example.env，均视为错误实现：SOURCE_BLOG_API_BASE_URL、SOURCE_BLOG_PUBLIC_ORIGIN、GEMINI_API_KEY、GEMINI_MODEL、GEMINI_THINKING_BUDGET、AI_GATEWAY_URL、JWT_SECRET_ADMIN、LOCAL_ATTACHMENT_PUBLIC_BASE_PATH、SITE_URL、SITE_TITLE、GOOGLE_AD_CLIENT_ID。
 
 ### 11.2 后台系统配置
 
@@ -1132,6 +1155,9 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - system.aiApiKey、system.aiGatewayUrl 等敏感字段必须支持单独更新、掩码回显和审计日志。
 - 若 system.sourceBlogApiBaseUrl 或 system.aiApiKey 未配置，系统仍可启动，但相关导入或翻译功能必须在后台显式提示“未配置，不可用”。
 - system.adminTokenDefaultTtlHours、system.adminTokenRememberMeTtlDays、system.adminLoginAttemptWindowMinutes、system.adminLoginMaxAttempts 属于安全策略配置，只允许高权限管理员修改。
+- 本节中的“可选”只表示该数据库字段允许为空或按数据库默认记录运行，不表示允许迁移到 env，也不表示允许新增第二配置源。
+- 第 11.2 节中的字段不得以平铺 env 变量形式出现在 example.env，也不得在代码中通过同义 process.env 键读取；初始化值一律通过数据库初始化逻辑写入。
+- 除本计划已经显式给出默认值的字段外，数据库初始化器不得臆造真实业务值；原站接口地址、原站公开域名、AI API Key、AI 模型名、AI 网关地址、广告参数等在首次初始化时都必须保持“未配置”状态，由管理员后续填写。
 
 ### 11.3 站点展示与运营配置
 
@@ -1165,6 +1191,8 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 本项目明确不需要 logo 图片，因此不设计 siteLogo、siteDarkLogo 一类配置。
 - site.url 用于 canonical、hreflang、sitemap 等 SEO 输出，不属于启动引导项。
 - 站点展示配置允许后台即时修改并生效，不应要求重启服务。
+- 第 11.3 节中的字段若需要首次默认值，必须由数据库初始化逻辑写入 site._ 记录，不允许回退为 SITE\__、VITE\_\* 或其他 env 变量。
+- 除本计划已经显式给出默认值的字段外，site.\* 初始化时不得猜测站点标题、站点域名、广告位参数或其他运营值；缺什么就保持空值或关闭状态，等待后台填写。
 
 ### 11.4 固定写在代码常量中的内容
 
@@ -1230,7 +1258,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - [ ] 按原项目结构创建 admin、blog、server、common 四层目录。
 - [ ] 建立博客端 EJS 模板目录、Tailwind 构建目录和静态资源目录。
 - [ ] 锁定 ejs 5.0.2、tailwindcss 3.4.17，并确定 Tailwind content 扫描范围覆盖 EJS 模板与相关 ViewModel 文件。
-- [ ] 创建根 package.json、build-all.js、README 草稿、example.env。
+- [ ] 创建根 package.json、build-all.js、README 草稿、example.env，其中 example.env 只能包含第 11.1 节定义的 5 个启动引导级键，且不得为 system._、site._ 或安全策略补充任何旁路 env。
 - [ ] 复制并适配原项目可复用的公共组件和工具函数。
 - [ ] 建立 server/secret 目录约定、管理员 JWT 密钥文件 ensure 逻辑与密钥轮换入口设计。
 - [ ] 将后台路由基座统一改为 /multilingual-admin。
@@ -1240,9 +1268,9 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 - [ ] 在 common/validation 中建立 Joi schema。
 - [ ] 将 import、post update、publish、shared entity update、settings update 全部接入 Joi。
-- [ ] 建立服务端 env 加载器与必填项校验器。
-- [ ] 建立带命名空间的 settings/options 初始化逻辑、默认值和密文字段存储方案。
-- [ ] 初始化原站数据源、AI 翻译、站点 SEO、广告和默认语言配置项。
+- [ ] 建立服务端 env 加载器与必填项校验器，只读取第 11.1 节定义的启动引导级键，并拒绝把其他业务键接入 process.env 读取链路。
+- [ ] 建立带命名空间的 settings/options 初始化逻辑、默认值和密文字段存储方案；第 11.2 节和第 11.3 节的默认值只能从这里写入数据库。
+- [ ] 初始化原站数据源、AI 翻译、站点 SEO、广告和默认语言配置项的数据库默认记录，不从 env 回填这些值，也不臆造原站地址、模型名、广告参数等真实业务值。
 - [ ] 建立安全响应头、中间件级鉴权链路与敏感配置掩码回显规则。
 - [ ] 建立 sourceUrlNormalizer 和 sourceAssetResolver，统一处理原站相对路径存储与运行时拼接。
 
@@ -1359,7 +1387,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - [ ] 编写 localized 附件上传安全校验测试。
 - [ ] 编写后台编辑流程端到端测试。
 - [ ] 编写前台多语言路由访问测试。
-- [ ] 完成 example.env。
+- [ ] 完成 example.env，并校对其只包含第 11.1 节定义的 5 个键，不得混入第 11.2 节、第 11.3 节、第 11.5 节或旧 Nuxt/Vite 项目的变量名。
 - [ ] 完成部署文档。
 - [ ] 完成与原站接口依赖说明文档。
 
@@ -1377,6 +1405,8 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 首次启动时若 server/secret/JWTSecretAdmin.key 不存在，系统会自动生成管理员 JWT 密钥文件并正常启动。
 - 后台重新生成管理员 JWT 密钥后，既有后台 token 会立即失效。
 - 后台登录在连续失败超限后会临时阻断，并且后台可查看 adminLoginLogs。
+- example.env 只包含 DB*HOST、LOCAL_ATTACHMENT_STORAGE_DIR、INIT_ADMIN_USERNAME、INIT_ADMIN_PASSWORD、INIT_ADMIN_NICKNAME 这 5 个启动引导级键，不包含任何 NUXT*_、NITRO\__、VITE*\*、SOURCE_BLOG*_、GEMINI\__、AI*GATEWAY_URL、JWT_SECRET_ADMIN、SITE*_ 或 GOOGLE*AD*_。
+- 服务端、管理端、博客端代码不会把第 11.2 节和第 11.3 节字段从 process.env 读取为业务配置来源。
 - 可以为 en、jp、tw 分别替换或上传各自语言专属的翻译站附件，且只影响对应语言文章。
 - 修改 system.sourceBlogPublicOrigin 后，不需要迁移数据库即可继续正确解析原站内部资源。
 - localized 附件上传会拒绝不在白名单内的 MIME、伪装文件头和路径穿越文件。
