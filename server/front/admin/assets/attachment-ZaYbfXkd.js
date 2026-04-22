@@ -1,1 +1,0 @@
-import{r as e}from"./index-CZrZpxJD.js";function o(t){return e.get("/attachment/list",{params:t})}function r(t,a){return e.put(`/attachment/update/${t}`,a)}function u(t,a){return e.post("/attachment/upload-localized",t,{headers:{"Content-Type":"multipart/form-data"},onUploadProgress:a})}export{r as a,o as g,u};
