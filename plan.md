@@ -83,6 +83,13 @@
 - 若 GitHub 源码中没有找到对应实现，不允许把猜测性的行为描述写入本计划，也不允许把“印象中的原项目行为”当作实现依据。
 - RichEditor5、列表与详情页结构、SEO 字段映射、server 侧工具函数、管理端公共组件等复用项，都必须以源码比对结果为准再落地。
 
+### 2.4 博客模板基线落点
+
+- 本项目已经在 blog/template-source/wikimoeToGithubPage/src 内固化一套由 wikimoeToGithubPage 模板链路分析提炼出的博客端模板源，作为后续 EJS SSR 落地的直接基线。
+- 该目录不是运行时视图目录，而是“界面结构、前台轻交互、媒体展示、足迹地图、只读投票、SEO 入口”的标准参考面；后续博客端实现必须先对齐该目录，再映射到运行时 blog/views、blog/public/assets 与 server/viewmodels。
+- 对博客端模板、DOM 结构、样式层级和轻量脚本的判断，默认优先以本仓库内的 blog/template-source/wikimoeToGithubPage/src 为直接执行依据；只有当该目录未覆盖某个细节时，才回查原项目源码继续比对。
+- blog/public/glightbox、blog/public/highlight、blog/public/openlayers 是与该模板源绑定的固定第三方静态资源基线，后续实现不得再改为 CDN 依赖、外部仓库路径引用或临时下载脚本。
+
 ## 3. 总体架构
 
 ## 3.1 目录结构
@@ -105,12 +112,23 @@ wikimoeNodeJSBlogMultilingual/
 │  ├─ postcss.config.js
 │  ├─ src/
 │  │  └─ styles/
+│  ├─ template-source/
+│  │  └─ wikimoeToGithubPage/
+│  │     └─ src/
+│  │        ├─ views/
+│  │        ├─ client/
+│  │        ├─ styles/
+│  │        └─ utils/
 │  ├─ views/
 │  │  ├─ layouts/
 │  │  ├─ partials/
 │  │  ├─ pages/
 │  │  └─ components/
 │  └─ public/
+│     ├─ assets/
+│     ├─ glightbox/
+│     ├─ highlight/
+│     └─ openlayers/
 ├─ server/
 │  ├─ package.json
 │  ├─ app.js
@@ -133,6 +151,8 @@ wikimoeNodeJSBlogMultilingual/
 - server 侧：路由注册模式、MongoDB utils 模式、JWT 工具、日志配置、缓存配置模式。
 - admin 侧：RichEditor5、RichEditorEventSelectorDialog、AttachmentsDialog、ResponsiveTable、ResponsiveTableColumn、IpInfoDisplay、DeviceInfoDisplay、axios API 封装层、登录页骨架。
 - blog 侧：文章卡片与详情页的视觉层级、SEO 字段映射规则、颜色模式交互约束、部分可拆分的样式 token 和通用 DOM 结构。
+- blog 模板侧：必须复用并持续维护 blog/template-source/wikimoeToGithubPage/src 这套模板源拆分结果，包括 layout、partial、component、page、client script、style baseline 与 view-model contract；后续新页面或重构页面时，不允许重新发明另一套无关的博客视觉体系。
+- blog 静态资源侧：GLightbox、highlight.js、OpenLayers 的本地静态目录必须保留在 blog/public 下，由 Express 统一托管，不允许改为运行时从外部地址拼装依赖。
 
 必须重写或显著改造的部分：
 
@@ -161,6 +181,9 @@ wikimoeNodeJSBlogMultilingual/
 - ViewModel 层负责把 posts、authors、sorts、tags、attachments 等实体整理成模板可直接消费的数据结构，避免在 EJS 中写复杂判断。
 - SEO ViewModel 与内容 ViewModel 必须同步生成，title、description、canonical、hreflang、open graph 和结构化数据不允许在模板层临时拼装。
 - 模板层采用 layout + partial + page 三级拆分，至少包含 base layout、head、header、footer、post-card、post-detail、entity-panel、vote-readonly-card 等模板片段。
+- 模板结构设计必须先对齐 blog/template-source/wikimoeToGithubPage/src/views 的拆分结果；运行时 blog/views 可以做端到端适配，但不允许背离这套模板基线重新组织页面骨架。
+- 前台允许的轻量脚本能力固定为：导航下拉、GLightbox 媒体灯箱、代码高亮与复制、足迹地图渲染；这些脚本必须以 blog/template-source/wikimoeToGithubPage/src/client 为基线实现，不允许额外扩展为前台状态管理系统。
+- 足迹地图、代码高亮和媒体灯箱依赖固定为 OpenLayers、highlight.js、GLightbox，资源来源固定为 blog/public/openlayers、blog/public/highlight、blog/public/glightbox。
 - TailwindCSS 只承担样式生成，不承担路由、状态管理或数据获取职责；前台样式构建产物固定输出到 blog/public/assets/blog.css，由 Express 统一托管，不允许在 blog/public 和 server/public 之间二选一实现。
 - Tailwind 的 content 扫描范围固定为 blog/views/**/\*.ejs、blog/src/**/_.js、server/viewmodels/\*\*/_.js；若后续模板类名进入其他目录，必须先修改本计划后再扩展扫描范围，不允许实现时自行猜测。
 - 前台不引入客户端框架；一期只允许原生脚本处理颜色模式切换和广告位延迟加载，不允许额外加入页面级 hydration、前台状态管理、客户端路由或“必要交互增强”这类未定义范围的脚本逻辑。
@@ -993,11 +1016,14 @@ votes 额外规则：
 - layouts/base.ejs：统一 head、主题 class、公共 meta、静态资源引入。
 - partials/head.ejs：title、description、canonical、hreflang、open graph、结构化数据入口。
 - partials/header.ejs 与 partials/footer.ejs：站点级公共框架，不提供语言切换器。
+- partials/page-scripts.ejs 或等价脚本入口：统一注入年份脚本、GLightbox、highlight.js、OpenLayers 与页面级轻量脚本。
 - components/post-card.ejs：普通文章与推文列表卡片。
-- components/post-meta.ejs：作者、发布日期、分类、标签、地点等元信息片段。
+- components/tags-and-mappoints.ejs：标签与地点链接片段。
+- components/media-grid.ejs：单图、多图、视频与全景媒体栅格。
 - components/entity-panel.ejs：bangumi、movie、game、book、event、vote 等关联信息块。
 - components/vote-readonly-card.ejs：只读投票卡片，明确无交互入口。
-- pages/home.ejs、pages/post-list.ejs、pages/post-detail.ejs：实际页面模板。
+- components/media-card.ejs：bangumi、movie、game、book 等媒体卡片。
+- pages/home.ejs、pages/post-list.ejs、pages/post-detail.ejs、pages/entity-cloud.ejs、pages/media-collection.ejs、pages/footprints.ejs：实际页面模板。
 
 模板设计要求：
 
@@ -1005,6 +1031,7 @@ votes 额外规则：
 - 原站相对路径资源在进入模板前必须先过 sourceAssetResolver，模板只消费可直接渲染的最终地址或解析结果。
 - EJS 默认必须使用转义输出；只有经过安全清洗且通过发布校验的 content HTML 字段允许使用非转义输出。
 - 移动端和暗黑模式为默认设计约束，不作为后补适配。
+- 若后续博客端实现与 blog/template-source/wikimoeToGithubPage/src 的模板源发生偏差，必须先回补 template-source 或先修改本计划，再进行运行时模板调整，不允许直接绕开模板源落地。
 
 ### 9.5 前台交互约束
 
@@ -1306,6 +1333,9 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - autoprefixer 10.x，与 TailwindCSS 3.4.17 配套。
 - EJS 模板体系，不引入 Nuxt、Nitro 或前台 SPA 框架。
 - 复用原项目中已验证的展示依赖与样式语言，但按 EJS 模板方式重组。
+- GLightbox，本地静态资源目录固定为 blog/public/glightbox。
+- highlight.js，本地静态资源目录固定为 blog/public/highlight。
+- OpenLayers，本地静态资源目录固定为 blog/public/openlayers。
 
 ## 13. 详细实施拆解
 
@@ -1313,9 +1343,11 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 
 - [ ] 按原项目结构创建 admin、blog、server 三层目录，并将公共规则按端内归位，不新增独立 common 层。
 - [ ] 建立博客端 EJS 模板目录、Tailwind 构建目录和静态资源目录。
+- [ ] 在 blog/template-source/wikimoeToGithubPage/src 中固化模板基线，至少包含 views、client、styles、utils 四层内容，供后续 SSR 实现持续对照。
 - [ ] 锁定 ejs 5.0.2、tailwindcss 3.4.17，并确定 Tailwind content 扫描范围覆盖 EJS 模板与相关 ViewModel 文件。
 - [ ] 创建根 package.json、build-all.js、README 草稿、example.env，其中 example.env 只能包含第 11.1 节定义的 5 个启动引导级键，且不得为 system._、site._ 或安全策略补充任何旁路 env。
 - [ ] 复制并适配原项目可复用的公共组件和工具函数。
+- [ ] 将 GLightbox、highlight.js、OpenLayers 的静态资源复制到 blog/public 对应目录，确保博客端运行时不依赖外部仓库目录或 CDN。
 - [ ] 建立 server/secret 目录约定、管理员 JWT 密钥文件 ensure 逻辑与密钥轮换入口设计。
 - [ ] 将后台路由基座统一改为 /multilingual-admin。
 - [ ] 在 server/constants 中建立语言、状态、类型、资源路径常量。
@@ -1462,6 +1494,8 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 富文本编辑器体验与原后台一致。
 - 正文 HTML 翻译不会破坏标签结构。
 - 博客端首屏页面由 EJS 服务端完整输出，不依赖 Nuxt 或前台 SPA hydration。
+- blog/template-source/wikimoeToGithubPage/src 中存在完整可读的模板基线文件，至少覆盖列表页、详情页、媒体卡片、只读投票、足迹地图、公共头尾和前台轻脚本。
+- blog/public/glightbox、blog/public/highlight、blog/public/openlayers 可独立提供模板所需静态资源，不依赖外部仓库目录或 CDN。
 - 首次启动时若 server/secret/JWTSecretAdmin.key 不存在，系统会自动生成管理员 JWT 密钥文件并正常启动。
 - 后台重新生成管理员 JWT 密钥后，既有后台 token 会立即失效。
 - 后台登录在连续失败超限后会临时阻断，并且后台可查看 adminLoginLogs。
@@ -1556,6 +1590,7 @@ EJS 页面渲染主链路直接读取本地服务层，不通过 HTTP 自调；/
 - 后台多语言列表统一采用“父级原始数据 + 子表格语言版本”的组表 UI。
 - 多语言文章全部采用 sourceId 分组，不允许脱离原文章分组单独漂移。
 - 前台公开页面只服务本地多语言数据，不在运行期回查原站文章接口。
+- 博客端界面与轻交互必须以 blog/template-source/wikimoeToGithubPage/src 为唯一直接基线，并使用 blog/public/glightbox、blog/public/highlight、blog/public/openlayers 作为固定第三方静态资源来源。
 - 原站作为导入数据源和远程附件来源存在，但所有原站内部资源都只存相对路径，由运行时按 system.sourceBlogPublicOrigin 拼接；多语言站同时支持本地翻译站附件，不依赖原站参与运行期渲染。
 
 ## 补充
