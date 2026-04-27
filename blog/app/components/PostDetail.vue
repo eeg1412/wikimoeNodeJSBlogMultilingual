@@ -356,7 +356,7 @@
         <div class="comment-list-body">
           <!-- 评论form -->
           <LazyCommentForm
-            :postid="postid"
+            :postid="sourcePostid"
             :allowRemark="postData.data.allowRemark"
             @refresh="refreshCommentList"
           />
@@ -558,7 +558,7 @@
                     <!-- 回复表单 -->
                     <LazyCommentForm
                       :id="`${item._id}-reply`"
-                      :postid="postid"
+                      :postid="sourcePostid"
                       :commentid="commentid"
                       :parentNickname="item.nickname || item.user?.nickname"
                       @refresh="refreshCommentList"
@@ -736,6 +736,7 @@ const runCode = () => {
   newWindow.document.write(runCodeContent)
 }
 const postid = postData.value.data._id
+const sourcePostid = postData.value.data.sourceId || postid
 // comment
 const commentPage = ref(1)
 const commentData = ref({
@@ -765,7 +766,7 @@ const changeCommentSort = type => {
 const getCommentList = async goToCommentListRef => {
   commentLoading.value = true
   await getCommentListApi({
-    id: postid,
+    id: sourcePostid,
     sorttype: commentSortType.value,
     page: commentPage.value
   })
@@ -918,7 +919,7 @@ const likeListInited = ref(false)
 const likeListLoading = ref(false)
 const likeList = ref([])
 const postLikeLogList = () => {
-  const postIdList = [postid]
+  const postIdList = [sourcePostid]
   likeListLoading.value = true
   postLikeLogListApi({ postIdList })
     .then(res => {
@@ -931,7 +932,7 @@ const postLikeLogList = () => {
     })
 }
 const checkIsLike = () => {
-  const likeData = likeList.value.find(item => item.post === postid)
+  const likeData = likeList.value.find(item => item.post === sourcePostid)
   if (likeData) {
     postData.value.data.isLike = likeData.like
     if (likeData.like && postData.value.data.likes === 0) {
@@ -941,7 +942,7 @@ const checkIsLike = () => {
   }
 }
 const getLikeDataByPostId = () => {
-  const likeData = likeList.value.find(item => item.post === postid)
+  const likeData = likeList.value.find(item => item.post === sourcePostid)
   if (likeData) {
     return likeData
   } else {
@@ -959,10 +960,12 @@ const likePost = () => {
   const __v = getLikeDataByPostId()?.__v
   likePostIsLoading.value = true
 
-  postLikeLogApi({ id: postid, like: !like, __v })
+  postLikeLogApi({ id: sourcePostid, like: !like, __v })
     .then(res => {
       // 将对应的likeList里的postId替换为res.data
-      const index = likeList.value.findIndex(item => item.post === postid)
+      const index = likeList.value.findIndex(
+        item => item.post === sourcePostid
+      )
       if (index > -1) {
         likeList.value[index] = res.data
       } else {

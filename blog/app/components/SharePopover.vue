@@ -67,6 +67,14 @@ const props = defineProps({
 const toast = useWToast()
 const emit = defineEmits(['shareadd'])
 
+const getSourcePostId = () => {
+  if (props.post.sourceId) {
+    return props.post.sourceId
+  }
+
+  return props.post._id
+}
+
 const copyText = text => {
   copyToClipboard(text, toast)
 }
@@ -190,7 +198,7 @@ const handleShare = platform => {
   }
 
   putShareCountApi({
-    id: props.post._id,
+    id: getSourcePostId(),
     sharePlatform: platform
   }).then(res => {
     if (res.add) {

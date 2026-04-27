@@ -37,8 +37,9 @@ module.exports = async function (req, res, next) {
       $in: newType
     }
   }
+  const isObjectIdInput = utils.isObjectId(id)
   // 判断id是否是ObjectId
-  if (utils.isObjectId(id)) {
+  if (isObjectIdInput) {
     // 根据id查询
     params._id = id
   } else {
@@ -56,14 +57,23 @@ module.exports = async function (req, res, next) {
     }
     params.alias = id
   }
-  // findOne
-  postUtils
-    .findOne(params, undefined, {
+  const findOptions = {
       authorFilter: 'nickname _id photo description cover',
       voteFliter:
         '_id endTime maxSelect showResultAfter title options.title options._id'
-    })
+    }
+  const findPostDetail = query => {
+    return postUtils.findOne(query, undefined, findOptions)
+  }
+  // findOne
+  findPostDetail(params)
     .then(async data => {
+      if (!data && isObjectIdInput) {
+        const sourceParams = { ...params }
+        delete sourceParams._id
+        sourceParams.sourceId = id
+        data = await findPostDetail(sourceParams)
+      }
       if (!data) {
         res.status(404).json({
           errors: [

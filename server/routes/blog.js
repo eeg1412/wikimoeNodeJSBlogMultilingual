@@ -1,6 +1,6 @@
 var express = require('express')
 var router = express.Router()
-const { checkJWTBlog, referrerRecord } = require('../utils/utils')
+const { referrerRecord } = require('../utils/utils')
 
 const checkIsReady = (req, res, next) => {
   const isReady = global.$isReady
@@ -24,28 +24,6 @@ const checkIsBackuping = (req, res, next) => {
 const referrerRecordMiddleware = (req, res, next) => {
   referrerRecord(req.headers.referer, 'blogApi')
   next()
-}
-
-// jwt权限校验
-const checkAuth = (req, res, next, typeName, token) => {
-  const jwtVersion = 1
-  if (!token) {
-    next()
-  } else {
-    const decoded = checkJWTBlog(token.split(' ')[1] || '')
-    // console.log(decoded)
-    if (!decoded.isError) {
-      if (decoded.data.version === jwtVersion) {
-        req[`${typeName}Decode`] = decoded.data
-      }
-    }
-    next()
-  }
-}
-
-const checkCommentRetractAuth = (req, res, next) => {
-  const token = req.headers['wm-comment-retract-authorization']
-  checkAuth(req, res, next, 'commentRetractAuth', token)
 }
 
 const blogRouteSetting = [
@@ -83,13 +61,6 @@ const blogRouteSetting = [
     middleware: [],
     controller: require('../api/blog/sidebar/getSidebarList')
   },
-  // getLatestComments
-  {
-    path: '/comment/latest',
-    method: 'get',
-    middleware: [],
-    controller: require('../api/blog/comment/getLatestComments')
-  },
   // getSortList
   // getSortList
   {
@@ -112,27 +83,6 @@ const blogRouteSetting = [
     middleware: [],
     controller: require('../api/blog/post/getPostDetail')
   },
-  // get getCommentList
-  {
-    path: '/comment/list',
-    method: 'get',
-    middleware: [],
-    controller: require('../api/blog/comment/getCommentList')
-  },
-  // post createComment
-  {
-    path: '/comment/create',
-    method: 'post',
-    middleware: [checkCommentRetractAuth],
-    controller: require('../api/blog/comment/createComment')
-  },
-  // post commentRetract
-  {
-    path: '/comment/retract',
-    method: 'post',
-    middleware: [checkCommentRetractAuth],
-    controller: require('../api/blog/comment/commentRetract')
-  },
   // put updatePostViewCount
   // put updatePostViewCount
   {
@@ -140,48 +90,6 @@ const blogRouteSetting = [
     method: 'put',
     middleware: [],
     controller: require('../api/blog/post/updatePostViewCount')
-  },
-  // put updatePostShareCount
-  {
-    path: '/post/share/count',
-    method: 'put',
-    middleware: [],
-    controller: require('../api/blog/post/updatePostShareCount')
-  },
-  // post createPostLikeLog
-  {
-    path: '/post/like/log',
-    method: 'post',
-    middleware: [],
-    controller: require('../api/blog/postLikeLog/createPostLikeLog')
-  },
-  // post getPostLikeLogList
-  {
-    path: '/post/like/log/list',
-    method: 'post',
-    middleware: [],
-    controller: require('../api/blog/postLikeLog/getPostLikeLogList')
-  },
-  // post createCommentLikeLog
-  {
-    path: '/comment/like/log',
-    method: 'post',
-    middleware: [],
-    controller: require('../api/blog/commentLikeLog/createCommentLikeLog')
-  },
-  // post getPostCommentLogList
-  {
-    path: '/comment/like/log/list',
-    method: 'post',
-    middleware: [],
-    controller: require('../api/blog/commentLikeLog/getPostCommentLogList')
-  },
-  // get getlinkList
-  {
-    path: '/link/list',
-    method: 'get',
-    middleware: [],
-    controller: require('../api/blog/link/getlinkList')
   },
   // getBangumiList
   {

@@ -1424,6 +1424,7 @@ function validateBlogApiSplit() {
   assertFileIncludes(sourcePath, [
     "'/options'",
     "'/comment/'",
+    "'/post/share/count'",
     "'/post/like/log'",
     "'/post/like/log/list'",
     "'/comment/like/log'",
@@ -1436,7 +1437,6 @@ function validateBlogApiSplit() {
     "'/post/archive'",
     "'/post/detail'",
     "'/post/view/count'",
-    "'/post/share/count'",
     "'/sort/'",
     "'/tag/'",
     "'/mappoint/'",
@@ -1639,13 +1639,6 @@ function validateBlogCacheAndVisitorStats() {
     'post',
     'updatePostViewCount.js'
   )
-  const updateSharePath = path.join(
-    serverDir,
-    'api',
-    'blog',
-    'post',
-    'updatePostShareCount.js'
-  )
   const trendPath = path.join(
     serverDir,
     'api',
@@ -1725,21 +1718,16 @@ function validateBlogCacheAndVisitorStats() {
     'routeOwnership: ROUTE_OWNERSHIP',
     "recordKind: 'translation'"
   ])
-  assertFileIncludes(updateSharePath, [
-    'normalizeLanguageCode(req.body.languageCode)',
-    'languageCode,',
-    'routeOwnership: ROUTE_OWNERSHIP',
-    "recordKind: 'translation'"
-  ])
   assertFileIncludes(trendPath, [
     'cacheDataUtils.getRequestLanguageCode(req)',
     'languageCache.trendPostListData',
     "routeOwnership: 'multilingual-blog'",
-    "$in: ['postView', 'postShare']",
+    "action: 'postView'",
     "recordKind: 'translation'"
   ])
   assertFileNotIncludes(trendPath, [
     "from: 'comments'",
+    'postShare',
     'postLike',
     'postDislike'
   ])
@@ -1763,8 +1751,8 @@ function validateBlogCacheAndVisitorStats() {
   ])
 
   assertFileNotIncludes(blogRoutePath, [
-    "path: '/options'",
     "path: '/comment/",
+    "path: '/post/share/count'",
     "path: '/post/like/log'",
     "path: '/comment/like/log'",
     "path: '/link/list'"

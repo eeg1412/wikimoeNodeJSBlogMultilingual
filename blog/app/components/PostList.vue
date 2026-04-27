@@ -214,16 +214,16 @@
                 class="dflex flexCenter cursor-pointer hover:text-primary-500 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-inset"
                 :class="item.isLike ? 'text-primary-500' : 'cGray94'"
                 tabindex="0"
-                @click.stop="likePost(item._id)"
+                @click.stop="likePost(item)"
                 @click.middle.stop
-                @keydown.enter.stop="likePost(item._id)"
+                @keydown.enter.stop="likePost(item)"
                 v-if="likeListInited"
               >
                 <!-- 加载 -->
                 <WUIIcon
                   class="mr5 post-list-info-bottom-icon animate-spin"
                   name="i-heroicons-arrow-path"
-                  v-if="getLikePostIsLoading(item._id)"
+                  v-if="getLikePostIsLoading(item)"
                 />
                 <!-- heart -->
                 <WUIIcon
@@ -673,14 +673,22 @@ const preventDefaultMiddleClick = e => {
 const likeListInited = ref(false)
 const likeListLoading = ref(false)
 const likeList = ref([])
+const getSourcePostId = post => {
+  if (post.sourceId) {
+    return post.sourceId
+  }
+
+  return post._id
+}
 const postLikeLogList = () => {
-  const postIdList = postsData.value.list.map(item => item._id)
+  const postIdList = postsData.value.list.map(item => getSourcePostId(item))
   likeListLoading.value = true
   postLikeLogListApi({ postIdList })
     .then(res => {
       likeList.value = res.list
       postsData.value.list.forEach((item, index) => {
-        const likeData = res.list.find(likeItem => likeItem.post === item._id)
+        const sourcePostId = getSourcePostId(item)
+        const likeData = res.list.find(likeItem => likeItem.post === sourcePostId)
         if (likeData && likeData.like) {
           if (item.likes === 0) {
             // 延迟补偿
@@ -714,21 +722,25 @@ const getLikeDataByPostId = postId => {
 
 const likePostIsLoading = reactive({})
 const getLikePostIsLoading = postId => {
-  return likePostIsLoading[postId] === true
+  const sourcePostId = getSourcePostId(postId)
+  return likePostIsLoading[sourcePostId] === true
 }
-const likePost = postId => {
-  if (likePostIsLoading[postId]) {
+const likePost = post => {
+  const sourcePostId = getSourcePostId(post)
+  if (likePostIsLoading[sourcePostId]) {
     return
   }
   // 如果找到了，判断里面的Like，没有就是false
-  let like = checkIsLike(postId)
-  const __v = getLikeDataByPostId(postId)?.__v
-  likePostIsLoading[postId] = true
+  let like = checkIsLike(sourcePostId)
+  const __v = getLikeDataByPostId(sourcePostId)?.__v
+  likePostIsLoading[sourcePostId] = true
 
-  postLikeLogApi({ id: postId, like: !like, __v })
+  postLikeLogApi({ id: sourcePostId, like: !like, __v })
     .then(res => {
       // 将对应的likeList里的postId替换为res.data
-      const index = likeList.value.findIndex(item => item.post === postId)
+      const index = likeList.value.findIndex(
+        item => item.post === sourcePostId
+      )
       if (index > -1) {
         likeList.value[index] = res.data
       } else {
@@ -737,7 +749,7 @@ const likePost = postId => {
       const newLike = res.data.like
       // postsData.value.list 找到对应的postId，将likes数量根据newLike加减
       const postIndex = postsData.value.list.findIndex(
-        item => item._id === postId
+        item => item._id === post._id
       )
 
       const post = postsData.value.list[postIndex]
@@ -760,7 +772,7 @@ const likePost = postId => {
       }
     })
     .finally(() => {
-      likePostIsLoading[postId] = false
+      likePostIsLoading[sourcePostId] = false
     })
 }
 

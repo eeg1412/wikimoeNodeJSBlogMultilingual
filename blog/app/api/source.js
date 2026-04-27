@@ -3,6 +3,7 @@ const SOURCE_BASE_URL = '/api/source-blog'
 export const SOURCE_ENDPOINT_PREFIXES = [
   '/options',
   '/comment/',
+  '/post/share/count',
   '/post/like/log',
   '/post/like/log/list',
   '/comment/like/log',

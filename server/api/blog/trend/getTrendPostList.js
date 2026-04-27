@@ -69,9 +69,7 @@ module.exports = async function (req, res, next) {
           {
             $match: {
               createdAt: { $gte: twentyFourHoursAgo.toDate() },
-              action: {
-                $in: ['postView', 'postShare']
-              },
+              action: 'postView',
               languageCode,
               routeOwnership: 'multilingual-blog',
               isBot: false
@@ -82,14 +80,7 @@ module.exports = async function (req, res, next) {
               _id: '$data.targetId',
               target: { $first: '$data.target' },
               hot: {
-                $sum: {
-                  $switch: {
-                    branches: [
-                      { case: { $eq: ['$action', 'postShare'] }, then: 71 }
-                    ],
-                    default: 13 // 其他情况下
-                  }
-                }
+                $sum: 13
               }
             }
           },

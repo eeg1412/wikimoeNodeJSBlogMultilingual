@@ -7,7 +7,6 @@ export const MULTILINGUAL_ENDPOINT_PREFIXES = [
   '/post/archive',
   '/post/detail',
   '/post/view/count',
-  '/post/share/count',
   '/sort/',
   '/tag/',
   '/mappoint/',
