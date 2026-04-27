@@ -1,10 +1,16 @@
 const postUtils = require('../../../mongodb/utils/posts')
 const utils = require('../../../utils/utils')
+const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const { ObjectId } = require('mongodb')
 
 module.exports = async function (req, res, next) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
   const id = req.query.id
   const type = req.query.type
   const randompost = req.query.randompost
@@ -19,6 +25,8 @@ module.exports = async function (req, res, next) {
     return
   }
   const params = {
+    languageCode,
+    recordKind: 'translation',
     status: 1
   }
   if (type && Array.isArray(type) && type.length > 0) {
@@ -105,7 +113,8 @@ module.exports = async function (req, res, next) {
         const sortId = jsonData.sort?._id
         if (sortId) {
           sortList.push(sortId)
-          const sortCache = global.$cacheData.sortList || []
+          const languageCache = cacheDataUtils.getLanguageCache(languageCode)
+          const sortCache = languageCache?.sortList || []
           // 遍历sortCache
           const sortCacheItem = sortCache.find(
             item => String(item._id) === String(sortId)
@@ -179,6 +188,8 @@ module.exports = async function (req, res, next) {
           const randomPostList = await postUtils.aggregate([
             {
               $match: {
+                languageCode,
+                recordKind: 'translation',
                 status: 1,
                 _id: {
                   $nin: nePostIdList

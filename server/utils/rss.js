@@ -3,11 +3,40 @@ const postUtils = require('../mongodb/utils/posts')
 const utils = require('./utils')
 const fs = require('fs')
 const path = require('path')
+const {
+  DEFAULT_LANGUAGE_CODE,
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('./language')
 const rssCacheFolder = './seo/rss'
 
-exports.updateRSS = async type => {
+function getPostUrl(siteUrl, languageCode, post) {
+  const pathType = post.type === 3 ? 'page' : 'post'
+  return `${siteUrl}/${languageCode}/index/${pathType}/${post.alias || post._id}`
+}
+
+async function cleanLanguageRss(languageCode) {
+  const rssPath = path.join(rssCacheFolder, languageCode)
+  try {
+    const files = await fs.promises.readdir(rssPath)
+    for (const file of files) {
+      await fs.promises.unlink(path.join(rssPath, file))
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+}
+
+exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
   const prmise = new Promise(async (resolve, reject) => {
-    console.info('creating rss:' + type)
+    const languageCode = normalizeLanguageCode(languageCodeInput)
+    if (!languageCode) {
+      return reject(new Error('LANGUAGE_CODE_UNSUPPORTED'))
+    }
+
+    console.info(`creating rss:${languageCode}:${type}`)
     const config = global.$globalConfig?.rssSettings || {}
     const { siteEnableRss, siteRssMaxCount, siteRssTweetTitleType } = config
     const siteSettings = global.$globalConfig?.siteSettings || {}
@@ -20,11 +49,13 @@ exports.updateRSS = async type => {
       siteTimeZone
     } = siteSettings
     if (siteEnableRss !== true) {
-      console.info(`rss:${type} not enabled`)
+      console.info(`rss:${languageCode}:${type} not enabled`)
       return resolve(null)
     }
 
     const params = {
+      languageCode,
+      recordKind: 'translation',
       status: 1,
       // type是1或者2
       type: {
@@ -61,18 +92,18 @@ exports.updateRSS = async type => {
       return reject('no data')
     }
     const { list } = data
-    let feedLinksRss = `${siteUrl}/rss`
+    let feedLinksRss = `${siteUrl}/${languageCode}/rss`
     if (type === 'blog') {
-      feedLinksRss = `${siteUrl}/rss/blog`
+      feedLinksRss = `${siteUrl}/${languageCode}/rss/blog`
     } else if (type === 'tweet') {
-      feedLinksRss = `${siteUrl}/rss/tweet`
+      feedLinksRss = `${siteUrl}/${languageCode}/rss/tweet`
     }
     const feed = new Feed({
       title: siteTitle,
       description: siteDescription,
       id: siteUrl,
-      link: siteUrl,
-      language: 'zh-CN',
+      link: `${siteUrl}/${languageCode}`,
+      language: languageCode,
       image: `${siteUrl}${siteLogo}`,
       favicon: `${siteUrl}${siteFavicon}`,
       generator: 'wikimoeBlog',
@@ -82,7 +113,7 @@ exports.updateRSS = async type => {
     })
     list.forEach(item => {
       const { title, excerpt, content, _id, author, type, date, alias } = item
-      const link = `${siteUrl}/post/${alias || _id}`
+      const link = getPostUrl(siteUrl, languageCode, item)
       // 注意如果用到作者的话，务必在更改作者的时候更新rss！！！
       let newTitle = title
       let newContent = content
@@ -147,17 +178,21 @@ exports.updateRSS = async type => {
             // 遍历contentPostList，以链接形式展示
             const contentPostList = item.contentPostList || []
             contentPostList.forEach(post => {
-              newContent += `<p><a href="${siteUrl}/post/${
-                post.alias || post._id
-              }" target="_blank">博文：${post.title}</a></p>`
+              newContent += `<p><a href="${getPostUrl(
+                siteUrl,
+                languageCode,
+                post
+              )}" target="_blank">博文：${post.title}</a></p>`
             })
           } else if (typeName === 'tweet') {
             // 遍历contentTweetList，以链接形式展示
             const contentTweetList = item.contentTweetList || []
             contentTweetList.forEach(tweet => {
-              newContent += `<p><a href="${siteUrl}/post/${
-                tweet.alias || tweet._id
-              }" target="_blank">推文：${utils.limitStr(
+              newContent += `<p><a href="${getPostUrl(
+                siteUrl,
+                languageCode,
+                tweet
+              )}" target="_blank">推文：${utils.limitStr(
                 tweet.excerpt,
                 20
               )}</a></p>`
@@ -196,36 +231,34 @@ exports.updateRSS = async type => {
     })
     const rssXML = feed.rss2()
     // 写入文件
-    const rssPath = path.join(rssCacheFolder, `${type}.xml`)
+    const rssFolder = path.join(rssCacheFolder, languageCode)
+    await fs.promises.mkdir(rssFolder, { recursive: true })
+    const rssPath = path.join(rssFolder, `${type}.xml`)
     await fs.promises.writeFile(rssPath, rssXML)
     resolve(rssXML)
-    console.info('rss created:' + type)
+    console.info(`rss created:${languageCode}:${type}`)
   })
   return prmise
 }
 
-exports.reflushRSS = async () => {
+exports.reflushLanguageRSS = async languageCodeInput => {
+  const languageCode = normalizeLanguageCode(languageCodeInput)
+  if (!languageCode) {
+    throw new Error('LANGUAGE_CODE_UNSUPPORTED')
+  }
+
   const config = global.$globalConfig?.rssSettings || {}
   const { siteEnableRss } = config
-  await utils.executeInLock('reflushRSS', async () => {
+  await utils.executeInLock(`reflushRSS:${languageCode}`, async () => {
     if (siteEnableRss !== true) {
-      console.info('rss not enabled delete rss files')
-      // 删除rss文件夹里的所有文件，除了 README.md
-      const files = await fs.promises.readdir(rssCacheFolder)
-      for (const file of files) {
-        if (file !== 'README.md') {
-          // 如果文件名不是 README.md，则删除
-          const filePath = path.join(rssCacheFolder, file)
-          await fs.promises.unlink(filePath)
-        }
-      }
-      console.info('rss files deleted')
+      console.info(`rss not enabled delete ${languageCode} rss files`)
+      await cleanLanguageRss(languageCode)
       return null
     }
     const promiseArray = [
-      this.updateRSS('all'),
-      this.updateRSS('blog'),
-      this.updateRSS('tweet')
+      this.updateRSS('all', languageCode),
+      this.updateRSS('blog', languageCode),
+      this.updateRSS('tweet', languageCode)
     ]
     await Promise.all(promiseArray)
       .then(res => {
@@ -236,6 +269,12 @@ exports.reflushRSS = async () => {
         return null
       })
   })
+}
+
+exports.reflushRSS = async () => {
+  for (const languageCode of SUPPORTED_LANGUAGE_CODES) {
+    await this.reflushLanguageRSS(languageCode)
+  }
 }
 
 exports.getRSS = (type, res) => {

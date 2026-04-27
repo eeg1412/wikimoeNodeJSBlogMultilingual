@@ -1,3 +1,5 @@
+import { normalizeLanguageCode } from '@/lang'
+
 /**
  * SEO 数据处理公共函数
  * 为文章生成标题、描述、关键词、图片等SEO数据
@@ -6,6 +8,17 @@
 export function usePostSeo() {
   const { options } = useOptions()
 
+  const getCanonicalPath = path => {
+    const pathList = path.split('/')
+    const languageCode = normalizeLanguageCode(pathList[1])
+
+    if (languageCode) {
+      pathList[1] = languageCode
+    }
+
+    return pathList.join('/')
+  }
+
   /**
    * 获取当前页面完整URL
    * @returns {String} 完整URL
@@ -13,7 +26,7 @@ export function usePostSeo() {
   const getCurrentUrl = () => {
     const route = useRoute()
     const siteUrl = options.value?.siteUrl || ''
-    return siteUrl + route.path
+    return siteUrl + getCanonicalPath(route.path)
   }
 
   /**

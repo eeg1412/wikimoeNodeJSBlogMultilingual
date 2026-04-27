@@ -16,7 +16,7 @@
             </div>
           </div>
           <div class="common-logo">
-            <div>博客管理后台</div>
+            <div>多语言管理后台</div>
             <div class="common-logo-close-btn">
               <el-button text :icon="Close" @click="switchOpenMenu"></el-button>
             </div>
@@ -26,343 +26,26 @@
             router
             class="admin-left-menu-body custom-scroll scroll-not-hide"
           >
-            <el-menu-item
-              index="Home"
-              @click="removeParam(null)"
-              @click.middle="openNewTab('Home')"
-              :route="{ name: 'Home' }"
+            <el-sub-menu
+              v-for="group in menuGroups"
+              :key="group.index"
+              :index="group.index"
             >
-              <i class="fas fa-fw fa-home pr10"></i>
-              <template #title>面板</template>
-            </el-menu-item>
-            <el-menu-item
-              index="SortList"
-              @click="removeParam('SortList')"
-              @click.middle="openNewTab('SortList')"
-              :route="{ name: 'SortList' }"
-            >
-              <i class="fas fa-fw fa-folder pr10"></i>
-              <template #title>分类</template>
-            </el-menu-item>
-            <!-- 标签 -->
-            <el-menu-item
-              index="TagList"
-              @click="removeParam('TagList')"
-              @click.middle="openNewTab('TagList')"
-              :route="{ name: 'TagList' }"
-            >
-              <i class="fas fa-fw fa-tags pr10"></i>
-              <template #title>标签</template>
-            </el-menu-item>
-            <!-- 地点 -->
-            <el-menu-item
-              index="MappointList"
-              @click="removeParam('MappointList')"
-              @click.middle="openNewTab('MappointList')"
-              :route="{ name: 'MappointList' }"
-            >
-              <i class="fas fa-fw fa-map pr10"></i>
-              <template #title>地点</template>
-            </el-menu-item>
-            <!-- 媒体库 -->
-            <el-menu-item
-              index="AlbumList"
-              @click="removeParam('AlbumList')"
-              @click.middle="openNewTab('AlbumList')"
-              :route="{ name: 'AlbumList' }"
-            >
-              <i class="fas fa-fw fa-images pr10"></i>
-              <template #title>媒体库</template>
-            </el-menu-item>
-            <el-menu-item
-              index="PostList"
-              @click="removeParam('PostList')"
-              @click.middle="openNewTab('PostList')"
-              :route="{ name: 'PostList' }"
-            >
-              <i class="fas fa-fw fa-newspaper pr10"></i>
-              <template #title>文章</template>
-            </el-menu-item>
-            <!-- 评论 -->
-            <el-menu-item
-              index="CommentList"
-              @click="removeParam('CommentList')"
-              @click.middle="openNewTab('CommentList')"
-              :route="{ name: 'CommentList' }"
-            >
-              <i class="fas fa-fw fa-comments pr10"></i>
-              <template #title>评论</template>
-            </el-menu-item>
-            <!-- 友链 -->
-            <el-menu-item
-              index="LinkList"
-              @click="removeParam('LinkList')"
-              @click.middle="openNewTab('LinkList')"
-              :route="{ name: 'LinkList' }"
-            >
-              <i class="fas fa-fw fa-link pr10"></i>
-              <template #title>友链</template>
-            </el-menu-item>
-            <!-- 导航 -->
-            <el-menu-item
-              index="NaviList"
-              @click="removeParam('NaviList')"
-              @click.middle="openNewTab('NaviList')"
-              :route="{ name: 'NaviList' }"
-            >
-              <i class="fas fa-fw fa-compass pr10"></i>
-              <template #title>导航</template>
-            </el-menu-item>
-            <!-- 侧边栏 -->
-            <el-menu-item
-              index="SidebarList"
-              @click="removeParam('SidebarList')"
-              @click.middle="openNewTab('SidebarList')"
-              :route="{ name: 'SidebarList' }"
-            >
-              <i class="fas fa-fw fa-columns pr10"></i>
-              <template #title>侧边栏</template>
-            </el-menu-item>
-            <!-- 横幅 -->
-            <el-menu-item
-              index="BannerList"
-              @click="removeParam('BannerList')"
-              @click.middle="openNewTab('BannerList')"
-              :route="{ name: 'BannerList' }"
-            >
-              <i class="fas fa-fw fa-image pr10"></i>
-              <template #title>横幅</template>
-            </el-menu-item>
-            <!-- 番剧 BangumiList -->
-            <el-menu-item
-              index="BangumiList"
-              @click="removeParam('BangumiList')"
-              @click.middle="openNewTab('BangumiList')"
-              :route="{ name: 'BangumiList' }"
-            >
-              <i class="fas fa-fw fa-tv pr10"></i>
-              <template #title>番剧</template>
-            </el-menu-item>
-            <!-- 电影 MovieList -->
-            <el-menu-item
-              index="MovieList"
-              @click="removeParam('MovieList')"
-              @click.middle="openNewTab('MovieList')"
-              :route="{ name: 'MovieList' }"
-            >
-              <i class="fas fa-fw fa-film pr10"></i>
-              <template #title>电影</template>
-            </el-menu-item>
-            <el-sub-menu index="game">
               <template #title>
-                <!-- 游戏 -->
-                <i class="fas fa-fw fa-gamepad pr10"></i>游戏
+                <i :class="group.icon"></i>{{ group.title }}
               </template>
-              <!-- 游戏平台 GamePlatformList -->
               <el-menu-item
-                index="GamePlatformList"
-                @click="removeParam('GamePlatformList')"
-                @click.middle="openNewTab('GamePlatformList')"
-                :route="{ name: 'GamePlatformList' }"
+                v-for="item in group.children"
+                :key="item.name"
+                :index="item.name"
+                @click="removeParam(item.name)"
+                @click.middle="openNewTab(item.name)"
+                :route="{ name: item.name }"
               >
-                <i class="fas fa-fw fa-gamepad pr10"></i>
-                <template #title>游戏平台</template>
-              </el-menu-item>
-              <!-- 游戏列表 GameList -->
-              <el-menu-item
-                index="GameList"
-                @click="removeParam('GameList')"
-                @click.middle="openNewTab('GameList')"
-                :route="{ name: 'GameList' }"
-              >
-                <i class="fas fa-fw fa-gamepad pr10"></i>
-                <template #title>游戏列表</template>
+                <i :class="item.icon"></i>
+                <template #title>{{ item.title }}</template>
               </el-menu-item>
             </el-sub-menu>
-            <el-sub-menu index="book">
-              <template #title>
-                <!-- 书籍 -->
-                <i class="fas fa-fw fa-book pr10"></i>书籍
-              </template>
-              <!-- 书籍类型 BooktypeList -->
-              <el-menu-item
-                index="BooktypeList"
-                @click="removeParam('BooktypeList')"
-                @click.middle="openNewTab('BooktypeList')"
-                :route="{ name: 'BooktypeList' }"
-              >
-                <i class="fas fa-fw fa-book pr10"></i>
-                <template #title>书籍类型</template>
-              </el-menu-item>
-              <!-- 书籍列表 BookList -->
-              <el-menu-item
-                index="BookList"
-                @click="removeParam('BookList')"
-                @click.middle="openNewTab('BookList')"
-                :route="{ name: 'BookList' }"
-              >
-                <i class="fas fa-fw fa-book pr10"></i>
-                <template #title>书籍列表</template>
-              </el-menu-item>
-            </el-sub-menu>
-            <el-sub-menu index="event">
-              <template #title>
-                <!-- 活动 -->
-                <i class="fas fa-fw fa-calendar-alt pr10"></i>活动
-              </template>
-              <!-- 活动类型 -->
-              <el-menu-item
-                index="EventtypeList"
-                @click="removeParam('EventtypeList')"
-                @click.middle="openNewTab('EventtypeList')"
-                :route="{ name: 'EventtypeList' }"
-              >
-                <i class="fas fa-fw fa-calendar-alt pr10"></i>
-                <template #title>活动类型</template>
-              </el-menu-item>
-              <!-- 活动列表 EventList -->
-              <el-menu-item
-                index="EventList"
-                @click="removeParam('EventList')"
-                @click.middle="openNewTab('EventList')"
-                :route="{ name: 'EventList' }"
-              >
-                <i class="fas fa-fw fa-calendar-alt pr10"></i>
-                <template #title>活动列表</template>
-              </el-menu-item>
-            </el-sub-menu>
-            <!-- 投票 -->
-            <el-menu-item
-              index="VoteList"
-              @click="removeParam('VoteList')"
-              @click.middle="openNewTab('VoteList')"
-              :route="{ name: 'VoteList' }"
-            >
-              <i class="fas fa-fw fa-poll-h pr10"></i>
-              <template #title>投票</template>
-            </el-menu-item>
-            <el-sub-menu index="history">
-              <template #title>
-                <!-- 日志图标 -->
-                <i class="fas fa-fw fa-book pr10"></i>日志
-              </template>
-              <!-- 投票日志 VotelogList -->
-              <el-menu-item
-                index="VotelogList"
-                @click="removeParam('VotelogList')"
-                @click.middle="openNewTab('VotelogList')"
-                :route="{ name: 'VotelogList' }"
-              >
-                <i class="fas fa-fw fa-poll-h pr10"></i>
-                <template #title>投票日志</template>
-              </el-menu-item>
-              <!-- 文章点赞日志 PostLikeLogList -->
-              <el-menu-item
-                index="PostLikeLogList"
-                @click="removeParam('PostLikeLogList')"
-                @click.middle="openNewTab('PostLikeLogList')"
-                :route="{ name: 'PostLikeLogList' }"
-              >
-                <i class="fas fa-fw fa-thumbs-up pr10"></i>
-                <template #title> 文章点赞日志</template>
-              </el-menu-item>
-              <!-- 评论点赞日志 CommentLikeLogList -->
-              <el-menu-item
-                index="CommentLikeLogList"
-                @click="removeParam('CommentLikeLogList')"
-                @click.middle="openNewTab('CommentLikeLogList')"
-                :route="{ name: 'CommentLikeLogList' }"
-              >
-                <i class="fas fa-fw fa-thumbs-up pr10"></i>
-                <template #title>评论点赞日志</template>
-              </el-menu-item>
-              <!-- 读者操作日志 ReaderlogList -->
-              <el-menu-item
-                index="ReaderlogList"
-                @click="removeParam('ReaderlogList')"
-                @click.middle="openNewTab('ReaderlogList')"
-                :route="{ name: 'ReaderlogList' }"
-              >
-                <i class="fas fa-fw fa-user-clock pr10"></i>
-                <template #title>读者操作日志</template>
-              </el-menu-item>
-              <!-- RSS访问日志 RsslogList -->
-              <el-menu-item
-                index="RsslogList"
-                @click="removeParam('RsslogList')"
-                @click.middle="openNewTab('RsslogList')"
-                :route="{ name: 'RsslogList' }"
-              >
-                <i class="fas fa-fw fa-rss pr10"></i>
-                <template #title>RSS访问日志</template>
-              </el-menu-item>
-              <!-- 邮件发送日志  EmailSendHistoryList -->
-              <el-menu-item
-                index="EmailSendHistoryList"
-                @click="removeParam('EmailSendHistoryList')"
-                @click.middle="openNewTab('EmailSendHistoryList')"
-                :route="{ name: 'EmailSendHistoryList' }"
-              >
-                <i class="fas fa-fw fa-envelope pr10"></i>
-                <template #title>邮件发送日志</template>
-              </el-menu-item>
-              <!-- 引用日志 ReferrerList -->
-              <el-menu-item
-                index="ReferrerList"
-                @click="removeParam('ReferrerList')"
-                @click.middle="openNewTab('ReferrerList')"
-                :route="{ name: 'ReferrerList' }"
-              >
-                <i class="fas fa-fw fa-external-link-alt pr10"></i>
-                <template #title>引用日志</template>
-              </el-menu-item>
-            </el-sub-menu>
-            <el-sub-menu index="user" v-if="adminInfo?.role === 999">
-              <template #title>
-                <!-- 日志图标 -->
-                <i class="fas fa-fw fa-user pr10"></i>管理员
-              </template>
-              <!-- UserList 管理员 -->
-              <el-menu-item
-                index="UserList"
-                @click="removeParam('UserList')"
-                @click.middle="openNewTab('UserList')"
-                :route="{ name: 'UserList' }"
-              >
-                <i class="fas fa-fw fa-user pr10"></i>
-                <template #title>管理员列表</template>
-              </el-menu-item>
-              <!-- 管理员登录日志 UserLoginLogList -->
-              <el-menu-item
-                index="UserLoginLogList"
-                @click="removeParam('UserLoginLogList')"
-                @click.middle="openNewTab('UserLoginLogList')"
-                :route="{ name: 'UserLoginLogList' }"
-              >
-                <i class="fas fa-fw fa-sign-in-alt pr10"></i>
-                <template #title>管理员登录日志</template>
-              </el-menu-item>
-            </el-sub-menu>
-            <!-- BackupList 备份 -->
-            <el-menu-item
-              index="BackupList"
-              @click="removeParam('BackupList')"
-              @click.middle="openNewTab('BackupList')"
-              :route="{ name: 'BackupList' }"
-            >
-              <i class="fas fa-fw fa-database pr10"></i>
-              <template #title>备份</template>
-            </el-menu-item>
-            <!-- 设置 -->
-            <el-menu-item
-              index="Config"
-              @click="removeParam('Config')"
-              @click.middle="openNewTab('Config')"
-              :route="{ name: 'Config' }"
-            >
-              <i class="fas fa-fw fa-cog pr10"></i>
-              <template #title>设置</template>
-            </el-menu-item>
           </el-menu>
         </div>
       </el-aside>
@@ -385,16 +68,6 @@
               <div class="fr pt5">
                 <el-button type="primary" circle text @click="goToBlog">
                   <i class="fas fa-fw fa-home"></i>
-                </el-button>
-              </div>
-              <div class="fr pt5">
-                <el-button
-                  type="primary"
-                  circle
-                  text
-                  @click="goLoginUserEditor"
-                >
-                  <i class="fas fa-fw fa-user-edit"></i>
                 </el-button>
               </div>
               <div class="fr pt5">
@@ -437,6 +110,119 @@ import { authApi } from '@/api'
 import store from '@/store'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ThemeChanger from '@/components/ThemeChanger.vue'
+
+const menuGroups = [
+  {
+    index: 'panel',
+    title: '面板',
+    icon: 'fas fa-fw fa-home pr10',
+    children: [
+      {
+        name: 'MultilingualDashboard',
+        title: '工作台',
+        icon: 'fas fa-fw fa-chart-line pr10'
+      }
+    ]
+  },
+  {
+    index: 'source-data',
+    title: '源数据管理',
+    icon: 'fas fa-fw fa-database pr10',
+    children: [
+      {
+        name: 'SourcePostImport',
+        title: '源文章导入',
+        icon: 'fas fa-fw fa-file-import pr10'
+      },
+      {
+        name: 'SourcePostSnapshotList',
+        title: '源文章快照',
+        icon: 'fas fa-fw fa-newspaper pr10'
+      },
+      {
+        name: 'SourceRelationList',
+        title: '源关联内容',
+        icon: 'fas fa-fw fa-project-diagram pr10'
+      },
+      {
+        name: 'SourceMediaSnapshotList',
+        title: '源媒体快照',
+        icon: 'fas fa-fw fa-images pr10'
+      }
+    ]
+  },
+  {
+    index: 'translation-data',
+    title: '多语言数据管理',
+    icon: 'fas fa-fw fa-language pr10',
+    children: [
+      {
+        name: 'TranslationPostList',
+        title: '多语言文章',
+        icon: 'fas fa-fw fa-newspaper pr10'
+      },
+      {
+        name: 'RelationList',
+        title: '关联内容',
+        icon: 'fas fa-fw fa-project-diagram pr10'
+      },
+      {
+        name: 'MultilingualMediaList',
+        title: '媒体库',
+        icon: 'fas fa-fw fa-images pr10'
+      },
+      {
+        name: 'NaviList',
+        title: '导航',
+        icon: 'fas fa-fw fa-compass pr10'
+      },
+      {
+        name: 'BannerList',
+        title: '横幅',
+        icon: 'fas fa-fw fa-image pr10'
+      },
+      {
+        name: 'SidebarList',
+        title: '侧边栏',
+        icon: 'fas fa-fw fa-columns pr10'
+      }
+    ]
+  },
+  {
+    index: 'settings',
+    title: '设置',
+    icon: 'fas fa-fw fa-cog pr10',
+    children: [
+      {
+        name: 'MultilingualConfig',
+        title: '多语言站点配置',
+        icon: 'fas fa-fw fa-sliders-h pr10'
+      }
+    ]
+  },
+  {
+    index: 'system',
+    title: '系统',
+    icon: 'fas fa-fw fa-server pr10',
+    children: [
+      {
+        name: 'BackupList',
+        title: '备份',
+        icon: 'fas fa-fw fa-archive pr10'
+      },
+      {
+        name: 'ReaderlogList',
+        title: '访客统计',
+        icon: 'fas fa-fw fa-user-clock pr10'
+      },
+      {
+        name: 'ReferrerList',
+        title: '访问来源',
+        icon: 'fas fa-fw fa-external-link-alt pr10'
+      }
+    ]
+  }
+]
 
 export default {
   components: {
@@ -481,13 +267,6 @@ export default {
       window.open(siteUrl.value, '_blank')
     }
 
-    const goLoginUserEditor = () => {
-      sessionStorage.setItem('LoginUserEditor-from', route.name)
-      router.push({
-        name: 'LoginUserEditor'
-      })
-    }
-
     const isCollapse = ref(false)
     const switchCollapse = () => {
       isCollapse.value = !isCollapse.value
@@ -518,13 +297,13 @@ export default {
       Grid,
       Close,
       HomeFilled,
+      menuGroups,
       activeIndex,
       removeParam,
       logout,
       adminInfo,
       siteUrl,
       goToBlog,
-      goLoginUserEditor,
       isCollapse,
       switchCollapse,
       phoneMenuOpen,

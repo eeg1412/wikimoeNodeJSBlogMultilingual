@@ -541,7 +541,7 @@ API 错误响应固定为 `{ errorList: [{ code, message, field }] }`。禁止�
 - RSS/Sitemap XML 文件由 Express 写入 `server/seo/rss/<canonical-code>/all.xml`、`blog.xml`、`tweet.xml` 和 `server/seo/sitemap/<canonical-code>/sitemap.xml`，Nuxt `[code]` route 只负责转发。
 - Blog API 客户端中，源站接管接口只走 `/api/blog`，多语言自有内容只走 `/api/multilingual-blog`。
 - 新增 server API 错误响应使用 `errorList`，不得新增 Mongoose `errors` schema path。
-- 缓存、RSS、Sitemap、SEO、访客统计不会把不同语言数据混在一起。
+- 缓存、RSS、Sitemap、SEO、访客统计不会把不同语言数据混在一起，也就是说根据语言单独设定。
 - Admin build、Blog build、Server 验证脚本通过；已知非阻塞警告需记录。
 
 ## 13. 当前待注意事项

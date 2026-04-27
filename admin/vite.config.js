@@ -26,29 +26,33 @@ export default defineConfig(({ mode }) => {
         '.vue'
       ]
     },
-    base: isProduction ? '/admin/' : '/',
+    base: isProduction ? '/multilingual-admin/' : '/',
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version)
     },
     server: {
       port: 8079,
       proxy: {
-        '/api': {
+        '/api/admin': {
           target: 'http://127.0.0.1:3006',
+          changeOrigin: true
+        },
+        '/api/multilingual-admin': {
+          target: 'http://127.0.0.1:3016',
           changeOrigin: true
         },
         '/content/uploadfile': {
-          target: 'http://127.0.0.1:3006',
+          target: 'http://127.0.0.1:3016',
           changeOrigin: true
         },
         '/upload': {
-          target: 'http://127.0.0.1:3006',
+          target: 'http://127.0.0.1:3016',
           changeOrigin: true
         }
       }
     },
     build: {
-      outDir: '../server/front/admin/',
+      outDir: '../server/front/multilingual-admin/',
       emptyOutDir: true,
       sourcemap: !isProduction,
       minify: 'terser',

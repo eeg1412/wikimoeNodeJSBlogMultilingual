@@ -3,9 +3,15 @@ const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
 module.exports = async function (req, res, next) {
-  if (global.$cacheData?.bangumiSeasonObj) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
+  const languageCache = cacheDataUtils.getLanguageCache(languageCode)
+  if (languageCache?.bangumiSeasonObj) {
     cacheDataUtils
-      .checkBangumiSeasonList()
+      .checkBangumiSeasonList(languageCode)
       .then(data => {
         res.send(data.list)
       })
@@ -23,7 +29,7 @@ module.exports = async function (req, res, next) {
       })
   } else {
     cacheDataUtils
-      .getBangumiSeasonList()
+      .getBangumiSeasonList(languageCode)
       .then(data => {
         res.send(data.list)
       })

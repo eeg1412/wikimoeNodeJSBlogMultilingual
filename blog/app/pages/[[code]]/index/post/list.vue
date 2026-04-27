@@ -4,4 +4,7 @@
     <NuxtPage></NuxtPage>
   </div>
 </template>
-<script setup></script>
+<script setup>
+const { languageCode } = useLang()
+languageCode.value
+</script>

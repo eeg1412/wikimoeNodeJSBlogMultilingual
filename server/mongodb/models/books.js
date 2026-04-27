@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var books = new Schema(
   {
@@ -81,4 +82,7 @@ var books = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('books', books)
+multilingualSchema.addSourceIdentityFields(books, 'books')
+multilingualSchema.addRelationIdentityIndex(books)
+
+module.exports = require('../modelFactory/defaultModel')('books', books)

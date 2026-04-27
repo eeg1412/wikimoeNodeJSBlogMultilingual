@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var sidebars = new Schema(
   {
@@ -24,4 +25,6 @@ var sidebars = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('sidebars', sidebars)
+multilingualSchema.addLocalLanguageFields(sidebars)
+
+module.exports = require('../modelFactory/defaultModel')('sidebars', sidebars)

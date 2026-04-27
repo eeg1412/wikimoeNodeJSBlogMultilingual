@@ -92,4 +92,4 @@ var comments = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('comments', comments)
+module.exports = require('../modelFactory/defaultModel')('comments', comments)

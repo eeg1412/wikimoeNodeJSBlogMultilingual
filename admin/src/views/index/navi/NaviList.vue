@@ -8,6 +8,18 @@
     <div class="clearfix pb20">
       <div class="fl common-top-search-form-body">
         <!-- 检索用 -->
+        <el-select
+          v-model="params.languageCode"
+          class="w_2"
+          @change="getNaviList"
+        >
+          <el-option
+            v-for="item in languageOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
       </div>
       <div class="fr">
         <!-- 按钮用 -->
@@ -83,13 +95,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref, watch } from 'vue'
 import { setSessionParams, getSessionParams, escapeHtml } from '@/utils/utils'
 import CheckDialogService from '@/services/CheckDialogService'
+import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 
 export default {
   setup() {
     const route = useRoute()
     const router = useRouter()
     const naviList = ref([])
-    const params = reactive({})
+    const params = reactive({
+      languageCode: 'zh-CN'
+    })
     const total = ref(0)
     const getNaviList = () => {
       authApi
@@ -104,7 +119,10 @@ export default {
     }
     const handleAdd = () => {
       router.push({
-        name: 'NaviAdd'
+        name: 'NaviAdd',
+        query: {
+          languageCode: params.languageCode
+        }
       })
     }
     // 监听 params.page 的变化
@@ -120,6 +138,9 @@ export default {
         name: 'NaviEdit',
         params: {
           id
+        },
+        query: {
+          languageCode: params.languageCode
         }
       })
     }
@@ -131,10 +152,12 @@ export default {
         correctAnswer: '是',
         content: `此操作将<span class="cRed">永久删除导航项：【${title}】</span>, 是否继续?`,
         success: () => {
-          return authApi.deleteNavi({ id }).then(() => {
-            ElMessage.success('删除成功')
-            getNaviList()
-          })
+          return authApi
+            .deleteNavi({ id, languageCode: params.languageCode })
+            .then(() => {
+              ElMessage.success('删除成功')
+              getNaviList()
+            })
         }
       })
         .then(() => {})
@@ -149,7 +172,9 @@ export default {
         params.page = sessionParams.page
         params.size = sessionParams.size
         params.keyword = sessionParams.keyword
+        params.languageCode = sessionParams.languageCode || params.languageCode
       }
+      params.languageCode = route.query.languageCode || params.languageCode
     }
     onMounted(() => {
       initParams()
@@ -160,6 +185,7 @@ export default {
       params,
       total,
       getNaviList,
+      languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       handleAdd,
       goEdit,
       deleteNavi

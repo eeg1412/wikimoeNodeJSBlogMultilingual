@@ -42,4 +42,7 @@ var postLikeLogs = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('postLikeLogs', postLikeLogs)
+module.exports = require('../modelFactory/defaultModel')(
+  'postLikeLogs',
+  postLikeLogs
+)

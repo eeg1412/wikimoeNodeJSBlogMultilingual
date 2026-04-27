@@ -1,5 +1,9 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+const {
+  DEFAULT_LANGUAGE_CODE,
+  SUPPORTED_LANGUAGE_CODES
+} = require('../../utils/language')
 const PerformanceNavigationTimingSchema = new Schema(
   {
     connectDuration: { type: Number, default: null },
@@ -28,6 +32,20 @@ var readerlogs = new Schema(
     // 操作了什么
     action: {
       type: String,
+      required: true,
+      index: true
+    },
+    languageCode: {
+      type: String,
+      enum: SUPPORTED_LANGUAGE_CODES,
+      default: DEFAULT_LANGUAGE_CODE,
+      required: true,
+      index: true
+    },
+    routeOwnership: {
+      type: String,
+      enum: ['multilingual-blog'],
+      default: 'multilingual-blog',
       required: true,
       index: true
     },
@@ -95,4 +113,7 @@ var readerlogs = new Schema(
 // timestamps:
 // createdAt
 // updatedAt
-module.exports = mongoose.model('readerlogs', readerlogs)
+module.exports = require('../modelFactory/defaultModel')(
+  'readerlogs',
+  readerlogs
+)

@@ -5,13 +5,73 @@ const routes = [
     path: '/',
     name: 'Index',
     // 跳转到Home页面
-    redirect: '/home',
+    redirect: '/dashboard/multilingual',
     component: () => import('../views/index/Index.vue'),
     children: [
       {
+        path: '/dashboard/multilingual',
+        name: 'MultilingualDashboard',
+        component: () =>
+          import('../views/index/dashboard/MultilingualDashboard.vue')
+      },
+      {
+        path: '/source/post/import',
+        name: 'SourcePostImport',
+        component: () => import('../views/index/source/SourcePostImport.vue')
+      },
+      {
+        path: '/source/post/snapshot/list',
+        name: 'SourcePostSnapshotList',
+        component: () =>
+          import('../views/index/source/SourcePostSnapshotList.vue')
+      },
+      {
+        path: '/source/relation/list',
+        name: 'SourceRelationList',
+        component: () => import('../views/index/relation/RelationList.vue'),
+        meta: { scope: 'source' }
+      },
+      {
+        path: '/source/media/snapshot/list',
+        name: 'SourceMediaSnapshotList',
+        component: () =>
+          import('../views/index/media/MultilingualMediaList.vue'),
+        meta: { scope: 'source' }
+      },
+      {
+        path: '/translation/post/list',
+        name: 'TranslationPostList',
+        component: () =>
+          import('../views/index/translation/TranslationPostList.vue')
+      },
+      {
+        path: '/translation/post/editor/:id',
+        name: 'TranslationPostEdit',
+        component: () =>
+          import('../views/index/translation/TranslationPostEditor.vue')
+      },
+      {
+        path: '/translation/relation/list',
+        name: 'RelationList',
+        component: () => import('../views/index/relation/RelationList.vue'),
+        meta: { scope: 'translation' }
+      },
+      {
+        path: '/translation/media/list',
+        name: 'MultilingualMediaList',
+        component: () =>
+          import('../views/index/media/MultilingualMediaList.vue'),
+        meta: { scope: 'translation' }
+      },
+      {
+        path: '/settings/multilingual',
+        name: 'MultilingualConfig',
+        component: () => import('../views/index/config/MultilingualConfig.vue')
+      },
+      {
         path: '/home',
         name: 'Home',
-        component: () => import('../views/index/home/Home.vue')
+        redirect: '/dashboard/multilingual'
       },
       // LoginUserEditor
       {
@@ -371,7 +431,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory('/admin'),
+  history: createWebHistory('/multilingual-admin'),
   routes
 })
 

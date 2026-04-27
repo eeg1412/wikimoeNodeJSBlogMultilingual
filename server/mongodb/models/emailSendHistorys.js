@@ -27,4 +27,7 @@ var emailSendHistorys = new Schema(
   { capped: 15728640, timestamps: true }
 )
 
-module.exports = mongoose.model('emailSendHistorys', emailSendHistorys)
+module.exports = require('../modelFactory/defaultModel')(
+  'emailSendHistorys',
+  emailSendHistorys
+)

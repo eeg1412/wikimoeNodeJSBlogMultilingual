@@ -162,7 +162,7 @@
           <el-upload
             class="attachments-upload"
             drag
-            action="/api/admin/attachment/upload"
+            action="/api/multilingual-admin/attachment/upload"
             multiple
             v-model:file-list="fileList"
             :accept="'image/*'"
@@ -885,7 +885,7 @@ export default {
             ) // 'image' 是字段名，'image.png' 是文件名
             showLoading()
             axios
-              .post('/api/admin/attachment/upload', formData, {
+              .post('/api/multilingual-admin/attachment/upload', formData, {
                 headers: {
                   'Content-Type': 'multipart/form-data',
                   ...headers.value
@@ -962,7 +962,7 @@ export default {
           }
         })
         axios
-          .post('/api/admin/attachment/upload', formData, {
+          .post('/api/multilingual-admin/attachment/upload', formData, {
             headers: headers.value,
             onUploadProgress: progressEvent => {
               const percentCompleted = Math.round(

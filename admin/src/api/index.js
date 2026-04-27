@@ -1,11 +1,12 @@
 import { createAPI } from './create-api'
 import auth from './module/auth'
+import multilingual from './module/multilingual'
 import { showLoading, hideLoading } from '@/utils/utils'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import store from '../store'
 
-const api = createAPI({ baseURL: '/api/admin' })
+const api = createAPI({ baseURL: '/api/multilingual-admin' })
 //请求拦截器
 api.interceptors.request.use(
   config => {
@@ -52,7 +53,8 @@ api.interceptors.response.use(
     switch (status) {
       case 400:
       case 403:
-        const errorList = error?.response?.data?.errors
+        const errorList =
+          error?.response?.data?.errorList || error?.response?.data?.errors
         if (typeof errorList === 'object') {
           errorList.forEach(errorMessage => {
             ElMessage.error({
@@ -84,11 +86,12 @@ api.interceptors.response.use(
             router.replace({ name: 'Login' })
           }, 200)
         } else {
-          const errorList = error?.response?.data
-          if (typeof errorList === 'object') {
+          const errorList =
+            error?.response?.data?.errorList || error?.response?.data?.errors
+          if (Array.isArray(errorList)) {
             errorList.forEach(errorMessage => {
               ElMessage.error({
-                message: errorMessage,
+                message: errorMessage.message || errorMessage,
                 'custom-class': 'common-message-error'
               })
             })
@@ -114,3 +117,4 @@ api.interceptors.response.use(
 )
 
 export const authApi = auth(api)
+export const multilingualApi = multilingual(api)

@@ -26,4 +26,4 @@ var rsslogs = new Schema(
   { capped: 15728640, timestamps: true }
 )
 
-module.exports = mongoose.model('rsslogs', rsslogs)
+module.exports = require('../modelFactory/defaultModel')('rsslogs', rsslogs)

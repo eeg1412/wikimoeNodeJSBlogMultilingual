@@ -1,13 +1,13 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var albums = new Schema(
   {
     name: {
       type: String,
       required: true,
-      // 唯一
-      unique: true
+      index: true
     },
     // 相册下的文件数量
     count: {
@@ -19,4 +19,7 @@ var albums = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('albums', albums)
+multilingualSchema.addSourceIdentityFields(albums, 'albums')
+multilingualSchema.addRelationIdentityIndex(albums)
+
+module.exports = require('../modelFactory/defaultModel')('albums', albums)

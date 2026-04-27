@@ -49,6 +49,7 @@
             :to="{
               name: postLinkName,
               params: {
+                code: languageCode,
                 ...postLinkParams,
                 page: 1
               }
@@ -119,6 +120,8 @@
   </ClientOnly>
 </template>
 <script setup>
+const { languageCode } = useLang()
+
 const props = defineProps({
   item: {
     type: Object,

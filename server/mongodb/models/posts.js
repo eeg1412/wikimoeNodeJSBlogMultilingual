@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var posts = new Schema(
   {
@@ -195,4 +196,8 @@ var posts = new Schema(
 // posts.set('toJSON', { virtuals: true })
 // posts.set('toObject', { virtuals: true })
 
-module.exports = mongoose.model('posts', posts)
+multilingualSchema.addSourceIdentityFields(posts, 'posts')
+multilingualSchema.addPostReviewFields(posts)
+multilingualSchema.addPostIndexes(posts)
+
+module.exports = require('../modelFactory/defaultModel')('posts', posts)

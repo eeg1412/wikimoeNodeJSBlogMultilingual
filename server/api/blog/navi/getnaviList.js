@@ -3,13 +3,19 @@ const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
 module.exports = async function (req, res, next) {
-  if (global.$cacheData?.naviList) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
+  const languageCache = cacheDataUtils.getLanguageCache(languageCode)
+  if (languageCache?.naviList) {
     res.send({
-      data: global.$cacheData.naviList
+      data: languageCache.naviList
     })
   } else {
     cacheDataUtils
-      .getNaviList()
+      .getNaviList(languageCode)
       .then(data => {
         res.send({
           data

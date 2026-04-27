@@ -1,39 +1,48 @@
-const mongoose = require('mongoose')
 const globalConfigUtils = require('../config/globalConfig')
 const cacheDataUtils = require('../config/cacheData')
 const rssToolUtils = require('../utils/rss')
 const sitemapToolUtils = require('../utils/sitemap')
-let mongodbErrorCount = 0
-console.info('数据库连接中...')
-// console.log('数据库地址：', process.env.DB_HOST);
-if (!process.env.DB_HOST) {
-  console.error('请在根目录下创建.env文件，并添加数据库地址。')
-  process.exit(1)
-}
-mongoose.connect(process.env.DB_HOST)
-const db = mongoose.connection
+const sourceConnectionInfo = require('./sourceConnection')
+const multilingualConnectionInfo = require('./multilingualConnection')
+const registerModels = require('./modelFactory/registerModels')
+const buildSourceRepositories = require('./sourceRepositories')
+const buildMultilingualRepositories = require('./multilingualRepositories')
 
-function handleDbError() {
+let mongodbErrorCount = 0
+let isInitializing = false
+console.info('数据库连接中...')
+
+const sourceModels = registerModels(sourceConnectionInfo.connection)
+const multilingualModels = registerModels(multilingualConnectionInfo.connection)
+const sourceRepositories = buildSourceRepositories(sourceModels)
+const multilingualRepositories =
+  buildMultilingualRepositories(multilingualModels)
+const db = {
+  source: {
+    connection: sourceConnectionInfo.connection,
+    repositories: sourceRepositories
+  },
+  multilingual: {
+    connection: multilingualConnectionInfo.connection,
+    repositories: multilingualRepositories
+  }
+}
+
+function handleDbError(error) {
   global.$isReady = false
   mongodbErrorCount++
   if (mongodbErrorCount > 10) {
     console.error('数据库连接失败次数过多，程序退出')
-    // mongoose.disconnect();
     process.exit(1)
   }
-  let retryTime = 10000 * mongodbErrorCount
-  console.error(`数据库连接失败，${retryTime / 1000}秒后重新连接数据库`)
-  setTimeout(() => {
-    console.info('数据库连接中...')
-    mongoose.connect(process.env.DB_HOST)
-  }, retryTime)
+
+  const message = error && error.message ? error.message : error
+  console.error('数据库连接或初始化失败：', message)
 }
 
-db.on('open', async () => {
-  console.info('数据库连接成功！')
-  // 输出mongodb版本信息
+async function logMongoDBVersion() {
   try {
-    const nativeDb = db.db
+    const nativeDb = multilingualConnectionInfo.connection.db
     if (!nativeDb) throw new Error('无法获取原生 MongoDB db 对象')
     const admin = nativeDb.admin()
     const buildInfo = await admin.command({ buildInfo: 1 })
@@ -41,31 +50,55 @@ db.on('open', async () => {
   } catch (err) {
     console.warn('获取MongoDB版本信息失败：', err.message || err)
   }
+}
 
-  mongodbErrorCount = 0
-  // 更新时注意同时更新还原时的缓存
-  await globalConfigUtils.initGlobalConfig()
-  cacheDataUtils.getNaviList()
-  cacheDataUtils.getSidebarList()
-  cacheDataUtils.getBannerList()
-  cacheDataUtils.getSortList()
-  cacheDataUtils.getPostArchiveList()
-  cacheDataUtils.getBangumiYearList()
-  cacheDataUtils.getMovieYearList()
-  rssToolUtils.reflushRSS()
-  sitemapToolUtils.reflushSitemap()
-  global.$isReady = true
-})
+async function initializeMultilingualRuntime() {
+  if (isInitializing || global.$isReady) {
+    return
+  }
 
-db.on('error', function (error) {
-  console.error('Error in MongoDb connection: ' + error)
-  handleDbError()
-})
+  if (!sourceConnectionInfo.isReady || !multilingualConnectionInfo.isReady) {
+    return
+  }
 
-db.on('close', function () {
-  // 如果未来有手动断开数据库连接的需求，需要注意这里的处理，避免重连
-  console.error('数据库断开，重新连接数据库')
-  handleDbError()
-})
+  isInitializing = true
+
+  try {
+    await logMongoDBVersion()
+    mongodbErrorCount = 0
+    // 更新时注意同时更新还原时的缓存
+    await globalConfigUtils.initGlobalConfig()
+    await cacheDataUtils.refreshAllLanguageCache()
+    await rssToolUtils.reflushRSS()
+    await sitemapToolUtils.reflushSitemap()
+    global.$isReady = true
+    console.info('多语言数据库初始化完成！')
+  } catch (error) {
+    handleDbError(error)
+  } finally {
+    isInitializing = false
+  }
+}
+
+function bindConnectionEvents(name, connection) {
+  connection.on('open', async () => {
+    console.info(`${name}数据库连接成功！`)
+    await initializeMultilingualRuntime()
+  })
+
+  connection.on('error', function (error) {
+    console.error(`${name}数据库连接错误: ` + error)
+    handleDbError(error)
+  })
+
+  connection.on('close', function () {
+    console.error(`${name}数据库断开`)
+    handleDbError(`${name}数据库断开`)
+  })
+}
+
+bindConnectionEvents('源站', sourceConnectionInfo.connection)
+bindConnectionEvents('多语言', multilingualConnectionInfo.connection)
+initializeMultilingualRuntime()
 
 module.exports = db

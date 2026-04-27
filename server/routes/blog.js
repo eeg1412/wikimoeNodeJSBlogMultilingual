@@ -91,6 +91,7 @@ const blogRouteSetting = [
     controller: require('../api/blog/comment/getLatestComments')
   },
   // getSortList
+  // getSortList
   {
     path: '/sort/list',
     method: 'get',
@@ -132,6 +133,7 @@ const blogRouteSetting = [
     middleware: [checkCommentRetractAuth],
     controller: require('../api/blog/comment/commentRetract')
   },
+  // put updatePostViewCount
   // put updatePostViewCount
   {
     path: '/post/view/count',

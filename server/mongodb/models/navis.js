@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var navis = new Schema(
   {
@@ -50,4 +51,6 @@ var navis = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('navis', navis)
+multilingualSchema.addLocalLanguageFields(navis)
+
+module.exports = require('../modelFactory/defaultModel')('navis', navis)

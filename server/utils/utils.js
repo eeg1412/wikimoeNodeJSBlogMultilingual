@@ -1017,17 +1017,20 @@ exports.referrerRecord = function (referrer, referrerType) {
         return
       }
       // 设置计时器
-      referrerRecordTimerMap[md5Id] = setTimeout(() => {
-        // 如果计时器到期，就保存referrer
-        const params = {
-          referrer,
-          referrerType
-        }
-        console.log('referrer记录', params)
-        referrerUtils.save(params)
-        // 删除计时器
-        delete referrerRecordTimerMap[md5Id]
-      }, 1000 * 60 * 60)
+      referrerRecordTimerMap[md5Id] = setTimeout(
+        () => {
+          // 如果计时器到期，就保存referrer
+          const params = {
+            referrer,
+            referrerType
+          }
+          console.log('referrer记录', params)
+          referrerUtils.save(params)
+          // 删除计时器
+          delete referrerRecordTimerMap[md5Id]
+        },
+        1000 * 60 * 60
+      )
     }
   }
 }
@@ -1213,9 +1216,13 @@ exports.executeInLock = (key, fn) => {
   })
 }
 
+function getMultilingualNativeDb() {
+  return global.$mongodDB.multilingual.connection.db
+}
+
 exports.getReaderlogsSize = async () => {
-  const mongodb = global.$mongodDB
-  const stats = await mongodb.db.command({ collStats: 'readerlogs' })
+  const nativeDb = getMultilingualNativeDb()
+  const stats = await nativeDb.command({ collStats: 'readerlogs' })
   const size = stats.size
   // 从环境变量获取最大大小,默认1GB
   const maxReaderlogsSize = process.env.MAX_HISTORYLOGS_SIZE
@@ -1232,8 +1239,8 @@ exports.getReaderlogsSize = async () => {
 
 // postLikeLogs
 exports.getPostLikeLogsSize = async () => {
-  const mongodb = global.$mongodDB
-  const stats = await mongodb.db.command({ collStats: 'postlikelogs' })
+  const nativeDb = getMultilingualNativeDb()
+  const stats = await nativeDb.command({ collStats: 'postlikelogs' })
   const size = stats.size
   // 从环境变量获取最大大小,默认1GB
   const maxPostLikeLogsSize = process.env.MAX_HISTORYLOGS_SIZE
@@ -1250,8 +1257,8 @@ exports.getPostLikeLogsSize = async () => {
 
 // commentLikeLogs
 exports.getCommentLikeLogsSize = async () => {
-  const mongodb = global.$mongodDB
-  const stats = await mongodb.db.command({ collStats: 'commentlikelogs' })
+  const nativeDb = getMultilingualNativeDb()
+  const stats = await nativeDb.command({ collStats: 'commentlikelogs' })
   const size = stats.size
   // 从环境变量获取最大大小,默认1GB
   const maxCommentLikeLogsSize = process.env.MAX_HISTORYLOGS_SIZE
@@ -1268,8 +1275,8 @@ exports.getCommentLikeLogsSize = async () => {
 
 // votelogs
 exports.getVoteLogsSize = async () => {
-  const mongodb = global.$mongodDB
-  const stats = await mongodb.db.command({ collStats: 'votelogs' })
+  const nativeDb = getMultilingualNativeDb()
+  const stats = await nativeDb.command({ collStats: 'votelogs' })
   const size = stats.size
   // 从环境变量获取最大大小,默认1GB
   const maxVoteLogsSize = process.env.MAX_HISTORYLOGS_SIZE

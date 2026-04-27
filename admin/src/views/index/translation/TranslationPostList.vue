@@ -1,0 +1,708 @@
+<template>
+  <div class="common-right-panel-form translation-post-list-page">
+    <div class="pb20">
+      <el-breadcrumb separator="/">
+        <el-breadcrumb-item>多语言数据管理</el-breadcrumb-item>
+        <el-breadcrumb-item>多语言文章</el-breadcrumb-item>
+      </el-breadcrumb>
+    </div>
+
+    <div class="clearfix pb20">
+      <div class="fl common-top-search-form-body">
+        <el-form
+          :inline="true"
+          :model="params"
+          class="translation-search-form"
+          @submit.prevent
+          @keypress.enter="getTranslationPostList(true)"
+        >
+          <el-form-item>
+            <el-input
+              v-model="params.keyword"
+              placeholder="标题、别名、源 ID"
+              clearable
+              style="width: 220px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.sourceLanguageCode"
+              placeholder="源语言"
+              clearable
+              style="width: 160px"
+            >
+              <el-option
+                v-for="item in languageOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.languageCode"
+              placeholder="翻译语言"
+              clearable
+              style="width: 160px"
+            >
+              <el-option
+                v-for="item in languageOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.type"
+              placeholder="类型"
+              clearable
+              style="width: 120px"
+            >
+              <el-option
+                v-for="item in postTypeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.status"
+              placeholder="状态"
+              clearable
+              style="width: 120px"
+            >
+              <el-option
+                v-for="item in postStatusOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="getTranslationPostList(true)">
+              搜索
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+      <div class="fr translation-actions">
+        <el-button @click="getTranslationPostList(true)">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </div>
+    </div>
+
+    <div class="mb20 list-table-body">
+      <ResponsiveTable
+        ref="tableRef"
+        :data="sourceGroupList"
+        :row-key="getSourceGroupRowKey"
+        height="100%"
+        border
+      >
+        <ResponsiveTableColumn type="expand" width="50" card-hidden>
+          <template #default="{ row }">
+            <div class="translation-child-table">
+              <ResponsiveTable
+                :data="getTranslationRows(row)"
+                row-key="languageCode"
+                border
+              >
+                <ResponsiveTableColumn label="语言" width="150">
+                  <template #default="{ row: childRow }">
+                    {{ getLanguageText(childRow.languageCode) }}
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="标题" min-width="220">
+                  <template #default="{ row: childRow }">
+                    <span v-if="childRow.translation">
+                      {{ getPostDisplayTitle(childRow.translation) }}
+                    </span>
+                    <el-tag v-else type="info" effect="plain">未创建</el-tag>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="状态" width="100">
+                  <template #default="{ row: childRow }">
+                    <el-tag
+                      v-if="childRow.translation"
+                      :type="getPostStatusTagType(childRow.translation.status)"
+                      effect="plain"
+                    >
+                      {{ getPostStatusText(childRow.translation.status) }}
+                    </el-tag>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="版本" width="90">
+                  <template #default="{ row: childRow }">
+                    <span v-if="childRow.translation">
+                      v{{ childRow.translation.snapshotVersion }}
+                    </span>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="复核" width="110">
+                  <template #default="{ row: childRow }">
+                    <el-tag
+                      v-if="childRow.translation?.pendingReview"
+                      type="warning"
+                      effect="plain"
+                    >
+                      待复核
+                    </el-tag>
+                    <el-tag
+                      v-else-if="childRow.translation"
+                      type="success"
+                      effect="plain"
+                    >
+                      正常
+                    </el-tag>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="更新时间" width="180">
+                  <template #default="{ row: childRow }">
+                    <span v-if="childRow.translation">
+                      {{ $formatDate(childRow.translation.updatedAt) }}
+                    </span>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="操作" width="150" fixed="right">
+                  <template #default="{ row: childRow }">
+                    <el-button
+                      v-if="childRow.translation"
+                      type="primary"
+                      size="small"
+                      @click="goTranslationEditor(childRow.translation)"
+                    >
+                      编辑
+                    </el-button>
+                    <el-button
+                      v-else
+                      type="primary"
+                      size="small"
+                      @click="
+                        createTranslation(row.sourcePost, childRow.languageCode)
+                      "
+                    >
+                      创建
+                    </el-button>
+                  </template>
+                </ResponsiveTableColumn>
+              </ResponsiveTable>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="源文章" min-width="260">
+          <template #default="{ row }">
+            <div class="source-title">
+              {{ getPostDisplayTitle(row.sourcePost) }}
+            </div>
+            <div class="source-meta">
+              源 ID：{{ row.sourcePost.sourceId }} / 别名：{{
+                row.sourcePost.alias || '-'
+              }}
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="类型" width="90">
+          <template #default="{ row }">
+            <el-tag effect="plain">{{
+              getPostTypeText(row.sourcePost.type)
+            }}</el-tag>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="源语言" width="150">
+          <template #default="{ row }">
+            {{ getLanguageText(row.sourcePost.sourceLanguageCode) }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="快照版本" width="100">
+          <template #default="{ row }"
+            >v{{ row.sourcePost.snapshotVersion }}</template
+          >
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="语言版本" min-width="280">
+          <template #default="{ row }">
+            <div class="language-version-tags">
+              <el-tag
+                v-for="item in getTranslationRows(row)"
+                :key="item.languageCode"
+                size="small"
+                effect="plain"
+                :type="getTranslationTagType(item.translation)"
+              >
+                {{ item.languageCode }}
+              </el-tag>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="导入时间" width="180">
+          <template #default="{ row }">
+            {{ $formatDate(row.sourcePost.sourceSnapshotAt) }}
+          </template>
+        </ResponsiveTableColumn>
+      </ResponsiveTable>
+    </div>
+
+    <div class="clearfix">
+      <el-pagination
+        class="fr"
+        background
+        layout="total, prev, pager, next"
+        :total="total"
+        :pager-count="5"
+        size="small"
+        v-model:current-page="params.page"
+        v-model:page-size="params.limit"
+      />
+    </div>
+
+    <el-dialog
+      v-model="detailDialogVisible"
+      title="编辑多语言文章"
+      width="880px"
+      destroy-on-close
+    >
+      <el-skeleton v-if="detailLoading" :rows="6" animated />
+      <template v-else-if="detailData">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="标题">
+            {{ detailData.post?.title || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="语言">
+            {{ getLanguageText(detailData.post?.languageCode) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Alias">
+            {{ detailData.post?.alias || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            {{ getPostStatusText(detailData.post?.status) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="快照版本">
+            v{{ detailData.post?.snapshotVersion || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="复核状态">
+            <el-tag
+              v-if="detailData.post?.pendingReview"
+              type="warning"
+              effect="plain"
+            >
+              待复核
+            </el-tag>
+            <el-tag v-else type="success" effect="plain">正常</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-form
+          class="translation-edit-form mt20"
+          :model="editForm"
+          label-width="90px"
+          @submit.prevent
+        >
+          <el-form-item label="标题">
+            <el-input v-model="editForm.title" clearable />
+          </el-form-item>
+          <el-form-item label="Alias">
+            <el-input v-model="editForm.alias" clearable />
+          </el-form-item>
+          <el-form-item label="摘要">
+            <el-input v-model="editForm.excerpt" type="textarea" :rows="3" />
+          </el-form-item>
+          <el-form-item label="正文">
+            <el-input v-model="editForm.content" type="textarea" :rows="12" />
+          </el-form-item>
+          <el-form-item label="类型">
+            <el-select v-model="editForm.type" style="width: 180px">
+              <el-option
+                v-for="item in postTypeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="editForm.status" style="width: 180px">
+              <el-option
+                v-for="item in postStatusOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="日期">
+            <el-date-picker
+              v-model="editForm.date"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="选择日期"
+            />
+          </el-form-item>
+        </el-form>
+        <div class="detail-actions mt20">
+          <el-button
+            v-if="detailData.post?.pendingReview"
+            :loading="detailSaving"
+            @click="confirmReview"
+          >
+            确认复核
+          </el-button>
+          <el-button type="primary" :loading="detailSaving" @click="saveDetail">
+            保存
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { multilingualApi } from '@/api'
+import {
+  POST_STATUS_OPTIONS,
+  POST_TYPE_OPTIONS,
+  SUPPORTED_LANGUAGE_OPTIONS,
+  getLanguageText,
+  getPostStatusTagType,
+  getPostStatusText,
+  getPostTypeText
+} from '@/utils/multilingual'
+
+export default {
+  setup() {
+    const router = useRouter()
+    const tableRef = ref(null)
+    const sourceGroupList = ref([])
+    const total = ref(0)
+    const detailDialogVisible = ref(false)
+    const detailLoading = ref(false)
+    const detailSaving = ref(false)
+    const detailData = ref(null)
+    const editForm = reactive({
+      title: '',
+      alias: '',
+      excerpt: '',
+      content: '',
+      type: 1,
+      status: 0,
+      date: ''
+    })
+    const params = reactive({
+      page: 1,
+      limit: 20,
+      keyword: '',
+      sourceLanguageCode: '',
+      languageCode: '',
+      status: '',
+      type: ''
+    })
+
+    const getRequestParams = () => {
+      const requestParams = {
+        page: params.page,
+        limit: params.limit
+      }
+      if (params.keyword) {
+        requestParams.keyword = params.keyword
+      }
+      if (params.sourceLanguageCode) {
+        requestParams.sourceLanguageCode = params.sourceLanguageCode
+      }
+      if (params.languageCode) {
+        requestParams.languageCode = params.languageCode
+      }
+      if (params.status !== '') {
+        requestParams.status = params.status
+      }
+      if (params.type !== '') {
+        requestParams.type = params.type
+      }
+      return requestParams
+    }
+
+    const getTranslationPostList = resetPage => {
+      if (resetPage === true && params.page !== 1) {
+        params.page = 1
+        return
+      }
+
+      multilingualApi
+        .getTranslationPostListBySource(getRequestParams())
+        .then(response => {
+          const responseData = response.data.data || {}
+          sourceGroupList.value = responseData.list || []
+          total.value = responseData.total || 0
+          tableRef.value?.scrollTo({ top: 0 })
+        })
+        .catch(error => {
+          console.log(error)
+        })
+    }
+
+    const getTranslationRows = row => {
+      const translations = row.translations || {}
+      return SUPPORTED_LANGUAGE_OPTIONS.map(item => {
+        return {
+          languageCode: item.value,
+          translation: translations[item.value]
+        }
+      })
+    }
+
+    const getSourceGroupRowKey = row => {
+      if (row.sourcePost?._id) {
+        return row.sourcePost._id
+      }
+      if (row.sourcePost?.sourceId) {
+        return row.sourcePost.sourceId
+      }
+
+      return row.sourcePost?.translationGroupId || ''
+    }
+
+    const getTranslationTagType = translation => {
+      if (!translation) {
+        return 'info'
+      }
+      if (translation.pendingReview) {
+        return 'warning'
+      }
+      return 'success'
+    }
+
+    const getPostDisplayTitle = post => {
+      if (!post) {
+        return '-'
+      }
+      if (Number(post.type) === 2) {
+        return post.excerpt || '推文'
+      }
+      return post.title || '暂无标题'
+    }
+
+    const createTranslation = (sourcePost, languageCode) => {
+      ElMessageBox.confirm(
+        `确认为 ${languageCode} 创建多语言文章？`,
+        '创建语言版本',
+        {
+          type: 'info',
+          confirmButtonText: '创建',
+          cancelButtonText: '取消'
+        }
+      )
+        .then(() => {
+          return multilingualApi.createTranslationPost({
+            sourceSnapshotId: sourcePost._id,
+            languageCode,
+            copyMode: 'source'
+          })
+        })
+        .then(() => {
+          ElMessage.success('创建成功')
+          getTranslationPostList(false)
+        })
+        .catch(error => {
+          console.log(error)
+        })
+    }
+
+    const openTranslationDetail = translation => {
+      detailDialogVisible.value = true
+      detailLoading.value = true
+      detailData.value = null
+      multilingualApi
+        .getTranslationPostDetail({ id: translation._id })
+        .then(response => {
+          detailData.value = response.data.data
+          syncEditForm(detailData.value?.post)
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          detailLoading.value = false
+        })
+    }
+
+    const goTranslationEditor = translation => {
+      router.push({
+        name: 'TranslationPostEdit',
+        params: { id: translation._id }
+      })
+    }
+
+    const syncEditForm = post => {
+      editForm.title = post?.title || ''
+      editForm.alias = post?.alias || ''
+      editForm.excerpt = post?.excerpt || ''
+      editForm.content = post?.content || ''
+      editForm.type = Number(post?.type || 1)
+      editForm.status = Number(post?.status || 0)
+      editForm.date = post?.date || ''
+    }
+
+    const saveDetail = () => {
+      const post = detailData.value?.post
+      if (!post) {
+        return
+      }
+
+      detailSaving.value = true
+      multilingualApi
+        .updateTranslationPost({
+          id: post._id,
+          languageCode: post.languageCode,
+          title: editForm.title,
+          alias: editForm.alias,
+          excerpt: editForm.excerpt,
+          content: editForm.content,
+          type: editForm.type,
+          status: editForm.status,
+          date: editForm.date
+        })
+        .then(response => {
+          detailData.value = response.data.data
+          syncEditForm(detailData.value?.post)
+          ElMessage.success('保存成功')
+          getTranslationPostList(false)
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          detailSaving.value = false
+        })
+    }
+
+    const confirmReview = () => {
+      const post = detailData.value?.post
+      if (!post) {
+        return
+      }
+
+      detailSaving.value = true
+      multilingualApi
+        .updateTranslationPost({
+          id: post._id,
+          languageCode: post.languageCode,
+          confirmReview: true
+        })
+        .then(response => {
+          detailData.value = response.data.data
+          syncEditForm(detailData.value?.post)
+          ElMessage.success('复核状态已更新')
+          getTranslationPostList(false)
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          detailSaving.value = false
+        })
+    }
+
+    watch(
+      () => params.page,
+      () => {
+        getTranslationPostList(false)
+      }
+    )
+
+    onMounted(() => {
+      getTranslationPostList(false)
+    })
+
+    return {
+      tableRef,
+      params,
+      sourceGroupList,
+      total,
+      detailDialogVisible,
+      detailLoading,
+      detailSaving,
+      detailData,
+      editForm,
+      languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
+      postTypeOptions: POST_TYPE_OPTIONS,
+      postStatusOptions: POST_STATUS_OPTIONS,
+      getLanguageText,
+      getPostStatusTagType,
+      getPostStatusText,
+      getPostTypeText,
+      getSourceGroupRowKey,
+      getTranslationRows,
+      getTranslationTagType,
+      getPostDisplayTitle,
+      getTranslationPostList,
+      createTranslation,
+      openTranslationDetail,
+      goTranslationEditor,
+      saveDetail,
+      confirmReview
+    }
+  }
+}
+</script>
+
+<style scoped>
+.translation-post-list-page {
+  min-width: 0;
+}
+
+.translation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.translation-child-table {
+  padding: 10px 20px;
+  background: var(--el-fill-color-lighter);
+}
+
+.source-title {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.source-meta {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.language-version-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.detail-actions {
+  text-align: right;
+}
+
+@media (max-width: 767px) {
+  .translation-search-form :deep(.el-form-item) {
+    margin-right: 0;
+    width: 100%;
+  }
+
+  .translation-search-form :deep(.el-input),
+  .translation-search-form :deep(.el-select) {
+    width: 100% !important;
+  }
+
+  .translation-actions {
+    float: none;
+    margin-top: 10px;
+  }
+}
+</style>

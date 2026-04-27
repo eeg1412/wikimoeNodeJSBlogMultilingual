@@ -10,9 +10,25 @@
 </template>
 <script setup>
 import { postLogCreateApi, putLogUpdatePerformanceApi } from '@/api/log'
+import { DEFAULT_LANGUAGE_CODE, normalizeLanguageCode } from '@/lang'
 import { isChunkAssetError, trackChunkAssetError } from '@/utils/chunk-error'
 
 const nuxtApp = useNuxtApp()
+const route = useRoute()
+
+function getRouteCode() {
+  const code = route.params.code
+
+  if (Array.isArray(code)) {
+    return code[0]
+  }
+
+  return code
+}
+
+const currentLanguageCode = computed(() => {
+  return normalizeLanguageCode(getRouteCode()) || DEFAULT_LANGUAGE_CODE
+})
 
 if (import.meta.client) {
   nuxtApp.hook('app:chunkError', ({ error }) => {
@@ -44,27 +60,30 @@ const { setCommentRetractCountData } = useCommentRetractCountData()
 const siteEnableRss = options.value.siteEnableRss
 const rssHead = () => {
   if (siteEnableRss) {
+    const siteUrl = options.value.siteUrl
+    const languageCode = currentLanguageCode.value
+
     return [
       // rel="alternate" type="application/rss+xml" title="RSS"
       {
         rel: 'alternate',
         type: 'application/rss+xml',
         title: 'RSS',
-        href: options.value.siteUrl + '/rss'
+        href: `${siteUrl}/${languageCode}/rss`
       },
       // rss for blog
       {
         rel: 'alternate',
         type: 'application/rss+xml',
         title: 'RSS for blog',
-        href: options.value.siteUrl + '/rss/blog'
+        href: `${siteUrl}/${languageCode}/rss/blog`
       },
       // rss for tweet
       {
         rel: 'alternate',
         type: 'application/rss+xml',
         title: 'RSS for tweet',
-        href: options.value.siteUrl + '/rss/tweet'
+        href: `${siteUrl}/${languageCode}/rss/tweet`
       }
     ]
   } else {
@@ -99,7 +118,7 @@ if (siteThemeModeList && siteThemeModeList.includes(siteThemeMode)) {
   })
 }
 
-useHead({
+useHead(() => ({
   titleTemplate: titleChunk => {
     if (!titleChunk) {
       return options.value.siteTitle
@@ -111,7 +130,7 @@ useHead({
   },
   title: options.value.siteSubTitle,
   htmlAttrs: {
-    lang: 'zh-hans'
+    lang: currentLanguageCode.value
   },
   meta: [
     { name: 'description', content: options.value.siteDescription },
@@ -158,7 +177,7 @@ useHead({
     ...rssHead()
   ],
   script: script
-})
+}))
 const getPerformanceNavigationTiming = () => {
   let dataContentObj = null
   try {
@@ -252,7 +271,6 @@ const updatePerformance = () => {
 }
 
 // watch 路由变化 重新设置 og:url
-const route = useRoute()
 watch(
   () => route.path,
   () => {

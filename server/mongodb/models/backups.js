@@ -52,4 +52,4 @@ var backups = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('backups', backups)
+module.exports = require('../modelFactory/defaultModel')('backups', backups)

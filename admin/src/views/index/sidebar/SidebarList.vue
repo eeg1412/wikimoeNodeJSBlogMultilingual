@@ -6,7 +6,20 @@
       </el-breadcrumb>
     </div>
     <div class="clearfix pb20">
-      <div class="fl common-top-search-form-body"></div>
+      <div class="fl common-top-search-form-body">
+        <el-select
+          v-model="params.languageCode"
+          class="w_2"
+          @change="getSidebarList"
+        >
+          <el-option
+            v-for="item in languageOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </div>
       <div class="fr">
         <!-- 按钮用 -->
         <!-- 排序 -->
@@ -191,6 +204,7 @@ import RichEditor5 from '@/components/RichEditor5'
 import GoogleAdInput from '@/components/GoogleAdInput'
 import { escapeHtml } from '@/utils/utils'
 import CheckDialogService from '@/services/CheckDialogService'
+import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 
 export default {
   components: {
@@ -204,6 +218,9 @@ export default {
     // 侧边栏设置
     const sidebarSettingsFormRef = ref(null)
     const sidebarSettingsForm = ref([])
+    const params = reactive({
+      languageCode: route.query.languageCode || 'zh-CN'
+    })
     const sidebarSettingsTemplate = computed(() => {
       const base = [
         // 1:自定义内容 3:最新评论 4:随机标签 5:随机文章 7:搜索 8:分类 9:归档 10:谷歌广告 11:自定义HTML 12:热门文章 13:当季追番 14:攻略中 15:阅读中
@@ -345,7 +362,7 @@ export default {
     }
 
     const getSidebarList = () => {
-      authApi.getSidebarList().then(res => {
+      authApi.getSidebarList(params).then(res => {
         sidebarSettingsForm.value = res.data.list
       })
     }
@@ -354,7 +371,7 @@ export default {
         item => item.type === command
       )
       authApi
-        .createSidebar(item)
+        .createSidebar({ ...item, languageCode: params.languageCode })
         .then(res => {
           // 在前面插入
           sidebarSettingsForm.value.unshift(res.data.data)
@@ -365,7 +382,7 @@ export default {
     }
     const sidebarSettingsSubmit = item => {
       authApi
-        .updateSidebar(item)
+        .updateSidebar({ ...item, languageCode: params.languageCode })
         .then(res => {
           ElMessage.success('更新成功')
         })
@@ -382,12 +399,14 @@ export default {
         correctAnswer: '是',
         content: `此操作将<span class="cRed">永久删除侧边栏设置：【${title}】</span>, 是否继续?`,
         success: () => {
-          return authApi.deleteSidebar({ id }).then(() => {
-            ElMessage.success('删除成功')
-            sidebarSettingsForm.value = sidebarSettingsForm.value.filter(
-              item => item._id !== id
-            )
-          })
+          return authApi
+            .deleteSidebar({ id, languageCode: params.languageCode })
+            .then(() => {
+              ElMessage.success('删除成功')
+              sidebarSettingsForm.value = sidebarSettingsForm.value.filter(
+                item => item._id !== id
+              )
+            })
         }
       })
         .then(() => {})
@@ -401,14 +420,15 @@ export default {
     const canDrag = ref(false)
     const onDragBtnClick = () => {
       if (canDrag.value) {
-        const params = sidebarSettingsForm.value.map((item, index) => {
+        const sidebarList = sidebarSettingsForm.value.map((item, index) => {
           return {
             _id: item._id,
             taxis: index
           }
         })
         updateSidebarTaxis({
-          sidebarList: params
+          languageCode: params.languageCode,
+          sidebarList
         }).then(res => {
           canDrag.value = false
           getSidebarList()
@@ -430,6 +450,8 @@ export default {
       // 侧边栏设置
       sidebarSettingsFormRef,
       sidebarSettingsForm,
+      languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
+      params,
       sidebarSettingsTemplate,
       showConetntTypeList,
       showCountTypeList,

@@ -1,12 +1,12 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var users = new Schema(
   {
     username: {
       type: String,
       required: true,
-      unique: true,
       index: true
     },
     password: {
@@ -45,4 +45,7 @@ var users = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('users', users)
+multilingualSchema.addSourceIdentityFields(users, 'users')
+multilingualSchema.addRelationIdentityIndex(users)
+
+module.exports = require('../modelFactory/defaultModel')('users', users)

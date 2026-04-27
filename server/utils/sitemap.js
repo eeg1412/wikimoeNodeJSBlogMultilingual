@@ -1,10 +1,31 @@
 const { SitemapStream } = require('sitemap')
 const { createWriteStream, createReadStream, constants } = require('fs')
-const { access, unlink } = require('fs').promises
+const { access, mkdir, unlink } = require('fs').promises
 const utils = require('./utils')
 const postUtils = require('../mongodb/utils/posts')
 const path = require('path')
+const {
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('./language')
 const sitemapCacheFolder = './seo/sitemap'
+
+function getPostSitemapUrl(languageCode, post) {
+  const pathType = post.type === 3 ? 'page' : 'post'
+  return `/${languageCode}/index/${pathType}/${post.alias || post._id}`
+}
+
+function getPostPriority(type) {
+  if (type === 3) {
+    return 0.8
+  }
+
+  if (type === 1) {
+    return 0.5
+  }
+
+  return 0.3
+}
 
 exports.updateSitemap = async () => {
   const promise = new Promise(async (resolve, reject) => {
@@ -121,7 +142,104 @@ exports.updateSitemap = async () => {
 
 exports.reflushSitemap = async () => {
   await utils.executeInLock('reflushSitemap', async () => {
-    await this.updateSitemap()
+    for (const languageCode of SUPPORTED_LANGUAGE_CODES) {
+      await this.reflushLanguageSitemap(languageCode)
+    }
+  })
+}
+
+exports.updateLanguageSitemap = async languageCodeInput => {
+  const languageCode = normalizeLanguageCode(languageCodeInput)
+  if (!languageCode) {
+    throw new Error('LANGUAGE_CODE_UNSUPPORTED')
+  }
+
+  const siteSettings = global.$globalConfig?.siteSettings || {}
+  const { siteUrl, siteEnableSitemap } = siteSettings
+  const sitemapFolder = path.join(sitemapCacheFolder, languageCode)
+  const sitemapPath = path.join(sitemapFolder, 'sitemap.xml')
+
+  if (siteEnableSitemap !== true) {
+    try {
+      await access(sitemapPath)
+      await unlink(sitemapPath)
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error
+      }
+    }
+    return null
+  }
+
+  await mkdir(sitemapFolder, { recursive: true })
+
+  return new Promise(async (resolve, reject) => {
+    console.info(`creating sitemap:${languageCode}`)
+    const sitemapStream = new SitemapStream({
+      hostname: siteUrl,
+      xslUrl: '/sitemap.xsl'
+    })
+    const writeStream = createWriteStream(sitemapPath)
+    sitemapStream.pipe(writeStream)
+    writeStream.on('finish', () => {
+      console.info(`sitemap created:${languageCode}`)
+      resolve()
+    })
+    writeStream.on('error', err => {
+      console.error(err)
+      reject(err)
+    })
+
+    sitemapStream.write({
+      url: `/${languageCode}`,
+      changefreq: 'always',
+      priority: 1,
+      lastmod: new Date()
+    })
+
+    const params = {
+      languageCode,
+      recordKind: 'translation',
+      status: 1,
+      type: {
+        $in: [1, 2, 3]
+      }
+    }
+    const sort = {
+      date: -1,
+      _id: -1
+    }
+    const postCursor = postUtils.findCursor(
+      params,
+      sort,
+      '_id type alias lastChangDate date'
+    )
+
+    try {
+      for await (const post of postCursor) {
+        sitemapStream.write({
+          url: getPostSitemapUrl(languageCode, post),
+          changefreq: 'always',
+          priority: getPostPriority(post.type),
+          lastmod: post.lastChangDate || post.date
+        })
+      }
+      sitemapStream.end()
+    } catch (error) {
+      sitemapStream.end()
+      reject(error)
+    }
+  })
+}
+
+exports.reflushLanguageSitemap = async languageCodeInput => {
+  const languageCode = normalizeLanguageCode(languageCodeInput)
+  if (!languageCode) {
+    throw new Error('LANGUAGE_CODE_UNSUPPORTED')
+  }
+
+  await utils.executeInLock(`reflushSitemap:${languageCode}`, async () => {
+    await this.updateLanguageSitemap(languageCode)
   })
 }
 
@@ -131,6 +249,28 @@ exports.getSitemap = async (req, res) => {
     await access(sitemapPath, constants.R_OK)
     const readStream = createReadStream(sitemapPath)
     res.setHeader('Content-Type', 'application/xml')
+    readStream.pipe(res)
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      res.status(404).send('sitemap not found')
+    } else {
+      res.status(500).send('server error')
+    }
+  }
+}
+
+exports.getLanguageSitemap = async (req, res) => {
+  const languageCode = normalizeLanguageCode(req.params.code)
+  if (!languageCode) {
+    res.status(404).send('sitemap not found')
+    return
+  }
+
+  const sitemapPath = path.join(sitemapCacheFolder, languageCode, 'sitemap.xml')
+  try {
+    await access(sitemapPath, constants.R_OK)
+    const readStream = createReadStream(sitemapPath)
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8')
     readStream.pipe(res)
   } catch (err) {
     if (err.code === 'ENOENT') {

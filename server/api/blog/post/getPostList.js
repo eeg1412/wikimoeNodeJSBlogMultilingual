@@ -3,11 +3,17 @@ const mappointsUtils = require('../../../mongodb/utils/mappoints')
 const sortUtils = require('../../../mongodb/utils/sorts')
 const tagsUtils = require('../../../mongodb/utils/tags')
 const utils = require('../../../utils/utils')
+const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
 
 module.exports = async function (req, res, next) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
   let {
     page,
     keyword,
@@ -38,6 +44,8 @@ module.exports = async function (req, res, next) {
     return
   }
   const params = {
+    languageCode,
+    recordKind: 'translation',
     // 默认status为1
     status: 1,
     // 默认type为blog和tweet
@@ -71,7 +79,15 @@ module.exports = async function (req, res, next) {
     ]
     // 检索tags
     const tags = await tagsUtils
-      .findLimit({ tagname: { $in: regexArray } }, undefined, 100)
+      .findLimit(
+        {
+          tagname: { $in: regexArray },
+          languageCode,
+          recordKind: 'translation'
+        },
+        undefined,
+        100
+      )
       .catch(err => {
         return []
       })
@@ -84,7 +100,11 @@ module.exports = async function (req, res, next) {
     }
     // 检索mappoints
     const mappoints = await mappointsUtils
-      .findLimit({ title: { $in: regexArray } }, undefined, 100)
+      .findLimit(
+        { title: { $in: regexArray }, languageCode, recordKind: 'translation' },
+        undefined,
+        100
+      )
       .catch(err => {
         return []
       })
@@ -129,7 +149,8 @@ module.exports = async function (req, res, next) {
 
   // 如果sort存在，就加入查询条件
   if (sortid) {
-    const sortList = global.$cacheData?.sortList || []
+    const languageCache = cacheDataUtils.getLanguageCache(languageCode)
+    const sortList = languageCache?.sortList || []
     function findInSortList(sortList, sortid, isObjectId) {
       for (let item of sortList) {
         if (

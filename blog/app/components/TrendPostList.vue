@@ -50,7 +50,7 @@
       <!-- <div class="text-2xl mb-2">
         <WUIIcon name="i-heroicons-cube-transparent" class="align-middle mr-1" />
       </div> -->
-      <div>暂无内容</div>
+      <div>{{ t('common.status.empty') }}</div>
     </div>
   </div>
 </template>
@@ -58,6 +58,7 @@
 import { getTrendPostListApi } from '@/api/trend'
 
 const { options } = useOptions()
+const { languageCode, t } = useLang()
 
 const { data: trendPostListData } = await getTrendPostListApi()
 const trendPostList = ref(trendPostListData.value.list)
@@ -84,13 +85,13 @@ const getLinkObj = item => {
     case 'blog':
       linkObj = {
         name: 'postDetail',
-        params: { id: detail.alias || detail._id }
+        params: { code: languageCode.value, id: detail.alias || detail._id }
       }
       break
     case 'page':
       linkObj = {
         name: 'pageDetail',
-        params: { id: detail.alias || detail._id }
+        params: { code: languageCode.value, id: detail.alias || detail._id }
       }
 
       break

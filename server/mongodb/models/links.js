@@ -52,4 +52,4 @@ var links = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('links', links)
+module.exports = require('../modelFactory/defaultModel')('links', links)

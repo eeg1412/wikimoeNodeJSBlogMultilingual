@@ -17,4 +17,4 @@ var referrers = new Schema(
   { capped: 15728640, timestamps: true }
 )
 
-module.exports = mongoose.model('referrers', referrers)
+module.exports = require('../modelFactory/defaultModel')('referrers', referrers)

@@ -463,7 +463,7 @@ export default {
         .then(res => {
           const token = res.data.token
           const form = document.createElement('form')
-          form.action = '/api/admin/backup/download' // your url
+          form.action = '/api/multilingual-admin/backup/download' // your url
           form.method = 'POST'
           form.target = '_blank' // open in a new tab
 

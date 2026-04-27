@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 
 // 定义选项子Schema
 var OptionSchema = new Schema({
@@ -49,4 +50,7 @@ var votes = new Schema(
   }
 )
 
-module.exports = mongoose.model('votes', votes)
+multilingualSchema.addSourceIdentityFields(votes, 'votes')
+multilingualSchema.addRelationIdentityIndex(votes)
+
+module.exports = require('../modelFactory/defaultModel')('votes', votes)

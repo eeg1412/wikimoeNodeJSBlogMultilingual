@@ -11,6 +11,16 @@
     </div>
     <div>
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
+        <el-form-item label="语言" prop="languageCode">
+          <el-select v-model="form.languageCode">
+            <el-option
+              v-for="item in languageOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="导航名称" prop="naviname">
           <el-input
             v-model="form.naviname"
@@ -75,6 +85,7 @@
 import { useRouter, useRoute } from 'vue-router'
 import { onMounted, reactive, ref } from 'vue'
 import { authApi } from '@/api'
+import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 export default {
   setup() {
     const router = useRouter()
@@ -90,6 +101,7 @@ export default {
       isdefault: false,
       deepmatch: false,
       query: '',
+      languageCode: route.query.languageCode || 'zh-CN',
       __v: null
     })
     const rules = reactive({
@@ -145,7 +157,10 @@ export default {
             .updateNavi(data)
             .then(() => {
               router.push({
-                name: 'NaviList'
+                name: 'NaviList',
+                query: {
+                  languageCode: form.languageCode
+                }
               })
             })
             .catch(() => {})
@@ -155,7 +170,10 @@ export default {
             .createNavi(data)
             .then(() => {
               router.push({
-                name: 'NaviList'
+                name: 'NaviList',
+                query: {
+                  languageCode: form.languageCode
+                }
               })
             })
             .catch(() => {})
@@ -165,7 +183,8 @@ export default {
 
     const getNaviDetail = () => {
       const params = {
-        id: id.value
+        id: id.value,
+        languageCode: form.languageCode
       }
       authApi
         .getNaviDetail(params)
@@ -187,7 +206,7 @@ export default {
     const naviList = ref([])
     const getNaviList = () => {
       authApi
-        .getNaviList()
+        .getNaviList({ languageCode: form.languageCode })
         .then(res => {
           naviList.value = res.data.data
         })
@@ -205,6 +224,7 @@ export default {
       rules,
       formRef,
       submit,
+      languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       naviList
     }
   }

@@ -13,6 +13,9 @@
 import { getSortDetailApi } from '@/api/sort'
 import { postLogCreateApi } from '@/api/log'
 
+const { languageCode } = useLang()
+languageCode.value
+
 const route = useRoute()
 // 如果page不是正整数，报错去404页面
 const page = route.params.page

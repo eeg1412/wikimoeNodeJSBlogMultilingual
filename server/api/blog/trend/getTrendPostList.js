@@ -1,14 +1,21 @@
 const sorts = require('../../../mongodb/models/sorts')
 const readerlogUtils = require('../../../mongodb/utils/readerlogs')
 const utils = require('../../../utils/utils')
+const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
 
 module.exports = async function (req, res, next) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
+  const languageCache = cacheDataUtils.getLanguageCache(languageCode)
   utils
-    .executeInLock('getTrendPostList', async () => {
-      const sidebarList = global.$cacheData.sidebarList || []
+    .executeInLock(`getTrendPostList:${languageCode}`, async () => {
+      const sidebarList = languageCache.sidebarList || []
       const trendSidebar = sidebarList.find(item => {
         return item.type === 12
       })
@@ -32,7 +39,7 @@ module.exports = async function (req, res, next) {
       }
 
       // 获取缓存中的trendPostListData
-      const trendPostListData = global.$cacheData.trendPostListData || null
+      const trendPostListData = languageCache.trendPostListData || null
 
       let shouldUpdate = true
       if (trendPostListData) {
@@ -53,7 +60,7 @@ module.exports = async function (req, res, next) {
       }
 
       if (shouldUpdate) {
-        console.info('getTrendPostList should update')
+        console.info(`getTrendPostList should update:${languageCode}`)
         // 查询数据库
         // 获取24小时前的时间
         const twentyFourHoursAgo = moment().subtract(24, 'hours')
@@ -63,8 +70,10 @@ module.exports = async function (req, res, next) {
             $match: {
               createdAt: { $gte: twentyFourHoursAgo.toDate() },
               action: {
-                $in: ['postView', 'postShare', 'postLike', 'postDislike']
+                $in: ['postView', 'postShare']
               },
+              languageCode,
+              routeOwnership: 'multilingual-blog',
               isBot: false
             }
           },
@@ -76,48 +85,12 @@ module.exports = async function (req, res, next) {
                 $sum: {
                   $switch: {
                     branches: [
-                      { case: { $eq: ['$action', 'postDislike'] }, then: -51 },
-                      { case: { $eq: ['$action', 'postLike'] }, then: 51 },
                       { case: { $eq: ['$action', 'postShare'] }, then: 71 }
                     ],
                     default: 13 // 其他情况下
                   }
                 }
               }
-            }
-          },
-          {
-            $lookup: {
-              from: 'comments',
-              localField: '_id',
-              foreignField: 'post',
-              pipeline: [
-                {
-                  $match: {
-                    date: { $gte: twentyFourHoursAgo.toDate() },
-                    status: 1,
-                    $or: [{ user: null }, { user: { $exists: false } }]
-                  }
-                },
-                {
-                  $project: {
-                    _id: 1
-                  }
-                }
-              ],
-              as: 'comments'
-            }
-          },
-          {
-            $addFields: {
-              hot: {
-                $add: ['$hot', { $multiply: [{ $size: '$comments' }, 91] }]
-              }
-            }
-          },
-          {
-            $project: {
-              comments: 0 // 不包含comments字段
             }
           },
           {
@@ -145,7 +118,9 @@ module.exports = async function (req, res, next) {
                     $expr: {
                       $and: [{ $eq: ['$status', 1] }]
                     }
-                  }
+                  },
+                  languageCode,
+                  recordKind: 'translation'
                 },
                 {
                   $addFields: {
@@ -212,7 +187,7 @@ module.exports = async function (req, res, next) {
           .aggregate(pipe)
           .then(data => {
             // 写入缓存
-            global.$cacheData.trendPostListData = {
+            languageCache.trendPostListData = {
               date: moment().toDate(),
               list: data,
               limit: limit

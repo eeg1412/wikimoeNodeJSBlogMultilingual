@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var banners = new Schema(
   {
@@ -28,4 +29,6 @@ var banners = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('banners', banners)
+multilingualSchema.addLocalLanguageFields(banners)
+
+module.exports = require('../modelFactory/defaultModel')('banners', banners)

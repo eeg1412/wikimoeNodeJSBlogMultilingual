@@ -51,4 +51,4 @@ var votelogs = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('votelogs', votelogs)
+module.exports = require('../modelFactory/defaultModel')('votelogs', votelogs)

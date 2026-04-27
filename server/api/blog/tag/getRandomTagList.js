@@ -1,13 +1,20 @@
 const tagUtils = require('../../../mongodb/utils/tags')
 const utils = require('../../../utils/utils')
+const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
 
 module.exports = async function (req, res, next) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
+  const languageCache = cacheDataUtils.getLanguageCache(languageCode)
   utils
-    .executeInLock('getRandomTagList', async () => {
-      const sidebarList = global.$cacheData.sidebarList || []
+    .executeInLock(`getRandomTagList:${languageCode}`, async () => {
+      const sidebarList = languageCache.sidebarList || []
       const randomTagListSidebar = sidebarList.find(item => {
         return item.type === 4
       })
@@ -31,7 +38,7 @@ module.exports = async function (req, res, next) {
       }
 
       // 获取缓存中的randomTagListData
-      const randomTagListData = global.$cacheData.randomTagListData || null
+      const randomTagListData = languageCache.randomTagListData || null
 
       let shouldUpdate = true
       if (randomTagListData) {
@@ -52,9 +59,12 @@ module.exports = async function (req, res, next) {
       }
 
       if (shouldUpdate) {
-        console.info('getRandomTagList should update')
+        console.info(`getRandomTagList should update:${languageCode}`)
         // 查询数据库
         const pipe = [
+          {
+            $match: cacheDataUtils.getTranslationParams(languageCode)
+          },
           {
             $sample: {
               size: limit + 10
@@ -68,7 +78,9 @@ module.exports = async function (req, res, next) {
               pipeline: [
                 {
                   $match: {
-                    status: 1 // 只统计已发布的文章
+                    status: 1,
+                    languageCode,
+                    recordKind: 'translation'
                   }
                 }
               ],
@@ -104,7 +116,7 @@ module.exports = async function (req, res, next) {
           .aggregate(pipe)
           .then(data => {
             // 写入缓存
-            global.$cacheData.randomTagListData = {
+            languageCache.randomTagListData = {
               date: moment().toDate(),
               list: data,
               limit: limit

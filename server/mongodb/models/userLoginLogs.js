@@ -41,4 +41,7 @@ var userLoginLogs = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('userLoginLogs', userLoginLogs)
+module.exports = require('../modelFactory/defaultModel')(
+  'userLoginLogs',
+  userLoginLogs
+)

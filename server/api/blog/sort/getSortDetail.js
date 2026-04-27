@@ -3,6 +3,11 @@ const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
 module.exports = async function (req, res, next) {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res.status(400).json({ errors: [{ message: 'languageCode不支持' }] })
+    return
+  }
   const { id } = req.query
   // id不能为空
   if (!id) {
@@ -27,11 +32,12 @@ module.exports = async function (req, res, next) {
     return
   }
   let list = []
-  if (global.$cacheData?.sortList) {
-    list = global.$cacheData.sortList
+  const languageCache = cacheDataUtils.getLanguageCache(languageCode)
+  if (languageCache?.sortList) {
+    list = languageCache.sortList
   } else {
     await cacheDataUtils
-      .getSortList()
+      .getSortList(languageCode)
       .then(data => {
         list = data
       })

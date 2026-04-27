@@ -1,129 +1,77 @@
-const BASE_URL = '/api/blog'
+import multilingualRequest, {
+  MULTILINGUAL_ENDPOINT_PREFIXES
+} from './multilingual'
+import sourceRequest, { SOURCE_ENDPOINT_PREFIXES } from './source'
 
-class HttpRequest {
-  request(url, method, data, options) {
-    return new Promise((resolve, reject) => {
-      const newOptions = {
-        baseURL: BASE_URL,
-        method: method,
-        ...options
-      }
-
-      if (method === 'GET' || method === 'DELETE') {
-        newOptions.params = data
-      }
-      if (method === 'POST' || method === 'PUT') {
-        newOptions.body = data
-      }
-      useFetch(url, newOptions)
-        .then(res => {
-          if (res.error?.value) {
-            const statusCode = res.error?.value?.statusCode
-            console.log('statusCode', statusCode)
-            showError({
-              statusCode: statusCode || 500,
-              message: '服务器正在维护中，请稍后再试。'
-            })
-          } else {
-            resolve(res)
-          }
-        })
-        .catch(error => {
-          reject(error)
-        })
-    })
+function matchEndpoint(url, endpoint) {
+  if (endpoint.endsWith('/')) {
+    return url.startsWith(endpoint)
   }
 
-  requestFetch(url, options) {
-    // 查看options内包含shouldUuid
-    const shouldUuid = options.shouldUuid
-    // 如果有就去本地拿uuid
-    if (shouldUuid && import.meta.client) {
-      const uuid = checkUuid()
-      // 删除shouldUuid
-      delete options.shouldUuid
-      if (uuid) {
-        options.headers = {
-          ...options.headers,
-          // 将uuid放入请求头 wmb-request-id
-          'wmb-request-id': uuid
-        }
-      }
-    }
-    // 查看options内包含shouldCommentRetractJWT
-    const shouldCommentRetractJWT = options.shouldCommentRetractJWT
-    // 如果有就去本地拿commentRetractJWT
-    if (shouldCommentRetractJWT && import.meta.client) {
-      const commentRetractJWT = localStorage.getItem('commentRetractJWT')
-      // 删除shouldCommentRetractJWT
-      delete options.shouldCommentRetractJWT
-      if (commentRetractJWT) {
-        options.headers = {
-          ...options.headers,
-          // 将commentRetractJWT放入请求头 comment-retract-jwt
-          'wm-comment-retract-authorization': `Bearer ${commentRetractJWT}`
-        }
-      }
-    }
-    return new Promise((resolve, reject) => {
-      $fetch(url, options)
-        .then(res => {
-          resolve(res)
-        })
-        .catch(error => {
-          reject(error)
-        })
-    })
+  return url === endpoint
+}
+
+function isSourceApiUrl(url) {
+  return SOURCE_ENDPOINT_PREFIXES.some(endpoint => matchEndpoint(url, endpoint))
+}
+
+function isMultilingualApiUrl(url) {
+  return MULTILINGUAL_ENDPOINT_PREFIXES.some(endpoint =>
+    matchEndpoint(url, endpoint)
+  )
+}
+
+function getRequestClient(url) {
+  if (isSourceApiUrl(url)) {
+    return sourceRequest
   }
 
-  // 封装常用方法
+  if (isMultilingualApiUrl(url)) {
+    return multilingualRequest
+  }
 
+  return multilingualRequest
+}
+
+const httpRequest = {
   get(url, params, options) {
-    return this.request(url, 'GET', params, options)
-  }
+    return getRequestClient(url).get(url, params, options)
+  },
 
   post(url, data, options) {
-    return this.request(url, 'POST', data, options)
-  }
+    return getRequestClient(url).post(url, data, options)
+  },
 
   put(url, data, options) {
-    return this.request(url, 'PUT', data, options)
-  }
+    return getRequestClient(url).put(url, data, options)
+  },
 
   delete(url, params, options) {
-    return this.request(url, 'DELETE', params, options)
-  }
+    return getRequestClient(url).delete(url, params, options)
+  },
 
-  // requestFetch
-  getFetch(url, data, options = {}) {
-    options.method = 'GET'
-    options.baseURL = BASE_URL
-    options.params = data
-    return this.requestFetch(url, options)
-  }
+  getFetch(url, data, options) {
+    return getRequestClient(url).getFetch(url, data, options)
+  },
 
   postFetch(url, data, options) {
-    options.method = 'POST'
-    options.baseURL = BASE_URL
-    options.body = data
-    return this.requestFetch(url, options)
-  }
+    return getRequestClient(url).postFetch(url, data, options)
+  },
 
   putFetch(url, data, options) {
-    options.method = 'PUT'
-    options.baseURL = BASE_URL
-    options.body = data
-    return this.requestFetch(url, options)
-  }
+    return getRequestClient(url).putFetch(url, data, options)
+  },
 
   deleteFetch(url, data, options) {
-    options.method = 'DELETE'
-    options.baseURL = BASE_URL
-    options.params = data
-    return this.requestFetch(url, options)
+    return getRequestClient(url).deleteFetch(url, data, options)
   }
 }
 
-const httpRequest = new HttpRequest()
+export {
+  isMultilingualApiUrl,
+  isSourceApiUrl,
+  multilingualRequest,
+  sourceRequest
+}
 
 export default httpRequest

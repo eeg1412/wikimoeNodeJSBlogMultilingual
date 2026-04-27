@@ -17,7 +17,13 @@
     "fixPostLastChangDate": "node ./tools/fixPostLastChangDate",
     "deleteEmailSmtpSslOption": "node ./tools/deleteEmailSmtpSslOption",
     "fixMongoDbDefaultValues": "node ./tools/fixMongoDbDefaultValues",
-    "fixNavisQuery": "node ./tools/fixNavisQuery"
+    "fixNavisQuery": "node ./tools/fixNavisQuery",
+    "validate:foundation": "node ./validator-tool.js foundation",
+    "validate:models": "node ./validator-tool.js models",
+    "validate:import": "node ./validator-tool.js import",
+    "validate:translation": "node ./validator-tool.js translation",
+    "validate:adminApi": "node ./validator-tool.js adminApi",
+    "validate:blog": "node ./validator-tool.js blog"
   },
   "dependencies": {
     "archiver": "^7.0.1",

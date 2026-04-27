@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var gamePlatforms = new Schema(
   {
@@ -9,4 +10,10 @@ var gamePlatforms = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('gamePlatforms', gamePlatforms)
+multilingualSchema.addSourceIdentityFields(gamePlatforms, 'gamePlatforms')
+multilingualSchema.addRelationIdentityIndex(gamePlatforms)
+
+module.exports = require('../modelFactory/defaultModel')(
+  'gamePlatforms',
+  gamePlatforms
+)

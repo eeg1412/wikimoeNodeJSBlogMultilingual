@@ -44,6 +44,7 @@ const props = defineProps({
 })
 
 const { options } = useOptions()
+const { languageCode } = useLang()
 
 const getLinkObj = item => {
   let linkObj = {}
@@ -54,13 +55,13 @@ const getLinkObj = item => {
     case 1:
       linkObj = {
         name: 'postDetail',
-        params: { id: detail.alias || detail._id }
+        params: { code: languageCode.value, id: detail.alias || detail._id }
       }
       break
     case 3:
       linkObj = {
         name: 'pageDetail',
-        params: { id: detail.alias || detail._id }
+        params: { code: languageCode.value, id: detail.alias || detail._id }
       }
       break
     default:

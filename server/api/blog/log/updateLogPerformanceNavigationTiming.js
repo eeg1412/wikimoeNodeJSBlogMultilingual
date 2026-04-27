@@ -1,10 +1,17 @@
 const readerlogUtils = require('../../../mongodb/utils/readerlogs')
 const utils = require('../../../utils/utils')
+const { normalizeLanguageCode } = require('../../../utils/language')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
+const ROUTE_OWNERSHIP = 'multilingual-blog'
+
 module.exports = async function (req, res, next) {
   res.send({})
+  const languageCode = normalizeLanguageCode(req.body.languageCode)
+  if (!languageCode) {
+    return
+  }
   const uuid = req.headers['wmb-request-id']
   const action = req.body.action
   const actionList = ['open']
@@ -90,6 +97,8 @@ module.exports = async function (req, res, next) {
       _id: id,
       uuid: uuid,
       action: action,
+      languageCode,
+      routeOwnership: ROUTE_OWNERSHIP,
       createdAt: {
         $gt: new Date(new Date().setMinutes(new Date().getMinutes() - 2))
       }

@@ -4,15 +4,22 @@ const utils = require('../../../utils/utils')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const mongoose = require('mongoose')
+const { normalizeLanguageCode } = require('../../../utils/language')
 const languageData = require('../../../utils/intl/language.json')
 const regionData = require('../../../utils/intl/region.json')
 const scriptData = require('../../../utils/intl/script.json')
+
+const ROUTE_OWNERSHIP = 'multilingual-blog'
 
 module.exports = async function (req, res, next) {
   const logId = new mongoose.Types.ObjectId()
   res.send({
     id: logId
   })
+  const languageCode = normalizeLanguageCode(req.body.languageCode)
+  if (!languageCode) {
+    return
+  }
   const uuid = req.headers['wmb-request-id']
   const referrer = utils.setReferrer(req.body.referrer)
   const ip = utils.getUserIp(req)
@@ -62,6 +69,8 @@ module.exports = async function (req, res, next) {
         ip: ip
       }
     ],
+    languageCode,
+    routeOwnership: ROUTE_OWNERSHIP,
     createdAt: {
       $gte: utils.getTodayStartTime(),
       $lte: utils.getTodayEndTime()
@@ -307,6 +316,8 @@ module.exports = async function (req, res, next) {
     _id: logId,
     uuid: uuid,
     action: action,
+    languageCode,
+    routeOwnership: ROUTE_OWNERSHIP,
     data: {
       target: target,
       targetId: id,

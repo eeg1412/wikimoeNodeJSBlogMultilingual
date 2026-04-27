@@ -21,7 +21,7 @@
             class="none seo"
             :to="{
               name: 'postDetail',
-              params: { id: item.alias || item._id }
+              params: { code: languageCode, id: item.alias || item._id }
             }"
             tabindex="-1"
           >
@@ -47,6 +47,7 @@
                     name: 'postListSort',
                     params: {
                       sortid: item.sort.alias || item.sort._id,
+                      code: languageCode,
                       page: 1
                     }
                   }"
@@ -61,7 +62,7 @@
               <WUIIcon
                 class="text-primary-500 f18"
                 name="i-heroicons-bars-arrow-up"
-                title="置顶"
+                :title="t('common.post.pinned')"
                 v-if="item.showTopIcon"
               />
             </div>
@@ -71,7 +72,7 @@
           <div class="post-list-excerpt-body">
             <!-- prettier-ignore -->
             <template v-if="item.type === 1">
-              <div class="whitespace-pre-wrap" v-if="item.type === 1">{{ item.excerpt || '发表了一篇博文' }}</div>
+              <div class="whitespace-pre-wrap" v-if="item.type === 1">{{ item.excerpt || t('common.post.defaultExcerpt') }}</div>
               <!-- tags -->
               <div class="mt-1 mb-1" v-if="item.tags.length > 0 || item.mappointList.length > 0">
                 <template v-for="(tag, index) in item.tags" :key="index">
@@ -79,7 +80,7 @@
                     class="post-detail-tag-item hover:underline"
                     :to="{
                       name: 'postListTag',
-                      params: { tagid: tag._id, page: 1 },
+                      params: { code: languageCode, tagid: tag._id, page: 1 },
                     }"
                     >#{{ tag.tagname }}</NuxtLink
                   >
@@ -89,7 +90,7 @@
                     class="post-detail-tag-item hover:underline"
                     :to="{
                       name: 'postListMappoint',
-                      params: { mappointid: mappoint._id, page: 1 },
+                      params: { code: languageCode, mappointid: mappoint._id, page: 1 },
                     }"
                     ><WUIIcon
                     name="i-heroicons-map-pin-solid"
@@ -127,7 +128,7 @@
               @click.middle.stop
               :to="{
                 name: 'postDetail',
-                params: { id: item.alias || item._id }
+                params: { code: languageCode, id: item.alias || item._id }
               }"
             >
               <LazyPostItem :post="item" />
@@ -143,7 +144,7 @@
                   @click.middle.stop
                   :to="{
                     name: 'postDetail',
-                    params: { id: item.alias || item._id }
+                    params: { code: languageCode, id: item.alias || item._id }
                   }"
                 >
                   <!-- icon book-open -->
@@ -151,7 +152,9 @@
                     class="mr5 post-list-info-bottom-icon"
                     name="i-heroicons-book-open"
                   />
-                  <span>{{ formatNumber(item.views) }} 阅读</span>
+                  <span>{{
+                    t('common.post.views', { count: formatNumber(item.views) })
+                  }}</span>
                 </NuxtLink>
               </div>
               <div class="mr15">
@@ -161,7 +164,7 @@
                   @click.middle.stop
                   :to="{
                     name: 'postDetail',
-                    params: { id: item.alias || item._id },
+                    params: { code: languageCode, id: item.alias || item._id },
                     hash: '#commentlist-container'
                   }"
                 >
@@ -170,7 +173,11 @@
                     class="mr5 post-list-info-bottom-icon"
                     name="i-heroicons-chat-bubble-left-ellipsis"
                   />
-                  <span>{{ formatNumber(item.comnum) }} 评论</span>
+                  <span>{{
+                    t('common.post.comments', {
+                      count: formatNumber(item.comnum)
+                    })
+                  }}</span>
                 </NuxtLink>
               </div>
               <div
@@ -192,7 +199,11 @@
                       class="mr5 post-list-info-bottom-icon"
                     />
 
-                    <span>{{ formatNumber(item.shares) }} 分享</span>
+                    <span>{{
+                      t('common.post.shares', {
+                        count: formatNumber(item.shares)
+                      })
+                    }}</span>
                   </button>
                 </LazySharePopover>
               </div>
@@ -227,7 +238,9 @@
                   v-else
                 />
 
-                <span>{{ formatNumber(item.likes) }} 点赞</span>
+                <span>{{
+                  t('common.post.likes', { count: formatNumber(item.likes) })
+                }}</span>
               </div>
               <div class="dflex flexCenter opacity-20" v-else>
                 <!-- heart -->
@@ -236,7 +249,9 @@
                   name="i-heroicons-heart"
                 />
 
-                <span>{{ formatNumber(item.likes) }} 点赞</span>
+                <span>{{
+                  t('common.post.likes', { count: formatNumber(item.likes) })
+                }}</span>
               </div>
             </div>
           </div>
@@ -330,7 +345,7 @@
               <div
                 class="flex justify-between items-center bg-white dark:bg-gray-900 border-b border-solid border-gray-200 dark:border-gray-700 text-base px-4 py-3"
               >
-                <div>类型筛选</div>
+                <div>{{ t('common.post.filterType') }}</div>
                 <button
                   class="text-gray-500 hover:text-gray-700 common-focus-visible-btn-outline"
                   @click="switchFilterMenu"
@@ -352,7 +367,7 @@
                         postType !== '1' && postType !== '2' ? '-1' : '0'
                       "
                     >
-                      全部类型
+                      {{ t('common.post.allTypes') }}
                     </div>
                   </li>
                   <li>
@@ -363,7 +378,7 @@
                       @keydown.enter="switchPostType('blog')"
                       :tabindex="postType === '1' ? '-1' : '0'"
                     >
-                      博文
+                      {{ t('common.post.blog') }}
                     </div>
                   </li>
                   <li>
@@ -374,7 +389,7 @@
                       @keydown.enter="switchPostType('tweet')"
                       :tabindex="postType === '2' ? '-1' : '0'"
                     >
-                      推文
+                      {{ t('common.post.tweet') }}
                     </div>
                   </li>
                 </ul>
@@ -395,6 +410,9 @@ const sitePageSize = computed(() => options.value.sitePageSize || 1)
 const route = useRoute()
 const router = useRouter()
 const toast = useWToast()
+const { languageCode, t } = useLang()
+languageCode.value
+
 const postRouteType = computed(() => route.params.type)
 const postType = computed(() => {
   if (postRouteType.value === 'blog') {
@@ -470,6 +488,8 @@ const routePagination = computed(() => {
       to.firstRoute = {
         name: routeName.value,
         params: {
+          ...route.params,
+          code: languageCode.value,
           page: 1,
           type: postRouteType.value
         }
@@ -477,6 +497,8 @@ const routePagination = computed(() => {
       to.lastRoute = {
         name: routeName.value,
         params: {
+          ...route.params,
+          code: languageCode.value,
           page: totalPage.value,
           type: postRouteType.value
         }
@@ -484,6 +506,8 @@ const routePagination = computed(() => {
       to.prevRoute = {
         name: routeName.value,
         params: {
+          ...route.params,
+          code: languageCode.value,
           page: page - 1,
           type: postRouteType.value
         }
@@ -491,6 +515,8 @@ const routePagination = computed(() => {
       to.nextRoute = {
         name: routeName.value,
         params: {
+          ...route.params,
+          code: languageCode.value,
           page: page + 1,
           type: postRouteType.value
         }
@@ -556,27 +582,29 @@ const { generateItemListJsonLd, setJsonLd } = useArticleJsonLd()
 const getListName = () => {
   switch (routeName.value) {
     case 'postList':
-      return page === 1 ? '首页' : `首页 - 第${page}页`
+      return page === 1
+        ? t('common.post.listHome')
+        : t('common.post.listHomePage', { page })
     case 'postListKeyword':
-      return `搜索：${keyword}`
+      return t('common.post.listKeyword', { keyword })
     case 'postListSort':
-      return `分类文章`
+      return t('common.post.listSort')
     case 'postListArchive':
-      return `归档：${year}年${month}月`
+      return t('common.post.listArchive', { year, month })
     case 'postListTag':
-      return `标签文章`
+      return t('common.post.listTag')
     case 'postListMappoint':
-      return `地点文章`
+      return t('common.post.listMappoint')
     case 'postListBangumi':
-      return `番剧相关文章`
+      return t('common.post.listBangumi')
     case 'postListMovie':
-      return `电影相关文章`
+      return t('common.post.listMovie')
     case 'postListBook':
-      return `图书相关文章`
+      return t('common.post.listBook')
     case 'postListGame':
-      return `游戏相关文章`
+      return t('common.post.listGame')
     default:
-      return '文章列表'
+      return t('common.post.listDefault')
   }
 }
 if (postsData?.value?.list && postsData.value.list.length > 0) {
@@ -618,7 +646,7 @@ const goPostDetail = (e, item, middle) => {
     // resolveUrl
     const url = router.resolve({
       name: routeName,
-      params: { id }
+      params: { code: languageCode.value, id }
     }).href
     window.open(url, '_blank')
   } else {
@@ -626,6 +654,7 @@ const goPostDetail = (e, item, middle) => {
     router.push({
       name: routeName,
       params: {
+        code: languageCode.value,
         id: id
       }
     })

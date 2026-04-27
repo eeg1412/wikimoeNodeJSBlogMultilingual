@@ -16,7 +16,7 @@
         <NuxtLink
           :to="{
             name: 'postDetail',
-            params: { id: item.alias || item._id }
+            params: { code: languageCode, id: item.alias || item._id }
           }"
           target="_blank"
         >
@@ -27,6 +27,8 @@
   </div>
 </template>
 <script setup>
+const { languageCode } = useLang()
+
 const props = defineProps({
   postList: {
     type: Array,

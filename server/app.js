@@ -16,9 +16,9 @@ const $mongodDB = require('./mongodb')
 global.$mongodDB = $mongodDB
 var history = require('connect-history-api-fallback')
 
-var adminRouter = require('./routes/admin')
+var multilingualAdminRouter = require('./routes/multilingualAdmin')
 const blogRouter = require('./routes/blog')
-const rssRouter = require('./routes/rss/index')
+const multilingualRssRouter = require('./routes/multilingualRss')
 const sitemapToolUtils = require('./utils/sitemap')
 
 var app = express()
@@ -102,17 +102,18 @@ app.use('/seo/blog/robots.txt', async function (req, res) {
   res.send(global.$globalConfig?.siteSettings?.siteRobotsTxt || '')
 })
 
-app.use('/api/admin', adminRouter)
+app.use('/api/multilingual-admin', multilingualAdminRouter)
 app.use('/api/blog', blogRouter)
-app.use('/rss', rssRouter)
+app.use('/api/multilingual-blog', blogRouter)
+app.use('/:code/rss', multilingualRssRouter)
 // robots.txt
 app.use('/robots.txt', function (req, res) {
   res.type('text/plain')
   res.send('User-agent: *\nDisallow: /')
 })
-// sitemap.xml
-app.use('/sitemap.xml', async function (req, res) {
-  sitemapToolUtils.getSitemap(req, res)
+// language sitemap.xml
+app.get('/:code/sitemap.xml', async function (req, res) {
+  sitemapToolUtils.getLanguageSitemap(req, res)
 })
 // sitemap.xsl
 app.use('/sitemap.xsl', function (req, res) {
@@ -123,10 +124,10 @@ app.use('/ads.txt', function (req, res) {
   res.type('text/plain')
   res.send(global.$globalConfig?.adSettings?.AdAdsTxt || '')
 })
-// 所有第一级路径不是/admin的，都返回404
+// 多语言 server 只处理多语言后台静态资源，源站路径留给源站处理
 app.use((req, res, next) => {
   const firstLevelPath = req.path.split('/')[1]
-  if (firstLevelPath !== 'admin') {
+  if (firstLevelPath !== 'multilingual-admin') {
     res.status(404).send('Not found')
   } else {
     next()
@@ -134,10 +135,13 @@ app.use((req, res, next) => {
 })
 app.use(
   history({
-    index: '/admin/index.html'
+    index: '/multilingual-admin/index.html'
   })
 )
-app.use('/admin', express.static(path.join(__dirname, 'front/admin')))
+app.use(
+  '/multilingual-admin',
+  express.static(path.join(__dirname, 'front/multilingual-admin'))
+)
 
 // setInterval(() => {
 //   const memoryUsage = process.memoryUsage();

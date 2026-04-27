@@ -6,7 +6,20 @@
       </el-breadcrumb>
     </div>
     <div class="clearfix pb20">
-      <div class="fl common-top-search-form-body"></div>
+      <div class="fl common-top-search-form-body">
+        <el-select
+          v-model="params.languageCode"
+          class="w_2"
+          @change="getBannerList"
+        >
+          <el-option
+            v-for="item in languageOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </div>
       <div class="fr">
         <!-- 按钮用 -->
         <!-- 排序 -->
@@ -132,6 +145,7 @@ import RichEditor5 from '@/components/RichEditor5'
 import Cropper from '@/components/Cropper'
 import { escapeHtml } from '@/utils/utils'
 import CheckDialogService from '@/services/CheckDialogService'
+import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 
 export default {
   components: {
@@ -145,15 +159,18 @@ export default {
     // 横幅设置
     const bannerSettingsFormRef = ref(null)
     const bannerSettingsForm = ref([])
+    const params = reactive({
+      languageCode: route.query.languageCode || 'zh-CN'
+    })
 
     const getBannerList = () => {
-      authApi.getBannerList().then(res => {
+      authApi.getBannerList(params).then(res => {
         bannerSettingsForm.value = res.data.list
       })
     }
     const handleBanner = () => {
       authApi
-        .createBanner({})
+        .createBanner({ languageCode: params.languageCode })
         .then(res => {
           // 在前面插入
           bannerSettingsForm.value.unshift(res.data.data)
@@ -164,7 +181,7 @@ export default {
     }
     const bannerSettingsSubmit = item => {
       authApi
-        .updateBanner(item)
+        .updateBanner({ ...item, languageCode: params.languageCode })
         .then(res => {
           ElMessage.success('更新成功')
         })
@@ -180,12 +197,14 @@ export default {
         correctAnswer: '是',
         content: `此操作将<span class="cRed">永久删除横幅设置：【${title}】</span>, 是否继续?`,
         success: () => {
-          return authApi.deleteBanner({ id }).then(() => {
-            ElMessage.success('删除成功')
-            bannerSettingsForm.value = bannerSettingsForm.value.filter(
-              item => item._id !== id
-            )
-          })
+          return authApi
+            .deleteBanner({ id, languageCode: params.languageCode })
+            .then(() => {
+              ElMessage.success('删除成功')
+              bannerSettingsForm.value = bannerSettingsForm.value.filter(
+                item => item._id !== id
+              )
+            })
         }
       })
         .then(() => {})
@@ -199,14 +218,15 @@ export default {
     const canDrag = ref(false)
     const onDragBtnClick = () => {
       if (canDrag.value) {
-        const params = bannerSettingsForm.value.map((item, index) => {
+        const bannerList = bannerSettingsForm.value.map((item, index) => {
           return {
             _id: item._id,
             taxis: index
           }
         })
         updateBannerTaxis({
-          bannerList: params
+          languageCode: params.languageCode,
+          bannerList
         }).then(res => {
           canDrag.value = false
           getBannerList()
@@ -232,6 +252,8 @@ export default {
       // 横幅设置
       bannerSettingsFormRef,
       bannerSettingsForm,
+      languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
+      params,
       handleBanner,
       bannerSettingsSubmit,
       bannerSettingsDelete,

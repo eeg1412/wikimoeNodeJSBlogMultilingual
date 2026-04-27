@@ -5,8 +5,11 @@
 </template>
 <script setup>
 import { postLogCreateApi } from '@/api/log'
+
+const { languageCode } = useLang()
+languageCode.value
+
 definePageMeta({
-  alias: ['/'],
   name: 'postList'
 })
 onMounted(() => {

@@ -1,11 +1,18 @@
 const postUtils = require('../../../mongodb/utils/posts')
 const readerlogUtils = require('../../../mongodb/utils/readerlogs')
 const utils = require('../../../utils/utils')
+const { normalizeLanguageCode } = require('../../../utils/language')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
+const ROUTE_OWNERSHIP = 'multilingual-blog'
+
 module.exports = async function (req, res, next) {
   const updateShare = async () => {
+    const languageCode = normalizeLanguageCode(req.body.languageCode)
+    if (!languageCode) {
+      return false
+    }
     const { isExceedMaxSize } = await utils.getReaderlogsSize()
     if (isExceedMaxSize) {
       userApiLog.error(`readerlogs超出最大存储容量`)
@@ -66,6 +73,8 @@ module.exports = async function (req, res, next) {
       ],
       // action字段 postShare
       action: 'postShare',
+      languageCode,
+      routeOwnership: ROUTE_OWNERSHIP,
       createdAt: {
         $gte: utils.getTodayStartTime(),
         $lte: utils.getTodayEndTime()
@@ -89,6 +98,8 @@ module.exports = async function (req, res, next) {
       ],
       // action字段 postShare
       action: 'postShare',
+      languageCode,
+      routeOwnership: ROUTE_OWNERSHIP,
       createdAt: {
         $gte: utils.getTodayStartTime(),
         $lte: utils.getTodayEndTime()
@@ -105,7 +116,11 @@ module.exports = async function (req, res, next) {
       }
     }
 
-    const data = await postUtils.findOne({ _id: id })
+    const data = await postUtils.findOne({
+      _id: id,
+      languageCode,
+      recordKind: 'translation'
+    })
     if (!data) {
       return false
     }
@@ -136,6 +151,8 @@ module.exports = async function (req, res, next) {
     const readerlogParams = {
       uuid: uuid,
       action: 'postShare',
+      languageCode,
+      routeOwnership: ROUTE_OWNERSHIP,
       data: {
         target: target,
         targetId: id,
@@ -165,7 +182,11 @@ module.exports = async function (req, res, next) {
     }
 
     postUtils
-      .updateOne({ _id: id }, params, true)
+      .updateOne(
+        { _id: id, languageCode, recordKind: 'translation' },
+        params,
+        true
+      )
       .then(data => {
         userApiLog.info(`post share update success`)
       })

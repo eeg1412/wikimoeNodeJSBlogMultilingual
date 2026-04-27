@@ -12,6 +12,9 @@
 <script setup>
 import { postLogCreateApi } from '@/api/log'
 
+const { languageCode } = useLang()
+languageCode.value
+
 const route = useRoute()
 const page = route.params.page
 // 如果page不是正整数，报错去404页面

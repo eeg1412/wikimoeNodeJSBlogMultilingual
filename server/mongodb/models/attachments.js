@@ -1,5 +1,6 @@
 var mongoose = require('mongoose')
 var Schema = mongoose.Schema
+var multilingualSchema = require('../modelFactory/multilingualSchema')
 // Schema
 var attachments = new Schema(
   {
@@ -69,4 +70,11 @@ var attachments = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('attachments', attachments)
+multilingualSchema.addSourceIdentityFields(attachments, 'attachments')
+multilingualSchema.addAttachmentMediaFields(attachments)
+multilingualSchema.addAttachmentIndexes(attachments)
+
+module.exports = require('../modelFactory/defaultModel')(
+  'attachments',
+  attachments
+)

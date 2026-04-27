@@ -5,3 +5,7 @@
     </NuxtLayout>
   </div>
 </template>
+<script setup>
+const { languageCode } = useLang()
+languageCode.value
+</script>

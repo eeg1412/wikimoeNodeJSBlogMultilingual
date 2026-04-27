@@ -46,4 +46,7 @@ var commentLikeLogs = new Schema(
   { timestamps: true }
 )
 
-module.exports = mongoose.model('commentLikeLogs', commentLikeLogs)
+module.exports = require('../modelFactory/defaultModel')(
+  'commentLikeLogs',
+  commentLikeLogs
+)
