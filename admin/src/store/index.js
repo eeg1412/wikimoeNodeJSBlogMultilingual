@@ -1,13 +1,22 @@
 import { createStore } from 'vuex'
 import { authApi } from '@/api'
-import { ElMessage } from 'element-plus'
+
+const DEFAULT_BLOG_LANGUAGE_CODE = 'zh-CN'
+
+function getDefaultBlogUrl() {
+  if (typeof window === 'undefined') {
+    return `/${DEFAULT_BLOG_LANGUAGE_CODE}/`
+  }
+
+  return `${window.location.origin}/${DEFAULT_BLOG_LANGUAGE_CODE}/`
+}
 
 export default createStore({
   state: {
     adminToken: localStorage.getItem('adminToken') || '',
     adminInfo: null,
     loadingShow: false,
-    siteUrl: ''
+    siteUrl: getDefaultBlogUrl()
   },
   getters: {
     adminToken: state => state.adminToken,
@@ -35,18 +44,8 @@ export default createStore({
           state.adminInfo = null
         })
     },
-    setOptions(state, data) {
-      authApi.getOptionList({ nameList: ['siteUrl'] }).then(res => {
-        const list = res.data.data
-        // 查找name为siteUrl的数据
-        const siteUrlData = list.find(item => item.name === 'siteUrl')
-        if (siteUrlData) {
-          state.siteUrl = siteUrlData.value
-        } else {
-          // 报错
-          ElMessage.error('请先设置站点信息！')
-        }
-      })
+    setOptions(state) {
+      state.siteUrl = getDefaultBlogUrl()
     }
   },
   actions: {

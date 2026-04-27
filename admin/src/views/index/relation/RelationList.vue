@@ -68,8 +68,7 @@
       >
         <ResponsiveTableColumn label="名称" min-width="260">
           <template #default="{ row }">
-            <div class="relation-title">{{ row.displayName }}</div>
-            <div class="relation-subtitle">{{ row._id }}</div>
+            <div class="relation-title">{{ getRelationDisplayName(row) }}</div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="语言" width="150">
@@ -135,7 +134,7 @@
           currentRow.sourceId || '-'
         }}</el-descriptions-item>
         <el-descriptions-item label="名称">{{
-          currentRow.displayName
+          getRelationDisplayName(currentRow)
         }}</el-descriptions-item>
         <el-descriptions-item label="语言">{{
           getLanguageText(currentRow.languageCode)
@@ -147,13 +146,18 @@
           $formatDate(currentRow.updatedAt || currentRow.createdAt)
         }}</el-descriptions-item>
       </el-descriptions>
-      <el-input
-        class="mt20"
-        :model-value="currentRowText"
-        type="textarea"
-        :rows="12"
-        readonly
-      />
+      <template v-if="currentRow">
+        <el-divider content-position="left">业务字段</el-divider>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item
+            v-for="field in detailFieldRows"
+            :key="field.name"
+            :label="field.label"
+          >
+            {{ field.value }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </template>
     </el-dialog>
 
     <el-dialog
@@ -166,9 +170,39 @@
         type="info"
         :closable="false"
         show-icon
-        title="只允许保存白名单业务字段，系统字段、源快照字段和语言字段会被服务端忽略。"
+        title="这里只开放可翻译的业务字段；系统字段、源快照字段和语言字段由服务端保护。"
       />
-      <el-input v-model="payloadText" type="textarea" :rows="14" />
+      <el-form
+        v-if="currentEditFields.length > 0"
+        :model="editForm"
+        label-width="110px"
+        @submit.prevent
+      >
+        <el-form-item
+          v-for="field in currentEditFields"
+          :key="field.name"
+          :label="field.label"
+        >
+          <el-switch
+            v-if="field.type === 'boolean'"
+            v-model="editForm[field.name]"
+          />
+          <el-input-number
+            v-else-if="field.type === 'number'"
+            v-model="editForm[field.name]"
+            controls-position="right"
+            style="width: 180px"
+          />
+          <el-input
+            v-else-if="field.type === 'textarea'"
+            v-model="editForm[field.name]"
+            type="textarea"
+            :rows="4"
+          />
+          <el-input v-else v-model="editForm[field.name]" clearable />
+        </el-form-item>
+      </el-form>
+      <el-empty v-else description="当前类型暂无可编辑业务字段" />
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitUpdate">
@@ -187,8 +221,134 @@ import { multilingualApi } from '@/api'
 import {
   RELATION_COLLECTION_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
-  getLanguageText
+  getLanguageText,
+  getRelationDisplayName
 } from '@/utils/multilingual'
+
+const RELATION_EDIT_FIELD_MAP = {
+  users: [
+    { name: 'nickname', label: '昵称' },
+    { name: 'email', label: '邮箱' },
+    { name: 'description', label: '说明', type: 'textarea' }
+  ],
+  sorts: [
+    { name: 'sortname', label: '分类名' },
+    { name: 'alias', label: '别名' },
+    { name: 'taxis', label: '排序', type: 'number' },
+    { name: 'description', label: '说明', type: 'textarea' },
+    { name: 'template', label: '模板' }
+  ],
+  tags: [{ name: 'tagname', label: '标签名' }],
+  mappoints: [
+    { name: 'title', label: '地点标题' },
+    { name: 'summary', label: '摘要', type: 'textarea' },
+    { name: 'longitude', label: '经度', type: 'number' },
+    { name: 'latitude', label: '纬度', type: 'number' },
+    { name: 'zIndex', label: '层级', type: 'number' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  bangumis: [
+    { name: 'title', label: '番剧标题' },
+    { name: 'summary', label: '简介', type: 'textarea' },
+    { name: 'rating', label: '评分', type: 'number' },
+    { name: 'year', label: '年份', type: 'number' },
+    { name: 'season', label: '季度', type: 'number' },
+    { name: 'label', label: '标签' },
+    { name: 'giveUp', label: '弃番', type: 'boolean' },
+    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  movies: [
+    { name: 'title', label: '电影标题' },
+    { name: 'summary', label: '简介', type: 'textarea' },
+    { name: 'rating', label: '评分', type: 'number' },
+    { name: 'year', label: '年份', type: 'number' },
+    { name: 'month', label: '月份', type: 'number' },
+    { name: 'day', label: '日期', type: 'number' },
+    { name: 'label', label: '标签' },
+    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  games: [
+    { name: 'title', label: '游戏标题' },
+    { name: 'summary', label: '简介', type: 'textarea' },
+    { name: 'rating', label: '评分', type: 'number' },
+    { name: 'label', label: '标签' },
+    { name: 'giveUp', label: '弃坑', type: 'boolean' },
+    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  gamePlatforms: [
+    { name: 'name', label: '平台名' },
+    { name: 'color', label: '颜色' }
+  ],
+  books: [
+    { name: 'title', label: '书籍标题' },
+    { name: 'summary', label: '简介', type: 'textarea' },
+    { name: 'rating', label: '评分', type: 'number' },
+    { name: 'label', label: '标签' },
+    { name: 'giveUp', label: '弃坑', type: 'boolean' },
+    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  booktypes: [
+    { name: 'name', label: '类型名' },
+    { name: 'color', label: '颜色' }
+  ],
+  events: [
+    { name: 'title', label: '活动标题' },
+    { name: 'color', label: '颜色' },
+    { name: 'content', label: '内容', type: 'textarea' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  eventtypes: [
+    { name: 'name', label: '类型名' },
+    { name: 'color', label: '颜色' }
+  ],
+  posts: [
+    { name: 'title', label: '标题' },
+    { name: 'excerpt', label: '摘要/推文', type: 'textarea' },
+    { name: 'alias', label: '别名' },
+    { name: 'status', label: '状态', type: 'number' },
+    { name: 'allowRemark', label: '允许评论', type: 'boolean' },
+    { name: 'top', label: '置顶', type: 'boolean' },
+    { name: 'sortop', label: '分类置顶', type: 'boolean' }
+  ],
+  votes: [
+    { name: 'title', label: '投票标题' },
+    { name: 'maxSelect', label: '最大选择数', type: 'number' },
+    { name: 'showResultAfter', label: '投票后显示结果', type: 'boolean' },
+    { name: 'status', label: '状态', type: 'number' }
+  ],
+  attachments: [
+    { name: 'name', label: '媒体名称' },
+    { name: 'description', label: '描述', type: 'textarea' },
+    { name: 'is360Panorama', label: '360 全景', type: 'boolean' }
+  ]
+}
+
+function formatFieldValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-'
+  }
+
+  if (typeof value === 'boolean') {
+    if (value) {
+      return '是'
+    }
+    return '否'
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join('，') : '-'
+  }
+
+  if (typeof value === 'object') {
+    return getRelationDisplayName(value)
+  }
+
+  return value
+}
 
 export default {
   setup() {
@@ -200,7 +360,7 @@ export default {
     const detailDialogVisible = ref(false)
     const editDialogVisible = ref(false)
     const submitting = ref(false)
-    const payloadText = ref('{}')
+    const editForm = reactive({})
     const params = reactive({
       page: 1,
       limit: 20,
@@ -237,11 +397,19 @@ export default {
       return params.collectionName
     })
 
-    const currentRowText = computed(() => {
+    const currentEditFields = computed(() => {
+      return RELATION_EDIT_FIELD_MAP[params.collectionName] || []
+    })
+
+    const detailFieldRows = computed(() => {
       if (!currentRow.value) {
-        return ''
+        return []
       }
-      return JSON.stringify(currentRow.value, null, 2)
+
+      return currentEditFields.value.map(field => ({
+        ...field,
+        value: formatFieldValue(currentRow.value[field.name])
+      }))
     })
 
     const getRequestParams = () => {
@@ -287,27 +455,25 @@ export default {
 
     const openEdit = row => {
       currentRow.value = row
-      payloadText.value = JSON.stringify(row, null, 2)
+      Object.keys(editForm).forEach(key => {
+        delete editForm[key]
+      })
+      currentEditFields.value.forEach(field => {
+        editForm[field.name] = row[field.name]
+      })
       editDialogVisible.value = true
     }
 
-    const parsePayload = () => {
-      try {
-        const payload = JSON.parse(payloadText.value || '{}')
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-          ElMessage.error('Payload 必须是 JSON 对象')
-          return null
-        }
-        return payload
-      } catch (error) {
-        ElMessage.error('Payload JSON 格式错误')
-        return null
-      }
+    const buildPayload = () => {
+      const payload = {}
+      currentEditFields.value.forEach(field => {
+        payload[field.name] = editForm[field.name]
+      })
+      return payload
     }
 
     const submitUpdate = () => {
-      const payload = parsePayload()
-      if (!payload || !currentRow.value) {
+      if (!currentRow.value) {
         return
       }
 
@@ -317,7 +483,7 @@ export default {
           collectionName: params.collectionName,
           id: currentRow.value._id,
           languageCode: params.languageCode,
-          payload
+          payload: buildPayload()
         })
         .then(() => {
           ElMessage.success('保存成功')
@@ -356,11 +522,12 @@ export default {
       relationList,
       total,
       currentRow,
-      currentRowText,
+      detailFieldRows,
       detailDialogVisible,
       editDialogVisible,
       submitting,
-      payloadText,
+      editForm,
+      currentEditFields,
       isSourceScope,
       breadcrumbGroup,
       pageTitle,
@@ -368,6 +535,7 @@ export default {
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       collectionOptions: RELATION_COLLECTION_OPTIONS,
       getLanguageText,
+      getRelationDisplayName,
       getRelationList,
       openDetail,
       openEdit,

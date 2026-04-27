@@ -29,6 +29,70 @@ async function getLanguageStats(PostModel) {
   return stats
 }
 
+async function getSourceGroupTotal(PostModel) {
+  const rows = await PostModel.aggregate([
+    {
+      $match: {
+        recordKind: SOURCE_RECORD_KIND,
+        translationGroupId: { $ne: null }
+      }
+    },
+    { $group: { _id: '$translationGroupId' } },
+    { $count: 'total' }
+  ])
+
+  return rows[0]?.total || 0
+}
+
+async function attachRecentImportTranslationSummary(PostModel, recentImports) {
+  const groupIds = recentImports
+    .map(item => item.translationGroupId)
+    .filter(Boolean)
+
+  if (groupIds.length === 0) {
+    return recentImports
+  }
+
+  const rows = await PostModel.aggregate([
+    {
+      $match: {
+        recordKind: TRANSLATION_RECORD_KIND,
+        translationGroupId: { $in: groupIds }
+      }
+    },
+    {
+      $group: {
+        _id: '$translationGroupId',
+        total: { $sum: 1 },
+        published: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 1] }, 1, 0]
+          }
+        },
+        pendingReview: {
+          $sum: {
+            $cond: ['$pendingReview', 1, 0]
+          }
+        }
+      }
+    }
+  ])
+
+  const summaryMap = new Map()
+  for (const row of rows) {
+    summaryMap.set(String(row._id), row)
+  }
+
+  return recentImports.map(item => ({
+    ...item,
+    translationSummary: summaryMap.get(String(item.translationGroupId)) || {
+      total: 0,
+      published: 0,
+      pendingReview: 0
+    }
+  }))
+}
+
 module.exports = async function (req, res) {
   try {
     const PostModel = getModel('posts')
@@ -43,7 +107,7 @@ module.exports = async function (req, res) {
       recentImports
     ] = await Promise.all([
       PostModel.countDocuments({ recordKind: SOURCE_RECORD_KIND }),
-      PostModel.countDocuments({ recordKind: SOURCE_RECORD_KIND }),
+      getSourceGroupTotal(PostModel),
       PostModel.countDocuments({
         recordKind: TRANSLATION_RECORD_KIND,
         pendingReview: true
@@ -59,12 +123,16 @@ module.exports = async function (req, res) {
       getLanguageStats(PostModel),
       PostModel.find({ recordKind: SOURCE_RECORD_KIND })
         .select(
-          'title alias type sourceLanguageCode sourceSnapshotAt snapshotVersion'
+          'title excerpt alias type status sourceId sourceLanguageCode sourceSnapshotAt snapshotVersion translationGroupId updatedAt'
         )
         .sort({ sourceSnapshotAt: -1, _id: -1 })
         .limit(5)
         .lean()
     ])
+    const recentImportsWithSummary = await attachRecentImportTranslationSummary(
+      PostModel,
+      recentImports
+    )
 
     res.send({
       data: {
@@ -74,7 +142,7 @@ module.exports = async function (req, res) {
         publishedTranslationTotal,
         localMediaTotal,
         languageStats,
-        recentImports
+        recentImports: recentImportsWithSummary
       }
     })
   } catch (error) {

@@ -54,7 +54,7 @@ exports.updateSitemap = async () => {
     // 创建SitemapStream实例
     const sitemapStream = new SitemapStream({
       hostname: siteUrl,
-      xslUrl: '/sitemap.xsl'
+      xslUrl: '/multilingual-assets/sitemap.xsl'
     })
     const writeStream = createWriteStream(
       path.join(sitemapCacheFolder, 'sitemap.xml')
@@ -177,7 +177,7 @@ exports.updateLanguageSitemap = async languageCodeInput => {
     console.info(`creating sitemap:${languageCode}`)
     const sitemapStream = new SitemapStream({
       hostname: siteUrl,
-      xslUrl: '/sitemap.xsl'
+      xslUrl: '/multilingual-assets/sitemap.xsl'
     })
     const writeStream = createWriteStream(sitemapPath)
     sitemapStream.pipe(writeStream)

@@ -1022,7 +1022,8 @@ async function getSourcePostList(query = {}) {
     const keywordRegExp = new RegExp(escapeRegExp(keyword), 'i')
     const keywordConditions = [
       { title: keywordRegExp },
-      { alias: keywordRegExp }
+      { alias: keywordRegExp },
+      { excerpt: keywordRegExp }
     ]
     if (mongoose.Types.ObjectId.isValid(keyword)) {
       keywordConditions.push({ sourceId: new mongoose.Types.ObjectId(keyword) })
@@ -1049,7 +1050,7 @@ async function getSourcePostList(query = {}) {
   const total = await PostModel.countDocuments(params)
   const list = await PostModel.find(params)
     .select(
-      '_id title alias type sourceId sourceLanguageCode translationGroupId snapshotVersion sourceSnapshotAt updatedAt'
+      '_id title excerpt alias type sourceId sourceLanguageCode translationGroupId snapshotVersion sourceSnapshotAt updatedAt'
     )
     .sort({ sourceSnapshotAt: -1, updatedAt: -1 })
     .skip((page - 1) * limit)
@@ -1067,6 +1068,7 @@ async function getSourcePostList(query = {}) {
     return {
       _id: item._id,
       title: item.title,
+      excerpt: item.excerpt,
       alias: item.alias,
       type: item.type,
       sourceId: item.sourceId,
@@ -1235,7 +1237,7 @@ async function getSourcePostDetail(id) {
     recordKind: TRANSLATION_RECORD_KIND
   })
     .select(
-      '_id title alias type languageCode status snapshotVersion sourceChanged pendingReview sourceChangedAt updatedAt'
+      '_id title excerpt alias type languageCode status snapshotVersion sourceChanged pendingReview sourceChangedAt updatedAt'
     )
     .sort({ languageCode: 1 })
     .lean()

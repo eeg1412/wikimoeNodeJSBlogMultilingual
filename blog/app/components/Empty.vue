@@ -4,7 +4,7 @@
       <div>
         <!-- img/nodata.webp -->
         <img
-          src="/img/nodata.webp?v=2"
+          src="/multilingual-assets/img/nodata.webp?v=2"
           width="1536"
           height="1024"
           alt="nodata"

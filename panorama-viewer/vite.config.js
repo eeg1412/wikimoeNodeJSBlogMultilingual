@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: '/panorama/',
+  base: '/multilingual-assets/panorama/',
   publicDir: false,
   build: {
     outDir: resolve(__dirname, '../blog/public/panorama'),

@@ -1,54 +1,100 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const MULTILINGUAL_PUBLIC_ASSET_BASE = '/multilingual-assets'
+const MULTILINGUAL_PUBLIC_ASSET_DIR = resolve(__dirname, 'public')
+const LOCAL_ENV = readLocalEnv()
+
+function readLocalEnv() {
+  const envPath = resolve(__dirname, '.env')
+
+  if (!existsSync(envPath)) {
+    return {}
+  }
+
+  return readFileSync(envPath, 'utf8')
+    .split(/\r?\n/)
+    .reduce((envMap, line) => {
+      const trimmedLine = line.trim()
+
+      if (!trimmedLine || trimmedLine.startsWith('#')) {
+        return envMap
+      }
+
+      const separatorIndex = trimmedLine.indexOf('=')
+
+      if (separatorIndex <= 0) {
+        return envMap
+      }
+
+      const key = trimmedLine.slice(0, separatorIndex).trim()
+      const value = trimmedLine.slice(separatorIndex + 1).trim()
+      envMap[key] = value.replace(/^['"]|['"]$/g, '')
+      return envMap
+    }, {})
+}
+
+function getEnvValue(key) {
+  return process.env[key] || LOCAL_ENV[key] || ''
+}
+
+function withMultilingualAssetBase(path) {
+  return `${MULTILINGUAL_PUBLIC_ASSET_BASE}${path}`
+}
+
 let routeRules = {
-  '/geojson/world-mid.json': {
+  [withMultilingualAssetBase('/geojson/world-mid.json')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/geojson/world-low.json': {
+  [withMultilingualAssetBase('/geojson/world-low.json')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 整个 avatar 目录
-  '/img/avatar/**': {
+  [withMultilingualAssetBase('/img/avatar/**')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 整个 icon 目录
-  '/img/icon/**': {
+  [withMultilingualAssetBase('/img/icon/**')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 单个文件
-  '/img/bg_02_dark.png': {
+  [withMultilingualAssetBase('/img/bg_02_dark.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/img/bg_02.png': {
+  [withMultilingualAssetBase('/img/bg_02.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/img/menuBg.png': {
+  [withMultilingualAssetBase('/img/menuBg.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/img/mypage-banner.webp': {
+  [withMultilingualAssetBase('/img/mypage-banner.webp')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/img/nodata.webp': {
+  [withMultilingualAssetBase('/img/nodata.webp')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  '/img/nopic400-565.png': {
+  [withMultilingualAssetBase('/img/nopic400-565.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
@@ -56,13 +102,24 @@ let routeRules = {
 }
 export default defineNuxtConfig({
   app: {
+    buildAssetsDir: '/_multilingual_nuxt/',
     head: {
       charset: 'utf-8',
       viewport:
-        'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0'
+        'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0',
+      link: [
+        {
+          rel: 'icon',
+          href: withMultilingualAssetBase('/favicon.ico')
+        }
+      ]
     }
     // 因为nuxt的页面动画有BUG导致两次运行onmounted，所以关闭
     // pageTransition: { name: 'page', mode: 'out-in' },
+  },
+
+  dir: {
+    public: 'public-root'
   },
 
   devtools: { enabled: true },
@@ -79,6 +136,10 @@ export default defineNuxtConfig({
     '@nuxt/icon'
   ],
 
+  icon: {
+    localApiEndpoint: '/api/multilingual-icon'
+  },
+
   swiper: {
     // Swiper options
     //----------------------
@@ -90,7 +151,9 @@ export default defineNuxtConfig({
   css: ['~/assets/css/common.css', 'photoswipe/style.css'],
 
   runtimeConfig: {
-    apiDomain: '',
+    apiDomain: getEnvValue('NUXT_API_DOMAIN'),
+    sourceApiDomain: getEnvValue('NUXT_SOURCE_API_DOMAIN'),
+    sourceAssetDomain: getEnvValue('NUXT_SOURCE_ASSET_DOMAIN'),
     swrEnabled: '',
     swrCacheMaxage: '',
     swrCacheStaleMaxage: '',
@@ -110,6 +173,13 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    publicAssets: [
+      {
+        dir: MULTILINGUAL_PUBLIC_ASSET_DIR,
+        baseURL: MULTILINGUAL_PUBLIC_ASSET_BASE,
+        maxAge: 31536000
+      }
+    ],
     output: {
       dir: 'build/.output',
       serverDir: 'build/.output/server',

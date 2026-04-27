@@ -17,7 +17,7 @@ global.$mongodDB = $mongodDB
 var history = require('connect-history-api-fallback')
 
 var multilingualAdminRouter = require('./routes/multilingualAdmin')
-const blogRouter = require('./routes/blog')
+const multilingualBlogRouter = require('./routes/blog')
 const multilingualRssRouter = require('./routes/multilingualRss')
 const sitemapToolUtils = require('./utils/sitemap')
 
@@ -37,7 +37,7 @@ app.use(cookieParser())
 
 const upLoadFolder = path.join(__dirname, 'public/upload')
 app.use(
-  '/upload',
+  '/multilingual-assets/upload',
   function (req, res, next) {
     utils.referrerRecord(req.headers.referer, 'assets')
     next()
@@ -47,7 +47,7 @@ app.use(
 
 const contentFolder = path.join(__dirname, 'public/content')
 app.use(
-  '/content',
+  '/multilingual-assets/content',
   function (req, res, next) {
     utils.referrerRecord(req.headers.referer, 'assets')
     next()
@@ -58,7 +58,7 @@ app.use(
 // up_works referrerRecord
 const upWorksFolder = path.join(__dirname, 'public/up_works')
 app.use(
-  '/up_works',
+  '/multilingual-assets/up_works',
   function (req, res, next) {
     utils.referrerRecord(req.headers.referer, 'assets')
     next()
@@ -69,7 +69,7 @@ app.use(
 // web_demo referrerRecord
 const webDemoFolder = path.join(__dirname, 'public/web_demo')
 app.use(
-  '/web_demo',
+  '/multilingual-assets/web_demo',
   function (req, res, next) {
     utils.referrerRecord(req.headers.referer, 'assets')
     next()
@@ -80,12 +80,22 @@ app.use(
 // ucloudImg referrerRecord
 const ucloudImgFolder = path.join(__dirname, 'public/ucloudImg')
 app.use(
-  '/ucloudImg',
+  '/multilingual-assets/ucloudImg',
   function (req, res, next) {
     utils.referrerRecord(req.headers.referer, 'assets')
     next()
   },
   express.static(ucloudImgFolder, { maxAge: '365d' })
+)
+
+const blogPublicAssetFolder = path.join(__dirname, '../blog/public')
+app.use(
+  '/multilingual-assets',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(blogPublicAssetFolder, { maxAge: '365d' })
 )
 // app.use(express.static(path.join(__dirname, 'public')));
 
@@ -96,33 +106,16 @@ app.use((err, req, res, next) => {
   }
   next()
 })
-// robots.txt
-app.use('/seo/blog/robots.txt', async function (req, res) {
-  res.setHeader('Content-Type', 'text/plain')
-  res.send(global.$globalConfig?.siteSettings?.siteRobotsTxt || '')
-})
-
 app.use('/api/multilingual-admin', multilingualAdminRouter)
-app.use('/api/blog', blogRouter)
-app.use('/api/multilingual-blog', blogRouter)
+app.use('/api/multilingual-blog', multilingualBlogRouter)
 app.use('/:code/rss', multilingualRssRouter)
-// robots.txt
-app.use('/robots.txt', function (req, res) {
-  res.type('text/plain')
-  res.send('User-agent: *\nDisallow: /')
-})
 // language sitemap.xml
 app.get('/:code/sitemap.xml', async function (req, res) {
   sitemapToolUtils.getLanguageSitemap(req, res)
 })
 // sitemap.xsl
-app.use('/sitemap.xsl', function (req, res) {
+app.use('/multilingual-assets/sitemap.xsl', function (req, res) {
   res.sendFile(path.join(__dirname, 'seo/sitemap/sitemap.xsl'))
-})
-// AdAdsTxt ads.txt
-app.use('/ads.txt', function (req, res) {
-  res.type('text/plain')
-  res.send(global.$globalConfig?.adSettings?.AdAdsTxt || '')
 })
 // 多语言 server 只处理多语言后台静态资源，源站路径留给源站处理
 app.use((req, res, next) => {

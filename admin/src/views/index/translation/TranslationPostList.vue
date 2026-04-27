@@ -19,7 +19,7 @@
           <el-form-item>
             <el-input
               v-model="params.keyword"
-              placeholder="标题、别名、源 ID"
+              placeholder="标题、摘要、别名、源 ID"
               clearable
               style="width: 220px"
             />
@@ -201,11 +201,7 @@
             <div class="source-title">
               {{ getPostDisplayTitle(row.sourcePost) }}
             </div>
-            <div class="source-meta">
-              源 ID：{{ row.sourcePost.sourceId }} / 别名：{{
-                row.sourcePost.alias || '-'
-              }}
-            </div>
+            <div class="source-meta">源 ID：{{ row.sourcePost.sourceId }}</div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="类型" width="90">
@@ -271,7 +267,7 @@
       <template v-else-if="detailData">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="标题">
-            {{ detailData.post?.title || '-' }}
+            {{ getPostDisplayTitle(detailData.post) }}
           </el-descriptions-item>
           <el-descriptions-item label="语言">
             {{ getLanguageText(detailData.post?.languageCode) }}
@@ -372,6 +368,7 @@ import {
   getLanguageText,
   getPostStatusTagType,
   getPostStatusText,
+  getPostDisplayTitle,
   getPostTypeText
 } from '@/utils/multilingual'
 
@@ -475,16 +472,6 @@ export default {
         return 'warning'
       }
       return 'success'
-    }
-
-    const getPostDisplayTitle = post => {
-      if (!post) {
-        return '-'
-      }
-      if (Number(post.type) === 2) {
-        return post.excerpt || '推文'
-      }
-      return post.title || '暂无标题'
     }
 
     const createTranslation = (sourcePost, languageCode) => {

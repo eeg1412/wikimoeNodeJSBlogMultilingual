@@ -418,7 +418,7 @@ export default {
         case 2:
           return { text: '还原', tagType: 'info' }
         default:
-          return { text: '', tagType: '' }
+          return { text: '-', tagType: 'info' }
       }
     }
 
@@ -437,7 +437,7 @@ export default {
         case 98:
           return { text: '查询文件出错', tagType: 'warning' }
         default:
-          return { text: '', tagType: '' }
+          return { text: '-', tagType: 'info' }
       }
     }
 
@@ -452,7 +452,7 @@ export default {
         case 3:
           return { text: '上传尚未完成', tagType: 'warning' }
         default:
-          return { text: '', tagType: '' }
+          return { text: '-', tagType: 'info' }
       }
     }
 

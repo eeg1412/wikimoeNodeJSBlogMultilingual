@@ -435,4 +435,63 @@ const router = createRouter({
   routes
 })
 
+const DISABLED_LEGACY_ROUTE_NAMES = new Set([
+  'SortList',
+  'SortAdd',
+  'SortEdit',
+  'TagList',
+  'TagAdd',
+  'TagEdit',
+  'MappointList',
+  'MappointAdd',
+  'MappointEdit',
+  'LinkList',
+  'LinkAdd',
+  'LinkEdit',
+  'AlbumList',
+  'PostList',
+  'PostEdit',
+  'CommentList',
+  'CommentEdit',
+  'BangumiList',
+  'BangumiAdd',
+  'BangumiEdit',
+  'MovieList',
+  'MovieAdd',
+  'MovieEdit',
+  'UserLoginLogList',
+  'PostLikeLogList',
+  'CommentLikeLogList',
+  'EmailSendHistoryList',
+  'RsslogList',
+  'GamePlatformList',
+  'GameList',
+  'GameAdd',
+  'GameEdit',
+  'BooktypeList',
+  'BookList',
+  'BookAdd',
+  'BookEdit',
+  'EventtypeList',
+  'EventList',
+  'EventAdd',
+  'EventEdit',
+  'UserList',
+  'UserAdd',
+  'UserEdit',
+  'VoteList',
+  'VoteAdd',
+  'VoteEdit',
+  'VotelogList',
+  'Config'
+])
+
+router.beforeEach(to => {
+  if (DISABLED_LEGACY_ROUTE_NAMES.has(to.name)) {
+    return { name: 'MultilingualDashboard' }
+  }
+
+  return true
+})
+
 export default router

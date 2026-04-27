@@ -8,7 +8,7 @@
           <WikimoeImage
             class="max-image rounded item-cover common-focus-visible-btn-outline"
             :class="{ 'movie-cover-none': !item.cover }"
-            :src="item.cover || '/img/nopic400-565.png'"
+            :src="item.cover || '/multilingual-assets/img/nopic400-565.png'"
             :alt="item.title"
             :data-href="item.cover"
             :data-href-list="item.cover ? setDataHrefList(item.cover) : null"

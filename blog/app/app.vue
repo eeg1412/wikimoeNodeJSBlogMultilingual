@@ -118,21 +118,10 @@ if (siteThemeModeList && siteThemeModeList.includes(siteThemeMode)) {
   })
 }
 
-useHead(() => ({
-  titleTemplate: titleChunk => {
-    if (!titleChunk) {
-      return options.value.siteTitle
-    } else if (titleChunk === options.value.siteSubTitle) {
-      return `${options.value.siteTitle} | ${titleChunk}`
-    } else {
-      return `${titleChunk} - ${options.value.siteTitle}`
-    }
-  },
-  title: options.value.siteSubTitle,
-  htmlAttrs: {
-    lang: currentLanguageCode.value
-  },
-  meta: [
+useHead(() => {
+  const siteDefaultCover = options.value.siteDefaultCover || ''
+  const siteFavicon = options.value.siteFavicon || ''
+  const meta = [
     { name: 'description', content: options.value.siteDescription },
     // name="keywords"
     { name: 'keywords', content: options.value.siteKeywords },
@@ -145,39 +134,70 @@ useHead(() => ({
     { property: 'og:site_name', content: options.value.siteTitle },
     { property: 'og:title', content: options.value.siteTitle },
     { property: 'og:description', content: options.value.siteDescription },
-    // { property: 'og:url', content: options.value.siteUrl },
-    {
-      property: 'og:image',
-      content: options.value.siteUrl + options.value.siteDefaultCover
-    },
     // twitter
     { name: 'twitter:card', content: 'summary' },
     { name: 'twitter:site', content: `@${options.value.siteTitle}` },
     { name: 'twitter:title', content: options.value.siteTitle },
     { name: 'twitter:description', content: options.value.siteDescription },
-    {
-      name: 'twitter:image',
-      content: options.value.siteUrl + options.value.siteDefaultCover
-    },
     // robots meta，允许大图预览
     { name: 'robots', content: 'max-image-preview:large' }
-  ],
-  link: [
-    {
-      rel: 'icon',
-      type: 'image/x-icon',
-      href: options.value.siteFavicon
+  ]
+  const link = [...rssHead()]
+
+  if (siteDefaultCover) {
+    let siteDefaultCoverUrl = siteDefaultCover
+
+    if (!siteDefaultCover.startsWith('http')) {
+      siteDefaultCoverUrl = options.value.siteUrl + siteDefaultCover
+    }
+
+    meta.push({ property: 'og:image', content: siteDefaultCoverUrl })
+    meta.push({ name: 'twitter:image', content: siteDefaultCoverUrl })
+  }
+
+  if (siteFavicon) {
+    link.unshift(
+      {
+        rel: 'icon',
+        type: 'image/x-icon',
+        href: siteFavicon
+      },
+      {
+        rel: 'apple-touch-icon',
+        sizes: '256x256',
+        href: siteFavicon
+      }
+    )
+  }
+
+  return {
+    titleTemplate: titleChunk => {
+      const siteTitle = options.value.siteTitle || ''
+      const siteSubTitle = options.value.siteSubTitle || ''
+
+      if (!titleChunk) {
+        return siteTitle
+      }
+
+      if (titleChunk === siteSubTitle) {
+        return [siteTitle, titleChunk].filter(Boolean).join(' | ')
+      }
+
+      if (siteTitle) {
+        return `${titleChunk} - ${siteTitle}`
+      }
+
+      return titleChunk
     },
-    {
-      rel: 'apple-touch-icon',
-      sizes: '256x256',
-      href: options.value.siteFavicon
+    title: options.value.siteSubTitle,
+    htmlAttrs: {
+      lang: currentLanguageCode.value
     },
-    // rss
-    ...rssHead()
-  ],
-  script: script
-}))
+    meta,
+    link,
+    script: script
+  }
+})
 const getPerformanceNavigationTiming = () => {
   let dataContentObj = null
   try {

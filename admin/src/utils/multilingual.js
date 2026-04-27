@@ -87,3 +87,66 @@ export function getTranslationProgress(summary) {
   const total = Number(summary?.total || 0)
   return `${total}/${SUPPORTED_LANGUAGE_OPTIONS.length}`
 }
+
+export function stripText(value) {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  return String(value)
+    .replace(/<[^>]*>/g, '')
+    .trim()
+}
+
+export function getPostDisplayTitle(post) {
+  if (!post) {
+    return '-'
+  }
+
+  if (Number(post.type) === 2) {
+    const tweetTitle = stripText(post.excerpt)
+    if (tweetTitle) {
+      return tweetTitle
+    }
+  }
+
+  const title = stripText(post.title)
+  if (title) {
+    return title
+  }
+
+  const excerpt = stripText(post.excerpt)
+  if (excerpt) {
+    return excerpt
+  }
+
+  return '未命名内容'
+}
+
+export function getRelationDisplayName(record) {
+  if (!record) {
+    return '-'
+  }
+
+  if (record.displayName) {
+    return record.displayName
+  }
+
+  if (record.tagname) {
+    return record.tagname
+  }
+
+  if (record.sortname) {
+    return record.sortname
+  }
+
+  if (record.nickname) {
+    return record.nickname
+  }
+
+  if (record.filename) {
+    return record.filename
+  }
+
+  return getPostDisplayTitle(record)
+}

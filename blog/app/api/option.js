@@ -1,4 +1,4 @@
-import httpRequest from '~/api'
+import { multilingualRequest, sourceRequest } from '~/api'
 
 /**
  * @description 查询配置项
@@ -7,7 +7,11 @@ import httpRequest from '~/api'
 
 const URL = `/options`
 const getOptionsApi = () => {
-  return httpRequest.get(URL)
+  return sourceRequest.getFetch(URL)
 }
 
-export { getOptionsApi }
+const getMultilingualOptionsApi = () => {
+  return multilingualRequest.getFetch(URL)
+}
+
+export { getOptionsApi, getMultilingualOptionsApi }

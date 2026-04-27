@@ -50,7 +50,15 @@
               @tab-change="onContentTabChange"
             >
               <el-tab-pane label="富文本" name="richText">
-                <RichEditor5 v-model:content="form.content" :isPost="true" />
+                <RichEditor4
+                  v-if="postEditorVersion === 4"
+                  v-model:content="form.content"
+                />
+                <RichEditor5
+                  v-else
+                  v-model:content="form.content"
+                  :isPost="true"
+                />
               </el-tab-pane>
               <el-tab-pane label="源代码" name="sourceCode">
                 <el-input
@@ -472,6 +480,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElMessage, ElTag } from 'element-plus'
 import { Close, Document, Plus, Rank } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
+import RichEditor4 from '@/components/RichEditor4.vue'
 import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import StringSortEditBox from '@/components/StringSortEditBox.vue'
@@ -783,6 +792,7 @@ export default {
     Rank,
     RelationSelectedList,
     RichEditor5,
+    RichEditor4,
     StringSortEditBox,
     draggable
   },
@@ -836,7 +846,12 @@ export default {
       allowRemark: false,
       template: '',
       code: '',
+      editorVersion: 5,
       coverImages: []
+    })
+
+    const postEditorVersion = computed(() => {
+      return Number(form.editorVersion || 5)
     })
 
     const pickerVisible = ref(false)
@@ -998,6 +1013,7 @@ export default {
       form.allowRemark = Boolean(post.allowRemark)
       form.template = post.template || ''
       form.code = post.code || ''
+      form.editorVersion = Number(post.editorVersion || 5)
       form.seriesSortList = Array.isArray(post.seriesSortList)
         ? post.seriesSortList
         : []
@@ -1250,6 +1266,7 @@ export default {
         allowRemark: form.allowRemark,
         template: form.template,
         code: form.code,
+        editorVersion: form.editorVersion,
         coverImages: form.coverImages,
         confirmReview
       }
@@ -1332,6 +1349,7 @@ export default {
       relationRecords,
       relationSaving,
       relationSortMap: RELATION_SORT_MAP,
+      postEditorVersion,
       removeRelation,
       removeRelationById,
       removeSingleRelation,

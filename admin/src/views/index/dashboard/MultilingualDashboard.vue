@@ -54,7 +54,10 @@
         <ResponsiveTableColumn label="标题" min-width="260">
           <template #default="{ row }">
             <div class="recent-title">
-              {{ row.title || row.alias || row._id }}
+              {{ getPostDisplayTitle(row) }}
+            </div>
+            <div class="recent-meta">
+              {{ getPostTypeText(row.type) }} · 源 ID {{ row.sourceId || '-' }}
             </div>
           </template>
         </ResponsiveTableColumn>
@@ -66,6 +69,11 @@
         <ResponsiveTableColumn label="版本" width="100">
           <template #default="{ row }">
             v{{ row.snapshotVersion || 1 }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="翻译进度" width="120">
+          <template #default="{ row }">
+            {{ getTranslationProgress(row.translationSummary) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="导入时间" width="180">
@@ -83,7 +91,10 @@ import { onMounted, reactive, ref } from 'vue'
 import { multilingualApi } from '@/api'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
-  getLanguageText
+  getLanguageText,
+  getPostDisplayTitle,
+  getPostTypeText,
+  getTranslationProgress
 } from '@/utils/multilingual'
 
 export default {
@@ -136,7 +147,10 @@ export default {
       languageStats,
       recentImports,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
-      getLanguageText
+      getLanguageText,
+      getPostDisplayTitle,
+      getPostTypeText,
+      getTranslationProgress
     }
   }
 }
@@ -190,6 +204,13 @@ export default {
 .recent-title {
   font-weight: 600;
   word-break: break-word;
+}
+
+.recent-meta {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+  word-break: break-all;
 }
 
 @media (max-width: 767px) {

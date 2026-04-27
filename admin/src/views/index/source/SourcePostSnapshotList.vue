@@ -103,7 +103,7 @@
         <ResponsiveTableColumn prop="title" label="源标题" min-width="240">
           <template #default="{ row }">
             <div class="snapshot-title">
-              {{ row.title || row.alias || row._id }}
+              {{ getPostDisplayTitle(row) }}
             </div>
             <div class="snapshot-subtitle">{{ row.sourceId }}</div>
           </template>
@@ -181,7 +181,7 @@
       <template v-else-if="detailData">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="标题">
-            {{ detailData.post?.title || '-' }}
+            {{ getPostDisplayTitle(detailData.post) }}
           </el-descriptions-item>
           <el-descriptions-item label="Alias">
             {{ detailData.post?.alias || '-' }}
@@ -261,6 +261,7 @@ import { multilingualApi } from '@/api'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
+  getPostDisplayTitle,
   getPostTypeText,
   getTranslationProgress
 } from '@/utils/multilingual'
@@ -340,7 +341,7 @@ export default {
 
     const overwrite = row => {
       ElMessageBox.confirm(
-        `确认覆盖源文章快照「${row.title || row.alias || row.sourceId}」？旧关联和旧媒体不会自动删除。`,
+        `确认覆盖源文章快照「${getPostDisplayTitle(row)}」？旧关联和旧媒体不会自动删除。`,
         '覆盖源快照',
         {
           type: 'warning',
@@ -418,6 +419,7 @@ export default {
       detailLoading,
       detailData,
       getLanguageText,
+      getPostDisplayTitle,
       getPostTypeText,
       getTranslationProgress,
       getSummaryLanguageList,

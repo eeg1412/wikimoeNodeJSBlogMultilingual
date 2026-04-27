@@ -12,7 +12,7 @@
       />
       <img
         v-else
-        src="/img/mypage-banner.webp"
+        src="/multilingual-assets/img/mypage-banner.webp"
         width="880"
         height="350"
         alt="mypage-banner"

@@ -106,10 +106,13 @@
         <ResponsiveTableColumn label="源文章" min-width="280">
           <template #default="{ row }">
             <div class="source-title">
-              {{ row.title || row.alias || row.sourceId }}
+              {{ getPostDisplayTitle(row) }}
             </div>
             <div class="source-meta">{{ row.sourceId }}</div>
-            <div v-if="row.excerpt" class="source-excerpt">
+            <div
+              v-if="row.excerpt && Number(row.type) !== 2"
+              class="source-excerpt"
+            >
               {{ row.excerpt }}
             </div>
           </template>
@@ -236,6 +239,7 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getPostStatusTagType,
   getPostStatusText,
+  getPostDisplayTitle,
   getPostTypeText
 } from '@/utils/multilingual'
 
@@ -344,7 +348,7 @@ export default {
 
     const overwriteRow = row => {
       ElMessageBox.confirm(
-        `确认覆盖源文章「${row.title || row.alias || row.sourceId}」的 ${params.sourceLanguageCode} 快照？旧关联和旧媒体不会自动删除。`,
+        `确认覆盖源文章「${getPostDisplayTitle(row)}」的 ${params.sourceLanguageCode} 快照？旧关联和旧媒体不会自动删除。`,
         '确认覆盖源快照',
         {
           type: 'warning',
@@ -453,6 +457,7 @@ export default {
       getPostTypeText,
       getPostStatusText,
       getPostStatusTagType,
+      getPostDisplayTitle,
       getSourceDatabasePostList,
       importRow,
       overwriteRow,

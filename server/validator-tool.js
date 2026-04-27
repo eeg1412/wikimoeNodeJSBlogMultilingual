@@ -373,6 +373,7 @@ function validateAdminPathMigration() {
   const serverDir = path.join(rootDir, 'server')
   const adminDir = path.join(rootDir, 'admin')
   const appPath = path.join(serverDir, 'app.js')
+  const blogNuxtConfigPath = path.join(rootDir, 'blog', 'nuxt.config.js')
   const viteConfigPath = path.join(adminDir, 'vite.config.js')
   const routerPath = path.join(adminDir, 'src', 'router', 'index.js')
   const apiPath = path.join(adminDir, 'src', 'api', 'index.js')
@@ -396,9 +397,12 @@ function validateAdminPathMigration() {
   assert(fs.existsSync(rssRoutePath), '缺少 server/routes/multilingualRss.js')
   assertFileIncludes(appPath, [
     "app.use('/api/multilingual-admin', multilingualAdminRouter)",
-    "app.use('/api/multilingual-blog', blogRouter)",
+    "app.use('/api/multilingual-blog', multilingualBlogRouter)",
     "app.use('/:code/rss', multilingualRssRouter)",
     "app.get('/:code/sitemap.xml'",
+    "'/multilingual-assets/upload'",
+    "'/multilingual-assets/content'",
+    "'../blog/public'",
     "firstLevelPath !== 'multilingual-admin'",
     "index: '/multilingual-admin/index.html'",
     "'/multilingual-admin'",
@@ -423,11 +427,24 @@ function validateAdminPathMigration() {
   assertFileIncludes(sitemapPath, [
     'getLanguageSitemap',
     'normalizeLanguageCode',
-    'application/xml; charset=utf-8'
+    'application/xml; charset=utf-8',
+    '/multilingual-assets/sitemap.xsl'
   ])
   assertFileIncludes(viteConfigPath, [
     "base: isProduction ? '/multilingual-admin/' : '/'",
-    "outDir: '../server/front/multilingual-admin/'"
+    "outDir: '../server/front/multilingual-admin/'",
+    "'/multilingual-assets'"
+  ])
+  assertFileNotIncludes(viteConfigPath, [
+    "'/api/admin'",
+    "'/upload'",
+    "'/content/uploadfile'"
+  ])
+  assertFileIncludes(blogNuxtConfigPath, [
+    "buildAssetsDir: '/_multilingual_nuxt/'",
+    "localApiEndpoint: '/api/multilingual-icon'",
+    'baseURL: MULTILINGUAL_PUBLIC_ASSET_BASE',
+    "public: 'public-root'"
   ])
   assertFileIncludes(routerPath, ["createWebHistory('/multilingual-admin')"])
   assertFileIncludes(apiPath, [
@@ -1315,10 +1332,37 @@ function validateBlogApiSplit() {
   const sourcePath = path.join(blogApiDir, 'source.js')
   const multilingualPath = path.join(blogApiDir, 'multilingual.js')
   const indexPath = path.join(blogApiDir, 'index.js')
+  const sourceProxyPath = path.join(
+    rootDir,
+    'blog',
+    'server',
+    'routes',
+    'api',
+    'source-blog',
+    '[...].js'
+  )
+  const oldSourceProxyPath = path.join(
+    rootDir,
+    'blog',
+    'server',
+    'routes',
+    'api',
+    'blog',
+    '[...].js'
+  )
 
   assert(fs.existsSync(sourcePath), '缺少 blog/app/api/source.js')
   assert(fs.existsSync(multilingualPath), '缺少 blog/app/api/multilingual.js')
   assert(fs.existsSync(indexPath), '缺少 blog/app/api/index.js')
+  assert(
+    fs.existsSync(sourceProxyPath),
+    '缺少 /api/source-blog Nuxt 代理 route'
+  )
+  assert(
+    !fs.existsSync(oldSourceProxyPath),
+    '禁止保留 /api/blog Nuxt 代理 route'
+  )
+  assertFileIncludes(sourceProxyPath, ['sourceApiDomain', "'/api/blog'"])
 
   const sourceContent = stripJavaScriptComments(
     fs.readFileSync(sourcePath, 'utf8')
@@ -1340,7 +1384,14 @@ function validateBlogApiSplit() {
     'blog/app/api/index.js 必须按接口归属转发到 source 或 multilingual'
   )
 
-  assert(sourceContent.includes("'/api/blog'"), 'source.js 必须使用 /api/blog')
+  assert(
+    sourceContent.includes("'/api/source-blog'"),
+    'source.js 必须使用 /api/source-blog'
+  )
+  assert(
+    !sourceContent.includes("'/api/blog'"),
+    'source.js 禁止直接请求 /api/blog，需通过 /api/source-blog 代理'
+  )
   assert(
     !sourceContent.includes('languageCode'),
     'source.js 禁止自动写入 languageCode'
@@ -1348,6 +1399,10 @@ function validateBlogApiSplit() {
   assert(
     !sourceContent.includes('/api/multilingual-blog'),
     'source.js 禁止请求 /api/multilingual-blog'
+  )
+  assert(
+    !multilingualContent.includes("'/options'"),
+    'multilingual.js 禁止接管 /options，非多语言配置必须走 /api/source-blog'
   )
 
   assert(

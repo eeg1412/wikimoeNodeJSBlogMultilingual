@@ -287,7 +287,7 @@ const loadWorldData = async () => {
       2: 'world-mid.json'
     }
     const response = await fetch(
-      `/geojson/${olMapMapPrecisionMap[olMapMapPrecision]}`
+      `/multilingual-assets/geojson/${olMapMapPrecisionMap[olMapMapPrecision]}`
     )
     if (!response.ok) throw new Error('本地 world.geojson 未找到')
 

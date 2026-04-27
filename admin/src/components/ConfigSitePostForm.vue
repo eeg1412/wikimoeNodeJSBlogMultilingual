@@ -84,8 +84,8 @@
       <!-- 内容范围 1博文 2推文 checkbox -->
       <el-form-item label="内容范围" prop="sitePostRandomSimilarRange">
         <el-checkbox-group v-model="sitePostForm.sitePostRandomSimilarRange">
-          <el-checkbox label="1">博文</el-checkbox>
-          <el-checkbox label="2">推文</el-checkbox>
+          <el-checkbox label="博文" value="1" />
+          <el-checkbox label="推文" value="2" />
         </el-checkbox-group>
         <div class="w_10">※相似内容的检索范围</div>
       </el-form-item>
@@ -94,8 +94,8 @@
         <el-checkbox-group
           v-model="sitePostForm.sitePostRandomSimilarShowRange"
         >
-          <el-checkbox label="1">博文</el-checkbox>
-          <el-checkbox label="2">推文</el-checkbox>
+          <el-checkbox label="博文" value="1" />
+          <el-checkbox label="推文" value="2" />
         </el-checkbox-group>
         <div class="w_10">※相似内容会在哪些类型的文章中出现</div>
       </el-form-item>

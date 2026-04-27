@@ -254,6 +254,7 @@ export default {
       bannerSettingsForm,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       params,
+      getBannerList,
       handleBanner,
       bannerSettingsSubmit,
       bannerSettingsDelete,

@@ -3,7 +3,6 @@ import { DEFAULT_LANGUAGE_CODE, normalizeLanguageCode } from '@/lang'
 const MULTILINGUAL_BASE_URL = '/api/multilingual-blog'
 
 export const MULTILINGUAL_ENDPOINT_PREFIXES = [
-  '/options',
   '/post/list',
   '/post/archive',
   '/post/detail',

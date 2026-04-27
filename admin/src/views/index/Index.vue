@@ -106,9 +106,8 @@ import {
   Close,
   HomeFilled
 } from '@element-plus/icons-vue'
-import { authApi } from '@/api'
 import store from '@/store'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import ThemeChanger from '@/components/ThemeChanger.vue'
 
 const menuGroups = [
@@ -259,12 +258,8 @@ export default {
     })
 
     const goToBlog = () => {
-      // 如果没有设置站点地址，报错
-      if (!siteUrl.value) {
-        ElMessage.error('请先设置站点地址')
-        return
-      }
-      window.open(siteUrl.value, '_blank')
+      const url = siteUrl.value || `${window.location.origin}/zh-CN/`
+      window.open(url, '_blank')
     }
 
     const isCollapse = ref(false)

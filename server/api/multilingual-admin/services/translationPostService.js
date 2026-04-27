@@ -1167,7 +1167,7 @@ async function buildTranslationMatrixMap(translationGroupIds) {
     recordKind: TRANSLATION_RECORD_KIND
   })
     .select(
-      '_id title alias type languageCode translationGroupId status snapshotVersion sourceChanged pendingReview sourceChangedAt lastChangDate updatedAt'
+      '_id title excerpt alias type languageCode translationGroupId status snapshotVersion sourceChanged pendingReview sourceChangedAt lastChangDate updatedAt'
     )
     .lean()
 
@@ -1213,7 +1213,8 @@ async function getTranslationPostListBySource(query = {}) {
     const keywordRegExp = new RegExp(escapeRegExp(keyword), 'i')
     const keywordConditions = [
       { title: keywordRegExp },
-      { alias: keywordRegExp }
+      { alias: keywordRegExp },
+      { excerpt: keywordRegExp }
     ]
     if (mongoose.Types.ObjectId.isValid(keyword)) {
       keywordConditions.push({ sourceId: new mongoose.Types.ObjectId(keyword) })
@@ -1256,7 +1257,7 @@ async function getTranslationPostListBySource(query = {}) {
   const total = await PostModel.countDocuments(sourceParams)
   const sourcePosts = await PostModel.find(sourceParams)
     .select(
-      '_id title alias type status sourceId sourceLanguageCode languageCode translationGroupId snapshotVersion sourceSnapshotAt sourceUpdatedAt updatedAt'
+      '_id title excerpt alias type status sourceId sourceLanguageCode languageCode translationGroupId snapshotVersion sourceSnapshotAt sourceUpdatedAt updatedAt'
     )
     .sort({ sourceSnapshotAt: -1, updatedAt: -1 })
     .skip((page - 1) * limit)

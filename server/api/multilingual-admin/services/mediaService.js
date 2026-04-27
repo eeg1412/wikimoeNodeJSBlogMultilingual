@@ -16,6 +16,7 @@ const SERVER_ROOT = path.resolve(__dirname, '..', '..', '..')
 const PUBLIC_ROOT = path.join(SERVER_ROOT, 'public')
 const CONTENT_ROOT = path.join(PUBLIC_ROOT, 'content')
 const UPLOAD_ROOT = path.join(CONTENT_ROOT, 'uploadfile')
+const MULTILINGUAL_PUBLIC_ASSET_PREFIX = '/multilingual-assets'
 
 const SOURCE_IMAGE_SETTING_DEFAULTS = {
   imgSettingEnableImgCompress: false,
@@ -277,7 +278,7 @@ function createFileSuffix() {
 
 function toPublicPath(filePath) {
   const relativePath = path.relative(PUBLIC_ROOT, filePath).replace(/\\/g, '/')
-  return '/' + relativePath
+  return `${MULTILINGUAL_PUBLIC_ASSET_PREFIX}/${relativePath}`
 }
 
 function isImageFile(file) {
@@ -501,6 +502,14 @@ function getContentRelativePath(storedPath) {
 
   if (relativePath.startsWith('content/')) {
     return relativePath.slice('content/'.length)
+  }
+
+  if (relativePath === 'multilingual-assets/content') {
+    return ''
+  }
+
+  if (relativePath.startsWith('multilingual-assets/content/')) {
+    return relativePath.slice('multilingual-assets/content/'.length)
   }
 
   if (relativePath === 'public/content') {

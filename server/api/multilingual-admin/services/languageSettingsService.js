@@ -216,7 +216,7 @@ function saveImageValue(languageCode, field, value) {
     createDir: true
   })
 
-  return `/upload/siteImg/multilingual/${languageCode}/${imageResult.fileNameAll}?v=${Date.now()}`
+  return `/multilingual-assets/upload/siteImg/multilingual/${languageCode}/${imageResult.fileNameAll}?v=${Date.now()}`
 }
 
 function buildDefaultValues() {
@@ -268,6 +268,36 @@ async function getLanguageSettingsList() {
     fields: LANGUAGE_SETTING_FIELDS,
     languages: languageCodes,
     settings
+  }
+}
+
+async function getLanguageSettings(languageCodeInput) {
+  const languageCode = normalizeSupportedLanguageCode(languageCodeInput)
+  const OptionModel = getOptionModel()
+  const values = buildDefaultValues()
+  const configuredNames = []
+  const nameList = LANGUAGE_SETTING_FIELDS.map(item => item.name)
+  const optionList = await OptionModel.find({
+    scope: OPTION_SCOPE,
+    languageCode,
+    name: { $in: nameList }
+  })
+    .select('name value languageCode scope')
+    .lean()
+
+  for (const item of optionList) {
+    const field = LANGUAGE_SETTING_FIELD_MAP[item.name]
+    if (!field) {
+      continue
+    }
+
+    values[item.name] = normalizeValue(field, item.value)
+    configuredNames.push(item.name)
+  }
+
+  return {
+    values,
+    configuredNames
   }
 }
 
@@ -335,6 +365,7 @@ async function updateLanguageSettings(body = {}) {
 
 module.exports = {
   LANGUAGE_SETTING_FIELDS,
+  getLanguageSettings,
   getLanguageSettingsList,
   updateLanguageSettings
 }

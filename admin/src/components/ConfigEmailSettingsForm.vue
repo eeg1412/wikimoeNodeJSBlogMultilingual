@@ -106,10 +106,10 @@
           <el-checkbox
             v-for="item in emailSendOptions"
             :key="item.value"
-            :label="item.value"
+            :label="item.label"
+            :value="item.value"
             :name="item.value"
-            >{{ item.label }}</el-checkbox
-          >
+          />
         </el-checkbox-group>
       </el-form-item>
     </div>

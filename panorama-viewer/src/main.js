@@ -29,7 +29,7 @@ const localeMessages = {
     statusLoading: '正在加载全景照片...',
     errorTitle: '无法显示全景照片',
     errorMissingSrc:
-      '缺少全景照片地址。请通过 query 参数传入 src，例如 ?src=/upload/panorama.jpg',
+      '缺少全景照片地址。请通过 query 参数传入 src，例如 ?src=/multilingual-assets/upload/panorama.jpg',
     errorLoad: '全景图无法加载，请检查 query 参数中的图片地址是否正确。',
     errorVrEnter: '进入 VR 模式失败，请检查权限或设备支持情况。',
     errorVrInit: '初始化 VR 模式失败，请检查权限或设备支持情况。',
@@ -67,7 +67,7 @@ const localeMessages = {
     statusLoading: '正在載入全景照片...',
     errorTitle: '無法顯示全景照片',
     errorMissingSrc:
-      '缺少全景照片地址。請透過 query 參數傳入 src，例如 ?src=/upload/panorama.jpg',
+      '缺少全景照片地址。請透過 query 參數傳入 src，例如 ?src=/multilingual-assets/upload/panorama.jpg',
     errorLoad: '全景圖無法載入，請檢查 query 參數中的圖片地址是否正確。',
     errorVrEnter: '進入 VR 模式失敗，請檢查權限或裝置支援情況。',
     errorVrInit: '初始化 VR 模式失敗，請檢查權限或裝置支援情況。',
@@ -105,7 +105,7 @@ const localeMessages = {
     statusLoading: 'Loading panorama...',
     errorTitle: 'Unable to Display Panorama',
     errorMissingSrc:
-      'Missing panorama image URL. Pass it via the src query parameter, for example ?src=/upload/panorama.jpg',
+      'Missing panorama image URL. Pass it via the src query parameter, for example ?src=/multilingual-assets/upload/panorama.jpg',
     errorLoad:
       'The panorama image could not be loaded. Check whether the image URL in the query parameter is correct.',
     errorVrEnter:
@@ -146,7 +146,7 @@ const localeMessages = {
     statusLoading: 'パノラマ画像を読み込み中...',
     errorTitle: 'パノラマ画像を表示できません',
     errorMissingSrc:
-      'パノラマ画像の URL がありません。query パラメーターの src で指定してください。例: ?src=/upload/panorama.jpg',
+      'パノラマ画像の URL がありません。query パラメーターの src で指定してください。例: ?src=/multilingual-assets/upload/panorama.jpg',
     errorLoad:
       'パノラマ画像を読み込めませんでした。query パラメーターの画像 URL が正しいか確認してください。',
     errorVrEnter:

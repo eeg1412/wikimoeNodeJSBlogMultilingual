@@ -676,7 +676,7 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   background-color: #fffcf7;
-  background-image: url(/img/bg_02.png);
+  background-image: url(/multilingual-assets/img/bg_02.png);
   background-size: contain;
   background-repeat: repeat;
   background-position: center top;
@@ -1509,7 +1509,7 @@ html.dark .ol-control button:focus {
 html.dark body {
   @apply dark:text-gray-200;
   background-color: var(--wikimoe-dark-bg);
-  background-image: url(/img/bg_02_dark.png);
+  background-image: url(/multilingual-assets/img/bg_02_dark.png);
 }
 html.dark .blog-layout-body {
   background-color: var(--wikimoe-dark-panel-bg);

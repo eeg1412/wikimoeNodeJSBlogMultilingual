@@ -147,7 +147,7 @@ function setBannerImage(params, img, id) {
   const imgRes = utils.base64ToFile(img, './public/upload/banner/', id, {
     createDir: true
   })
-  params.img = `/upload/banner/${imgRes.fileNameAll}?v=${Date.now()}`
+  params.img = `/multilingual-assets/upload/banner/${imgRes.fileNameAll}?v=${Date.now()}`
   params.imgPath = imgRes.filepath
 }
 

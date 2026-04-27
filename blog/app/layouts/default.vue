@@ -16,12 +16,14 @@
         <div class="blog-top-bar-left-body">
           <nuxt-link :to="homePath">
             <img
+              v-if="options.siteLogo"
               class="blog-top-bar-sitelogo light"
               loading="lazy"
               :src="options.siteLogo"
               :alt="options.siteTitle"
             />
             <img
+              v-if="options.siteDarkLogo"
               class="blog-top-bar-sitelogo dark"
               loading="lazy"
               :src="options.siteDarkLogo"
@@ -70,11 +72,13 @@
             <div>
               <nuxt-link :to="homePath">
                 <img
+                  v-if="options.siteLogo"
                   class="blog-layout-sitelogo light"
                   :src="options.siteLogo"
                   :alt="options.siteTitle"
                 />
                 <img
+                  v-if="options.siteDarkLogo"
                   class="blog-layout-sitelogo dark"
                   :src="options.siteDarkLogo"
                   :alt="options.siteTitle"
@@ -539,7 +543,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 .blog-layout-info-menu-bg {
-  background-image: url('/img/menuBg.png?v=2');
+  background-image: url('/multilingual-assets/img/menuBg.png?v=2');
   background-repeat: no-repeat;
   background-position: right bottom;
   background-size: 100%;

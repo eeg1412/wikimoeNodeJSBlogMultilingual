@@ -33,19 +33,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 8079,
       proxy: {
-        '/api/admin': {
-          target: 'http://127.0.0.1:3006',
-          changeOrigin: true
-        },
         '/api/multilingual-admin': {
           target: 'http://127.0.0.1:3016',
           changeOrigin: true
         },
-        '/content/uploadfile': {
-          target: 'http://127.0.0.1:3016',
-          changeOrigin: true
-        },
-        '/upload': {
+        '/multilingual-assets': {
           target: 'http://127.0.0.1:3016',
           changeOrigin: true
         }

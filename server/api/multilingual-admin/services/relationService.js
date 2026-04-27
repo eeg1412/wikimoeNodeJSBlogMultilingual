@@ -260,6 +260,10 @@ function buildKeywordParams(keyword) {
 }
 
 function getRelationDisplayName(record) {
+  if (Number(record.type) === 2 && record.excerpt) {
+    return record.excerpt
+  }
+
   return (
     record.title ||
     record.excerpt ||

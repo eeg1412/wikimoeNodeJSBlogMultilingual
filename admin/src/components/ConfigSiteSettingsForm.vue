@@ -136,7 +136,8 @@
         <el-checkbox
           v-for="item in sharePlatforms"
           :key="item.key"
-          :label="item.key"
+          :label="item.alt"
+          :value="item.key"
           class="mr-4 mb-2 flex items-center"
         >
           <span>{{ item.alt }}</span>
@@ -530,14 +531,42 @@ export default {
     ])
 
     const sharePlatforms = [
-      { key: 'weibo', src: '/img/icon/sina-weibo.svg', alt: '新浪微博' },
-      { key: 'qq-zone', src: '/img/icon/qq-zone.svg', alt: 'QQ空间' },
-      { key: 'x', src: '/img/icon/x-icon.svg', alt: 'X' },
-      { key: 'facebook', src: '/img/icon/facebook.svg', alt: 'Facebook' },
-      { key: 'reddit', src: '/img/icon/reddit.svg', alt: 'Reddit' },
-      { key: 'telegram', src: '/img/icon/telegram.svg', alt: 'Telegram' },
-      { key: 'line', src: '/img/icon/line.svg', alt: 'LINE' },
-      { key: 'whatsapp', src: '/img/icon/whatsapp.svg', alt: 'WhatsApp' },
+      {
+        key: 'weibo',
+        src: '/multilingual-assets/img/icon/sina-weibo.svg',
+        alt: '新浪微博'
+      },
+      {
+        key: 'qq-zone',
+        src: '/multilingual-assets/img/icon/qq-zone.svg',
+        alt: 'QQ空间'
+      },
+      { key: 'x', src: '/multilingual-assets/img/icon/x-icon.svg', alt: 'X' },
+      {
+        key: 'facebook',
+        src: '/multilingual-assets/img/icon/facebook.svg',
+        alt: 'Facebook'
+      },
+      {
+        key: 'reddit',
+        src: '/multilingual-assets/img/icon/reddit.svg',
+        alt: 'Reddit'
+      },
+      {
+        key: 'telegram',
+        src: '/multilingual-assets/img/icon/telegram.svg',
+        alt: 'Telegram'
+      },
+      {
+        key: 'line',
+        src: '/multilingual-assets/img/icon/line.svg',
+        alt: 'LINE'
+      },
+      {
+        key: 'whatsapp',
+        src: '/multilingual-assets/img/icon/whatsapp.svg',
+        alt: 'WhatsApp'
+      },
       { key: 'copy-link', src: '', alt: '复制链接' }
     ]
 

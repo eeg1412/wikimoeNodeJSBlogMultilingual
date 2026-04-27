@@ -458,6 +458,7 @@ export default {
       showTextInputTypeList,
       showTextareaTypeList,
       placeholderMap,
+      getSidebarList,
       handleSideBarCommand,
       sidebarSettingsSubmit,
       sidebarSettingsDelete,

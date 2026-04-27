@@ -17,6 +17,7 @@
         :key="item.value"
         :label="item.label"
         :name="item.value"
+        lazy
       >
         <el-form
           class="language-config-form"

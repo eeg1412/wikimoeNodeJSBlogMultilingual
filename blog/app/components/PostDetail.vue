@@ -348,18 +348,18 @@
     </div>
     <!-- 评论 -->
     <!-- 评论列表 commentList -->
-    <ClientOnly>
-      <div class="comment-list-body">
-        <!-- 评论form -->
-        <LazyCommentForm
-          :postid="postid"
-          :allowRemark="postData.data.allowRemark"
-          @refresh="refreshCommentList"
-        />
-        <div
-          class="relative pt-4 header-scroll-margin-top"
-          id="commentlist-container"
-        >
+    <div
+      class="relative pt-4 header-scroll-margin-top"
+      id="commentlist-container"
+    >
+      <ClientOnly>
+        <div class="comment-list-body">
+          <!-- 评论form -->
+          <LazyCommentForm
+            :postid="postid"
+            :allowRemark="postData.data.allowRemark"
+            @refresh="refreshCommentList"
+          />
           <DivLoading
             :loading="commentLoading"
             :text="t('common.status.loading')"
@@ -622,8 +622,8 @@
             </div>
           </div>
         </div>
-      </div>
-    </ClientOnly>
+      </ClientOnly>
+    </div>
     <ClientOnly>
       <!-- headerList -->
       <Teleport to="#rightToolBarMenu">
@@ -720,7 +720,7 @@ const postAuthor = computed(() => {
 
   return {
     nickname: options.value?.siteTitle || 'Wikimoe',
-    photo: '/img/avatar/1.webp'
+    photo: '/multilingual-assets/img/avatar/1.webp'
   }
 })
 const pageTemplate = computed(() => {
