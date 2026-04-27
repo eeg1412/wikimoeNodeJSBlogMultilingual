@@ -963,9 +963,7 @@ const likePost = () => {
   postLikeLogApi({ id: sourcePostid, like: !like, __v })
     .then(res => {
       // 将对应的likeList里的postId替换为res.data
-      const index = likeList.value.findIndex(
-        item => item.post === sourcePostid
-      )
+      const index = likeList.value.findIndex(item => item.post === sourcePostid)
       if (index > -1) {
         likeList.value[index] = res.data
       } else {

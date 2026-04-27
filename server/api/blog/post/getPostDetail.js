@@ -58,10 +58,10 @@ module.exports = async function (req, res, next) {
     params.alias = id
   }
   const findOptions = {
-      authorFilter: 'nickname _id photo description cover',
-      voteFliter:
-        '_id endTime maxSelect showResultAfter title options.title options._id'
-    }
+    authorFilter: 'nickname _id photo description cover',
+    voteFliter:
+      '_id endTime maxSelect showResultAfter title options.title options._id'
+  }
   const findPostDetail = query => {
     return postUtils.findOne(query, undefined, findOptions)
   }

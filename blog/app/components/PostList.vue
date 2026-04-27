@@ -688,7 +688,9 @@ const postLikeLogList = () => {
       likeList.value = res.list
       postsData.value.list.forEach((item, index) => {
         const sourcePostId = getSourcePostId(item)
-        const likeData = res.list.find(likeItem => likeItem.post === sourcePostId)
+        const likeData = res.list.find(
+          likeItem => likeItem.post === sourcePostId
+        )
         if (likeData && likeData.like) {
           if (item.likes === 0) {
             // 延迟补偿
@@ -738,9 +740,7 @@ const likePost = post => {
   postLikeLogApi({ id: sourcePostId, like: !like, __v })
     .then(res => {
       // 将对应的likeList里的postId替换为res.data
-      const index = likeList.value.findIndex(
-        item => item.post === sourcePostId
-      )
+      const index = likeList.value.findIndex(item => item.post === sourcePostId)
       if (index > -1) {
         likeList.value[index] = res.data
       } else {
