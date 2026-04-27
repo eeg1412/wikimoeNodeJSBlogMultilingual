@@ -1,45 +1,82 @@
-import Mappoint from '../models/mappoint.js'
-import { findGroupedDocumentPage } from './groupedDocuments.js'
+const mappointsModel = require('../models/mappoints')
 
-export async function findMappointPage({
-  query = {},
-  page = 1,
-  limit = 50
-} = {}) {
-  const skip = (page - 1) * limit
-  const [list, total] = await Promise.all([
-    Mappoint.find(query)
-      .sort({ zIndex: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    Mappoint.countDocuments(query)
-  ])
-  return { list, total }
+exports.save = async function (parmas) {
+  // document作成
+  const mappoints = new mappointsModel(parmas)
+  // document保存
+  return await mappoints.save()
 }
 
-export async function findMappointGroupPage({
-  query = {},
-  page = 1,
-  limit = 50
-} = {}) {
-  return findGroupedDocumentPage({
-    Model: Mappoint,
-    query,
-    page,
-    limit,
-    groupField: 'sourceId',
-    preGroupSort: { zIndex: -1, createdAt: -1 }
-  })
+exports.findOne = async function (parmas, projection, options = {}) {
+  // document查询
+  const q = mappointsModel.findOne(parmas, projection)
+  if (options.lean) {
+    q.lean()
+  }
+  return await q
 }
 
-export async function findMappointBySourceIdLang(sourceId, languageCode) {
-  return Mappoint.findOne({ sourceId, languageCode }).lean()
+// 查找所有
+exports.find = async function (parmas, sort, projection, options = {}) {
+  // document查询
+  const q = mappointsModel.find(parmas, projection).sort(sort)
+  if (options.lean) {
+    q.lean()
+  }
+  return await q
 }
 
-export async function updateMappointById(id, updateData) {
-  return Mappoint.findByIdAndUpdate(id, updateData, {
-    new: true,
-    runValidators: true
-  })
+exports.findLimit = async function (parmas, sort, limit = 10, projection) {
+  // document查询
+  return await mappointsModel.find(parmas, projection).sort(sort).limit(limit)
+}
+
+// 分页查询
+exports.findPage = async function (
+  parmas,
+  sort,
+  page,
+  limit,
+  projection,
+  options = {}
+) {
+  // document查询
+  const q = mappointsModel
+    .find(parmas, projection)
+    .sort(sort)
+    .skip((page - 1) * limit)
+    .limit(limit)
+  if (options.lean) {
+    q.lean()
+  }
+  const list = await q
+  const total = await mappointsModel.countDocuments(parmas)
+  // 查询失败
+  if (!list || total === undefined) {
+    throw new Error('查询失败')
+  }
+  return {
+    list,
+    total
+  }
+}
+
+exports.updateOne = async function (filters, parmas) {
+  // document查询
+  parmas.$inc = { __v: 1, ...parmas.$inc }
+  return await mappointsModel.updateOne(filters, parmas)
+}
+// deleteMany
+exports.deleteMany = async function (filters) {
+  return await mappointsModel.deleteMany(filters)
+}
+// 删除
+exports.deleteOne = async function (filters) {
+  // document查询
+  return await mappointsModel.deleteOne(filters)
+}
+
+// 聚合
+exports.aggregate = async function (pipeline) {
+  return await mappointsModel.aggregate(pipeline)
 }

@@ -1,68 +1,71 @@
-import mongoose from 'mongoose'
-import { DB_HOST } from '../config/env.js'
-import { initOptions } from '../config/optionsInit.js'
-import { initAdminUser } from '../config/adminInit.js'
-import { initGlobalConfig } from '../config/globalConfig.js'
-import { cacheData } from '../config/cacheData.js'
-
+const mongoose = require('mongoose')
+const globalConfigUtils = require('../config/globalConfig')
+const cacheDataUtils = require('../config/cacheData')
+const rssToolUtils = require('../utils/rss')
+const sitemapToolUtils = require('../utils/sitemap')
 let mongodbErrorCount = 0
-let dbInstance = null
-
-export function getDb() {
-  return dbInstance
+console.info('数据库连接中...')
+// console.log('数据库地址：', process.env.DB_HOST);
+if (!process.env.DB_HOST) {
+  console.error('请在根目录下创建.env文件，并添加数据库地址。')
+  process.exit(1)
 }
-
-export async function connectMongoDB() {
-  const uri = DB_HOST()
-  if (!uri) {
-    console.error('[MongoDB] DB_HOST 未设置，无法连接数据库')
-    process.exit(1)
-  }
-
-  // 注册重连/错误事件（必须在 connect() 之前注册，否则事件已触发时监听器还未就绪）
-  const db = mongoose.connection
-
-  db.on('error', error => {
-    console.error('[MongoDB] 连接错误:', error.message || error)
-    handleDbError()
-  })
-
-  db.on('close', () => {
-    console.error('[MongoDB] 数据库断开，尝试重新连接...')
-    handleDbError()
-  })
-
-  console.info('[MongoDB] 数据库连接中...')
-  await mongoose.connect(uri)
-
-  // await mongoose.connect() resolve 意味着连接已建立
-  dbInstance = db
-  console.info('[MongoDB] 数据库连接成功！')
-  mongodbErrorCount = 0
-
-  // 初始化系统
-  await initOptions()
-  await initAdminUser()
-  await initGlobalConfig()
-  await cacheData.refresh()
-
-  global.$isReady = true
-  console.info('[System] 系统初始化完成，服务就绪')
-
-  return db
-}
+mongoose.connect(process.env.DB_HOST)
+const db = mongoose.connection
 
 function handleDbError() {
   global.$isReady = false
   mongodbErrorCount++
   if (mongodbErrorCount > 10) {
-    console.error('[MongoDB] 连接失败次数过多，程序退出')
+    console.error('数据库连接失败次数过多，程序退出')
+    // mongoose.disconnect();
     process.exit(1)
   }
-  const retryMs = 10000 * mongodbErrorCount
-  console.error(`[MongoDB] 将在 ${retryMs / 1000} 秒后重试`)
+  let retryTime = 10000 * mongodbErrorCount
+  console.error(`数据库连接失败，${retryTime / 1000}秒后重新连接数据库`)
   setTimeout(() => {
-    console.info('[MongoDB] 数据库重连中...')
-    mongoose.connect(DB_HOST())
-  }, retryMs)
+    console.info('数据库连接中...')
+    mongoose.connect(process.env.DB_HOST)
+  }, retryTime)
 }
+
+db.on('open', async () => {
+  console.info('数据库连接成功！')
+  // 输出mongodb版本信息
+  try {
+    const nativeDb = db.db
+    if (!nativeDb) throw new Error('无法获取原生 MongoDB db 对象')
+    const admin = nativeDb.admin()
+    const buildInfo = await admin.command({ buildInfo: 1 })
+    console.info(`MongoDB 版本：${buildInfo.version}`)
+  } catch (err) {
+    console.warn('获取MongoDB版本信息失败：', err.message || err)
+  }
+
+  mongodbErrorCount = 0
+  // 更新时注意同时更新还原时的缓存
+  await globalConfigUtils.initGlobalConfig()
+  cacheDataUtils.getNaviList()
+  cacheDataUtils.getSidebarList()
+  cacheDataUtils.getBannerList()
+  cacheDataUtils.getSortList()
+  cacheDataUtils.getPostArchiveList()
+  cacheDataUtils.getBangumiYearList()
+  cacheDataUtils.getMovieYearList()
+  rssToolUtils.reflushRSS()
+  sitemapToolUtils.reflushSitemap()
+  global.$isReady = true
+})
+
+db.on('error', function (error) {
+  console.error('Error in MongoDb connection: ' + error)
+  handleDbError()
+})
+
+db.on('close', function () {
+  // 如果未来有手动断开数据库连接的需求，需要注意这里的处理，避免重连
+  console.error('数据库断开，重新连接数据库')
+  handleDbError()
+})
+
+module.exports = db

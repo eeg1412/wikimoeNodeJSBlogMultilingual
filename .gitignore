@@ -1,42 +1,31 @@
 # dependencies
-node_modules/
-
-# environment files
+node_modules
 .env
-.env.*
-admin/.env
-admin/.env.*
-blog/.env
-blog/.env.*
-server/.env
-server/.env.*
-
-# build output
-dist/
-.nuxt/
-.output/
-.nitro/
-.cache/
-.vite/
-server/front/multilingual-admin/
-coverage/
-.nyc_output/
-*.tsbuildinfo
-
-# runtime data
-server/public/localized/
-server/log/
-server/secret/
-server/cache/
-server/backups/
-
-# logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# system files
-.DS_Store
-Thumbs.db
+data
+/server/log
+/server/public/upload/avatar/*
+/server/public/upload/linkicon/*
+/server/public/upload/banner/*
+/server/public/upload/siteImg/*
+/server/public/upload/bangumi/*
+/server/public/upload/movie/*
+/server/public/upload/gameCover/*
+/server/public/upload/bookCover/*
+/server/public/content/uploadfile/*
+/server/public/admin/*
+/server/public/up_works/*
+/server/public/web_demo/*
+/server/public/ucloudImg/*
+/server/seo/sitemap/sitemap.xml
+/server/seo/rss/*
+/server/seo/robots/*
+/server/front/*
+/server/config/globalConfig.json
+/server/uploadCache/*
+/server/utils/ip2location/*
+/server/tools/backupFromEmlogJson/*
+/server/cache/*
+/server/secret/*
+/server/backups/*
+/blog/public/ads.txt
+/blog/public/robots.txt

@@ -1,37 +1,64 @@
-import Tag from '../models/tag.js'
-import { findGroupedDocumentPage } from './groupedDocuments.js'
+const tagsModel = require('../models/tags')
 
-export async function findTagPage({ query = {}, page = 1, limit = 50 } = {}) {
-  const skip = (page - 1) * limit
-  const [list, total] = await Promise.all([
-    Tag.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    Tag.countDocuments(query)
-  ])
-  return { list, total }
+exports.save = async function (parmas) {
+  // document作成
+  const tags = new tagsModel(parmas)
+  // document保存
+  return await tags.save()
 }
 
-export async function findTagGroupPage({
-  query = {},
-  page = 1,
-  limit = 50
-} = {}) {
-  return findGroupedDocumentPage({
-    Model: Tag,
-    query,
-    page,
-    limit,
-    groupField: 'sourceId',
-    preGroupSort: { createdAt: -1 }
-  })
+exports.findOne = async function (parmas, projection) {
+  // document查询
+  return await tagsModel.findOne(parmas, projection)
 }
 
-export async function findTagBySourceIdLang(sourceId, languageCode) {
-  return Tag.findOne({ sourceId, languageCode }).lean()
+// 查找所有
+exports.find = async function (parmas, sort, projection) {
+  // document查询
+  return await tagsModel.find(parmas, projection).sort(sort)
 }
 
-export async function updateTagById(id, updateData) {
-  return Tag.findByIdAndUpdate(id, updateData, {
-    new: true,
-    runValidators: true
-  })
+exports.findLimit = async function (parmas, sort, limit = 10, projection) {
+  // document查询
+  return await tagsModel.find(parmas, projection).sort(sort).limit(limit)
+}
+
+// 分页查询
+exports.findPage = async function (parmas, sort, page, limit, projection) {
+  // document查询
+  const list = await tagsModel
+    .find(parmas, projection)
+    .sort(sort)
+    .skip((page - 1) * limit)
+    .limit(limit)
+  const total = await tagsModel.countDocuments(parmas)
+  // 查询失败
+  if (!list || total === undefined) {
+    throw new Error('查询失败')
+  }
+  return {
+    list,
+    total
+  }
+}
+
+exports.updateOne = async function (filters, parmas) {
+  // document查询
+  parmas.$inc = { __v: 1, ...parmas.$inc }
+  return await tagsModel.updateOne(filters, parmas)
+}
+// 删除
+exports.deleteOne = async function (filters) {
+  // document查询
+  return await tagsModel.deleteOne(filters)
+}
+// deleteMany
+exports.deleteMany = async function (filters) {
+  // document查询
+  return await tagsModel.deleteMany(filters)
+}
+// 聚合
+exports.aggregate = async function (pipe) {
+  // document查询
+  return await tagsModel.aggregate(pipe)
 }

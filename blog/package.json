@@ -1,15 +1,37 @@
 {
-  "name": "wikimoe-multilingual-blog-build",
-  "version": "1.0.0",
+  "name": "nuxt-app",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build:css": "tailwindcss -i ./src/styles/main.css -o ./public/assets/blog.css --minify",
-    "watch:css": "tailwindcss -i ./src/styles/main.css -o ./public/assets/blog.css --watch"
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "upgrade": "npx nuxt upgrade --dedupe"
   },
   "devDependencies": {
-    "@tailwindcss/typography": "^0.5.10",
-    "tailwindcss": "3.4.17",
-    "postcss": "^8.4.32",
-    "autoprefixer": "^10.4.16"
-  }
+    "@iconify-json/heroicons": "^1.2.3",
+    "@types/node": "^24.10.0"
+  },
+  "dependencies": {
+    "@iconify-json/fluent": "^1.2.44",
+    "@nuxt/icon": "^2.2.1",
+    "@nuxtjs/color-mode": "^4.0.0",
+    "@nuxtjs/tailwindcss": "^6.14.0",
+    "@photo-sphere-viewer/core": "^5.14.0",
+    "@photo-sphere-viewer/gyroscope-plugin": "^5.14.0",
+    "@popperjs/core": "^2.11.8",
+    "highlight.js": "^11.11.1",
+    "moment": "^2.30.1",
+    "nuxt": "^4.0.0",
+    "nuxt-swiper": "^1.2.2",
+    "ol": "^10.6.1",
+    "photoswipe": "^5.4.4",
+    "qrcode": "^1.5.4",
+    "validator": "^13.15.26",
+    "vr-equirectangular-viewer": "^1.0.8",
+    "vue": "^3.5.0"
+  },
+  "version": "1.2.0"
 }

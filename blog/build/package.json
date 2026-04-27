@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "start": "node start.js",
+    "start-linux": "node start.js",
+    "start-windows": "node start.js"
+  }
+}

@@ -1,18 +1,29 @@
 {
-  "name": "wikimoenodejsblogmultilingual",
-  "version": "1.0.0",
-  "description": "Multilingual satellite blog based on wikimoeNodeJSBlog",
-  "private": true,
-  "type": "module",
+  "name": "wikimoenodejsblog",
+  "version": "1.2.0",
+  "description": "猛男自用博客系统，基于nodejs，mongodb",
+  "main": "index.js",
   "scripts": {
-    "start": "node server/bin/www",
+    "start": "node index.js",
     "build-all": "node build-all.js",
-    "dev:server": "node --watch server/bin/www",
-    "build:admin": "cd admin && npm run build",
-    "build:blog": "cd blog && npm run build"
+    "ver-change": "node ver-change.js",
+    "build-panorama": "yarn --cwd panorama-viewer build",
+    "dev-panorama": "yarn --cwd panorama-viewer dev"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eeg1412/wikimoeNodeJSBlog.git"
+  },
+  "keywords": [
+    "blog"
+  ],
+  "author": "hiroki",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/eeg1412/wikimoeNodeJSBlog/issues"
+  },
+  "homepage": "https://github.com/eeg1412/wikimoeNodeJSBlog#readme",
   "dependencies": {
-    "concurrently": "^8.2.2",
-    "joi": "^17.13.3"
+    "concurrently": "^8.2.2"
   }
 }

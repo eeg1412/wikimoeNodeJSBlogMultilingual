@@ -1,41 +1,45 @@
-import Sort from '../models/sort.js'
-import { findGroupedDocumentPage } from './groupedDocuments.js'
+const sortsModel = require('../models/sorts')
 
-export async function findSortPage({ query = {}, page = 1, limit = 50 } = {}) {
-  const skip = (page - 1) * limit
-  const [list, total] = await Promise.all([
-    Sort.find(query)
-      .sort({ taxis: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    Sort.countDocuments(query)
-  ])
-  return { list, total }
+exports.save = async function (parmas) {
+  // document作成
+  const sorts = new sortsModel(parmas)
+  // document保存
+  return await sorts.save()
 }
 
-export async function findSortGroupPage({
-  query = {},
-  page = 1,
-  limit = 50
-} = {}) {
-  return findGroupedDocumentPage({
-    Model: Sort,
-    query,
-    page,
-    limit,
-    groupField: 'sourceId',
-    preGroupSort: { taxis: 1, createdAt: -1 }
-  })
+exports.findOne = async function (parmas, projection) {
+  // document查询
+  return await sortsModel.findOne(parmas, projection)
 }
 
-export async function findSortBySourceIdLang(sourceId, languageCode) {
-  return Sort.findOne({ sourceId, languageCode }).lean()
+// 查找所有
+exports.find = async function (parmas, sort, projection, options = {}) {
+  // document查询
+  const q = sortsModel.find(parmas, projection).sort(sort)
+  if (options.lean) {
+    q.lean()
+  }
+  return await q
 }
 
-export async function updateSortById(id, updateData) {
-  return Sort.findByIdAndUpdate(id, updateData, {
-    new: true,
-    runValidators: true
-  })
+exports.updateOne = async function (filters, parmas) {
+  // document查询
+  parmas.$inc = { __v: 1, ...parmas.$inc }
+  return await sortsModel.updateOne(filters, parmas)
+}
+// 删除
+exports.deleteOne = async function (filters) {
+  // document查询
+  return await sortsModel.deleteOne(filters)
+}
+// deleteMany
+exports.deleteMany = async function (filters) {
+  // document查询
+  return await sortsModel.deleteMany(filters)
+}
+
+// 聚合
+exports.aggregate = async function (parmas) {
+  // document查询
+  return await sortsModel.aggregate(parmas)
 }

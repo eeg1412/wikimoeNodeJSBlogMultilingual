@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>Panorama Viewer</title>
+  </head>
+  <body>
+    <div class="panorama-shell" id="app">
+      <div class="panorama-stage" id="viewer"></div>
+
+      <div class="panorama-overlay panorama-overlay--status" id="status">
+        <div class="panorama-card">
+          <div class="panorama-card__title" id="status-title">
+            Panorama Viewer
+          </div>
+          <div class="panorama-card__body" id="status-text">
+            Initializing...
+          </div>
+        </div>
+      </div>
+
+      <div class="panorama-overlay panorama-overlay--status hidden" id="error">
+        <div class="panorama-card panorama-card--error">
+          <div class="panorama-card__title" id="error-title">
+            Unable to Display Panorama
+          </div>
+          <div class="panorama-card__body" id="error-text"></div>
+          <div class="panorama-card__actions">
+            <button
+              class="panorama-card__action"
+              id="error-home-button"
+              type="button"
+            >
+              Go Home
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="panorama-toolbar hidden"
+        id="toolbar"
+        aria-label="Panorama Controls"
+      >
+        <button
+          class="panorama-toolbar__button"
+          id="home-button"
+          type="button"
+          title="Go Home"
+          aria-label="Go Home"
+        ></button>
+        <button
+          class="panorama-toolbar__button hidden"
+          id="fisheye-button"
+          type="button"
+          title="Toggle Lens Mode"
+          aria-label="Toggle Lens Mode"
+        ></button>
+        <button
+          class="panorama-toolbar__button hidden"
+          id="gyroscope-button"
+          type="button"
+          title="Motion View"
+          aria-label="Motion View"
+        ></button>
+        <button
+          class="panorama-toolbar__button hidden"
+          id="vr-button"
+          type="button"
+          title="VR Mode"
+          aria-label="VR Mode"
+        ></button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

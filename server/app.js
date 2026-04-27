@@ -1,125 +1,152 @@
-import express from 'express'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
-import cookieParser from 'cookie-parser'
-import log4js from 'log4js'
-import helmet from 'helmet'
-import history from 'connect-history-api-fallback'
-import expressLayouts from 'express-ejs-layouts'
+global.$cacheData = {}
+global.$isReady = false
+global.$isBackuping = false
+global.$secret = {}
+var express = require('express')
+const utils = require('./utils/utils')
+const JWTSecretAdmin = utils.ensureJWTSecretAdmin()
+global.$secret.JWTSecretAdmin = JWTSecretAdmin
+const JWTSecretBlog = utils.ensureJWTSecretBlog()
+global.$secret.JWTSecretBlog = JWTSecretBlog
+const log4js = require('log4js')
+var path = require('path')
+var cookieParser = require('cookie-parser')
+// var logger = require('morgan');
+const $mongodDB = require('./mongodb')
+global.$mongodDB = $mongodDB
+var history = require('connect-history-api-fallback')
 
-import log4jsConfig from './config/log4js.config.js'
-import { validateEnv, LOCAL_ATTACHMENT_STORAGE_DIR } from './config/env.js'
-import { connectMongoDB } from './mongodb/index.js'
-import {
-  ensureJWTSecretAdmin,
-  setAdminJwtSecretGlobal
-} from './utils/jwtManager.js'
-import { globalErrorHandler, requireReady } from './middleware/errorHandler.js'
+var adminRouter = require('./routes/admin')
+const blogRouter = require('./routes/blog')
+const rssRouter = require('./routes/rss/index')
+const sitemapToolUtils = require('./utils/sitemap')
 
-import adminRouter from './routes/admin.js'
-import blogRouter from './routes/blog.js'
-import blogPageRouter from './routes/blogPages.js'
-import { getSiteConfig } from './config/globalConfig.js'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-
-// ────────────── 启动校验 ──────────────
-validateEnv()
-
-// ────────────── 日志配置 ──────────────
-log4js.configure(log4jsConfig)
-const logger = log4js.getLogger('system')
-
-// ────────────── JWT 密钥 ──────────────
-const jwtSecret = ensureJWTSecretAdmin()
-setAdminJwtSecretGlobal(jwtSecret)
-
-// ────────────── Express 应用 ──────────────
-const app = express()
-
-// 安全响应头
-app.use(
-  helmet({
-    contentSecurityPolicy: false // EJS 模板会使用内联样式，暂时关闭 CSP；生产上线前应配置
-  })
-)
+var app = express()
 
 app.use(log4js.connectLogger(log4js.getLogger('access'), { level: 'auto' }))
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: false, limit: '10mb' }))
+
+// app.use(logger('dev'));
+app.use(express.json({ limit: process.env.JSON_LIMIT || '10mb' }))
+app.use(
+  express.urlencoded({
+    extended: false,
+    limit: process.env.URLENCODED_LIMIT || '10mb'
+  })
+)
 app.use(cookieParser())
 
-// JSON 解析错误处理
+const upLoadFolder = path.join(__dirname, 'public/upload')
+app.use(
+  '/upload',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(upLoadFolder, { maxAge: '365d' })
+)
+
+const contentFolder = path.join(__dirname, 'public/content')
+app.use(
+  '/content',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(contentFolder, { maxAge: '365d' })
+)
+
+// up_works referrerRecord
+const upWorksFolder = path.join(__dirname, 'public/up_works')
+app.use(
+  '/up_works',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(upWorksFolder, { maxAge: '365d' })
+)
+
+// web_demo referrerRecord
+const webDemoFolder = path.join(__dirname, 'public/web_demo')
+app.use(
+  '/web_demo',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(webDemoFolder, { maxAge: '365d' })
+)
+
+// ucloudImg referrerRecord
+const ucloudImgFolder = path.join(__dirname, 'public/ucloudImg')
+app.use(
+  '/ucloudImg',
+  function (req, res, next) {
+    utils.referrerRecord(req.headers.referer, 'assets')
+    next()
+  },
+  express.static(ucloudImgFolder, { maxAge: '365d' })
+)
+// app.use(express.static(path.join(__dirname, 'public')));
+
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    return res.status(400).json({ message: '非法 JSON 格式' })
+    console.error('传入非法JSON格式')
+    return res.status(400) // Bad request
   }
-  next(err)
+  next()
 })
-
-// ────────────── EJS 视图引擎（博客端） ──────────────
-app.set('views', join(__dirname, '../blog/views'))
-app.set('view engine', 'ejs')
-app.use(expressLayouts)
-app.set('layout', 'layouts/base')
-app.set('layout extractScripts', false)
-app.set('layout extractStyles', false)
-
-// ────────────── 静态资源 ──────────────
-// 博客端编译样式
-app.use(
-  '/assets',
-  express.static(join(__dirname, '../blog/public/assets'), { maxAge: '7d' })
-)
-// 博客端其他公共资源
-app.use(
-  '/public',
-  express.static(join(__dirname, '../blog/public'), { maxAge: '7d' })
-)
-// 翻译站本地附件
-app.use(
-  '/local-attachments',
-  express.static(LOCAL_ATTACHMENT_STORAGE_DIR(), { maxAge: '30d' })
-)
-
-// ────────────── 路由 ──────────────
-app.use('/api/admin', requireReady, adminRouter)
-app.use('/api/blog', requireReady, blogRouter)
-
 // robots.txt
-app.use('/robots.txt', (req, res) => {
+app.use('/seo/blog/robots.txt', async function (req, res) {
+  res.setHeader('Content-Type', 'text/plain')
+  res.send(global.$globalConfig?.siteSettings?.siteRobotsTxt || '')
+})
+
+app.use('/api/admin', adminRouter)
+app.use('/api/blog', blogRouter)
+app.use('/rss', rssRouter)
+// robots.txt
+app.use('/robots.txt', function (req, res) {
   res.type('text/plain')
-  res.send(getSiteConfig().robotsTxt || 'User-agent: *\nDisallow:')
+  res.send('User-agent: *\nDisallow: /')
 })
-
-// ads.txt
-app.use('/ads.txt', (req, res) => {
+// sitemap.xml
+app.use('/sitemap.xml', async function (req, res) {
+  sitemapToolUtils.getSitemap(req, res)
+})
+// sitemap.xsl
+app.use('/sitemap.xsl', function (req, res) {
+  res.sendFile(path.join(__dirname, 'seo/sitemap/sitemap.xsl'))
+})
+// AdAdsTxt ads.txt
+app.use('/ads.txt', function (req, res) {
   res.type('text/plain')
-  res.send(getSiteConfig().adsTxtContent || '')
+  res.send(global.$globalConfig?.adSettings?.AdAdsTxt || '')
 })
-
-// 管理端 SPA
-app.use('/multilingual-admin', express.static(join(__dirname, 'front/admin')))
-app.get('/multilingual-admin', (req, res) =>
-  res.sendFile(join(__dirname, 'front/admin/index.html'))
-)
-app.get('/multilingual-admin/*', (req, res) =>
-  res.sendFile(join(__dirname, 'front/admin/index.html'))
-)
-
-// 博客端页面路由（语言前缀路由，必须在 SPA 之后）
-app.use('/', requireReady, blogPageRouter)
-
-// ────────────── 全局错误处理 ──────────────
-app.use(globalErrorHandler)
-
-// ────────────── 启动数据库连接 ──────────────
-connectMongoDB().catch(err => {
-  logger.error('数据库连接失败:', err)
-  process.exit(1)
+// 所有第一级路径不是/admin的，都返回404
+app.use((req, res, next) => {
+  const firstLevelPath = req.path.split('/')[1]
+  if (firstLevelPath !== 'admin') {
+    res.status(404).send('Not found')
+  } else {
+    next()
+  }
 })
+app.use(
+  history({
+    index: '/admin/index.html'
+  })
+)
+app.use('/admin', express.static(path.join(__dirname, 'front/admin')))
 
-logger.info('Express 应用初始化完成')
+// setInterval(() => {
+//   const memoryUsage = process.memoryUsage();
+//   const rss = (memoryUsage.rss / 1024 / 1024).toFixed(2);
+//   const heapTotal = (memoryUsage.heapTotal / 1024 / 1024).toFixed(2);
+//   const heapUsed = (memoryUsage.heapUsed / 1024 / 1024).toFixed(2);
+//   console.log(`RSS: ${rss} MB, Heap Total: ${heapTotal} MB, Heap Used: ${heapUsed} MB`);
+// }, 1000);
 
-export default app
+console.info('Express应用初始化完成')
+
+module.exports = app
