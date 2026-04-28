@@ -179,10 +179,7 @@
                     <span v-else class="table-empty-text">-</span>
                   </template>
                 </ResponsiveTableColumn>
-                <ResponsiveTableColumn
-                  label="关联与相关内容"
-                  min-width="420"
-                >
+                <ResponsiveTableColumn label="关联与相关内容" min-width="420">
                   <template #default="{ row: childRow }">
                     <PostRelationSummary
                       v-if="childRow.translation"

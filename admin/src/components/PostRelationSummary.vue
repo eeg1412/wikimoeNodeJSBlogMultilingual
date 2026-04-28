@@ -27,9 +27,7 @@
         <template v-else-if="content.type === 'game'">
           <i class="fas fa-fw fa-gamepad"></i>{{ `${checkShowText(content)}` }}
           {{
-            content.gamePlatform?.name
-              ? `【${content.gamePlatform.name}】`
-              : ''
+            content.gamePlatform?.name ? `【${content.gamePlatform.name}】` : ''
           }}
         </template>
         <template v-else-if="content.type === 'post'">
@@ -86,9 +84,7 @@
         <template v-else-if="content.type === 'game'">
           <i class="fas fa-fw fa-gamepad"></i>{{ `${checkShowText(content)}` }}
           {{
-            content.gamePlatform?.name
-              ? `【${content.gamePlatform.name}】`
-              : ''
+            content.gamePlatform?.name ? `【${content.gamePlatform.name}】` : ''
           }}
         </template>
         <template v-else-if="content.type === 'post'">

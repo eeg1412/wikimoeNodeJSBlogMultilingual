@@ -26,11 +26,11 @@ const ALLOWED_COLLECTION_NAMES = new Set([
   'attachments'
 ])
 
-const DEFAULT_LIST_COLLECTION_NAMES = Array.from(ALLOWED_COLLECTION_NAMES).filter(
-  collectionName => {
-    return collectionName !== 'attachments'
-  }
-)
+const DEFAULT_LIST_COLLECTION_NAMES = Array.from(
+  ALLOWED_COLLECTION_NAMES
+).filter(collectionName => {
+  return collectionName !== 'attachments'
+})
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -336,7 +336,9 @@ async function listRelationsAcrossCollections(input) {
 
   resultList.sort((left, right) => {
     const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime()
-    const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime()
+    const rightTime = new Date(
+      right.updatedAt || right.createdAt || 0
+    ).getTime()
     if (leftTime !== rightTime) {
       return rightTime - leftTime
     }
