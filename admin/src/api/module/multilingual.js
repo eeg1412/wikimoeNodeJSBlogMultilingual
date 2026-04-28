@@ -31,6 +31,13 @@ export default function (api) {
         noLoading
       })
     },
+    getSourceRelationList(data, noLoading = false) {
+      return api.get('/source/relation/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getSourcePostDetail(data) {
       return api.get('/source/post/detail', {
         params: data,

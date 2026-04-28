@@ -32,6 +32,7 @@ export const RELATION_COLLECTION_OPTIONS = [
   { label: '阅读类型', value: 'booktypes' },
   { label: '活动', value: 'events' },
   { label: '活动类型', value: 'eventtypes' },
+  { label: '文章', value: 'posts' },
   { label: '投票', value: 'votes' },
   { label: '媒体', value: 'attachments' }
 ]

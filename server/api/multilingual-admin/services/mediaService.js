@@ -55,19 +55,22 @@ function escapeRegExp(value) {
 }
 
 function parseAttachmentListQuery(query = {}) {
-  const languageCode = normalizeLanguageCode(query.languageCode)
-  if (!languageCode) {
+  let recordKind = TRANSLATION_RECORD_KIND
+  if (query.recordKind === SOURCE_RECORD_KIND) {
+    recordKind = SOURCE_RECORD_KIND
+  }
+
+  const rawLanguageCode = String(query.languageCode || '').trim()
+  const languageCode = rawLanguageCode
+    ? normalizeLanguageCode(rawLanguageCode)
+    : ''
+  if (rawLanguageCode && !languageCode) {
     throw new ApiError(
       ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
       undefined,
       'languageCode',
       400
     )
-  }
-
-  let recordKind = TRANSLATION_RECORD_KIND
-  if (query.recordKind === SOURCE_RECORD_KIND) {
-    recordKind = SOURCE_RECORD_KIND
   }
 
   let mediaMode = String(query.mediaMode || '').trim()
@@ -115,8 +118,10 @@ async function listAttachments(query = {}) {
   const input = parseAttachmentListQuery(query)
   const AttachmentModel = getAttachmentModel()
   const params = {
-    recordKind: input.recordKind,
-    languageCode: input.languageCode
+    recordKind: input.recordKind
+  }
+  if (input.languageCode) {
+    params.languageCode = input.languageCode
   }
   if (input.mediaMode) {
     params.mediaMode = input.mediaMode

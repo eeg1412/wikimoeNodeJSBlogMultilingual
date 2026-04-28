@@ -179,6 +179,10 @@ function getMultilingualModel(collectionName) {
   return repository.model
 }
 
+function getAllowedCollectionNameList() {
+  return Array.from(ALLOWED_COLLECTION_NAMES)
+}
+
 function parsePositiveInteger(value, defaultValue, maxValue) {
   const numberValue = Number(value)
   if (!Number.isInteger(numberValue) || numberValue <= 0) {
@@ -197,8 +201,13 @@ function escapeRegExp(value) {
 }
 
 function parseRelationListQuery(query = {}) {
+  const recordKind =
+    query.recordKind === SOURCE_RECORD_KIND
+      ? SOURCE_RECORD_KIND
+      : TRANSLATION_RECORD_KIND
+
   const collectionName = String(query.collectionName || '').trim()
-  if (!ALLOWED_COLLECTION_NAMES.has(collectionName)) {
+  if (collectionName && !ALLOWED_COLLECTION_NAMES.has(collectionName)) {
     throw new ApiError(
       ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
       'collectionName is not supported',
@@ -207,8 +216,11 @@ function parseRelationListQuery(query = {}) {
     )
   }
 
-  const languageCode = normalizeLanguageCode(query.languageCode)
-  if (!languageCode) {
+  const rawLanguageCode = String(query.languageCode || '').trim()
+  const languageCode = rawLanguageCode
+    ? normalizeLanguageCode(rawLanguageCode)
+    : ''
+  if (rawLanguageCode && !languageCode) {
     throw new ApiError(
       ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
       undefined,
@@ -216,11 +228,6 @@ function parseRelationListQuery(query = {}) {
       400
     )
   }
-
-  const recordKind =
-    query.recordKind === SOURCE_RECORD_KIND
-      ? SOURCE_RECORD_KIND
-      : TRANSLATION_RECORD_KIND
 
   return {
     collectionName,
@@ -276,17 +283,80 @@ function getRelationDisplayName(record) {
   )
 }
 
-async function listRelations(query = {}) {
-  const input = parseRelationListQuery(query)
-  const Model = getMultilingualModel(input.collectionName)
+function buildRelationListParams(input) {
   const params = {
-    recordKind: input.recordKind,
-    languageCode: input.languageCode
+    recordKind: input.recordKind
   }
+
+  if (input.languageCode) {
+    params.languageCode = input.languageCode
+  }
+
   const keywordParams = buildKeywordParams(input.keyword)
   if (keywordParams) {
     params.$or = keywordParams.$or
   }
+
+  return params
+}
+
+function toRelationListItem(item, collectionName) {
+  return {
+    ...item,
+    collectionName,
+    displayName: getRelationDisplayName(item)
+  }
+}
+
+async function listRelationsAcrossCollections(input) {
+  const collectionNameList = input.collectionName
+    ? [input.collectionName]
+    : getAllowedCollectionNameList()
+  const params = buildRelationListParams(input)
+  const resultList = []
+
+  await Promise.all(
+    collectionNameList.map(async collectionName => {
+      const Model = getMultilingualModel(collectionName)
+      const list = await Model.find(params)
+        .sort({ updatedAt: -1, _id: -1 })
+        .lean()
+
+      list.forEach(item => {
+        resultList.push(toRelationListItem(item, collectionName))
+      })
+    })
+  )
+
+  resultList.sort((left, right) => {
+    const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime()
+    const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime()
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+    return String(right._id).localeCompare(String(left._id))
+  })
+
+  const startIndex = (input.page - 1) * input.limit
+  const endIndex = startIndex + input.limit
+
+  return {
+    list: resultList.slice(startIndex, endIndex),
+    total: resultList.length,
+    page: input.page,
+    limit: input.limit
+  }
+}
+
+async function listRelations(query = {}) {
+  const input = parseRelationListQuery(query)
+
+  if (!input.collectionName) {
+    return listRelationsAcrossCollections(input)
+  }
+
+  const Model = getMultilingualModel(input.collectionName)
+  const params = buildRelationListParams(input)
 
   const total = await Model.countDocuments(params)
   const list = await Model.find(params)
@@ -297,10 +367,7 @@ async function listRelations(query = {}) {
 
   return {
     list: list.map(item => {
-      return {
-        ...item,
-        displayName: getRelationDisplayName(item)
-      }
+      return toRelationListItem(item, input.collectionName)
     }),
     total,
     page: input.page,

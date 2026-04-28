@@ -24,8 +24,15 @@
               style="width: 240px"
             />
           </el-form-item>
-          <el-form-item>
-            <el-select v-model="params.languageCode" style="width: 180px">
+          <el-form-item v-if="!isSourceScope">
+            <el-select
+              v-model="params.languageCode"
+              clearable
+              placeholder="全部语言"
+              style="width: 180px"
+              @change="getRelationList(true)"
+              @clear="getRelationList(true)"
+            >
               <el-option
                 v-for="item in languageOptions"
                 :key="item.value"
@@ -34,8 +41,15 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item>
-            <el-select v-model="params.collectionName" style="width: 160px">
+          <el-form-item v-if="!isSourceScope">
+            <el-select
+              v-model="params.collectionName"
+              clearable
+              placeholder="全部类型"
+              style="width: 160px"
+              @change="getRelationList(true)"
+              @clear="getRelationList(true)"
+            >
               <el-option
                 v-for="item in collectionOptions"
                 :key="item.value"
@@ -77,8 +91,8 @@
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="类型" width="120">
-          <template #default>
-            {{ collectionText }}
+          <template #default="{ row }">
+            {{ getCollectionText(row.collectionName || params.collectionName) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源 ID" min-width="210">
@@ -138,6 +152,9 @@
         }}</el-descriptions-item>
         <el-descriptions-item label="语言">{{
           getLanguageText(currentRow.languageCode)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{
+          getCollectionText(currentRow.collectionName || params.collectionName)
         }}</el-descriptions-item>
         <el-descriptions-item label="快照版本"
           >v{{ currentRow.snapshotVersion || 1 }}</el-descriptions-item
@@ -361,13 +378,20 @@ export default {
     const editDialogVisible = ref(false)
     const submitting = ref(false)
     const editForm = reactive({})
-    const params = reactive({
-      page: 1,
-      limit: 20,
-      keyword: '',
-      languageCode: 'zh-CN',
-      collectionName: 'tags'
-    })
+
+    const getDefaultParams = scope => {
+      const defaultParams = {
+        page: 1,
+        limit: 20,
+        keyword: '',
+        languageCode: '',
+        collectionName: ''
+      }
+
+      return defaultParams
+    }
+
+    const params = reactive(getDefaultParams(route.meta.scope))
 
     const isSourceScope = computed(() => {
       return route.meta.scope === 'source'
@@ -387,18 +411,29 @@ export default {
       return '关联内容'
     })
 
-    const collectionText = computed(() => {
+    const getCollectionText = collectionName => {
       const item = RELATION_COLLECTION_OPTIONS.find(option => {
-        return option.value === params.collectionName
+        return option.value === collectionName
       })
       if (item) {
         return item.label
       }
-      return params.collectionName
-    })
+      return collectionName || '-'
+    }
 
     const currentEditFields = computed(() => {
-      return RELATION_EDIT_FIELD_MAP[params.collectionName] || []
+      const collectionName =
+        currentRow.value?.collectionName || params.collectionName
+
+      return RELATION_EDIT_FIELD_MAP[collectionName] || []
+    })
+
+    const detailCollectionName = computed(() => {
+      if (!currentRow.value) {
+        return params.collectionName
+      }
+
+      return currentRow.value.collectionName || params.collectionName
     })
 
     const detailFieldRows = computed(() => {
@@ -406,7 +441,10 @@ export default {
         return []
       }
 
-      return currentEditFields.value.map(field => ({
+      const fieldList =
+        RELATION_EDIT_FIELD_MAP[detailCollectionName.value] || []
+
+      return fieldList.map(field => ({
         ...field,
         value: formatFieldValue(currentRow.value[field.name])
       }))
@@ -415,17 +453,21 @@ export default {
     const getRequestParams = () => {
       const requestParams = {
         page: params.page,
-        limit: params.limit,
-        languageCode: params.languageCode,
-        collectionName: params.collectionName,
-        recordKind: 'translation'
+        limit: params.limit
       }
-      if (isSourceScope.value) {
-        requestParams.recordKind = 'source'
+
+      if (params.languageCode) {
+        requestParams.languageCode = params.languageCode
       }
+
+      if (params.collectionName) {
+        requestParams.collectionName = params.collectionName
+      }
+
       if (params.keyword) {
         requestParams.keyword = params.keyword
       }
+
       return requestParams
     }
 
@@ -435,8 +477,11 @@ export default {
         return
       }
 
-      multilingualApi
-        .getTranslationRelationList(getRequestParams())
+      const request = isSourceScope.value
+        ? multilingualApi.getSourceRelationList
+        : multilingualApi.getTranslationRelationList
+
+      request(getRequestParams())
         .then(response => {
           const responseData = response.data.data || {}
           relationList.value = responseData.list || []
@@ -480,9 +525,10 @@ export default {
       submitting.value = true
       multilingualApi
         .updateTranslationRelation({
-          collectionName: params.collectionName,
+          collectionName:
+            currentRow.value.collectionName || params.collectionName,
           id: currentRow.value._id,
-          languageCode: params.languageCode,
+          languageCode: currentRow.value.languageCode || params.languageCode,
           payload: buildPayload()
         })
         .then(() => {
@@ -506,9 +552,10 @@ export default {
     )
 
     watch(
-      () => [params.languageCode, params.collectionName, route.meta.scope],
-      () => {
-        getRelationList(true)
+      () => route.meta.scope,
+      scope => {
+        Object.assign(params, getDefaultParams(scope))
+        getRelationList(false)
       }
     )
 
@@ -531,7 +578,7 @@ export default {
       isSourceScope,
       breadcrumbGroup,
       pageTitle,
-      collectionText,
+      getCollectionText,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       collectionOptions: RELATION_COLLECTION_OPTIONS,
       getLanguageText,

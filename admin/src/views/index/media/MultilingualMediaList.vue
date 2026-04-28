@@ -25,7 +25,14 @@
             />
           </el-form-item>
           <el-form-item>
-            <el-select v-model="params.languageCode" style="width: 180px">
+            <el-select
+              v-model="params.languageCode"
+              style="width: 180px"
+              clearable
+              placeholder="全部语言"
+              @change="getMediaList(true)"
+              @clear="getMediaList(true)"
+            >
               <el-option
                 v-for="item in languageOptions"
                 :key="item.value"
@@ -40,6 +47,8 @@
               clearable
               placeholder="媒体模式"
               style="width: 140px"
+              @change="getMediaList(true)"
+              @clear="getMediaList(true)"
             >
               <el-option
                 v-for="item in mediaModeOptions"
@@ -71,6 +80,31 @@
         height="100%"
         border
       >
+        <ResponsiveTableColumn label="预览" width="150">
+          <template #default="{ row }">
+            <div class="media-preview-cell">
+              <el-image
+                v-if="isImageMedia(row) && getImagePreviewUrl(row)"
+                :src="getImagePreviewUrl(row)"
+                :preview-src-list="[getImagePreviewUrl(row)]"
+                fit="cover"
+                loading="lazy"
+                preview-teleported
+                class="media-preview-image"
+              />
+              <video
+                v-else-if="isVideoMedia(row) && getVideoPreviewUrl(row)"
+                :src="getVideoPreviewUrl(row)"
+                :poster="getVideoPoster(row) || undefined"
+                class="media-preview-video"
+                controls
+                preload="metadata"
+                playsinline
+              ></video>
+              <div v-else class="media-preview-empty">无预览</div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="媒体" min-width="280">
           <template #default="{ row }">
             <div class="media-title">
@@ -155,6 +189,25 @@
     </div>
 
     <el-dialog v-model="detailDialogVisible" title="媒体详情" width="760px">
+      <div v-if="currentRow" class="media-detail-preview">
+        <el-image
+          v-if="isImageMedia(currentRow) && getImagePreviewUrl(currentRow)"
+          :src="getImagePreviewUrl(currentRow)"
+          :preview-src-list="[getImagePreviewUrl(currentRow)]"
+          fit="contain"
+          preview-teleported
+          class="media-detail-image"
+        />
+        <video
+          v-else-if="isVideoMedia(currentRow) && getVideoPreviewUrl(currentRow)"
+          :src="getVideoPreviewUrl(currentRow)"
+          :poster="getVideoPoster(currentRow) || undefined"
+          class="media-detail-video"
+          controls
+          preload="metadata"
+          playsinline
+        ></video>
+      </div>
       <el-descriptions v-if="currentRow" :column="2" border>
         <el-descriptions-item label="ID">{{
           currentRow._id
@@ -268,13 +321,24 @@ export default {
     const replaceSubmitting = ref(false)
     const convertSubmitting = ref(false)
     const confirmText = ref('')
-    const params = reactive({
-      page: 1,
-      limit: 20,
-      keyword: '',
-      languageCode: 'zh-CN',
-      mediaMode: ''
-    })
+
+    const getDefaultParams = scope => {
+      const defaultParams = {
+        page: 1,
+        limit: 20,
+        keyword: '',
+        languageCode: '',
+        mediaMode: ''
+      }
+
+      if (scope === 'source') {
+        defaultParams.languageCode = 'zh-CN'
+      }
+
+      return defaultParams
+    }
+
+    const params = reactive(getDefaultParams(route.meta.scope))
 
     const isSourceScope = computed(() => {
       return route.meta.scope === 'source'
@@ -331,15 +395,87 @@ export default {
       return `${(numberSize / 1024 / 1024).toFixed(1)} MB`
     }
 
+    const isAbsoluteMediaUrl = value => {
+      if (!value) {
+        return false
+      }
+
+      return /^(https?:)?\/\//.test(value) || value.startsWith('/')
+    }
+
+    const normalizeMediaUrl = value => {
+      if (!value) {
+        return ''
+      }
+
+      if (isAbsoluteMediaUrl(value)) {
+        return value
+      }
+
+      return value
+    }
+
+    const isImageMedia = row => {
+      return Boolean(row?.mimetype && row.mimetype.includes('image'))
+    }
+
+    const isVideoMedia = row => {
+      return Boolean(row?.mimetype && row.mimetype.includes('video'))
+    }
+
+    const getImagePreviewUrl = row => {
+      const previewCandidateList = [
+        row?.localThumbnailPath,
+        row?.localFilepath,
+        row?.thumfor,
+        row?.filepath,
+        row?.remoteFilepath
+      ]
+
+      for (const item of previewCandidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return previewUrl
+        }
+      }
+
+      return ''
+    }
+
+    const getVideoPreviewUrl = row => {
+      const previewCandidateList = [
+        row?.localFilepath,
+        row?.filepath,
+        row?.remoteFilepath
+      ]
+
+      for (const item of previewCandidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return previewUrl
+        }
+      }
+
+      return ''
+    }
+
+    const getVideoPoster = row => {
+      return normalizeMediaUrl(
+        row?.localThumbnailPath || row?.thumfor || row?.localFilepath || ''
+      )
+    }
+
     const getRequestParams = () => {
       const requestParams = {
         page: params.page,
         limit: params.limit,
-        languageCode: params.languageCode,
         recordKind: 'translation'
       }
       if (isSourceScope.value) {
         requestParams.recordKind = 'source'
+      }
+      if (params.languageCode) {
+        requestParams.languageCode = params.languageCode
       }
       if (params.keyword) {
         requestParams.keyword = params.keyword
@@ -459,9 +595,10 @@ export default {
     )
 
     watch(
-      () => [params.languageCode, params.mediaMode, route.meta.scope],
-      () => {
-        getMediaList(true)
+      () => route.meta.scope,
+      scope => {
+        Object.assign(params, getDefaultParams(scope))
+        getMediaList(false)
       }
     )
 
@@ -490,6 +627,11 @@ export default {
       getMediaModeText,
       getSizeText,
       getFileSizeText,
+      isImageMedia,
+      isVideoMedia,
+      getImagePreviewUrl,
+      getVideoPreviewUrl,
+      getVideoPoster,
       getMediaList,
       openDetail,
       openReplace,
@@ -519,12 +661,64 @@ export default {
   word-break: break-word;
 }
 
+.media-preview-cell {
+  width: 120px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.media-preview-image,
+.media-preview-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.media-preview-image :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-preview-video {
+  object-fit: cover;
+}
+
+.media-preview-empty {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
 .media-subtitle,
 .media-path {
   margin-top: 4px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
+}
+
+.media-detail-preview {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.media-detail-image,
+.media-detail-video {
+  width: 100%;
+  max-width: 520px;
+  max-height: 320px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+}
+
+.media-detail-image :deep(img) {
+  object-fit: contain;
 }
 
 @media (max-width: 767px) {

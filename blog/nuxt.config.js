@@ -160,6 +160,7 @@ export default defineNuxtConfig({
     swrCacheMaxPage: '',
     swrCacheTtl: '',
     public: {
+      apiDomain: getEnvValue('NUXT_API_DOMAIN'),
       version: process.env.npm_package_version
     }
   },
