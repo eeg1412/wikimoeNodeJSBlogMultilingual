@@ -41,7 +41,7 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="!isSourceScope">
+          <el-form-item v-if="isMixedCollectionPage">
             <el-select
               v-model="params.collectionName"
               clearable
@@ -66,23 +66,19 @@
         </el-form>
       </div>
       <div class="fr relation-actions">
-        <el-button @click="getRelationList(false)">
+        <el-button :loading="loading" @click="getRelationList(false)">
           <el-icon><Refresh /></el-icon>
         </el-button>
       </div>
     </div>
 
-    <div class="mb20 list-table-body">
-      <ResponsiveTable
-        ref="tableRef"
-        :data="relationList"
-        row-key="_id"
-        height="100%"
-        border
-      >
+    <div class="mb20 list-table-body" v-loading="loading">
+      <ResponsiveTable :data="relationList" row-key="_id" height="100%" border>
         <ResponsiveTableColumn label="名称" min-width="260">
           <template #default="{ row }">
-            <div class="relation-title">{{ getRelationDisplayName(row) }}</div>
+            <div class="relation-title">
+              {{ getRelationDisplayName(row) }}
+            </div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="语言" width="150">
@@ -90,9 +86,13 @@
             {{ getLanguageText(row.languageCode) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="类型" width="120">
+        <ResponsiveTableColumn
+          v-if="isMixedCollectionPage"
+          label="类型"
+          width="120"
+        >
           <template #default="{ row }">
-            {{ getCollectionText(row.collectionName || params.collectionName) }}
+            {{ getCollectionText(row.collectionName) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源 ID" min-width="210">
@@ -134,8 +134,9 @@
         :total="total"
         :pager-count="5"
         size="small"
-        v-model:current-page="params.page"
-        v-model:page-size="params.limit"
+        :current-page="params.page"
+        :page-size="params.limit"
+        @current-change="handlePageChange"
       />
     </div>
 
@@ -154,7 +155,7 @@
           getLanguageText(currentRow.languageCode)
         }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{
-          getCollectionText(currentRow.collectionName || params.collectionName)
+          getCollectionText(detailCollectionName)
         }}</el-descriptions-item>
         <el-descriptions-item label="快照版本"
           >v{{ currentRow.snapshotVersion || 1 }}</el-descriptions-item
@@ -180,7 +181,7 @@
     <el-dialog
       v-model="editDialogVisible"
       title="编辑关联基础字段"
-      width="760px"
+      width="min(860px, 94vw)"
     >
       <el-alert
         class="mb20"
@@ -195,29 +196,13 @@
         label-width="110px"
         @submit.prevent
       >
-        <el-form-item
-          v-for="field in currentEditFields"
-          :key="field.name"
-          :label="field.label"
-        >
-          <el-switch
-            v-if="field.type === 'boolean'"
-            v-model="editForm[field.name]"
-          />
-          <el-input-number
-            v-else-if="field.type === 'number'"
-            v-model="editForm[field.name]"
-            controls-position="right"
-            style="width: 180px"
-          />
-          <el-input
-            v-else-if="field.type === 'textarea'"
-            v-model="editForm[field.name]"
-            type="textarea"
-            :rows="4"
-          />
-          <el-input v-else v-model="editForm[field.name]" clearable />
-        </el-form-item>
+        <RelationBusinessFieldEditor
+          :fields="currentEditFields"
+          :form="editForm"
+          :language-code="editLanguageCode"
+          :record="currentRow"
+          @parent-updated="handleParentRelationUpdated"
+        />
       </el-form>
       <el-empty v-else description="当前类型暂无可编辑业务字段" />
       <template #footer>
@@ -234,6 +219,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import { multilingualApi } from '@/api'
 import {
   RELATION_COLLECTION_OPTIONS,
@@ -241,108 +227,11 @@ import {
   getLanguageText,
   getRelationDisplayName
 } from '@/utils/multilingual'
-
-const RELATION_EDIT_FIELD_MAP = {
-  users: [
-    { name: 'nickname', label: '昵称' },
-    { name: 'email', label: '邮箱' },
-    { name: 'description', label: '说明', type: 'textarea' }
-  ],
-  sorts: [
-    { name: 'sortname', label: '分类名' },
-    { name: 'alias', label: '别名' },
-    { name: 'taxis', label: '排序', type: 'number' },
-    { name: 'description', label: '说明', type: 'textarea' },
-    { name: 'template', label: '模板' }
-  ],
-  tags: [{ name: 'tagname', label: '标签名' }],
-  mappoints: [
-    { name: 'title', label: '地点标题' },
-    { name: 'summary', label: '摘要', type: 'textarea' },
-    { name: 'longitude', label: '经度', type: 'number' },
-    { name: 'latitude', label: '纬度', type: 'number' },
-    { name: 'zIndex', label: '层级', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  bangumis: [
-    { name: 'title', label: '番剧标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'year', label: '年份', type: 'number' },
-    { name: 'season', label: '季度', type: 'number' },
-    { name: 'label', label: '标签' },
-    { name: 'giveUp', label: '弃番', type: 'boolean' },
-    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  movies: [
-    { name: 'title', label: '电影标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'year', label: '年份', type: 'number' },
-    { name: 'month', label: '月份', type: 'number' },
-    { name: 'day', label: '日期', type: 'number' },
-    { name: 'label', label: '标签' },
-    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  games: [
-    { name: 'title', label: '游戏标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'label', label: '标签' },
-    { name: 'giveUp', label: '弃坑', type: 'boolean' },
-    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  gamePlatforms: [
-    { name: 'name', label: '平台名' },
-    { name: 'color', label: '颜色' }
-  ],
-  books: [
-    { name: 'title', label: '书籍标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'label', label: '标签' },
-    { name: 'giveUp', label: '弃坑', type: 'boolean' },
-    { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  booktypes: [
-    { name: 'name', label: '类型名' },
-    { name: 'color', label: '颜色' }
-  ],
-  events: [
-    { name: 'title', label: '活动标题' },
-    { name: 'color', label: '颜色' },
-    { name: 'content', label: '内容', type: 'textarea' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  eventtypes: [
-    { name: 'name', label: '类型名' },
-    { name: 'color', label: '颜色' }
-  ],
-  posts: [
-    { name: 'title', label: '标题' },
-    { name: 'excerpt', label: '摘要/推文', type: 'textarea' },
-    { name: 'alias', label: '别名' },
-    { name: 'status', label: '状态', type: 'number' },
-    { name: 'allowRemark', label: '允许评论', type: 'boolean' },
-    { name: 'top', label: '置顶', type: 'boolean' },
-    { name: 'sortop', label: '分类置顶', type: 'boolean' }
-  ],
-  votes: [
-    { name: 'title', label: '投票标题' },
-    { name: 'maxSelect', label: '最大选择数', type: 'number' },
-    { name: 'showResultAfter', label: '投票后显示结果', type: 'boolean' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  attachments: [
-    { name: 'name', label: '媒体名称' },
-    { name: 'description', label: '描述', type: 'textarea' },
-    { name: 'is360Panorama', label: '360 全景', type: 'boolean' }
-  ]
-}
+import {
+  getRelationEditFields,
+  getRelationFieldInitialValue,
+  shouldSubmitRelationEditField
+} from '@/utils/relationEditFields'
 
 function formatFieldValue(value) {
   if (value === null || value === undefined || value === '') {
@@ -368,18 +257,41 @@ function formatFieldValue(value) {
 }
 
 export default {
-  setup() {
+  components: {
+    RelationBusinessFieldEditor
+  },
+  props: {
+    scope: {
+      type: String,
+      required: true
+    },
+    title: {
+      type: String,
+      required: true
+    },
+    collectionName: {
+      type: String,
+      default: ''
+    },
+    excludeCollectionNames: {
+      type: Array,
+      default() {
+        return []
+      }
+    }
+  },
+  setup(props) {
     const route = useRoute()
-    const tableRef = ref(null)
     const relationList = ref([])
     const total = ref(0)
+    const loading = ref(false)
     const currentRow = ref(null)
     const detailDialogVisible = ref(false)
     const editDialogVisible = ref(false)
     const submitting = ref(false)
     const editForm = reactive({})
 
-    const getDefaultParams = scope => {
+    const getDefaultParams = () => {
       const defaultParams = {
         page: 1,
         limit: 20,
@@ -391,10 +303,32 @@ export default {
       return defaultParams
     }
 
-    const params = reactive(getDefaultParams(route.meta.scope))
+    const params = reactive(getDefaultParams())
 
     const isSourceScope = computed(() => {
-      return route.meta.scope === 'source'
+      return props.scope === 'source'
+    })
+
+    const currentCollectionName = computed(() => {
+      return props.collectionName || ''
+    })
+
+    const currentExcludeCollectionNames = computed(() => {
+      if (Array.isArray(props.excludeCollectionNames)) {
+        return props.excludeCollectionNames
+      }
+
+      return []
+    })
+
+    const isMixedCollectionPage = computed(() => {
+      return !currentCollectionName.value
+    })
+
+    const collectionOptions = computed(() => {
+      return RELATION_COLLECTION_OPTIONS.filter(option => {
+        return !currentExcludeCollectionNames.value.includes(option.value)
+      })
     })
 
     const breadcrumbGroup = computed(() => {
@@ -405,10 +339,11 @@ export default {
     })
 
     const pageTitle = computed(() => {
-      if (isSourceScope.value) {
-        return '源关联内容'
+      if (props.title) {
+        return props.title
       }
-      return '关联内容'
+
+      return getCollectionText(currentCollectionName.value)
     })
 
     const getCollectionText = collectionName => {
@@ -423,17 +358,27 @@ export default {
 
     const currentEditFields = computed(() => {
       const collectionName =
-        currentRow.value?.collectionName || params.collectionName
+        currentRow.value?.collectionName ||
+        currentCollectionName.value ||
+        params.collectionName
 
-      return RELATION_EDIT_FIELD_MAP[collectionName] || []
+      return getRelationEditFields(collectionName)
+    })
+
+    const editLanguageCode = computed(() => {
+      return currentRow.value?.languageCode || params.languageCode || ''
     })
 
     const detailCollectionName = computed(() => {
       if (!currentRow.value) {
-        return params.collectionName
+        return currentCollectionName.value || params.collectionName
       }
 
-      return currentRow.value.collectionName || params.collectionName
+      return (
+        currentRow.value.collectionName ||
+        currentCollectionName.value ||
+        params.collectionName
+      )
     })
 
     const detailFieldRows = computed(() => {
@@ -441,8 +386,7 @@ export default {
         return []
       }
 
-      const fieldList =
-        RELATION_EDIT_FIELD_MAP[detailCollectionName.value] || []
+      const fieldList = getRelationEditFields(detailCollectionName.value)
 
       return fieldList.map(field => ({
         ...field,
@@ -456,12 +400,21 @@ export default {
         limit: params.limit
       }
 
-      if (params.languageCode) {
-        requestParams.languageCode = params.languageCode
+      if (currentCollectionName.value) {
+        requestParams.collectionName = currentCollectionName.value
       }
 
-      if (params.collectionName) {
+      if (!currentCollectionName.value && params.collectionName) {
         requestParams.collectionName = params.collectionName
+      }
+
+      if (!currentCollectionName.value && !params.collectionName) {
+        requestParams.excludeCollectionNames =
+          currentExcludeCollectionNames.value.join(',')
+      }
+
+      if (!isSourceScope.value && params.languageCode) {
+        requestParams.languageCode = params.languageCode
       }
 
       if (params.keyword) {
@@ -472,25 +425,40 @@ export default {
     }
 
     const getRelationList = resetPage => {
-      if (resetPage === true && params.page !== 1) {
-        params.page = 1
+      if (
+        !currentCollectionName.value &&
+        !params.collectionName &&
+        currentExcludeCollectionNames.value.length === 0
+      ) {
         return
+      }
+
+      if (resetPage === true) {
+        params.page = 1
       }
 
       const request = isSourceScope.value
         ? multilingualApi.getSourceRelationList
         : multilingualApi.getTranslationRelationList
 
-      request(getRequestParams())
+      loading.value = true
+      request(getRequestParams(), true)
         .then(response => {
           const responseData = response.data.data || {}
           relationList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
         })
         .catch(error => {
           console.log(error)
         })
+        .finally(() => {
+          loading.value = false
+        })
+    }
+
+    const handlePageChange = page => {
+      params.page = page
+      getRelationList(false)
     }
 
     const openDetail = row => {
@@ -504,7 +472,7 @@ export default {
         delete editForm[key]
       })
       currentEditFields.value.forEach(field => {
-        editForm[field.name] = row[field.name]
+        editForm[field.name] = getRelationFieldInitialValue(field, row)
       })
       editDialogVisible.value = true
     }
@@ -512,9 +480,29 @@ export default {
     const buildPayload = () => {
       const payload = {}
       currentEditFields.value.forEach(field => {
+        if (!shouldSubmitRelationEditField(field)) {
+          return
+        }
         payload[field.name] = editForm[field.name]
       })
       return payload
+    }
+
+    const handleParentRelationUpdated = ({ field, parentRecord }) => {
+      if (!currentRow.value || !field || !parentRecord) {
+        return
+      }
+
+      currentRow.value[field.name] = parentRecord
+      const index = relationList.value.findIndex(item => {
+        return item._id === currentRow.value._id
+      })
+      if (index >= 0) {
+        relationList.value[index] = {
+          ...relationList.value[index],
+          [field.name]: parentRecord
+        }
+      }
     }
 
     const submitUpdate = () => {
@@ -523,12 +511,22 @@ export default {
       }
 
       submitting.value = true
+      const collectionName =
+        currentRow.value.collectionName ||
+        currentCollectionName.value ||
+        params.collectionName
+      const languageCode = currentRow.value.languageCode || params.languageCode
+      if (!collectionName || !languageCode) {
+        ElMessage.error('缺少关联内容类型或语言信息')
+        submitting.value = false
+        return
+      }
+
       multilingualApi
         .updateTranslationRelation({
-          collectionName:
-            currentRow.value.collectionName || params.collectionName,
+          collectionName,
           id: currentRow.value._id,
-          languageCode: currentRow.value.languageCode || params.languageCode,
+          languageCode,
           payload: buildPayload()
         })
         .then(() => {
@@ -545,16 +543,9 @@ export default {
     }
 
     watch(
-      () => params.page,
+      () => route.fullPath,
       () => {
-        getRelationList(false)
-      }
-    )
-
-    watch(
-      () => route.meta.scope,
-      scope => {
-        Object.assign(params, getDefaultParams(scope))
+        Object.assign(params, getDefaultParams())
         getRelationList(false)
       }
     )
@@ -564,26 +555,31 @@ export default {
     })
 
     return {
-      tableRef,
       params,
       relationList,
       total,
+      loading,
       currentRow,
       detailFieldRows,
+      detailCollectionName,
       detailDialogVisible,
       editDialogVisible,
       submitting,
       editForm,
+      editLanguageCode,
       currentEditFields,
       isSourceScope,
+      isMixedCollectionPage,
+      collectionOptions,
       breadcrumbGroup,
       pageTitle,
       getCollectionText,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
-      collectionOptions: RELATION_COLLECTION_OPTIONS,
       getLanguageText,
       getRelationDisplayName,
       getRelationList,
+      handlePageChange,
+      handleParentRelationUpdated,
       openDetail,
       openEdit,
       submitUpdate

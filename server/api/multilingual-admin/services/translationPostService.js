@@ -115,30 +115,7 @@ const POST_EDITABLE_FIELDS = [
   'content',
   'excerpt',
   'alias',
-  'author',
-  'sort',
   'type',
-  'tags',
-  'mappointList',
-  'coverImages',
-  'bangumiList',
-  'movieList',
-  'gameList',
-  'bookList',
-  'postList',
-  'tweetList',
-  'eventList',
-  'voteList',
-  'seriesSortList',
-  'contentBangumiList',
-  'contentMovieList',
-  'contentGameList',
-  'contentBookList',
-  'contentPostList',
-  'contentTweetList',
-  'contentEventList',
-  'contentVoteList',
-  'contentSeriesSortList',
   'top',
   'sortop',
   'status',
@@ -227,6 +204,58 @@ const TRANSLATION_POST_LIST_SELECT_FIELDS = [
   'contentSeriesSortList'
 ].join(' ')
 
+const POST_DETAIL_ATTACHMENT_SELECT_FIELDS = [
+  '_id',
+  'sourceId',
+  'sourceLanguageCode',
+  'languageCode',
+  'translationGroupId',
+  'snapshotVersion',
+  'sourceSnapshotAt',
+  'sourceUpdatedAt',
+  'createdAt',
+  'updatedAt',
+  'name',
+  'filename',
+  'filesize',
+  'filepath',
+  'width',
+  'height',
+  'mimetype',
+  'thumfor',
+  'thumWidth',
+  'thumHeight',
+  'album',
+  'description',
+  'is360Panorama',
+  'status',
+  'mediaMode',
+  'remoteSourceId',
+  'remoteFilepath',
+  'remoteSnapshot',
+  'localFilepath',
+  'localThumbnailPath',
+  'localStorageStatus'
+].join(' ')
+
+const POST_RELATED_ATTACHMENT_PREVIEW_SELECT_FIELDS = [
+  '_id',
+  'name',
+  'filename',
+  'filepath',
+  'remoteFilepath',
+  'localFilepath',
+  'localThumbnailPath',
+  'thumfor',
+  'width',
+  'height',
+  'thumWidth',
+  'thumHeight',
+  'mimetype',
+  'mediaMode',
+  'is360Panorama'
+].join(' ')
+
 function getPostModel() {
   return getMultilingualModel('posts')
 }
@@ -242,7 +271,14 @@ function getMultilingualModel(collectionName) {
 
 function buildMultilingualPostPopulate() {
   const matchStatus = { $in: [0, 1] }
-  const postCoverPopulate = { path: 'coverImages' }
+  const postDetailCoverPopulate = {
+    path: 'coverImages',
+    select: POST_DETAIL_ATTACHMENT_SELECT_FIELDS
+  }
+  const postCoverPopulate = {
+    path: 'coverImages',
+    select: POST_RELATED_ATTACHMENT_PREVIEW_SELECT_FIELDS
+  }
 
   return [
     {
@@ -258,7 +294,7 @@ function buildMultilingualPostPopulate() {
       path: 'mappointList',
       match: { status: matchStatus }
     },
-    { path: 'coverImages' },
+    postDetailCoverPopulate,
     {
       path: 'bangumiList',
       match: { status: matchStatus }

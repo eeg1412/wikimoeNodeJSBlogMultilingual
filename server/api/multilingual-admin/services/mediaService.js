@@ -4,6 +4,7 @@ const path = require('path')
 const mongoose = require('mongoose')
 const utils = require('../../../utils/utils')
 const { normalizeLanguageCode } = require('../../../utils/language')
+const mediaSettingsService = require('./mediaSettingsService')
 const {
   ApiError,
   ERROR_CODES
@@ -17,16 +18,6 @@ const PUBLIC_ROOT = path.join(SERVER_ROOT, 'public')
 const CONTENT_ROOT = path.join(PUBLIC_ROOT, 'content')
 const UPLOAD_ROOT = path.join(CONTENT_ROOT, 'uploadfile')
 const MULTILINGUAL_PUBLIC_ASSET_PREFIX = '/multilingual-assets'
-
-const SOURCE_IMAGE_SETTING_DEFAULTS = {
-  imgSettingEnableImgCompress: false,
-  imgSettingEnableImgCompressWebp: false,
-  imgSettingCompressQuality: 80,
-  imgSettingCompressMaxSize: 1920,
-  imgSettingEnableImgThumbnail: false,
-  imgSettingThumbnailQuality: 40,
-  imgSettingThumbnailMaxSize: 680
-}
 
 function getAttachmentModel() {
   const repository = global.$mongodDB.multilingual.repositories.attachments
@@ -196,39 +187,26 @@ async function findAttachment(input) {
   return attachment
 }
 
-function parseSourceOptionValue(defaultValue, value) {
-  if (typeof defaultValue === 'number') {
-    const numberValue = Number(value)
-    if (Number.isFinite(numberValue)) {
-      return numberValue
-    }
-    return defaultValue
+function parseBooleanOption(value) {
+  return value === true || value === 'true' || value === '1'
+}
+
+function parseImageReplacementOptions(body = {}) {
+  let imgSettingCompressMaxSize = null
+  if (/^[1-9]\d*$/.test(String(body.imgSettingCompressMaxSize || ''))) {
+    imgSettingCompressMaxSize = Number(body.imgSettingCompressMaxSize)
   }
 
-  if (typeof defaultValue === 'boolean') {
-    return value === true || value === 'true'
+  return {
+    noCompress: parseBooleanOption(body.noCompress),
+    noThumbnail: parseBooleanOption(body.noThumbnail),
+    is360Panorama: parseBooleanOption(body.is360Panorama),
+    imgSettingCompressMaxSize
   }
-
-  return value
 }
 
 async function getSourceImageSettings() {
-  const config = { ...SOURCE_IMAGE_SETTING_DEFAULTS }
-  const repository = global.$mongodDB.source.repositories.options
-  if (!repository) {
-    return config
-  }
-
-  const optionList = await repository.find({}, 'name value', { lean: true })
-  for (const item of optionList) {
-    if (!Object.prototype.hasOwnProperty.call(config, item.name)) {
-      continue
-    }
-
-    config[item.name] = parseSourceOptionValue(config[item.name], item.value)
-  }
-
-  return config
+  return await mediaSettingsService.getMediaSettingValues()
 }
 
 function decodeOriginalName(file) {
@@ -290,6 +268,10 @@ function isImageFile(file) {
   return Boolean(file && file.mimetype && file.mimetype.startsWith('image'))
 }
 
+function isVideoFile(file) {
+  return Boolean(file && file.mimetype && file.mimetype.startsWith('video'))
+}
+
 function normalizeImageDimensions(imageInfo) {
   let width = imageInfo.width || 0
   let height = imageInfo.height || 0
@@ -336,11 +318,15 @@ async function buildImageStorageData(
   file,
   attachmentId,
   yearMonthPath,
-  suffix
+  suffix,
+  options = {}
 ) {
   const originalName = decodeOriginalName(file)
   const originalExtname = getFileExtname(originalName, file.mimetype)
   const config = await getSourceImageSettings()
+  if (options.imgSettingCompressMaxSize) {
+    config.imgSettingCompressMaxSize = options.imgSettingCompressMaxSize
+  }
   const imageInfo = await utils.imageMetadata(file.buffer)
   const dimensions = normalizeImageDimensions(imageInfo)
   const animated = imageInfo.pages > 1
@@ -354,12 +340,13 @@ async function buildImageStorageData(
     thumfor: '',
     thumWidth: 0,
     thumHeight: 0,
+    is360Panorama: options.is360Panorama,
     status: 1
   }
   const createdFiles = []
 
   try {
-    if (config.imgSettingEnableImgThumbnail) {
+    if (config.imgSettingEnableImgThumbnail && !options.noThumbnail) {
       const thumbnailDimensions = calculateResizeDimensions(
         dimensions.width,
         dimensions.height,
@@ -393,6 +380,7 @@ async function buildImageStorageData(
     let outputExtname = originalExtname
     if (
       config.imgSettingEnableImgCompress &&
+      !options.noCompress &&
       config.imgSettingEnableImgCompressWebp
     ) {
       outputExtname = '.webp'
@@ -403,7 +391,7 @@ async function buildImageStorageData(
       yearMonthPath,
       `${attachmentId}-${suffix}${outputExtname}`
     )
-    if (config.imgSettingEnableImgCompress) {
+    if (config.imgSettingEnableImgCompress && !options.noCompress) {
       const resizedDimensions = calculateResizeDimensions(
         dimensions.width,
         dimensions.height,
@@ -477,17 +465,103 @@ async function buildFileStorageData(file, attachmentId, yearMonthPath, suffix) {
   }
 }
 
-async function saveLocalFile(file, attachmentId) {
+async function buildVideoStorageData(
+  file,
+  coverFile,
+  attachmentId,
+  yearMonthPath,
+  suffix,
+  body = {}
+) {
+  if (!coverFile || !coverFile.buffer) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '视频替换必须上传封面图',
+      'cover',
+      400
+    )
+  }
+  if (!isImageFile(coverFile)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '视频封面必须是图片文件',
+      'cover',
+      400
+    )
+  }
+
+  const width = parsePositiveInteger(body.width, 0)
+  const height = parsePositiveInteger(body.height, 0)
+  if (!width || !height) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '视频宽高不能为空',
+      'width',
+      400
+    )
+  }
+
+  const filename = String(body.filename || decodeOriginalName(file)).trim()
+  const videoPath = path.join(yearMonthPath, `${attachmentId}-${suffix}.mp4`)
+  const coverPath = path.join(
+    yearMonthPath,
+    `thum-${attachmentId}-${suffix}.webp`
+  )
+  const createdFiles = []
+
+  try {
+    await fs.promises.writeFile(videoPath, file.buffer)
+    createdFiles.push(videoPath)
+    await fs.promises.writeFile(coverPath, coverFile.buffer)
+    createdFiles.push(coverPath)
+
+    const videoStats = await fs.promises.stat(videoPath)
+    const coverInfo = await utils.imageMetadata(coverFile.buffer)
+
+    return {
+      updateData: {
+        filename,
+        filesize: videoStats.size,
+        filepath: toPublicPath(videoPath),
+        width,
+        height,
+        mimetype: 'video/mp4',
+        thumfor: toPublicPath(coverPath),
+        thumWidth: coverInfo.width || 0,
+        thumHeight: coverInfo.height || 0,
+        status: 1
+      },
+      createdFiles
+    }
+  } catch (error) {
+    await cleanupCreatedFiles(createdFiles)
+    throw error
+  }
+}
+
+async function saveLocalFile(file, attachmentId, options = {}) {
   const yearMonth = buildYearMonth()
   const yearMonthPath = await ensureUploadDir(yearMonth)
   const suffix = createFileSuffix()
+
+  if (isVideoFile(file)) {
+    return await buildVideoStorageData(
+      file,
+      options.coverFile,
+      attachmentId,
+      yearMonthPath,
+      suffix,
+      options.body
+    )
+  }
 
   if (isImageFile(file)) {
     return await buildImageStorageData(
       file,
       attachmentId,
       yearMonthPath,
-      suffix
+      suffix,
+      options.imageOptions
     )
   }
 
@@ -598,7 +672,40 @@ async function safeDeleteContentFiles(storedPathList) {
   }
 }
 
-async function replaceLocalAttachment(body = {}, file) {
+function validateReplacementFileType(attachment, file) {
+  if (attachment.mimetype && attachment.mimetype.startsWith('image')) {
+    if (!isImageFile(file)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '图片媒体只能替换为图片文件',
+        'file',
+        400
+      )
+    }
+    return
+  }
+
+  if (attachment.mimetype && attachment.mimetype.startsWith('video')) {
+    if (!isVideoFile(file)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '视频媒体只能替换为视频文件',
+        'file',
+        400
+      )
+    }
+    return
+  }
+
+  throw new ApiError(
+    ERROR_CODES.CONTENT_FIELD_INVALID,
+    '当前媒体类型暂不支持替换',
+    'file',
+    400
+  )
+}
+
+async function replaceLocalAttachment(body = {}, file, coverFile) {
   if (!file || !file.buffer) {
     throw new ApiError(
       ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
@@ -610,8 +717,13 @@ async function replaceLocalAttachment(body = {}, file) {
 
   const input = parseAttachmentInput(body)
   const attachment = await findAttachment(input)
+  validateReplacementFileType(attachment, file)
   const AttachmentModel = getAttachmentModel()
-  const storageData = await saveLocalFile(file, String(attachment._id))
+  const storageData = await saveLocalFile(file, String(attachment._id), {
+    body,
+    coverFile,
+    imageOptions: parseImageReplacementOptions(body)
+  })
   const updateData = {
     ...storageData.updateData,
     mediaMode: 'local',

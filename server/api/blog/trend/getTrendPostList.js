@@ -108,10 +108,10 @@ module.exports = async function (req, res, next) {
                   $match: {
                     $expr: {
                       $and: [{ $eq: ['$status', 1] }]
-                    }
-                  },
-                  languageCode,
-                  recordKind: 'translation'
+                    },
+                    languageCode,
+                    recordKind: 'translation'
+                  }
                 },
                 {
                   $addFields: {

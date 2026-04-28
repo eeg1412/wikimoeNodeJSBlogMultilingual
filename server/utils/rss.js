@@ -8,7 +8,61 @@ const {
   SUPPORTED_LANGUAGE_CODES,
   normalizeLanguageCode
 } = require('./language')
+const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
+const {
+  getSourceSeoSettings,
+  normalizeSiteUrl
+} = require('./sourceSeoSettings')
 const rssCacheFolder = './seo/rss'
+
+const LANGUAGE_RSS_SETTING_NAMES = [
+  'siteEnableRss',
+  'siteRssMaxCount',
+  'siteRssTweetTitleType',
+  'siteShowRssInFooter'
+]
+
+function pickLanguageRssSettings(values) {
+  const rssSettings = {}
+  LANGUAGE_RSS_SETTING_NAMES.forEach(name => {
+    rssSettings[name] = values[name]
+  })
+
+  return rssSettings
+}
+
+async function getLanguageSeoSettings(languageCode) {
+  const sourceSettings = await getSourceSeoSettings()
+  const languageSettings =
+    await languageSettingsService.getLanguageSettings(languageCode)
+  const values = languageSettings.values || {}
+  const configuredNames = languageSettings.configuredNames || []
+  const languageValues = {}
+  configuredNames.forEach(name => {
+    languageValues[name] = values[name]
+  })
+  const languageRssSettings = pickLanguageRssSettings(values)
+  const siteSettings = {
+    ...(global.$globalConfig?.siteSettings || {}),
+    ...(global.$globalConfig?.rssSettings || {})
+  }
+  const siteUrl = normalizeSiteUrl(
+    sourceSettings.siteUrl || siteSettings.siteUrl || languageValues.siteUrl
+  )
+
+  return {
+    ...sourceSettings,
+    ...siteSettings,
+    ...languageValues,
+    ...languageRssSettings,
+    siteUrl,
+    siteTimeZone:
+      languageValues.siteTimeZone ||
+      sourceSettings.siteTimeZone ||
+      siteSettings.siteTimeZone ||
+      ''
+  }
+}
 
 function getPostUrl(siteUrl, languageCode, post) {
   const pathType = post.type === 3 ? 'page' : 'post'
@@ -37,10 +91,11 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
     }
 
     console.info(`creating rss:${languageCode}:${type}`)
-    const config = global.$globalConfig?.rssSettings || {}
-    const { siteEnableRss, siteRssMaxCount, siteRssTweetTitleType } = config
-    const siteSettings = global.$globalConfig?.siteSettings || {}
+    const siteSettings = await getLanguageSeoSettings(languageCode)
     const {
+      siteEnableRss,
+      siteRssMaxCount,
+      siteRssTweetTitleType,
       siteTitle,
       siteUrl,
       siteDescription,
@@ -50,6 +105,11 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
     } = siteSettings
     if (siteEnableRss !== true) {
       console.info(`rss:${languageCode}:${type} not enabled`)
+      return resolve(null)
+    }
+    if (!siteUrl) {
+      console.warn(`rss:${languageCode}:${type} siteUrl is empty or invalid`)
+      await cleanLanguageRss(languageCode)
       return resolve(null)
     }
 
@@ -247,9 +307,9 @@ exports.reflushLanguageRSS = async languageCodeInput => {
     throw new Error('LANGUAGE_CODE_UNSUPPORTED')
   }
 
-  const config = global.$globalConfig?.rssSettings || {}
-  const { siteEnableRss } = config
   await utils.executeInLock(`reflushRSS:${languageCode}`, async () => {
+    const siteSettings = await getLanguageSeoSettings(languageCode)
+    const { siteEnableRss } = siteSettings
     if (siteEnableRss !== true) {
       console.info(`rss not enabled delete ${languageCode} rss files`)
       await cleanLanguageRss(languageCode)

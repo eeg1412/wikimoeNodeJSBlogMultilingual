@@ -10,14 +10,16 @@
         ? '.mp4'
         : 'video/*,.mkv,.mov,.mp4,.m4v,.mk3d,.wmv,.asf,.mxf,.ts,.m2ts,.3gp,.3g2,.flv,.webm,.ogv,.rmvb,.avi'
     "
-    :disabled="!albumId || !ffmpegInstalled"
-    :class="albumId && ffmpegInstalled ? '' : 'attachments-upload-disabled'"
+    :disabled="isUploaderDisabled"
+    :class="isUploaderDisabled ? 'attachments-upload-disabled' : ''"
   >
     <el-icon class="el-icon--upload"><Film /></el-icon>
-    <div class="el-upload__text" v-show="albumId && ffmpegInstalled">
+    <div class="el-upload__text" v-show="!isUploaderDisabled">
       拖动文件或点击上传
     </div>
-    <div class="el-upload__text" v-show="!albumId">请选择相册后上传</div>
+    <div class="el-upload__text" v-show="requireAlbumId && !albumId">
+      请选择相册后上传
+    </div>
     <!-- ffmpegInstalled -->
     <div class="el-upload__text" v-show="!ffmpegInstalled">
       请去设置中安装FFmpeg
@@ -239,6 +241,22 @@ export default {
     albumId: {
       type: String,
       default: ''
+    },
+    requireAlbumId: {
+      type: Boolean,
+      default: true
+    },
+    uploadApi: {
+      type: Function,
+      default: null
+    },
+    optionApi: {
+      type: Function,
+      default: null
+    },
+    successMessage: {
+      type: String,
+      default: '上传成功'
     }
   },
   emits: ['onVideoUploaded'],
@@ -252,6 +270,15 @@ export default {
       return Object.keys(options).filter(key => {
         return options[key] !== null && options[key] !== false
       }).length
+    })
+    const isUploaderDisabled = computed(() => {
+      if (!ffmpegInstalled.value) {
+        return true
+      }
+      if (props.requireAlbumId && !props.albumId) {
+        return true
+      }
+      return false
     })
 
     const videoUrl = ref('')
@@ -325,9 +352,24 @@ export default {
           'videoSettingCompressFps'
         ]
       }
-      authApi.getOptionList(params).then(res => {
-        res.data.data.forEach(item => {
-          videoForm[item.name] = Number(item.value)
+      const request = props.optionApi
+        ? props.optionApi(params.nameList)
+        : authApi.getOptionList(params)
+
+      request.then(res => {
+        const responseData = res.data.data
+        if (Array.isArray(responseData)) {
+          responseData.forEach(item => {
+            videoForm[item.name] = Number(item.value)
+          })
+          return
+        }
+
+        const values = responseData?.values || responseData || {}
+        params.nameList.forEach(name => {
+          if (typeof values[name] !== 'undefined') {
+            videoForm[name] = Number(values[name])
+          }
         })
       })
     }
@@ -555,15 +597,16 @@ export default {
       formData.append('width', outputVideoRef.value.videoWidth)
       // 视频高度
       formData.append('height', outputVideoRef.value.videoHeight)
-      // albumid
-      formData.append('albumid', props.albumId)
+      if (props.requireAlbumId) {
+        formData.append('albumid', props.albumId)
+      }
       // filename
       formData.append('filename', fileRawName)
-      authApi
-        .uploadAttachmentVideo(formData)
+      const uploadApi = props.uploadApi || authApi.uploadAttachmentVideo
+      uploadApi(formData)
         .then(res => {
           emit('onVideoUploaded', res)
-          ElMessage.success('上传成功')
+          ElMessage.success(props.successMessage)
           // 关闭弹窗
           editorVisible.value = false
         })
@@ -591,6 +634,7 @@ export default {
       step,
       options,
       optionsCount,
+      isUploaderDisabled,
       videoUrl,
       videoRef,
       uploadVideo,

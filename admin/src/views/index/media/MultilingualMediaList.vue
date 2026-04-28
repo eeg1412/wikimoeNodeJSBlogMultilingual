@@ -83,24 +83,42 @@
         <ResponsiveTableColumn label="预览" width="150">
           <template #default="{ row }">
             <div class="media-preview-cell">
-              <el-image
+              <button
                 v-if="isImageMedia(row) && getImagePreviewUrl(row)"
-                :src="getImagePreviewUrl(row)"
-                :preview-src-list="[getImagePreviewUrl(row)]"
-                fit="cover"
-                loading="lazy"
-                preview-teleported
-                class="media-preview-image"
-              />
-              <video
+                type="button"
+                class="media-preview-trigger"
+                title="打开预览"
+                @click="openMediaPreview(row)"
+              >
+                <el-image
+                  :src="getImagePreviewUrl(row)"
+                  fit="cover"
+                  loading="lazy"
+                  class="media-preview-image"
+                />
+                <div v-if="row.is360Panorama" class="media-preview-360">
+                  360°
+                </div>
+              </button>
+              <button
                 v-else-if="isVideoMedia(row) && getVideoPreviewUrl(row)"
-                :src="getVideoPreviewUrl(row)"
-                :poster="getVideoPoster(row) || undefined"
-                class="media-preview-video"
-                controls
-                preload="metadata"
-                playsinline
-              ></video>
+                type="button"
+                class="media-preview-trigger"
+                title="播放视频"
+                @click="openMediaPreview(row)"
+              >
+                <el-image
+                  v-if="getVideoCoverUrl(row)"
+                  :src="getVideoCoverUrl(row)"
+                  fit="cover"
+                  loading="lazy"
+                  class="media-preview-image"
+                />
+                <div v-else class="media-preview-cover-empty">无封面</div>
+                <div class="media-preview-play">
+                  <el-icon><VideoPlay /></el-icon>
+                </div>
+              </button>
               <div v-else class="media-preview-empty">无预览</div>
             </div>
           </template>
@@ -141,6 +159,19 @@
             {{ getFileSizeText(row.filesize) }}
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="描述" min-width="220">
+          <template #default="{ row }">
+            <span>{{ row.description || '-' }}</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="360 全景" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.is360Panorama" type="success" effect="plain">
+              是
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源 ID" min-width="210">
           <template #default="{ row }">
             {{ row.sourceId || '-' }}
@@ -151,9 +182,16 @@
             {{ $formatDate(row.updatedAt || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="230" fixed="right">
+        <ResponsiveTableColumn label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">详情</el-button>
+            <el-button
+              v-if="!isSourceScope"
+              size="small"
+              @click="openEdit(row)"
+            >
+              编辑
+            </el-button>
             <el-button
               v-if="!isSourceScope"
               type="primary"
@@ -190,23 +228,40 @@
 
     <el-dialog v-model="detailDialogVisible" title="媒体详情" width="760px">
       <div v-if="currentRow" class="media-detail-preview">
-        <el-image
+        <button
           v-if="isImageMedia(currentRow) && getImagePreviewUrl(currentRow)"
-          :src="getImagePreviewUrl(currentRow)"
-          :preview-src-list="[getImagePreviewUrl(currentRow)]"
-          fit="contain"
-          preview-teleported
-          class="media-detail-image"
-        />
-        <video
+          type="button"
+          class="media-detail-preview-trigger"
+          title="打开预览"
+          @click="openMediaPreview(currentRow)"
+        >
+          <el-image
+            :src="getImagePreviewUrl(currentRow)"
+            fit="contain"
+            class="media-detail-image"
+          />
+          <div v-if="currentRow.is360Panorama" class="media-preview-360">
+            360°
+          </div>
+        </button>
+        <button
           v-else-if="isVideoMedia(currentRow) && getVideoPreviewUrl(currentRow)"
-          :src="getVideoPreviewUrl(currentRow)"
-          :poster="getVideoPoster(currentRow) || undefined"
-          class="media-detail-video"
-          controls
-          preload="metadata"
-          playsinline
-        ></video>
+          type="button"
+          class="media-detail-preview-trigger media-detail-video-cover"
+          title="播放视频"
+          @click="openMediaPreview(currentRow)"
+        >
+          <el-image
+            v-if="getVideoCoverUrl(currentRow)"
+            :src="getVideoCoverUrl(currentRow)"
+            fit="cover"
+            class="media-detail-image"
+          />
+          <div v-else class="media-detail-cover-empty">无封面</div>
+          <div class="media-preview-play">
+            <el-icon><VideoPlay /></el-icon>
+          </div>
+        </button>
       </div>
       <el-descriptions v-if="currentRow" :column="2" border>
         <el-descriptions-item label="ID">{{
@@ -227,6 +282,12 @@
         <el-descriptions-item label="MIME">{{
           currentRow.mimetype || '-'
         }}</el-descriptions-item>
+        <el-descriptions-item label="360 全景">{{
+          currentRow.is360Panorama ? '是' : '否'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="描述" :span="2">{{
+          currentRow.description || '-'
+        }}</el-descriptions-item>
         <el-descriptions-item label="文件路径" :span="2">{{
           currentRow.filepath || '-'
         }}</el-descriptions-item>
@@ -240,56 +301,139 @@
     </el-dialog>
 
     <el-dialog
-      v-model="replaceDialogVisible"
-      title="替换为本地文件"
+      v-model="editDialogVisible"
+      title="编辑媒体信息"
       width="560px"
+      :close-on-click-modal="false"
     >
-      <el-upload
-        :show-file-list="true"
-        :limit="1"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        :on-remove="clearSelectedFile"
-      >
-        <el-button type="primary">选择文件</el-button>
-      </el-upload>
+      <el-form :model="editForm" label-width="90px" @submit.prevent>
+        <el-form-item label="媒体名称">
+          <el-input v-model="editForm.name" placeholder="请输入媒体名称" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="editForm.description"
+            type="textarea"
+            :rows="5"
+            placeholder="请输入描述"
+          />
+        </el-form-item>
+        <el-form-item
+          v-if="currentRow && isImageMedia(currentRow)"
+          label="360 全景"
+        >
+          <el-switch v-model="editForm.is360Panorama" />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="replaceDialogVisible = false">取消</el-button>
+        <el-button @click="editDialogVisible = false">取消</el-button>
         <el-button
           type="primary"
-          :loading="replaceSubmitting"
-          @click="replaceLocal"
+          :loading="editSubmitting"
+          @click="updateMediaInfo"
         >
-          替换
+          保存
         </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
-      v-model="convertDialogVisible"
-      title="转回远程快照"
-      width="560px"
+      v-model="replaceDialogVisible"
+      title="替换为本地文件"
+      width="760px"
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetReplaceForm"
+      @paste="handleReplacePaste"
     >
-      <el-alert
-        class="mb20"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="转回远程会删除本地文件。请输入 DELETE_LOCAL_FILE 确认。"
-      />
-      <el-input
-        v-model="confirmText"
-        placeholder="DELETE_LOCAL_FILE"
-        clearable
-      />
-      <template #footer>
-        <el-button @click="convertDialogVisible = false">取消</el-button>
-        <el-button
-          type="warning"
-          :loading="convertSubmitting"
-          @click="convertRemote"
+      <template v-if="currentRow">
+        <el-upload
+          v-if="isImageMedia(currentRow)"
+          class="attachments-upload"
+          drag
+          v-model:file-list="imageFileList"
+          :accept="'image/*'"
+          :show-file-list="true"
+          :limit="1"
+          :auto-upload="false"
+          :on-change="handleImageFileChange"
+          :on-remove="clearSelectedFile"
         >
-          转远程
+          <el-icon class="el-icon--upload"><Picture /></el-icon>
+          <div class="el-upload__text">拖动文件或点击上传</div>
+          <div class="mt5">
+            <el-popover placement="bottom" :width="200" trigger="click">
+              <div>
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="replaceOptions.noCompress"
+                  label="不压缩图片"
+                />
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="replaceOptions.noThumbnail"
+                  label="不生成缩略图"
+                />
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="replaceOptions.is360Panorama"
+                  label="是360°全景图片"
+                />
+                <div class="accactment-options-filed">
+                  <div class="accactment-options-label">最长边:</div>
+                  <div class="accactment-options-value">
+                    <el-input-number
+                      v-model="replaceOptions.imgSettingCompressMaxSize"
+                      :step="10"
+                      :precision="0"
+                      :min="1"
+                      size="small"
+                      placeholder="设置最长边"
+                      clearable
+                    />
+                  </div>
+                </div>
+              </div>
+              <template #reference>
+                <el-button
+                  size="small"
+                  :type="replaceOptionsCount > 0 ? 'primary' : ''"
+                  :plain="replaceOptionsCount <= 0"
+                  @click.stop
+                >
+                  <el-icon><Setting /></el-icon>
+                  <span class="pl3">
+                    设置<template v-if="replaceOptionsCount > 0">
+                      （已设置 {{ replaceOptionsCount }} 项）
+                    </template>
+                  </span>
+                </el-button>
+              </template>
+            </el-popover>
+          </div>
+        </el-upload>
+        <VideoUploader
+          v-else-if="isVideoMedia(currentRow)"
+          :requireAlbumId="false"
+          :uploadApi="replaceVideoLocal"
+          :optionApi="getMediaSettingValues"
+          successMessage="替换成功"
+          @onVideoUploaded="handleReplaceSuccess"
+        />
+        <el-empty v-else description="当前媒体类型暂不支持替换" />
+      </template>
+      <template #footer>
+        <el-button @click="replaceDialogVisible = false">取消</el-button>
+        <el-button
+          v-if="currentRow && isImageMedia(currentRow)"
+          type="primary"
+          :loading="replaceSubmitting"
+          @click="replaceImageLocal"
+        >
+          替换
         </el-button>
       </template>
     </el-dialog>
@@ -301,6 +445,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
+import CheckDialogService from '@/services/CheckDialogService'
+import VideoUploader from '@/components/VideoUploader.vue'
+import { loadAndOpenImg } from '@/utils/utils'
 import {
   MEDIA_MODE_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
@@ -308,6 +455,9 @@ import {
 } from '@/utils/multilingual'
 
 export default {
+  components: {
+    VideoUploader
+  },
   setup() {
     const route = useRoute()
     const tableRef = ref(null)
@@ -315,12 +465,29 @@ export default {
     const total = ref(0)
     const currentRow = ref(null)
     const detailDialogVisible = ref(false)
+    const editDialogVisible = ref(false)
     const replaceDialogVisible = ref(false)
-    const convertDialogVisible = ref(false)
     const selectedFile = ref(null)
+    const imageFileList = ref([])
     const replaceSubmitting = ref(false)
-    const convertSubmitting = ref(false)
-    const confirmText = ref('')
+    const editSubmitting = ref(false)
+    const editForm = reactive({
+      name: '',
+      description: '',
+      is360Panorama: false
+    })
+    const replaceOptions = reactive({
+      noCompress: false,
+      noThumbnail: false,
+      is360Panorama: false,
+      imgSettingCompressMaxSize: null
+    })
+
+    const replaceOptionsCount = computed(() => {
+      return Object.keys(replaceOptions).filter(key => {
+        return replaceOptions[key] !== null && replaceOptions[key] !== false
+      }).length
+    })
 
     const getDefaultParams = scope => {
       const defaultParams = {
@@ -442,6 +609,25 @@ export default {
       return ''
     }
 
+    const getImageOriginalUrl = row => {
+      const previewCandidateList = [
+        row?.localFilepath,
+        row?.filepath,
+        row?.remoteFilepath,
+        row?.localThumbnailPath,
+        row?.thumfor
+      ]
+
+      for (const item of previewCandidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return previewUrl
+        }
+      }
+
+      return ''
+    }
+
     const getVideoPreviewUrl = row => {
       const previewCandidateList = [
         row?.localFilepath,
@@ -459,10 +645,73 @@ export default {
       return ''
     }
 
-    const getVideoPoster = row => {
-      return normalizeMediaUrl(
-        row?.localThumbnailPath || row?.thumfor || row?.localFilepath || ''
-      )
+    const getVideoCoverUrl = row => {
+      const previewCandidateList = [row?.localThumbnailPath, row?.thumfor]
+
+      for (const item of previewCandidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return previewUrl
+        }
+      }
+
+      return ''
+    }
+
+    const getPositiveMediaSize = value => {
+      const numberValue = Number(value)
+      if (Number.isFinite(numberValue) && numberValue > 0) {
+        return numberValue
+      }
+      return 0
+    }
+
+    const getMediaPreviewSize = row => {
+      const width =
+        getPositiveMediaSize(row?.width) || getPositiveMediaSize(row?.thumWidth)
+      const height =
+        getPositiveMediaSize(row?.height) ||
+        getPositiveMediaSize(row?.thumHeight)
+
+      if (width && height) {
+        return { width, height }
+      }
+
+      if (isVideoMedia(row)) {
+        return { width: 1280, height: 720 }
+      }
+
+      return { width: 1600, height: 900 }
+    }
+
+    const buildMediaPreviewItem = row => {
+      let previewUrl = ''
+      if (isImageMedia(row)) {
+        previewUrl = getImageOriginalUrl(row)
+      }
+      if (isVideoMedia(row)) {
+        previewUrl = getVideoPreviewUrl(row)
+      }
+      if (!previewUrl) {
+        return null
+      }
+
+      const previewSize = getMediaPreviewSize(row)
+      return {
+        src: previewUrl,
+        width: previewSize.width,
+        height: previewSize.height,
+        mimetype: row?.mimetype || '',
+        is360Panorama: Boolean(row?.is360Panorama)
+      }
+    }
+
+    const openMediaPreview = row => {
+      const previewItem = buildMediaPreviewItem(row)
+      if (!previewItem) {
+        return
+      }
+      loadAndOpenImg(0, [previewItem])
     }
 
     const getRequestParams = () => {
@@ -510,28 +759,173 @@ export default {
       detailDialogVisible.value = true
     }
 
+    const openEdit = row => {
+      currentRow.value = row
+      editForm.name = row.name || ''
+      editForm.description = row.description || ''
+      editForm.is360Panorama = Boolean(row.is360Panorama)
+      editDialogVisible.value = true
+    }
+
+    const updateMediaListRow = record => {
+      const index = mediaList.value.findIndex(item => {
+        return item._id === record._id
+      })
+      if (index >= 0) {
+        mediaList.value[index] = record
+      }
+      if (currentRow.value && currentRow.value._id === record._id) {
+        currentRow.value = record
+      }
+    }
+
+    const updateMediaInfo = () => {
+      if (!currentRow.value) {
+        return
+      }
+      const payload = {
+        name: editForm.name || '',
+        description: editForm.description || ''
+      }
+      if (isImageMedia(currentRow.value)) {
+        payload.is360Panorama = editForm.is360Panorama
+      }
+
+      editSubmitting.value = true
+      multilingualApi
+        .updateTranslationRelation({
+          collectionName: 'attachments',
+          id: currentRow.value._id,
+          languageCode: currentRow.value.languageCode,
+          payload
+        })
+        .then(response => {
+          updateMediaListRow(response.data.data)
+          ElMessage.success('保存成功')
+          editDialogVisible.value = false
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          editSubmitting.value = false
+        })
+    }
+
     const openReplace = row => {
       currentRow.value = row
-      selectedFile.value = null
+      resetReplaceForm()
       replaceDialogVisible.value = true
     }
 
     const openConvert = row => {
       currentRow.value = row
-      confirmText.value = ''
-      convertDialogVisible.value = true
+      CheckDialogService.open({
+        correctAnswer: 'DELETE_LOCAL_FILE',
+        content:
+          '转回远程快照会<span class="cRed">删除本地文件</span>，是否继续？',
+        success: convertRemote
+      }).catch(() => {})
     }
 
-    const handleFileChange = file => {
+    const handleImageFileChange = file => {
+      if (!file.raw || !file.raw.type || !file.raw.type.includes('image')) {
+        ElMessage.error('图片媒体只能选择图片文件')
+        selectedFile.value = null
+        imageFileList.value = []
+        return
+      }
       selectedFile.value = file
+      imageFileList.value = [file]
+    }
+
+    const generateRandomString = length => {
+      const characters = 'abcdefghijklmnopqrstuvwxyz0123456789'
+      let result = ''
+      for (let index = 0; index < length; index++) {
+        result += characters.charAt(
+          Math.floor(Math.random() * characters.length)
+        )
+      }
+      return result
+    }
+
+    const handleReplacePaste = event => {
+      if (!currentRow.value || !isImageMedia(currentRow.value)) {
+        return
+      }
+      const clipboardData =
+        event.clipboardData || event.originalEvent?.clipboardData
+      if (!clipboardData || !clipboardData.items) {
+        return
+      }
+      const items = clipboardData.items
+      for (let index in items) {
+        const item = items[index]
+        if (item.kind !== 'file') {
+          continue
+        }
+        const blob = item.getAsFile()
+        if (!blob.type.startsWith('image/')) {
+          continue
+        }
+        const file = new File([blob], `image-${generateRandomString(8)}.png`, {
+          type: blob.type
+        })
+        selectedFile.value = {
+          name: file.name,
+          raw: file
+        }
+        imageFileList.value = [selectedFile.value]
+        ElMessage.success('已读取粘贴图片')
+        event.preventDefault()
+        return
+      }
     }
 
     const clearSelectedFile = () => {
       selectedFile.value = null
+      imageFileList.value = []
     }
 
-    const replaceLocal = () => {
+    const resetReplaceForm = () => {
+      selectedFile.value = null
+      imageFileList.value = []
+      replaceOptions.noCompress = false
+      replaceOptions.noThumbnail = false
+      replaceOptions.is360Panorama = false
+      replaceOptions.imgSettingCompressMaxSize = null
+    }
+
+    const appendBaseReplaceFormData = formData => {
+      formData.append('id', currentRow.value._id)
+      formData.append('languageCode', currentRow.value.languageCode)
+    }
+
+    const appendImageReplaceOptions = formData => {
+      formData.append('noCompress', replaceOptions.noCompress ? '1' : '0')
+      formData.append('noThumbnail', replaceOptions.noThumbnail ? '1' : '0')
+      formData.append('is360Panorama', replaceOptions.is360Panorama ? '1' : '0')
+      if (replaceOptions.imgSettingCompressMaxSize) {
+        formData.append(
+          'imgSettingCompressMaxSize',
+          String(replaceOptions.imgSettingCompressMaxSize)
+        )
+      }
+    }
+
+    const handleReplaceSuccess = () => {
+      replaceDialogVisible.value = false
+      resetReplaceForm()
+      getMediaList(false)
+    }
+
+    const replaceImageLocal = () => {
       if (!currentRow.value) {
+        return
+      }
+      if (!isImageMedia(currentRow.value)) {
+        ElMessage.error('图片媒体只能替换为图片文件')
         return
       }
       if (!selectedFile.value?.raw) {
@@ -540,18 +934,16 @@ export default {
       }
 
       const formData = new FormData()
-      formData.append('id', currentRow.value._id)
-      formData.append('languageCode', currentRow.value.languageCode)
-      formData.append('file', selectedFile.value.raw)
+      appendBaseReplaceFormData(formData)
+      appendImageReplaceOptions(formData)
+      formData.append('file', selectedFile.value.raw, selectedFile.value.name)
 
       replaceSubmitting.value = true
       multilingualApi
         .replaceLocalMedia(formData)
         .then(() => {
           ElMessage.success('替换成功')
-          replaceDialogVisible.value = false
-          selectedFile.value = null
-          getMediaList(false)
+          handleReplaceSuccess()
         })
         .catch(error => {
           console.log(error)
@@ -561,29 +953,41 @@ export default {
         })
     }
 
-    const convertRemote = () => {
+    const replaceVideoLocal = formData => {
       if (!currentRow.value) {
-        return
+        return Promise.reject(new Error('媒体不存在'))
+      }
+      if (!isVideoMedia(currentRow.value)) {
+        ElMessage.error('视频媒体只能替换为视频文件')
+        return Promise.reject(new Error('视频媒体只能替换为视频文件'))
       }
 
-      convertSubmitting.value = true
-      multilingualApi
+      appendBaseReplaceFormData(formData)
+      return multilingualApi.replaceLocalMedia(formData)
+    }
+
+    const getMediaSettingValues = () => {
+      return multilingualApi.getMediaSettings({}, true)
+    }
+
+    const convertRemote = () => {
+      if (!currentRow.value) {
+        return Promise.resolve()
+      }
+
+      return multilingualApi
         .convertRemoteMedia({
           id: currentRow.value._id,
           languageCode: currentRow.value.languageCode,
-          confirmText: confirmText.value
+          confirmText: 'DELETE_LOCAL_FILE'
         })
         .then(() => {
           ElMessage.success('已转回远程快照')
-          convertDialogVisible.value = false
-          confirmText.value = ''
           getMediaList(false)
         })
         .catch(error => {
           console.log(error)
-        })
-        .finally(() => {
-          convertSubmitting.value = false
+          throw error
         })
     }
 
@@ -613,11 +1017,14 @@ export default {
       total,
       currentRow,
       detailDialogVisible,
+      editDialogVisible,
       replaceDialogVisible,
-      convertDialogVisible,
+      imageFileList,
       replaceSubmitting,
-      convertSubmitting,
-      confirmText,
+      editSubmitting,
+      editForm,
+      replaceOptions,
+      replaceOptionsCount,
       isSourceScope,
       breadcrumbGroup,
       pageTitle,
@@ -631,14 +1038,22 @@ export default {
       isVideoMedia,
       getImagePreviewUrl,
       getVideoPreviewUrl,
-      getVideoPoster,
+      getVideoCoverUrl,
+      openMediaPreview,
       getMediaList,
       openDetail,
+      openEdit,
+      updateMediaInfo,
       openReplace,
       openConvert,
-      handleFileChange,
+      handleImageFileChange,
+      handleReplacePaste,
       clearSelectedFile,
-      replaceLocal,
+      resetReplaceForm,
+      replaceImageLocal,
+      replaceVideoLocal,
+      getMediaSettingValues,
+      handleReplaceSuccess,
       convertRemote
     }
   }
@@ -672,8 +1087,27 @@ export default {
   background: var(--el-fill-color-light);
 }
 
-.media-preview-image,
-.media-preview-video {
+.media-preview-trigger {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+}
+
+.media-preview-trigger:focus-visible,
+.media-detail-preview-trigger:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+}
+
+.media-preview-image {
   width: 100%;
   height: 100%;
   display: block;
@@ -685,8 +1119,48 @@ export default {
   object-fit: cover;
 }
 
-.media-preview-video {
-  object-fit: cover;
+.media-preview-cover-empty,
+.media-detail-cover-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  background: var(--el-fill-color);
+}
+
+.media-preview-play,
+.media-preview-360 {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.media-preview-play {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 28px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.media-preview-360 {
+  min-width: 48px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.46);
 }
 
 .media-preview-empty {
@@ -708,17 +1182,35 @@ export default {
   justify-content: center;
 }
 
-.media-detail-image,
-.media-detail-video {
+.media-detail-preview-trigger {
+  position: relative;
   width: 100%;
   max-width: 520px;
-  max-height: 320px;
-  border-radius: 10px;
+  height: 320px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+}
+
+.media-detail-image {
+  width: 100%;
+  height: 100%;
+  display: block;
   background: var(--el-fill-color-light);
 }
 
 .media-detail-image :deep(img) {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+.media-detail-video-cover .media-detail-image :deep(img) {
+  object-fit: cover;
 }
 
 @media (max-width: 767px) {
@@ -735,6 +1227,10 @@ export default {
   .media-actions {
     float: none;
     margin-top: 10px;
+  }
+
+  .media-detail-preview-trigger {
+    height: 220px;
   }
 }
 </style>

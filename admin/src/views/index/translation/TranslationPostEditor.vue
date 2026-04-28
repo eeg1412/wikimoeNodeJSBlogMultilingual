@@ -26,6 +26,26 @@
         <el-descriptions-item label="类型">
           {{ getPostTypeText(form.type) }}
         </el-descriptions-item>
+        <el-descriptions-item label="作者">
+          <span class="relation-inline-name">{{ authorName }}</span>
+          <el-tooltip
+            v-if="authorRecord"
+            content="快捷编辑作者"
+            placement="top"
+          >
+            <el-button
+              class="relation-inline-edit-button"
+              link
+              type="primary"
+              size="small"
+              :icon="EditPen"
+              aria-label="快捷编辑作者"
+              @click="
+                openRelationEditor(getRelationField('author'), authorRecord)
+              "
+            />
+          </el-tooltip>
+        </el-descriptions-item>
         <el-descriptions-item label="快照版本">
           v{{ form.snapshotVersion || '-' }}
         </el-descriptions-item>
@@ -106,60 +126,77 @@
           class="blok-form-item"
         >
           <div class="cover-image-list">
-            <draggable
-              v-model="relationRecords.coverImages"
-              item-key="_id"
-              handle=".handle"
-              @change="syncRelationIds('coverImages')"
-            >
-              <template #item="{ element, index }">
-                <div class="post-cover-image-item">
-                  <el-image
-                    v-if="canPreviewAttachmentImage(element)"
-                    :src="getAttachmentPreview(element)"
-                    fit="contain"
-                    style="width: 100%; height: 100%"
-                  />
-                  <div v-else class="attachment-file-card">
-                    <el-icon size="28"><Document /></el-icon>
-                    <div>{{ getRelationName(element) }}</div>
-                    <div
-                      v-if="element.mediaMode === 'remote'"
-                      class="f12 cGray666"
-                    >
-                      远程媒体
-                    </div>
-                  </div>
-                  <div
-                    class="post-cover-image-item-delete"
-                    @click.stop.prevent="removeRelation('coverImages', index)"
-                  >
-                    <el-icon><Close /></el-icon>
-                  </div>
-                  <div
-                    class="handle post-cover-image-item-handle"
-                    v-show="relationRecords.coverImages.length > 1"
-                  >
-                    <el-icon><Rank /></el-icon>
-                  </div>
-                </div>
-              </template>
-            </draggable>
             <div
-              class="post-cover-image-item type-add"
-              v-show="relationRecords.coverImages.length < maxCoverLength"
-              @click="openRelationPicker(getRelationField('coverImages'))"
+              v-for="element in relationRecords.coverImages"
+              :key="element._id"
+              class="post-cover-image-item"
             >
-              <div class="dflex flexCenter w_10 full-height">
-                <el-icon size="32px"><Plus /></el-icon>
+              <button
+                v-if="isImageAttachment(element) && getImagePreviewUrl(element)"
+                type="button"
+                class="post-cover-image-preview-trigger"
+                title="打开预览"
+                @click="openMediaPreview(element)"
+              >
+                <el-image
+                  :src="getImagePreviewUrl(element)"
+                  fit="contain"
+                  style="width: 100%; height: 100%"
+                />
+              </button>
+              <button
+                v-else-if="
+                  isVideoAttachment(element) && getVideoPreviewUrl(element)
+                "
+                type="button"
+                class="post-cover-image-preview-trigger"
+                title="播放视频"
+                @click="openMediaPreview(element)"
+              >
+                <el-image
+                  v-if="getVideoCoverUrl(element)"
+                  :src="getVideoCoverUrl(element)"
+                  fit="cover"
+                  style="width: 100%; height: 100%"
+                />
+                <div v-else class="attachment-cover-empty">无封面</div>
+              </button>
+              <div v-else class="attachment-file-card">
+                <el-icon size="28"><Document /></el-icon>
+                <div>{{ getRelationName(element) }}</div>
+                <div v-if="element.mediaMode === 'remote'" class="f12 cGray666">
+                  远程媒体
+                </div>
               </div>
+              <div v-if="element.is360Panorama" class="attachment-360-icon">
+                360°
+              </div>
+              <div
+                v-if="isVideoAttachment(element)"
+                class="attachment-play-icon"
+              >
+                <el-icon><VideoPlay /></el-icon>
+              </div>
+              <el-tooltip content="快捷编辑媒体内容" placement="top">
+                <el-button
+                  class="post-cover-image-item-edit"
+                  type="primary"
+                  size="small"
+                  :icon="EditPen"
+                  circle
+                  aria-label="快捷编辑媒体内容"
+                  @click.stop.prevent="
+                    openRelationEditor(getRelationField('coverImages'), element)
+                  "
+                />
+              </el-tooltip>
             </div>
-          </div>
-          <div
-            class="w_10 cGray666"
-            v-if="relationRecords.coverImages.length > 1"
-          >
-            ※可以拖动改变顺序
+            <span
+              v-if="relationRecords.coverImages.length === 0"
+              class="translation-media-empty cGray666"
+            >
+              未关联媒体内容
+            </span>
           </div>
         </el-form-item>
 
@@ -167,9 +204,7 @@
           <RelationSelectedList
             :field="getRelationField('sort')"
             :records="relationRecords.sort"
-            @pick="openRelationPicker"
             @edit="openRelationEditor"
-            @remove="removeSingleRelation"
           />
         </el-form-item>
 
@@ -178,18 +213,14 @@
             <RelationSelectedList
               :field="getRelationField('tags')"
               :records="relationRecords.tags"
-              @pick="openRelationPicker"
               @edit="openRelationEditor"
-              @remove="removeRelationById"
             />
           </el-form-item>
           <el-form-item label="地点">
             <RelationSelectedList
               :field="getRelationField('mappointList')"
               :records="relationRecords.mappointList"
-              @pick="openRelationPicker"
               @edit="openRelationEditor"
-              @remove="removeRelationById"
             />
           </el-form-item>
         </template>
@@ -207,21 +238,7 @@
             <RelationSelectedList
               :field="field"
               :records="relationRecords[field.field]"
-              @pick="openRelationPicker"
               @edit="openRelationEditor"
-              @remove="removeRelationById"
-            />
-          </el-form-item>
-          <el-form-item label="更改排序">
-            <el-switch
-              v-model="form.contentSeriesSortListTurnOn"
-              @change="onContentSeriesSortSwitch"
-            />
-          </el-form-item>
-          <el-form-item label="排序" v-if="form.contentSeriesSortListTurnOn">
-            <StringSortEditBox
-              v-model:modelValue="form.contentSeriesSortList"
-              :map="relationSortMap"
             />
           </el-form-item>
         </div>
@@ -239,21 +256,7 @@
             <RelationSelectedList
               :field="field"
               :records="relationRecords[field.field]"
-              @pick="openRelationPicker"
               @edit="openRelationEditor"
-              @remove="removeRelationById"
-            />
-          </el-form-item>
-          <el-form-item label="更改排序">
-            <el-switch
-              v-model="form.seriesSortListTurnOn"
-              @change="onSeriesSortSwitch"
-            />
-          </el-form-item>
-          <el-form-item label="排序" v-if="form.seriesSortListTurnOn">
-            <StringSortEditBox
-              v-model:modelValue="form.seriesSortList"
-              :map="relationSortMap"
             />
           </el-form-item>
         </div>
@@ -324,6 +327,8 @@
 
         <el-form-item>
           <el-button @click="goList">返回列表</el-button>
+          <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
+          <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
           <el-button
             v-if="form.pendingReview"
             :loading="saving"
@@ -339,118 +344,198 @@
     </div>
 
     <el-dialog
-      v-model="pickerVisible"
-      :title="pickerTitle"
-      width="860px"
+      v-model="exportDialogVisible"
+      title="导出翻译 JSON"
+      width="min(980px, 96vw)"
       destroy-on-close
       append-to-body
     >
-      <div class="relation-picker-toolbar">
-        <el-input
-          v-model="pickerParams.keyword"
-          clearable
-          placeholder="检索关键词"
-          @keyup.enter="getPickerList(true)"
-        />
-        <el-button type="primary" @click="getPickerList(true)">搜索</el-button>
+      <div class="translation-json-toolbar">
+        <div class="cGray666">
+          勾选需要交给 AI 翻译的字段。富文本会导出为结构化
+          JSON，尽量保留编辑器结构与媒体属性。
+        </div>
+        <div class="translation-json-toolbar-actions">
+          <el-button size="small" @click="selectAllExportEntries">
+            全选
+          </el-button>
+          <el-button size="small" @click="clearExportEntries">清空</el-button>
+        </div>
       </div>
-      <div v-loading="pickerLoading" class="relation-picker-list">
-        <el-checkbox-group
-          v-if="pickerField?.multiple"
-          v-model="pickerSelectedIds"
+      <div class="translation-json-selected-count cGray666">
+        已选择 {{ selectedExportIds.length }} 项
+      </div>
+      <el-checkbox-group v-model="selectedExportIds" class="w_10">
+        <div
+          v-for="group in exportEntryGroups"
+          :key="group.label"
+          class="translation-json-group"
         >
-          <div
-            v-for="item in pickerList"
-            :key="item._id"
-            class="relation-picker-row"
-          >
-            <el-checkbox :value="item._id">
-              <span>{{ getRelationName(item) }}</span>
-              <span class="relation-picker-extra">{{
-                item.alias || item.filename || ''
-              }}</span>
+          <div class="translation-json-group-title">{{ group.label }}</div>
+          <div class="translation-json-entry-list">
+            <el-checkbox
+              v-for="entry in group.entries"
+              :key="entry.id"
+              :label="entry.id"
+              class="translation-json-entry"
+            >
+              <div class="translation-json-entry-label">{{ entry.label }}</div>
+              <div class="translation-json-entry-preview">
+                {{ entry.previewText }}
+              </div>
             </el-checkbox>
-            <el-button
-              link
-              type="primary"
-              size="small"
-              @click="openRelationEditor(pickerField, item)"
-            >
-              快捷编辑
-            </el-button>
           </div>
-        </el-checkbox-group>
-        <el-radio-group v-else v-model="pickerSingleId" class="w_10">
-          <div
-            v-for="item in pickerList"
-            :key="item._id"
-            class="relation-picker-row"
-          >
-            <el-radio :value="item._id">
-              <span>{{ getRelationName(item) }}</span>
-              <span class="relation-picker-extra">{{
-                item.alias || item.filename || ''
-              }}</span>
-            </el-radio>
-            <el-button
-              link
-              type="primary"
-              size="small"
-              @click="openRelationEditor(pickerField, item)"
-            >
-              快捷编辑
-            </el-button>
-          </div>
-        </el-radio-group>
+        </div>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="exportDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="downloadTranslationJson">
+          导出 JSON
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入翻译 JSON"
+      width="min(1100px, 96vw)"
+      destroy-on-close
+      append-to-body
+    >
+      <div class="translation-json-toolbar">
+        <div class="cGray666">
+          支持直接粘贴 AI 返回的 JSON，或选择本地 JSON
+          文件。结构化富文本会先展示回写预览，再二次确认导入。
+        </div>
+        <div class="translation-json-toolbar-actions">
+          <el-button size="small" @click="triggerImportFilePicker">
+            选择 JSON 文件
+          </el-button>
+        </div>
       </div>
-      <div class="clearfix mt15">
-        <el-pagination
-          class="fr"
-          background
-          layout="total, prev, pager, next"
-          :total="pickerTotal"
-          :pager-count="5"
-          size="small"
-          v-model:current-page="pickerParams.page"
-          v-model:page-size="pickerParams.limit"
+      <input
+        ref="importFileInputRef"
+        class="translation-json-hidden-input"
+        type="file"
+        accept=".json,application/json"
+        @change="handleImportFileChange"
+      />
+      <el-input
+        v-model="importJsonText"
+        type="textarea"
+        :rows="12"
+        placeholder="请粘贴 JSON 内容"
+      />
+      <div class="mt10">
+        <el-button type="primary" @click="parseTranslationJsonImport">
+          解析并预览
+        </el-button>
+      </div>
+
+      <div v-if="importPreview" class="translation-import-preview-section">
+        <el-alert
+          class="mb20"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="确认导入后，会立即写入当前文章和相关关联内容。若当前页存在未保存改动，也会一并提交。"
         />
+
+        <el-descriptions class="mb20" :column="3" border>
+          <el-descriptions-item label="可导入变更">
+            {{ importPreview.changeCount }}
+          </el-descriptions-item>
+          <el-descriptions-item label="跳过条目">
+            {{ importPreview.skippedCount }}
+          </el-descriptions-item>
+          <el-descriptions-item label="目标语言">
+            {{ getLanguageText(form.languageCode) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div
+          v-if="importPreview.warningList.length > 0"
+          class="translation-json-warning-list"
+        >
+          <div class="translation-json-group-title">跳过说明</div>
+          <div
+            v-for="warning in importPreview.warningList"
+            :key="warning"
+            class="translation-json-warning-item"
+          >
+            {{ warning }}
+          </div>
+        </div>
+
+        <div
+          v-for="group in importPreviewGroups"
+          :key="group.label"
+          class="translation-import-preview-group"
+        >
+          <div class="translation-json-group-title">{{ group.label }}</div>
+          <div
+            v-for="item in group.entries"
+            :key="item.id"
+            class="translation-import-preview-item"
+          >
+            <div class="translation-import-preview-item-title">
+              {{ item.label }}
+            </div>
+            <div class="translation-import-preview-columns">
+              <div class="translation-import-preview-panel">
+                <div class="translation-import-preview-panel-title">当前</div>
+                <div
+                  v-if="item.currentHtml"
+                  class="translation-import-preview-html"
+                  v-html="item.currentHtml"
+                />
+                <pre class="translation-import-preview-raw">{{
+                  item.currentValue
+                }}</pre>
+              </div>
+              <div class="translation-import-preview-panel">
+                <div class="translation-import-preview-panel-title">导入后</div>
+                <div
+                  v-if="item.nextHtml"
+                  class="translation-import-preview-html"
+                  v-html="item.nextHtml"
+                />
+                <pre class="translation-import-preview-raw">{{
+                  item.nextValue
+                }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
-        <el-button @click="pickerVisible = false">取消</el-button>
-        <el-button type="primary" @click="applyPickerSelection">确定</el-button>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="importing"
+          :disabled="!importPreview || importPreview.changeCount === 0"
+          @click="confirmTranslationJsonImport"
+        >
+          确认导入
+        </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="relationEditVisible"
       :title="relationEditTitle"
-      width="680px"
+      width="min(860px, 94vw)"
       destroy-on-close
       append-to-body
     >
       <el-form :model="relationEditForm" label-width="110px" @submit.prevent>
-        <el-form-item
-          v-for="field in relationEditFields"
-          :key="field.name"
-          :label="field.label"
-        >
-          <el-switch
-            v-if="field.type === 'boolean'"
-            v-model="relationEditForm[field.name]"
-          />
-          <el-input-number
-            v-else-if="field.type === 'number'"
-            v-model="relationEditForm[field.name]"
-            controls-position="right"
-          />
-          <el-input
-            v-else-if="field.type === 'textarea'"
-            v-model="relationEditForm[field.name]"
-            type="textarea"
-            :rows="4"
-          />
-          <el-input v-else v-model="relationEditForm[field.name]" />
-        </el-form-item>
+        <RelationBusinessFieldEditor
+          :fields="relationEditFields"
+          :form="relationEditForm"
+          :language-code="form.languageCode"
+          :record="relationEditRecord"
+          @parent-updated="handleRelationParentUpdated"
+        />
       </el-form>
       <template #footer>
         <el-button @click="relationEditVisible = false">取消</el-button>
@@ -477,28 +562,43 @@ import {
   watch
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElButton, ElMessage, ElTag } from 'element-plus'
-import { Close, Document, Plus, Rank } from '@element-plus/icons-vue'
-import draggable from 'vuedraggable'
+import {
+  ElButton,
+  ElMessage,
+  ElMessageBox,
+  ElTag,
+  ElTooltip
+} from 'element-plus'
+import { Document, EditPen, VideoPlay } from '@element-plus/icons-vue'
 import RichEditor4 from '@/components/RichEditor4.vue'
 import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
-import StringSortEditBox from '@/components/StringSortEditBox.vue'
+import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import { multilingualApi } from '@/api'
 import {
   getLanguageText,
   getPostStatusText,
   getPostTypeText
 } from '@/utils/multilingual'
-import { nowTimestampToBase36WithRandom } from '@/utils/utils'
+import { loadAndOpenImg, nowTimestampToBase36WithRandom } from '@/utils/utils'
+import {
+  getRelationEditFields,
+  getRelationFieldInitialValue,
+  shouldSubmitRelationEditField
+} from '@/utils/relationEditFields'
+import {
+  buildTranslationExportEntries,
+  buildTranslationExportPayload,
+  buildTranslationImportPreview,
+  buildTranslationJsonFilename,
+  parseTranslationImportPayload
+} from '@/utils/translationJson'
 
-const RELATION_SORT_MAP = {
-  media: '媒体内容',
-  event: '活动',
-  vote: '投票',
-  post: '博文',
-  tweet: '推文',
-  acgn: '番剧/电影/游戏/书籍'
+const AUTHOR_RELATION_FIELD = {
+  label: '作者',
+  field: 'author',
+  collectionName: 'users',
+  multiple: false
 }
 
 const BASE_RELATION_FIELDS = [
@@ -625,73 +725,11 @@ const DETAIL_RELATION_FIELDS = [
 ]
 
 const ALL_RELATION_FIELDS = [
+  AUTHOR_RELATION_FIELD,
   ...BASE_RELATION_FIELDS,
   ...TWEET_CONTENT_RELATION_FIELDS,
   ...DETAIL_RELATION_FIELDS
 ]
-
-const RELATION_EDIT_FIELD_MAP = {
-  users: [
-    { name: 'nickname', label: '昵称' },
-    { name: 'description', label: '说明', type: 'textarea' }
-  ],
-  sorts: [
-    { name: 'sortname', label: '分类名' },
-    { name: 'alias', label: '别名' },
-    { name: 'description', label: '说明', type: 'textarea' }
-  ],
-  tags: [{ name: 'tagname', label: '标签名' }],
-  mappoints: [
-    { name: 'title', label: '地点标题' },
-    { name: 'summary', label: '摘要', type: 'textarea' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  bangumis: [
-    { name: 'title', label: '番剧标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  movies: [
-    { name: 'title', label: '电影标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  games: [
-    { name: 'title', label: '游戏标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  books: [
-    { name: 'title', label: '书籍标题' },
-    { name: 'summary', label: '简介', type: 'textarea' },
-    { name: 'rating', label: '评分', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  events: [
-    { name: 'title', label: '活动标题' },
-    { name: 'content', label: '内容', type: 'textarea' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  votes: [
-    { name: 'title', label: '投票标题' },
-    { name: 'maxSelect', label: '最大选择数', type: 'number' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  posts: [
-    { name: 'title', label: '标题' },
-    { name: 'excerpt', label: '摘要/推文', type: 'textarea' },
-    { name: 'alias', label: '别名' },
-    { name: 'status', label: '状态', type: 'number' }
-  ],
-  attachments: [
-    { name: 'name', label: '媒体名称' },
-    { name: 'description', label: '描述', type: 'textarea' },
-    { name: 'is360Panorama', label: '360 全景', type: 'boolean' }
-  ]
-}
 
 function createRelationRecords() {
   const records = {}
@@ -709,19 +747,39 @@ function getRecordIdList(records) {
   return records.map(item => item._id).filter(Boolean)
 }
 
+function groupEntryList(entryList) {
+  const groupMap = new Map()
+  entryList.forEach(entry => {
+    const groupLabel = entry.groupLabel || '未分组'
+    if (!groupMap.has(groupLabel)) {
+      groupMap.set(groupLabel, [])
+    }
+    groupMap.get(groupLabel).push(entry)
+  })
+
+  return Array.from(groupMap.entries()).map(([label, entries]) => {
+    return {
+      label,
+      entries
+    }
+  })
+}
+
 const RelationSelectedList = defineComponent({
   name: 'RelationSelectedList',
   props: {
     field: { type: Object, required: true },
     records: { type: Array, default: () => [] }
   },
-  emits: ['pick', 'edit', 'remove'],
+  emits: ['edit'],
   setup(props, { emit }) {
     const getName = record => {
       return (
         record.displayName ||
         record.title ||
         record.excerpt ||
+        record.nickname ||
+        record.username ||
         record.name ||
         record.tagname ||
         record.sortname ||
@@ -731,17 +789,15 @@ const RelationSelectedList = defineComponent({
       )
     }
 
-    return () =>
-      h('div', { class: 'relation-selected-list' }, [
+    return () => {
+      const nodes =
         props.records.length > 0
           ? props.records.map(record =>
               h(
                 ElTag,
                 {
                   key: record._id,
-                  class: 'relation-selected-tag',
-                  closable: true,
-                  onClose: () => emit('remove', props.field, record._id)
+                  class: 'relation-selected-tag'
                 },
                 {
                   default: () => [
@@ -751,50 +807,49 @@ const RelationSelectedList = defineComponent({
                       getName(record)
                     ),
                     h(
-                      ElButton,
+                      ElTooltip,
                       {
-                        link: true,
-                        type: 'primary',
-                        size: 'small',
-                        onClick: event => {
-                          event.stopPropagation()
-                          emit('edit', props.field, record)
-                        }
+                        content: `快捷编辑${props.field.label}`,
+                        placement: 'top'
                       },
-                      { default: () => '快捷编辑' }
+                      {
+                        default: () =>
+                          h(ElButton, {
+                            class: 'relation-selected-edit-button',
+                            link: true,
+                            type: 'primary',
+                            size: 'small',
+                            icon: EditPen,
+                            'aria-label': `快捷编辑${props.field.label}`,
+                            onClick: event => {
+                              event.stopPropagation()
+                              emit('edit', props.field, record)
+                            }
+                          })
+                      }
                     )
                   ]
                 }
               )
             )
-          : h('span', { class: 'cGray666' }, '未选择'),
-        h(
-          ElButton,
-          {
-            class: 'ml10',
-            type: 'primary',
-            size: 'small',
-            onClick: () => emit('pick', props.field)
-          },
-          { default: () => (props.records.length > 0 ? '更换/追加' : '选择') }
-        )
-      ])
+          : [h('span', { class: 'cGray666' }, '未关联')]
+
+      return h('div', { class: 'relation-selected-list' }, nodes)
+    }
   }
 })
 
 export default {
   name: 'TranslationPostEditor',
   components: {
-    Close,
     Document,
+    EditPen,
     EmojiTextarea,
-    Plus,
-    Rank,
     RelationSelectedList,
     RichEditor5,
     RichEditor4,
-    StringSortEditBox,
-    draggable
+    RelationBusinessFieldEditor,
+    VideoPlay
   },
   setup() {
     const route = useRoute()
@@ -811,6 +866,7 @@ export default {
       sourceLanguageCode: '',
       snapshotVersion: 1,
       pendingReview: false,
+      author: null,
       title: '',
       date: null,
       content: '',
@@ -828,8 +884,6 @@ export default {
       tweetList: [],
       eventList: [],
       voteList: [],
-      seriesSortListTurnOn: false,
-      seriesSortList: [],
       contentBangumiList: [],
       contentMovieList: [],
       contentGameList: [],
@@ -838,8 +892,6 @@ export default {
       contentTweetList: [],
       contentEventList: [],
       contentVoteList: [],
-      contentSeriesSortListTurnOn: false,
-      contentSeriesSortList: [],
       top: false,
       sortop: false,
       status: 0,
@@ -854,45 +906,26 @@ export default {
       return Number(form.editorVersion || 5)
     })
 
-    const pickerVisible = ref(false)
-    const pickerLoading = ref(false)
-    const pickerField = ref(null)
-    const pickerList = ref([])
-    const pickerTotal = ref(0)
-    const pickerSelectedIds = ref([])
-    const pickerSingleId = ref('')
-    const pickerParams = reactive({
-      page: 1,
-      limit: 20,
-      keyword: ''
-    })
-
     const relationEditVisible = ref(false)
     const relationSaving = ref(false)
     const relationEditField = ref(null)
     const relationEditRecord = ref(null)
     const relationEditForm = reactive({})
+    const exportDialogVisible = ref(false)
+    const exportEntryList = ref([])
+    const selectedExportIds = ref([])
+    const importDialogVisible = ref(false)
+    const importJsonText = ref('')
+    const importPreview = ref(null)
+    const importing = ref(false)
+    const importFileInputRef = ref(null)
 
     const typeTitle = computed(() => getPostTypeText(form.type))
-    const maxCoverLength = computed(() => {
-      if (form.type === 2) {
-        return 9999
-      }
-      return 1
-    })
-    const pickerTitle = computed(() => {
-      if (!pickerField.value) {
-        return '选择关联内容'
-      }
-      return `选择${pickerField.value.label}`
-    })
     const relationEditFields = computed(() => {
       if (!relationEditField.value) {
         return []
       }
-      return (
-        RELATION_EDIT_FIELD_MAP[relationEditField.value.collectionName] || []
-      )
+      return getRelationEditFields(relationEditField.value.collectionName)
     })
     const relationEditTitle = computed(() => {
       if (!relationEditField.value) {
@@ -910,6 +943,8 @@ export default {
         record?.displayName ||
         record?.title ||
         record?.excerpt ||
+        record?.nickname ||
+        record?.username ||
         record?.name ||
         record?.tagname ||
         record?.sortname ||
@@ -920,35 +955,155 @@ export default {
       )
     }
 
+    const authorRecord = computed(() => relationRecords.author[0] || null)
+    const authorName = computed(() => {
+      if (!authorRecord.value) {
+        return '-'
+      }
+      return getRelationName(authorRecord.value)
+    })
+    const exportEntryGroups = computed(() => {
+      return groupEntryList(exportEntryList.value)
+    })
+    const importPreviewGroups = computed(() => {
+      return groupEntryList(importPreview.value?.changeList || [])
+    })
+
+    function buildTranslationEntries() {
+      return buildTranslationExportEntries({
+        form,
+        relationFields: ALL_RELATION_FIELDS,
+        relationRecords
+      })
+    }
+
+    function isVideoAttachment(record) {
+      return Boolean(record?.mimetype && record.mimetype.includes('video'))
+    }
+
     function isImageAttachment(record) {
       return Boolean(record?.mimetype && record.mimetype.includes('image'))
     }
 
-    function getAttachmentPreview(record) {
-      const localPreview = record?.localThumbnailPath || record?.localFilepath
-      if (localPreview) {
-        return localPreview
+    function isAbsoluteMediaUrl(value) {
+      if (!value) {
+        return false
       }
 
-      const preview =
-        record?.thumfor || record?.filepath || record?.remoteFilepath || ''
-      if (!preview) {
-        return ''
-      }
-
-      if (/^https?:\/\//.test(preview) || preview.startsWith('//')) {
-        return preview
-      }
-
-      if (record?.mediaMode === 'remote') {
-        return ''
-      }
-
-      return preview
+      return /^(https?:)?\/\//.test(value) || value.startsWith('/')
     }
 
-    function canPreviewAttachmentImage(record) {
-      return isImageAttachment(record) && Boolean(getAttachmentPreview(record))
+    function normalizeMediaUrl(value) {
+      if (!value) {
+        return ''
+      }
+
+      if (isAbsoluteMediaUrl(value)) {
+        return value
+      }
+
+      return value
+    }
+
+    function getFirstMediaUrl(candidateList) {
+      for (const item of candidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return previewUrl
+        }
+      }
+
+      return ''
+    }
+
+    function getImagePreviewUrl(record) {
+      return getFirstMediaUrl([
+        record?.localThumbnailPath,
+        record?.localFilepath,
+        record?.thumfor,
+        record?.filepath,
+        record?.remoteFilepath
+      ])
+    }
+
+    function getImageOriginalUrl(record) {
+      return getFirstMediaUrl([
+        record?.localFilepath,
+        record?.filepath,
+        record?.remoteFilepath,
+        record?.localThumbnailPath,
+        record?.thumfor
+      ])
+    }
+
+    function getVideoPreviewUrl(record) {
+      return getFirstMediaUrl([
+        record?.localFilepath,
+        record?.filepath,
+        record?.remoteFilepath
+      ])
+    }
+
+    function getVideoCoverUrl(record) {
+      return getFirstMediaUrl([record?.localThumbnailPath, record?.thumfor])
+    }
+
+    function getPositiveMediaSize(value) {
+      const numberValue = Number(value)
+      if (Number.isFinite(numberValue) && numberValue > 0) {
+        return numberValue
+      }
+      return 0
+    }
+
+    function getMediaPreviewSize(record) {
+      const width =
+        getPositiveMediaSize(record?.width) ||
+        getPositiveMediaSize(record?.thumWidth)
+      const height =
+        getPositiveMediaSize(record?.height) ||
+        getPositiveMediaSize(record?.thumHeight)
+
+      if (width && height) {
+        return { width, height }
+      }
+
+      if (isVideoAttachment(record)) {
+        return { width: 1280, height: 720 }
+      }
+
+      return { width: 1600, height: 900 }
+    }
+
+    function buildMediaPreviewItem(record) {
+      let previewUrl = ''
+      if (isImageAttachment(record)) {
+        previewUrl = getImageOriginalUrl(record)
+      }
+      if (isVideoAttachment(record)) {
+        previewUrl = getVideoPreviewUrl(record)
+      }
+      if (!previewUrl) {
+        return null
+      }
+
+      const previewSize = getMediaPreviewSize(record)
+      return {
+        src: previewUrl,
+        width: previewSize.width,
+        height: previewSize.height,
+        mimetype: record?.mimetype || '',
+        is360Panorama: Boolean(record?.is360Panorama)
+      }
+    }
+
+    function openMediaPreview(record) {
+      const previewItem = buildMediaPreviewItem(record)
+      if (!previewItem) {
+        return
+      }
+
+      loadAndOpenImg(0, [previewItem])
     }
 
     function generateRandomString(length) {
@@ -1001,6 +1156,7 @@ export default {
       form.sourceLanguageCode = post.sourceLanguageCode
       form.snapshotVersion = post.snapshotVersion
       form.pendingReview = Boolean(post.pendingReview)
+      setRelationRecordList('author', post.author ? [post.author] : [])
       form.title = post.title || ''
       form.date = post.date ? new Date(post.date) : null
       form.content = post.content || ''
@@ -1014,18 +1170,10 @@ export default {
       form.template = post.template || ''
       form.code = post.code || ''
       form.editorVersion = Number(post.editorVersion || 5)
-      form.seriesSortList = Array.isArray(post.seriesSortList)
-        ? post.seriesSortList
-        : []
-      form.seriesSortListTurnOn = form.seriesSortList.length > 0
-      form.contentSeriesSortList = Array.isArray(post.contentSeriesSortList)
-        ? post.contentSeriesSortList
-        : []
-      form.contentSeriesSortListTurnOn = form.contentSeriesSortList.length > 0
 
       setRelationRecordList('sort', post.sort ? [post.sort] : [])
       ALL_RELATION_FIELDS.forEach(field => {
-        if (field.field === 'sort') {
+        if (field.field === 'author' || field.field === 'sort') {
           return
         }
         setRelationRecordList(field.field, post[field.field] || [])
@@ -1035,7 +1183,7 @@ export default {
 
     function getPostDetail() {
       loading.value = true
-      multilingualApi
+      return multilingualApi
         .getTranslationPostDetail({ id: route.params.id })
         .then(response => {
           detailData.value = response.data.data
@@ -1047,102 +1195,21 @@ export default {
     }
 
     function syncRelationIds(fieldName) {
-      if (fieldName === 'sort') {
-        form.sort = relationRecords.sort[0]?._id || null
+      const field = getRelationField(fieldName)
+      if (field && !field.multiple) {
+        form[fieldName] = relationRecords[fieldName][0]?._id || null
         return
       }
       form[fieldName] = getRecordIdList(relationRecords[fieldName])
     }
 
-    function removeRelation(fieldName, index) {
-      relationRecords[fieldName].splice(index, 1)
-      syncRelationIds(fieldName)
-    }
-
-    function removeRelationById(field, recordId) {
-      const index = relationRecords[field.field].findIndex(
-        item => item._id === recordId
-      )
-      if (index >= 0) {
-        removeRelation(field.field, index)
-      }
-    }
-
-    function removeSingleRelation(field) {
-      relationRecords[field.field] = []
-      syncRelationIds(field.field)
-    }
-
-    function getPickerList(resetPage) {
-      if (!pickerField.value) {
-        return
-      }
-      if (resetPage === true) {
-        pickerParams.page = 1
-      }
-      pickerLoading.value = true
-      multilingualApi
-        .getTranslationRelationList(
-          {
-            collectionName: pickerField.value.collectionName,
-            languageCode: form.languageCode,
-            recordKind: 'translation',
-            keyword: pickerParams.keyword,
-            page: pickerParams.page,
-            limit: pickerParams.limit
-          },
-          true
-        )
-        .then(response => {
-          const data = response.data.data || {}
-          let list = data.list || []
-          if (pickerField.value.postType) {
-            list = list.filter(
-              item => Number(item.type) === pickerField.value.postType
-            )
-          }
-          pickerList.value = list
-          pickerTotal.value = data.total || 0
-        })
-        .finally(() => {
-          pickerLoading.value = false
-        })
-    }
-
-    function openRelationPicker(field) {
-      if (!field) {
-        return
-      }
-      pickerField.value = field
-      pickerParams.page = 1
-      pickerParams.keyword = ''
-      const selectedIds = getRecordIdList(relationRecords[field.field])
-      pickerSelectedIds.value = selectedIds
-      pickerSingleId.value = selectedIds[0] || ''
-      pickerVisible.value = true
-      getPickerList(true)
-    }
-
-    function applyPickerSelection() {
-      const field = pickerField.value
-      if (!field) {
-        return
-      }
-      let selectedIds = []
-      if (field.multiple) {
-        selectedIds = pickerSelectedIds.value
-      } else if (pickerSingleId.value) {
-        selectedIds = [pickerSingleId.value]
-      }
-      const selectedMap = new Map()
-      relationRecords[field.field].forEach(item =>
-        selectedMap.set(item._id, item)
-      )
-      pickerList.value.forEach(item => selectedMap.set(item._id, item))
-      const records = selectedIds.map(id => selectedMap.get(id)).filter(Boolean)
-      relationRecords[field.field] = records
-      syncRelationIds(field.field)
-      pickerVisible.value = false
+    function fillRelationEditForm(record) {
+      Object.keys(relationEditForm).forEach(key => {
+        delete relationEditForm[key]
+      })
+      relationEditFields.value.forEach(item => {
+        relationEditForm[item.name] = getRelationFieldInitialValue(item, record)
+      })
     }
 
     function openRelationEditor(field, record) {
@@ -1151,12 +1218,7 @@ export default {
       }
       relationEditField.value = field
       relationEditRecord.value = record
-      Object.keys(relationEditForm).forEach(key => {
-        delete relationEditForm[key]
-      })
-      relationEditFields.value.forEach(item => {
-        relationEditForm[item.name] = record[item.name]
-      })
+      fillRelationEditForm(record)
       relationEditVisible.value = true
     }
 
@@ -1177,6 +1239,9 @@ export default {
       }
       const payload = {}
       relationEditFields.value.forEach(item => {
+        if (!shouldSubmitRelationEditField(item)) {
+          return
+        }
         payload[item.name] = relationEditForm[item.name]
       })
       relationSaving.value = true
@@ -1190,12 +1255,6 @@ export default {
         .then(response => {
           const updatedRecord = response.data.data
           replaceRecordInList(field.field, updatedRecord)
-          const pickerIndex = pickerList.value.findIndex(
-            item => item._id === updatedRecord._id
-          )
-          if (pickerIndex >= 0) {
-            pickerList.value[pickerIndex] = updatedRecord
-          }
           ElMessage.success('关联内容已保存')
           relationEditVisible.value = false
         })
@@ -1204,24 +1263,23 @@ export default {
         })
     }
 
+    function handleRelationParentUpdated({ field, parentRecord }) {
+      if (!relationEditField.value || !relationEditRecord.value) {
+        return
+      }
+      relationEditRecord.value[field.name] = parentRecord
+      replaceRecordInList(
+        relationEditField.value.field,
+        relationEditRecord.value
+      )
+    }
+
     function onContentTabChange(tabName) {
       if (tabName === 'sourceCode') {
         contentSource.value = form.content
         return
       }
       form.content = contentSource.value
-    }
-
-    function onContentSeriesSortSwitch(value) {
-      if (!value) {
-        form.contentSeriesSortList = []
-      }
-    }
-
-    function onSeriesSortSwitch(value) {
-      if (!value) {
-        form.seriesSortList = []
-      }
     }
 
     function buildSubmitData(confirmReview) {
@@ -1236,30 +1294,7 @@ export default {
         content: form.content,
         excerpt: form.excerpt,
         alias: form.alias,
-        sort: form.sort,
         type: form.type,
-        tags: form.tags,
-        mappointList: form.mappointList,
-        bangumiList: form.bangumiList,
-        movieList: form.movieList,
-        gameList: form.gameList,
-        bookList: form.bookList,
-        postList: form.postList,
-        tweetList: form.tweetList,
-        eventList: form.eventList,
-        voteList: form.voteList,
-        seriesSortList: form.seriesSortListTurnOn ? form.seriesSortList : [],
-        contentBangumiList: form.contentBangumiList,
-        contentMovieList: form.contentMovieList,
-        contentGameList: form.contentGameList,
-        contentBookList: form.contentBookList,
-        contentPostList: form.contentPostList,
-        contentTweetList: form.contentTweetList,
-        contentEventList: form.contentEventList,
-        contentVoteList: form.contentVoteList,
-        contentSeriesSortList: form.contentSeriesSortListTurnOn
-          ? form.contentSeriesSortList
-          : [],
         top: form.top,
         sortop: form.sortop,
         status: form.status,
@@ -1267,7 +1302,6 @@ export default {
         template: form.template,
         code: form.code,
         editorVersion: form.editorVersion,
-        coverImages: form.coverImages,
         confirmReview
       }
     }
@@ -1294,76 +1328,232 @@ export default {
       router.push({ name: 'TranslationPostList' })
     }
 
-    watch(
-      () => pickerParams.page,
-      () => {
-        if (pickerVisible.value) {
-          getPickerList(false)
-        }
+    function openTranslationJsonExport() {
+      const entryList = buildTranslationEntries()
+      if (entryList.length === 0) {
+        ElMessage.warning('当前没有可导出的翻译内容')
+        return
       }
-    )
+
+      exportEntryList.value = entryList
+      selectedExportIds.value = entryList
+        .filter(entry => entry.defaultSelected)
+        .map(entry => entry.id)
+      exportDialogVisible.value = true
+    }
+
+    function selectAllExportEntries() {
+      selectedExportIds.value = exportEntryList.value.map(entry => entry.id)
+    }
+
+    function clearExportEntries() {
+      selectedExportIds.value = []
+    }
+
+    function downloadTranslationJson() {
+      if (selectedExportIds.value.length === 0) {
+        ElMessage.warning('请至少选择一项导出内容')
+        return
+      }
+
+      const selectedIdSet = new Set(selectedExportIds.value)
+      const selectedEntries = exportEntryList.value.filter(entry => {
+        return selectedIdSet.has(entry.id)
+      })
+      const jsonPayload = buildTranslationExportPayload({
+        form,
+        selectedEntries
+      })
+      const blob = new Blob([JSON.stringify(jsonPayload, null, 2)], {
+        type: 'application/json;charset=utf-8'
+      })
+      const downloadUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = downloadUrl
+      anchor.download = buildTranslationJsonFilename(form)
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      URL.revokeObjectURL(downloadUrl)
+      exportDialogVisible.value = false
+      ElMessage.success('JSON 已导出')
+    }
+
+    function openTranslationJsonImport() {
+      importJsonText.value = ''
+      importPreview.value = null
+      importDialogVisible.value = true
+    }
+
+    function triggerImportFilePicker() {
+      importFileInputRef.value && importFileInputRef.value.click()
+    }
+
+    function handleImportFileChange(event) {
+      const file = event.target.files?.[0]
+      event.target.value = ''
+      if (!file) {
+        return
+      }
+
+      const reader = new FileReader()
+      reader.onload = readerEvent => {
+        importJsonText.value = String(readerEvent.target?.result || '')
+      }
+      reader.onerror = () => {
+        ElMessage.error('JSON 文件读取失败')
+      }
+      reader.readAsText(file, 'utf-8')
+    }
+
+    function parseTranslationJsonImport() {
+      if (!importJsonText.value.trim()) {
+        ElMessage.warning('请先粘贴或选择 JSON 内容')
+        return
+      }
+
+      try {
+        const parsedPayload = parseTranslationImportPayload(
+          importJsonText.value
+        )
+        const preview = buildTranslationImportPreview({
+          parsedPayload,
+          currentEntries: buildTranslationEntries(),
+          form
+        })
+        importPreview.value = preview
+        if (preview.changeCount === 0) {
+          ElMessage.info('JSON 中没有可导入的变更')
+        }
+      } catch (error) {
+        ElMessage.error(error?.message || 'JSON 解析失败')
+      }
+    }
+
+    async function confirmTranslationJsonImport() {
+      if (!importPreview.value || importPreview.value.changeCount === 0) {
+        ElMessage.warning('请先解析出可导入的变更')
+        return
+      }
+
+      try {
+        await ElMessageBox.confirm(
+          '确认导入后，将立即写入当前文章与关联内容。请确认本页不存在不希望一并保存的未保存改动。',
+          '确认导入',
+          {
+            type: 'warning',
+            confirmButtonText: '确认导入',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+
+      importing.value = true
+      try {
+        const relationUpdates = importPreview.value.applyPlan.relationUpdates
+        if (relationUpdates.length > 0) {
+          await Promise.all(
+            relationUpdates.map(updateItem => {
+              return multilingualApi.updateTranslationRelation({
+                collectionName: updateItem.collectionName,
+                id: updateItem.id,
+                languageCode: form.languageCode,
+                payload: updateItem.payload
+              })
+            })
+          )
+        }
+
+        const postPatch = importPreview.value.applyPlan.postPatch
+        if (Object.keys(postPatch).length > 0) {
+          await multilingualApi.updateTranslationPost({
+            ...buildSubmitData(false),
+            ...postPatch
+          })
+        }
+
+        await getPostDetail()
+        importDialogVisible.value = false
+        importJsonText.value = ''
+        importPreview.value = null
+        ElMessage.success('JSON 导入成功')
+      } finally {
+        importing.value = false
+      }
+    }
+
+    watch(importJsonText, () => {
+      importPreview.value = null
+    })
 
     onMounted(() => {
       getPostDetail()
     })
 
     return {
-      Close,
       Document,
-      Plus,
-      Rank,
+      EditPen,
+      VideoPlay,
+      authorName,
+      authorRecord,
       contentSource,
       contentTab,
       confirmReview,
       detailData,
       detailRelationFields: DETAIL_RELATION_FIELDS,
       form,
-      getAttachmentPreview,
+      exportDialogVisible,
+      exportEntryGroups,
+      getImagePreviewUrl,
       getLanguageText,
       getPostStatusText,
       getPostTypeText,
       getRelationField,
       getRelationName,
+      getVideoCoverUrl,
+      getVideoPreviewUrl,
       goList,
       isImageAttachment,
+      isVideoAttachment,
       loading,
-      maxCoverLength,
-      onContentSeriesSortSwitch,
       onContentTabChange,
-      onSeriesSortSwitch,
+      openMediaPreview,
       openRelationEditor,
-      openRelationPicker,
-      pickerField,
-      pickerList,
-      pickerLoading,
-      pickerParams,
-      pickerSelectedIds,
-      pickerSingleId,
-      pickerTitle,
-      pickerTotal,
-      pickerVisible,
+      handleRelationParentUpdated,
+      importDialogVisible,
+      importFileInputRef,
+      importJsonText,
+      importPreview,
+      importPreviewGroups,
+      importing,
       relationEditFields,
       relationEditForm,
+      relationEditRecord,
       relationEditTitle,
       relationEditVisible,
       relationRecords,
       relationSaving,
-      relationSortMap: RELATION_SORT_MAP,
       postEditorVersion,
-      removeRelation,
-      removeRelationById,
-      removeSingleRelation,
       resetRandomAlias,
+      selectedExportIds,
+      clearExportEntries,
+      confirmTranslationJsonImport,
+      downloadTranslationJson,
+      handleImportFileChange,
+      openTranslationJsonExport,
+      openTranslationJsonImport,
+      parseTranslationJsonImport,
       saveRelationEdit,
       saving,
+      selectAllExportEntries,
       submit,
       syncRelationIds,
+      triggerImportFilePicker,
       tweetContentRelationFields: TWEET_CONTENT_RELATION_FIELDS,
       typeTitle,
-      buildTypeAlias,
-      applyPickerSelection,
-      canPreviewAttachmentImage,
-      getPickerList
+      buildTypeAlias
     }
   }
 }
@@ -1384,8 +1574,83 @@ export default {
   gap: 10px;
 }
 
-.cover-image-list :deep(.sortable-ghost) {
-  opacity: 0.4;
+.post-cover-image-item {
+  width: 100px;
+  height: 100px;
+  border: 1px solid var(--el-border-color);
+  color: #ccc;
+  box-sizing: border-box;
+  cursor: pointer;
+  position: relative;
+}
+
+.post-cover-image-preview-trigger {
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+}
+
+.post-cover-image-preview-trigger:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+}
+
+.attachment-cover-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  background: var(--el-fill-color);
+}
+
+.translation-media-empty {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.relation-inline-name {
+  margin-right: 6px;
+}
+
+.relation-inline-edit-button {
+  vertical-align: middle;
+}
+
+.attachment-360-icon,
+.attachment-play-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.88);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.post-cover-image-item-edit {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  z-index: 3;
 }
 
 .attachment-file-card {
@@ -1417,6 +1682,13 @@ export default {
   white-space: normal;
 }
 
+.relation-selected-tag :deep(.el-tag__content) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
 .relation-selected-name {
   display: inline-block;
   max-width: 280px;
@@ -1426,37 +1698,144 @@ export default {
   white-space: nowrap;
 }
 
-.relation-picker-toolbar {
+.relation-selected-edit-button {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+}
+
+.translation-json-toolbar {
   display: flex;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
-.relation-picker-list {
-  min-height: 280px;
-  max-height: 50vh;
-  overflow: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-}
-
-.relation-picker-row {
+.translation-json-toolbar-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.relation-picker-row:last-child {
-  border-bottom: none;
+.translation-json-selected-count {
+  margin-bottom: 12px;
 }
 
-.relation-picker-extra {
-  margin-left: 8px;
-  color: var(--el-text-color-secondary);
+.translation-json-group,
+.translation-import-preview-group,
+.translation-json-warning-list {
+  margin-bottom: 18px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--el-fill-color-lighter);
+}
+
+.translation-json-group-title,
+.translation-import-preview-item-title,
+.translation-import-preview-panel-title {
+  font-weight: 600;
+}
+
+.translation-json-group-title {
+  margin-bottom: 10px;
+}
+
+.translation-json-entry-list {
+  display: grid;
+  gap: 10px;
+}
+
+.translation-json-entry {
+  width: 100%;
+  margin-right: 0;
+  align-items: flex-start;
+}
+
+.translation-json-entry :deep(.el-checkbox__label) {
+  width: 100%;
+}
+
+.translation-json-entry-label {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+
+.translation-json-entry-preview,
+.translation-json-warning-item {
+  margin-top: 4px;
   font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.translation-json-hidden-input {
+  display: none;
+}
+
+.translation-import-preview-section {
+  margin-top: 20px;
+}
+
+.translation-import-preview-item {
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.translation-import-preview-item + .translation-import-preview-item {
+  margin-top: 12px;
+}
+
+.translation-import-preview-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.translation-import-preview-panel {
+  min-width: 0;
+}
+
+.translation-import-preview-panel-title {
+  margin-bottom: 8px;
+  color: var(--el-text-color-secondary);
+}
+
+.translation-import-preview-html,
+.translation-import-preview-raw {
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.translation-import-preview-html {
+  margin-bottom: 8px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.translation-import-preview-html :deep(img),
+.translation-import-preview-html :deep(video) {
+  max-width: 100%;
+}
+
+.translation-import-preview-raw {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 @media (max-width: 767px) {
@@ -1477,9 +1856,19 @@ export default {
     margin-left: 0 !important;
   }
 
-  .relation-picker-toolbar,
-  .relation-picker-row {
-    display: block;
+  .relation-selected-name {
+    max-width: calc(100vw - 150px);
+  }
+
+  .translation-json-toolbar,
+  .translation-import-preview-columns {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .translation-json-toolbar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 </style>

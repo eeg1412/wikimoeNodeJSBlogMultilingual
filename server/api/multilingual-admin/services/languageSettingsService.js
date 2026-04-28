@@ -140,6 +140,56 @@ const LANGUAGE_SETTING_FIELDS = [
     type: 'string',
     group: 'post',
     defaultValue: '相似内容'
+  },
+  {
+    name: 'siteEnableRss',
+    label: '开启 RSS',
+    type: 'boolean',
+    group: 'seoFeed',
+    defaultValue: false
+  },
+  {
+    name: 'siteRssMaxCount',
+    label: 'RSS 显示条数',
+    type: 'number',
+    group: 'seoFeed',
+    defaultValue: 10,
+    min: 1,
+    max: 100
+  },
+  {
+    name: 'siteRssTweetTitleType',
+    label: '推文标题类型',
+    type: 'radio',
+    group: 'seoFeed',
+    defaultValue: 1,
+    min: 1,
+    max: 2,
+    options: [
+      { label: '裁切内容', value: 1 },
+      { label: '日期', value: 2 }
+    ]
+  },
+  {
+    name: 'siteShowRssInFooter',
+    label: '底部显示 RSS',
+    type: 'boolean',
+    group: 'seoFeed',
+    defaultValue: false
+  },
+  {
+    name: 'siteEnableSitemap',
+    label: '开启站点地图',
+    type: 'boolean',
+    group: 'seoFeed',
+    defaultValue: false
+  },
+  {
+    name: 'siteShowSitemapInFooter',
+    label: '底部显示站点地图',
+    type: 'boolean',
+    group: 'seoFeed',
+    defaultValue: false
   }
 ]
 
@@ -180,9 +230,30 @@ function normalizeBooleanValue(value) {
   return false
 }
 
+function normalizeNumberValue(field, value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return field.defaultValue
+  }
+
+  let normalizedValue = Math.round(numberValue)
+  if (field.min && normalizedValue < field.min) {
+    normalizedValue = field.min
+  }
+  if (field.max && normalizedValue > field.max) {
+    normalizedValue = field.max
+  }
+
+  return normalizedValue
+}
+
 function normalizeValue(field, value) {
   if (field.type === 'boolean') {
     return normalizeBooleanValue(value)
+  }
+
+  if (field.type === 'number' || field.type === 'radio') {
+    return normalizeNumberValue(field, value)
   }
 
   if (value === null || typeof value === 'undefined') {

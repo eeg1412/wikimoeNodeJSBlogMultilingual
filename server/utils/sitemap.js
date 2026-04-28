@@ -8,7 +8,52 @@ const {
   SUPPORTED_LANGUAGE_CODES,
   normalizeLanguageCode
 } = require('./language')
+const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
+const {
+  getSourceSeoSettings,
+  normalizeSiteUrl
+} = require('./sourceSeoSettings')
 const sitemapCacheFolder = './seo/sitemap'
+const sitemapXslUrl = '/api/multilingual-asset/sitemap.xsl'
+
+const LANGUAGE_SITEMAP_SETTING_NAMES = [
+  'siteEnableSitemap',
+  'siteShowSitemapInFooter'
+]
+
+function pickLanguageSitemapSettings(values) {
+  const sitemapSettings = {}
+  LANGUAGE_SITEMAP_SETTING_NAMES.forEach(name => {
+    sitemapSettings[name] = values[name]
+  })
+
+  return sitemapSettings
+}
+
+async function getLanguageSeoSettings(languageCode) {
+  const sourceSettings = await getSourceSeoSettings()
+  const languageSettings =
+    await languageSettingsService.getLanguageSettings(languageCode)
+  const values = languageSettings.values || {}
+  const configuredNames = languageSettings.configuredNames || []
+  const languageValues = {}
+  configuredNames.forEach(name => {
+    languageValues[name] = values[name]
+  })
+  const languageSitemapSettings = pickLanguageSitemapSettings(values)
+  const siteSettings = global.$globalConfig?.siteSettings || {}
+  const siteUrl = normalizeSiteUrl(
+    sourceSettings.siteUrl || siteSettings.siteUrl || languageValues.siteUrl
+  )
+
+  return {
+    ...sourceSettings,
+    ...siteSettings,
+    ...languageValues,
+    ...languageSitemapSettings,
+    siteUrl
+  }
+}
 
 function getPostSitemapUrl(languageCode, post) {
   const pathType = post.type === 3 ? 'page' : 'post'
@@ -54,7 +99,7 @@ exports.updateSitemap = async () => {
     // 创建SitemapStream实例
     const sitemapStream = new SitemapStream({
       hostname: siteUrl,
-      xslUrl: '/multilingual-assets/sitemap.xsl'
+      xslUrl: sitemapXslUrl
     })
     const writeStream = createWriteStream(
       path.join(sitemapCacheFolder, 'sitemap.xml')
@@ -154,12 +199,24 @@ exports.updateLanguageSitemap = async languageCodeInput => {
     throw new Error('LANGUAGE_CODE_UNSUPPORTED')
   }
 
-  const siteSettings = global.$globalConfig?.siteSettings || {}
+  const siteSettings = await getLanguageSeoSettings(languageCode)
   const { siteUrl, siteEnableSitemap } = siteSettings
   const sitemapFolder = path.join(sitemapCacheFolder, languageCode)
   const sitemapPath = path.join(sitemapFolder, 'sitemap.xml')
 
   if (siteEnableSitemap !== true) {
+    try {
+      await access(sitemapPath)
+      await unlink(sitemapPath)
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error
+      }
+    }
+    return null
+  }
+  if (!siteUrl) {
+    console.warn(`sitemap:${languageCode} siteUrl is empty or invalid`)
     try {
       await access(sitemapPath)
       await unlink(sitemapPath)
@@ -177,7 +234,7 @@ exports.updateLanguageSitemap = async languageCodeInput => {
     console.info(`creating sitemap:${languageCode}`)
     const sitemapStream = new SitemapStream({
       hostname: siteUrl,
-      xslUrl: '/multilingual-assets/sitemap.xsl'
+      xslUrl: sitemapXslUrl
     })
     const writeStream = createWriteStream(sitemapPath)
     sitemapStream.pipe(writeStream)

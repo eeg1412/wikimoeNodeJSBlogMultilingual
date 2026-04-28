@@ -1,4 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import {
+  SOURCE_RELATION_ROUTE_NAME_MAP,
+  TRANSLATION_RELATION_ROUTE_NAME_MAP
+} from '../views/index/relation/relationCollection'
+
+const getRelationRedirectQuery = query => {
+  const redirectQuery = {}
+  if (query.keyword) {
+    redirectQuery.keyword = query.keyword
+  }
+  if (query.languageCode) {
+    redirectQuery.languageCode = query.languageCode
+  }
+
+  return redirectQuery
+}
 
 const routes = [
   {
@@ -27,8 +43,44 @@ const routes = [
       {
         path: '/source/relation/list',
         name: 'SourceRelationList',
-        component: () => import('../views/index/relation/RelationList.vue'),
-        meta: { scope: 'source' }
+        component: () =>
+          import('../views/index/relation/SourceRelationList.vue'),
+        beforeEnter: to => {
+          const routeName =
+            SOURCE_RELATION_ROUTE_NAME_MAP[to.query.collectionName]
+          if (!routeName) {
+            return true
+          }
+
+          return {
+            name: routeName,
+            query: getRelationRedirectQuery(to.query)
+          }
+        }
+      },
+      {
+        path: '/source/author/list',
+        name: 'SourceAuthorRelationList',
+        component: () =>
+          import('../views/index/relation/SourceAuthorRelationList.vue')
+      },
+      {
+        path: '/source/sort/list',
+        name: 'SourceSortRelationList',
+        component: () =>
+          import('../views/index/relation/SourceSortRelationList.vue')
+      },
+      {
+        path: '/source/tag/list',
+        name: 'SourceTagRelationList',
+        component: () =>
+          import('../views/index/relation/SourceTagRelationList.vue')
+      },
+      {
+        path: '/source/mappoint/list',
+        name: 'SourceMappointRelationList',
+        component: () =>
+          import('../views/index/relation/SourceMappointRelationList.vue')
       },
       {
         path: '/source/media/snapshot/list',
@@ -52,8 +104,44 @@ const routes = [
       {
         path: '/translation/relation/list',
         name: 'RelationList',
-        component: () => import('../views/index/relation/RelationList.vue'),
-        meta: { scope: 'translation' }
+        component: () =>
+          import('../views/index/relation/TranslationRelationList.vue'),
+        beforeEnter: to => {
+          const routeName =
+            TRANSLATION_RELATION_ROUTE_NAME_MAP[to.query.collectionName]
+          if (!routeName) {
+            return true
+          }
+
+          return {
+            name: routeName,
+            query: getRelationRedirectQuery(to.query)
+          }
+        }
+      },
+      {
+        path: '/translation/author/list',
+        name: 'TranslationAuthorRelationList',
+        component: () =>
+          import('../views/index/relation/TranslationAuthorRelationList.vue')
+      },
+      {
+        path: '/translation/sort/list',
+        name: 'TranslationSortRelationList',
+        component: () =>
+          import('../views/index/relation/TranslationSortRelationList.vue')
+      },
+      {
+        path: '/translation/tag/list',
+        name: 'TranslationTagRelationList',
+        component: () =>
+          import('../views/index/relation/TranslationTagRelationList.vue')
+      },
+      {
+        path: '/translation/mappoint/list',
+        name: 'TranslationMappointRelationList',
+        component: () =>
+          import('../views/index/relation/TranslationMappointRelationList.vue')
       },
       {
         path: '/translation/media/list',
@@ -66,6 +154,12 @@ const routes = [
         path: '/settings/multilingual',
         name: 'MultilingualConfig',
         component: () => import('../views/index/config/MultilingualConfig.vue')
+      },
+      {
+        path: '/settings/media',
+        name: 'MultilingualMediaSettings',
+        component: () =>
+          import('../views/index/config/MultilingualMediaSettings.vue')
       },
       {
         path: '/home',

@@ -57,6 +57,27 @@
                     v-else-if="field.type === 'boolean'"
                     v-model="settingsMap[item.value][field.name]"
                   />
+                  <el-input-number
+                    v-else-if="field.type === 'number'"
+                    v-model="settingsMap[item.value][field.name]"
+                    controls-position="right"
+                    :min="field.min || 1"
+                    :max="field.max"
+                    :step="1"
+                    :precision="0"
+                  />
+                  <el-radio-group
+                    v-else-if="field.type === 'radio'"
+                    v-model="settingsMap[item.value][field.name]"
+                  >
+                    <el-radio
+                      v-for="option in field.options || []"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </el-radio>
+                  </el-radio-group>
                   <el-input
                     v-else-if="field.type === 'textarea'"
                     v-model="settingsMap[item.value][field.name]"
@@ -105,7 +126,8 @@ const FIELD_GROUP_OPTIONS = [
   { label: 'SEO', value: 'seo' },
   { label: '品牌图片', value: 'assets' },
   { label: '分享与页脚', value: 'share' },
-  { label: '文章页', value: 'post' }
+  { label: '文章页', value: 'post' },
+  { label: 'RSS 与站点地图', value: 'seoFeed' }
 ]
 
 export default {

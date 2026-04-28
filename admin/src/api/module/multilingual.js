@@ -56,6 +56,18 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
+    getMediaSettings(data = {}, noLoading = false) {
+      return api.get('/settings/media/get', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    updateMediaSettings(data) {
+      return api.put('/settings/media/update', data, {
+        shouldAdminJWT: true
+      })
+    },
     createTranslationPost(data) {
       return api.post('/translation/post/create', data, {
         shouldAdminJWT: true

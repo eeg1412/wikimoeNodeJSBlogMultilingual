@@ -202,6 +202,40 @@ function parsePositiveInteger(value, defaultValue, maxValue) {
   return numberValue
 }
 
+function parseCollectionNameList(value) {
+  if (!value) {
+    return []
+  }
+
+  let rawList = value
+  if (!Array.isArray(rawList)) {
+    rawList = String(value).split(',')
+  }
+
+  const collectionNameList = []
+  rawList.forEach(rawItem => {
+    const collectionName = String(rawItem || '').trim()
+    if (!collectionName) {
+      return
+    }
+
+    if (!ALLOWED_COLLECTION_NAMES.has(collectionName)) {
+      throw new ApiError(
+        ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+        'collectionName is not supported',
+        'excludeCollectionNames',
+        400
+      )
+    }
+
+    if (!collectionNameList.includes(collectionName)) {
+      collectionNameList.push(collectionName)
+    }
+  })
+
+  return collectionNameList
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -237,6 +271,9 @@ function parseRelationListQuery(query = {}) {
 
   return {
     collectionName,
+    excludeCollectionNames: parseCollectionNameList(
+      query.excludeCollectionNames
+    ),
     languageCode,
     recordKind,
     keyword: String(query.keyword || '').trim(),
@@ -255,6 +292,8 @@ function buildKeywordParams(keyword) {
     { title: reg },
     { excerpt: reg },
     { name: reg },
+    { nickname: reg },
+    { username: reg },
     { tagname: reg },
     { sortname: reg },
     { filename: reg },
@@ -281,6 +320,8 @@ function getRelationDisplayName(record) {
     record.title ||
     record.excerpt ||
     record.name ||
+    record.nickname ||
+    record.username ||
     record.tagname ||
     record.sortname ||
     record.filename ||
@@ -317,7 +358,9 @@ function toRelationListItem(item, collectionName) {
 async function listRelationsAcrossCollections(input) {
   const collectionNameList = input.collectionName
     ? [input.collectionName]
-    : DEFAULT_LIST_COLLECTION_NAMES
+    : DEFAULT_LIST_COLLECTION_NAMES.filter(collectionName => {
+        return !input.excludeCollectionNames.includes(collectionName)
+      })
   const params = buildRelationListParams(input)
   const resultList = []
 

@@ -7,6 +7,17 @@ const {
 
 const adminApiLog = log4js.getLogger('adminApi')
 
+function getLoginAttemptLimitSettings() {
+  return {
+    siteAdminLoginAttemptTime:
+      Number(global.$globalConfig?.otherSettings?.siteAdminLoginAttemptTime) ||
+      5,
+    siteAdminLoginMaxAttempts:
+      Number(global.$globalConfig?.otherSettings?.siteAdminLoginMaxAttempts) ||
+      3
+  }
+}
+
 function getUserLoginLogModel() {
   return global.$mongodDB.multilingual.repositories.userLoginLogs.model
 }
@@ -33,8 +44,33 @@ module.exports = async function multilingualAdminLogin(req, res) {
     const remember = req.body.remember === true
     const ip = utils.getUserIp(req)
     const limitedUsername = utils.limitStr(String(username || ''), 50)
-    const ipInfo = await utils.IP2LocationUtils(ip, null, null, false)
     const deviceInfo = utils.deviceUAInfoUtils(req)
+
+    const { siteAdminLoginAttemptTime, siteAdminLoginMaxAttempts } =
+      getLoginAttemptLimitSettings()
+    const timeThreshold = new Date(
+      Date.now() - siteAdminLoginAttemptTime * 60 * 1000
+    )
+    const recentAttempts = await getUserLoginLogModel().countDocuments({
+      ip,
+      success: false,
+      date: { $gte: timeThreshold }
+    })
+
+    if (recentAttempts >= siteAdminLoginMaxAttempts) {
+      adminApiLog.warn(
+        `multilingual admin:${limitedUsername} from IP:${ip} try login but too many attempts`
+      )
+      sendError(
+        res,
+        429,
+        ERROR_CODES.AUTH_TOO_MANY_ATTEMPTS,
+        '登录失败次数过多，请稍后再试'
+      )
+      return
+    }
+
+    const ipInfo = await utils.IP2LocationUtils(ip, null, null, false)
 
     if (typeof username !== 'string' || typeof password !== 'string') {
       await saveLoginLog(

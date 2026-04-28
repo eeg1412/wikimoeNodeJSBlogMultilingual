@@ -38,7 +38,7 @@
                 v-for="(item, index) in sidebarSettingsTemplate"
                 :key="item.type"
                 :command="item.type"
-                >{{ item.title }}</el-dropdown-item
+                >{{ getSidebarTemplateMenuTitle(item) }}</el-dropdown-item
               >
             </el-dropdown-menu>
           </template>
@@ -328,6 +328,10 @@ export default {
       }
     }
 
+    const getSidebarTemplateMenuTitle = item => {
+      return getLocalizedSidebarBuiltinTitle(item?.type, 'zh-CN') || item?.title
+    }
+
     const sidebarSettingsTemplate = computed(() => {
       // 检查 sidebarSettingsForm 里存在的 type，如果存在，只输出sidebarSettingsForm中没有的type
       const typeList = sidebarSettingsForm.value.map(item => item.type)
@@ -441,12 +445,20 @@ export default {
       })
     }
 
+    const relationRouteNameMap = {
+      users: 'TranslationAuthorRelationList',
+      sorts: 'TranslationSortRelationList',
+      tags: 'TranslationTagRelationList',
+      mappoints: 'TranslationMappointRelationList'
+    }
+
     const goRelationList = collectionName => {
       router.push({
-        name: 'RelationList',
+        name:
+          relationRouteNameMap[collectionName] ||
+          'TranslationAuthorRelationList',
         query: {
-          languageCode: params.languageCode,
-          collectionName
+          languageCode: params.languageCode
         }
       })
     }
@@ -466,6 +478,7 @@ export default {
       showTextInputTypeList,
       showTextareaTypeList,
       placeholderMap,
+      getSidebarTemplateMenuTitle,
       getSidebarList,
       handleSideBarCommand,
       sidebarSettingsSubmit,

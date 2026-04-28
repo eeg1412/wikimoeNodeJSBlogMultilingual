@@ -171,6 +171,16 @@ import store from '@/store'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 export default {
+  props: {
+    getSettingsApi: {
+      type: Function,
+      default: null
+    },
+    updateSettingsApi: {
+      type: Function,
+      default: null
+    }
+  },
   setup(props, { emit }) {
     const mediaFormRef = ref(null)
     // // 开启图片压缩
@@ -235,12 +245,16 @@ export default {
               value: mediaForm[key]
             })
           })
-          authApi
-            .updateOption({ optionList: params })
+          const request = props.updateSettingsApi
+            ? props.updateSettingsApi(params)
+            : authApi.updateOption({ optionList: params })
+
+          request
             .then(res => {
-              const obj = formatResToObj(res.data.data)
-              formatResToForm(mediaForm, obj)
-              store.dispatch('setOptions')
+              applyResponseToForm(res)
+              if (!props.updateSettingsApi) {
+                store.dispatch('setOptions')
+              }
               emit('submitSuccess')
 
               ElMessage.success('更新成功')
@@ -256,6 +270,22 @@ export default {
       })
     }
     const inited = ref(false)
+    const applyResponseToForm = res => {
+      const responseData = res.data.data
+      if (Array.isArray(responseData)) {
+        const obj = formatResToObj(responseData)
+        formatResToForm(mediaForm, obj)
+        return
+      }
+
+      if (responseData?.values) {
+        formatResToForm(mediaForm, responseData.values)
+        return
+      }
+
+      formatResToForm(mediaForm, responseData || {})
+    }
+
     const getOptionList = () => {
       // 将mediaForm的key转换为数组
       const params = {
@@ -264,12 +294,13 @@ export default {
       Object.keys(mediaForm).forEach(key => {
         params.nameList.push(key)
       })
-      authApi
-        .getOptionList(params)
+      const request = props.getSettingsApi
+        ? props.getSettingsApi(params.nameList)
+        : authApi.getOptionList(params)
+
+      request
         .then(res => {
-          // res.data.data是数组，需要转换为对象
-          const obj = formatResToObj(res.data.data)
-          formatResToForm(mediaForm, obj)
+          applyResponseToForm(res)
         })
         .finally(() => {
           inited.value = true

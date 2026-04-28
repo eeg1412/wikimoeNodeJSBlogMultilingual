@@ -1,7 +1,7 @@
 <template>
   <div class="editor-body richeditor-5">
     <Toolbar
-      style="border-bottom: 1px solid #ccc"
+      style="border-bottom: 1px solid var(--el-border-color)"
       :editor="editorRef"
       :defaultConfig="toolbarConfig"
       :mode="mode"
@@ -572,6 +572,51 @@ export default {
 }
 .richeditor-5 .w-e-text-container [data-slate-editor] .w-e-image-container {
   margin: 0;
+}
+
+html.dark .richeditor-5 {
+  border-color: var(--el-border-color);
+  background-color: var(--w-e-textarea-bg-color);
+  color: var(--w-e-textarea-color);
+}
+
+html.dark .richeditor-5 .w-e-toolbar,
+html.dark .richeditor-5 .w-e-text-container,
+html.dark .richeditor-5 .w-e-menu-panel {
+  border-color: var(--w-e-toolbar-border-color);
+  background-color: var(--w-e-toolbar-bg-color);
+  color: var(--w-e-toolbar-color);
+}
+
+html.dark .richeditor-5 .w-e-text-container,
+html.dark .richeditor-5 .w-e-text-container [data-slate-editor] {
+  background-color: var(--w-e-textarea-bg-color);
+  color: var(--w-e-textarea-color);
+}
+
+html.dark .richeditor-5 .w-e-bar-item button,
+html.dark .richeditor-5 .w-e-bar-item .title,
+html.dark .richeditor-5 .w-e-bar-item svg {
+  color: var(--w-e-toolbar-color);
+  fill: var(--w-e-toolbar-color);
+}
+
+html.dark .richeditor-5 .w-e-bar-divider {
+  background-color: var(--w-e-toolbar-border-color);
+}
+
+html.dark .richeditor-5 .w-e-bar-item button:hover,
+html.dark .richeditor-5 .w-e-bar-item button.active {
+  background-color: var(--w-e-toolbar-active-bg-color);
+  color: var(--w-e-toolbar-active-color);
+}
+
+html.dark .richeditor-5 .w-e-drop-panel,
+html.dark .richeditor-5 .w-e-select-list,
+html.dark .richeditor-5 .w-e-modal {
+  border-color: var(--el-border-color);
+  background-color: var(--el-bg-color-overlay);
+  color: var(--el-text-color-primary);
 }
 </style>
 <style scoped>

@@ -139,6 +139,26 @@ const menuGroups = [
         icon: 'fas fa-fw fa-newspaper pr10'
       },
       {
+        name: 'SourceAuthorRelationList',
+        title: '源作者',
+        icon: 'fas fa-fw fa-user pr10'
+      },
+      {
+        name: 'SourceSortRelationList',
+        title: '源分类',
+        icon: 'fas fa-fw fa-folder pr10'
+      },
+      {
+        name: 'SourceTagRelationList',
+        title: '源标签',
+        icon: 'fas fa-fw fa-tags pr10'
+      },
+      {
+        name: 'SourceMappointRelationList',
+        title: '源地点',
+        icon: 'fas fa-fw fa-map-marker-alt pr10'
+      },
+      {
         name: 'SourceRelationList',
         title: '源关联内容',
         icon: 'fas fa-fw fa-project-diagram pr10'
@@ -159,6 +179,26 @@ const menuGroups = [
         name: 'TranslationPostList',
         title: '多语言文章',
         icon: 'fas fa-fw fa-newspaper pr10'
+      },
+      {
+        name: 'TranslationAuthorRelationList',
+        title: '作者',
+        icon: 'fas fa-fw fa-user pr10'
+      },
+      {
+        name: 'TranslationSortRelationList',
+        title: '分类',
+        icon: 'fas fa-fw fa-folder pr10'
+      },
+      {
+        name: 'TranslationTagRelationList',
+        title: '标签',
+        icon: 'fas fa-fw fa-tags pr10'
+      },
+      {
+        name: 'TranslationMappointRelationList',
+        title: '地点',
+        icon: 'fas fa-fw fa-map-marker-alt pr10'
       },
       {
         name: 'RelationList',
@@ -196,6 +236,11 @@ const menuGroups = [
         name: 'MultilingualConfig',
         title: '多语言站点配置',
         icon: 'fas fa-fw fa-sliders-h pr10'
+      },
+      {
+        name: 'MultilingualMediaSettings',
+        title: '媒体设置',
+        icon: 'fas fa-fw fa-photo-video pr10'
       }
     ]
   },

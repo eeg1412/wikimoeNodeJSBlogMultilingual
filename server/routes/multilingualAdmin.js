@@ -98,6 +98,18 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/auth/getLoginUserInfo')
   },
   {
+    path: '/settings/media/get',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/settings/media/get')
+  },
+  {
+    path: '/settings/media/update',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/settings/media/update')
+  },
+  {
     path: '/dashboard/summary',
     method: 'get',
     middleware: [checkAuth],
@@ -394,7 +406,7 @@ const multilingualAdminRouteSetting = [
   {
     path: '/media/replace-local',
     method: 'post',
-    middleware: [checkAuth, upload.single('file')],
+    middleware: [checkAuth, upload.any()],
     controller: require('../api/multilingual-admin/media/replaceLocal')
   },
   {

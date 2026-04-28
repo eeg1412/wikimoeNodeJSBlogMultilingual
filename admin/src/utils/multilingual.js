@@ -270,6 +270,10 @@ export function getRelationDisplayName(record) {
     return record.nickname
   }
 
+  if (record.username) {
+    return record.username
+  }
+
   if (record.filename) {
     return record.filename
   }
