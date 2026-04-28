@@ -572,13 +572,41 @@
             v-if="aiSkippedEntries.length > 0 && !aiImportPreview"
             class="translation-json-warning-list"
           >
-            <div class="translation-json-group-title">已跳过条目</div>
+            <div class="ai-skipped-header">
+              <div class="translation-json-group-title">
+                暂未翻译的关联内容
+              </div>
+              <el-button
+                v-if="creatableAiSkippedEntries.length > 0"
+                size="small"
+                type="primary"
+                plain
+                :loading="creatingAllSkippedTranslations"
+                :disabled="isAiBusy"
+                @click="createAllSkippedTranslations"
+              >
+                全部创建
+              </el-button>
+            </div>
             <div
               v-for="item in aiSkippedEntries"
               :key="item.id"
-              class="translation-json-warning-item"
+              class="translation-json-warning-item ai-skipped-item"
             >
-              {{ item.label || item.id }}：{{ item.reason }}
+              <span>{{
+                item.message || `${item.label || item.id}：${item.reason}`
+              }}</span>
+              <el-button
+                v-if="canCreateSkippedTranslation(item)"
+                size="small"
+                type="primary"
+                link
+                :loading="isSkippedTranslationCreating(item)"
+                :disabled="isAiBusy || creatingAllSkippedTranslations"
+                @click="createSkippedTranslation(item)"
+              >
+                创建
+              </el-button>
             </div>
           </div>
 
@@ -853,8 +881,10 @@ import { multilingualApi } from '@/api'
 import store from '@/store'
 import {
   getLanguageText,
+  getPostDisplayTitle,
   getPostStatusText,
-  getPostTypeText
+  getPostTypeText,
+  getRelationDisplayName
 } from '@/utils/multilingual'
 import { loadAndOpenImg, nowTimestampToBase36WithRandom } from '@/utils/utils'
 import {
@@ -1042,6 +1072,21 @@ function groupEntryList(entryList) {
   })
 }
 
+function getRelationRecordDisplayName(record, field = {}) {
+  if (!record) {
+    return '-'
+  }
+
+  if (field.collectionName === 'posts') {
+    return getPostDisplayTitle({
+      ...record,
+      type: record.type || field.postType
+    })
+  }
+
+  return getRelationDisplayName(record)
+}
+
 const RelationSelectedList = defineComponent({
   name: 'RelationSelectedList',
   props: {
@@ -1051,19 +1096,7 @@ const RelationSelectedList = defineComponent({
   emits: ['edit'],
   setup(props, { emit }) {
     const getName = record => {
-      return (
-        record.displayName ||
-        record.title ||
-        record.excerpt ||
-        record.nickname ||
-        record.username ||
-        record.name ||
-        record.tagname ||
-        record.sortname ||
-        record.filename ||
-        record.alias ||
-        record._id
-      )
+      return getRelationRecordDisplayName(record, props.field)
     }
 
     return () => {
@@ -1211,6 +1244,8 @@ export default {
     const aiStreamStatusList = ref([])
     const aiStreamContent = ref('')
     const aiStreamReasoning = ref('')
+    const skippedTranslationCreatingIds = ref([])
+    const creatingAllSkippedTranslations = ref(false)
 
     const typeTitle = computed(() => getPostTypeText(form.type))
     const relationEditFields = computed(() => {
@@ -1230,21 +1265,8 @@ export default {
       return ALL_RELATION_FIELDS.find(item => item.field === fieldName)
     }
 
-    function getRelationName(record) {
-      return (
-        record?.displayName ||
-        record?.title ||
-        record?.excerpt ||
-        record?.nickname ||
-        record?.username ||
-        record?.name ||
-        record?.tagname ||
-        record?.sortname ||
-        record?.filename ||
-        record?.alias ||
-        record?._id ||
-        '-'
-      )
+    function getRelationName(record, field = {}) {
+      return getRelationRecordDisplayName(record, field)
     }
 
     const authorRecord = computed(() => relationRecords.author[0] || null)
@@ -1265,6 +1287,11 @@ export default {
     })
     const aiImportPreviewGroups = computed(() => {
       return groupEntryList(aiImportPreview.value?.changeList || [])
+    })
+    const creatableAiSkippedEntries = computed(() => {
+      return aiSkippedEntries.value.filter(item => {
+        return canCreateSkippedTranslation(item)
+      })
     })
     const isAiBusy = computed(() => {
       return aiTranslating.value || aiApplying.value
@@ -1313,8 +1340,8 @@ export default {
       })
     }
 
-    async function loadSourceReferenceEntries() {
-      if (sourceReferenceEntries.value.length > 0) {
+    async function loadSourceReferenceEntries(options = {}) {
+      if (!options.force && sourceReferenceEntries.value.length > 0) {
         return {
           entries: sourceReferenceEntries.value,
           skippedEntries: []
@@ -1892,9 +1919,109 @@ export default {
       selectedAiEntryIds.value = []
       aiPrompt.value = ''
       aiImportPreview.value = null
+      sourceReferenceEntries.value = []
       aiStreamStatusList.value = []
       aiStreamContent.value = ''
       aiStreamReasoning.value = ''
+      skippedTranslationCreatingIds.value = []
+      creatingAllSkippedTranslations.value = false
+    }
+
+    function canCreateSkippedTranslation(item) {
+      return Boolean(
+        item &&
+          item.actionType === 'createTranslationPost' &&
+          item.sourceSnapshotId &&
+          item.relationField
+      )
+    }
+
+    function isSkippedTranslationCreating(item) {
+      return skippedTranslationCreatingIds.value.includes(item.id)
+    }
+
+    function setSkippedTranslationCreating(item, isCreating) {
+      const idList = skippedTranslationCreatingIds.value.filter(id => {
+        return id !== item.id
+      })
+      if (isCreating) {
+        idList.push(item.id)
+      }
+      skippedTranslationCreatingIds.value = idList
+    }
+
+    function applyPostDetailData(nextDetailData) {
+      if (!nextDetailData || !nextDetailData.post) {
+        return false
+      }
+      detailData.value = nextDetailData
+      applyPost(nextDetailData.post)
+      return true
+    }
+
+    async function refreshAiTranslationCandidates(nextDetailData = null) {
+      aiLoading.value = true
+      sourceReferenceEntries.value = []
+      try {
+        const isDetailApplied = applyPostDetailData(nextDetailData)
+        if (!isDetailApplied) {
+          await getPostDetail()
+        }
+        const mappedResult = await loadSourceReferenceEntries({ force: true })
+        aiEntryList.value = mappedResult.entries
+        aiSkippedEntries.value = mappedResult.skippedEntries
+        selectedAiEntryIds.value = aiEntryList.value
+          .filter(entry => entry.defaultSelected)
+          .map(entry => entry.id)
+      } finally {
+        aiLoading.value = false
+      }
+    }
+
+    async function createSkippedTranslation(item) {
+      if (!canCreateSkippedTranslation(item)) {
+        return
+      }
+
+      setSkippedTranslationCreating(item, true)
+      try {
+        const response = await multilingualApi.createMissingPostRelationTranslation({
+          postId: form.id,
+          sourceSnapshotId: item.sourceSnapshotId,
+          relationField: item.relationField
+        })
+        const responseData = response.data.data || {}
+        await refreshAiTranslationCandidates(responseData.post)
+        ElMessage.success('已创建关联文章语言版本')
+      } finally {
+        setSkippedTranslationCreating(item, false)
+      }
+    }
+
+    async function createAllSkippedTranslations() {
+      const itemList = creatableAiSkippedEntries.value
+      if (itemList.length === 0) {
+        return
+      }
+
+      creatingAllSkippedTranslations.value = true
+      skippedTranslationCreatingIds.value = itemList.map(item => item.id)
+      try {
+        let lastResponseData = null
+        for (const item of itemList) {
+          const response = await multilingualApi.createMissingPostRelationTranslation({
+            postId: form.id,
+            sourceSnapshotId: item.sourceSnapshotId,
+            relationField: item.relationField
+          })
+          lastResponseData = response.data.data || null
+        }
+        await refreshAiTranslationCandidates(lastResponseData?.post || null)
+        ElMessage.success(`已创建 ${itemList.length} 个关联文章语言版本`)
+      } finally {
+        creatingAllSkippedTranslations.value = false
+        skippedTranslationCreatingIds.value = []
+      }
     }
 
     function resetAiStreamState() {
@@ -1934,7 +2061,7 @@ export default {
       resetAiTranslationState()
       aiDialogVisible.value = true
       aiLoading.value = true
-      loadSourceReferenceEntries()
+      loadSourceReferenceEntries({ force: true })
         .then(mappedResult => {
           aiEntryList.value = mappedResult.entries
           aiSkippedEntries.value = mappedResult.skippedEntries
@@ -2190,9 +2317,14 @@ export default {
       aiTranslating,
       authorName,
       authorRecord,
+      canCreateSkippedTranslation,
       clearAiEntries,
       contentSource,
       contentTab,
+      creatableAiSkippedEntries,
+      createAllSkippedTranslations,
+      createSkippedTranslation,
+      creatingAllSkippedTranslations,
       confirmAiTranslationImport,
       confirmReview,
       detailData,
@@ -2210,6 +2342,7 @@ export default {
       getVideoPreviewUrl,
       goList,
       isImageAttachment,
+      isSkippedTranslationCreating,
       isVideoAttachment,
       loading,
       onContentTabChange,
@@ -2444,6 +2577,18 @@ export default {
   margin-bottom: 10px;
 }
 
+.ai-skipped-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.ai-skipped-header .translation-json-group-title {
+  margin-bottom: 0;
+}
+
 .translation-json-entry-list {
   display: grid;
   gap: 10px;
@@ -2476,6 +2621,17 @@ export default {
 
 .translation-json-hidden-input {
   display: none;
+}
+
+.ai-skipped-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-skipped-item span {
+  min-width: 0;
 }
 
 .translation-import-preview-section {
@@ -2605,6 +2761,16 @@ export default {
   .translation-json-toolbar-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .ai-skipped-header,
+  .ai-skipped-item {
+    align-items: flex-start;
+  }
+
+  .ai-skipped-item {
+    flex-direction: column;
+    gap: 4px;
   }
 }
 </style>

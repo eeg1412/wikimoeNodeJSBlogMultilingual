@@ -1223,11 +1223,23 @@ function buildTranslatedPayload(input, post, resultData) {
     if (entry.recordId) {
       outputEntry.recordId = entry.recordId
     }
+    if (entry.recordKind) {
+      outputEntry.recordKind = entry.recordKind
+    }
+    if (entry.sourceRecordId) {
+      outputEntry.sourceRecordId = entry.sourceRecordId
+    }
     if (entry.recordLabel) {
       outputEntry.recordLabel = entry.recordLabel
     }
     if (entry.sourceId) {
       outputEntry.sourceId = entry.sourceId
+    }
+    if (entry.sourceSnapshotId) {
+      outputEntry.sourceSnapshotId = entry.sourceSnapshotId
+    }
+    if (entry.relationTypeLabel) {
+      outputEntry.relationTypeLabel = entry.relationTypeLabel
     }
     if (entry.assets && Object.keys(entry.assets).length > 0) {
       outputEntry.assets = entry.assets

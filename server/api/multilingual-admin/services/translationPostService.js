@@ -1186,6 +1186,56 @@ function parseCreateInput(body = {}) {
   }
 }
 
+function parseCreateRelationTranslationInput(body = {}) {
+  const postId = String(body.postId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_ID_INVALID,
+      'translation post id invalid',
+      'postId',
+      400
+    )
+  }
+
+  const sourceSnapshotId = String(body.sourceSnapshotId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      undefined,
+      'sourceSnapshotId',
+      404
+    )
+  }
+
+  const relationField = String(body.relationField || '').trim()
+  if (POST_ARRAY_RELATION_COLLECTIONS[relationField] !== SOURCE_POST_COLLECTION) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'relationField is not a post relation field',
+      'relationField',
+      400
+    )
+  }
+
+  return {
+    postId,
+    sourceSnapshotId,
+    relationField
+  }
+}
+
+async function findExistingTranslationForSourcePost(sourcePost, languageCode) {
+  const translationGroupId = sourcePost.translationGroupId || sourcePost._id
+  const PostModel = getPostModel()
+  return await PostModel.findOne({
+    translationGroupId,
+    languageCode,
+    recordKind: TRANSLATION_RECORD_KIND
+  })
+    .select('_id translationGroupId languageCode')
+    .lean()
+}
+
 async function createTranslationPost(body = {}) {
   const input = parseCreateInput(body)
   let sourcePost = await findSourcePostSnapshot(input.sourceSnapshotId)
@@ -1237,6 +1287,64 @@ async function createTranslationPost(body = {}) {
     translationGroupId,
     languageCode: input.languageCode,
     copiedCounts: context.copiedCounts
+  }
+}
+
+async function createMissingPostRelationTranslation(body = {}) {
+  const input = parseCreateRelationTranslationInput(body)
+  const PostModel = getPostModel()
+  const post = await PostModel.findOne({
+    _id: new mongoose.Types.ObjectId(input.postId),
+    recordKind: TRANSLATION_RECORD_KIND
+  }).lean()
+
+  if (!post) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      'translation post not found',
+      'postId',
+      404
+    )
+  }
+
+  let sourcePost = await findSourcePostSnapshot(input.sourceSnapshotId)
+  sourcePost = await ensureSourcePostSnapshotRelations(sourcePost)
+  let translationPostId = null
+  let created = false
+  const existingTranslation = await findExistingTranslationForSourcePost(
+    sourcePost,
+    post.languageCode
+  )
+
+  if (existingTranslation) {
+    translationPostId = existingTranslation._id
+  } else {
+    const createResult = await createTranslationPost({
+      sourceSnapshotId: input.sourceSnapshotId,
+      languageCode: post.languageCode,
+      copyMode: 'source'
+    })
+    translationPostId = createResult.translationPostId
+    created = true
+  }
+
+  await PostModel.updateOne(
+    { _id: post._id, recordKind: TRANSLATION_RECORD_KIND },
+    {
+      $addToSet: {
+        [input.relationField]: translationPostId
+      },
+      $set: {
+        lastChangDate: new Date()
+      }
+    }
+  )
+
+  return {
+    post: await getTranslationPostDetail(post._id),
+    relationField: input.relationField,
+    translationPostId,
+    created
   }
 }
 
@@ -1538,6 +1646,7 @@ async function updateTranslationPost(body = {}) {
 }
 
 module.exports = {
+  createMissingPostRelationTranslation,
   createTranslationPost,
   getTranslationPostListBySource,
   getTranslationPostDetail,

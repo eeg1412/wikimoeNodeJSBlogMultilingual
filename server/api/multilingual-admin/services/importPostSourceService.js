@@ -239,8 +239,26 @@ function hasRelationValue(value) {
   return Boolean(value)
 }
 
+function isRelationRecordMissingSourceId(record) {
+  return isDocumentObject(record) && !record.sourceId
+}
+
+function hasMissingRelationSourceId(value) {
+  if (Array.isArray(value)) {
+    return value.some(item => isRelationRecordMissingSourceId(item))
+  }
+
+  return isRelationRecordMissingSourceId(value)
+}
+
 function needsSourcePostRelationRepair(post) {
-  return !hasRelationValue(post.author)
+  if (!hasRelationValue(post.author)) {
+    return true
+  }
+
+  return POST_RELATION_FIELDS.some(field => {
+    return hasMissingRelationSourceId(post[field])
+  })
 }
 
 function cloneValue(value) {

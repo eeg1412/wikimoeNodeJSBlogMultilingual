@@ -92,6 +92,11 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
+    createMissingPostRelationTranslation(data) {
+      return api.post('/translation/post/create-relation-translation', data, {
+        shouldAdminJWT: true
+      })
+    },
     getTranslationPostListBySource(data, noLoading = false) {
       return api.get('/translation/post/list-by-source', {
         params: data,

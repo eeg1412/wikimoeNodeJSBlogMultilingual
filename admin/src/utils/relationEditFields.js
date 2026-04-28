@@ -1,3 +1,8 @@
+import {
+  getPostDisplayTitle,
+  getRelationDisplayName
+} from '@/utils/multilingual'
+
 export const RELATION_EDIT_FIELD_MAP = {
   users: [
     { name: 'nickname', label: '昵称', translationExport: true },
@@ -203,20 +208,15 @@ export function getRelationTranslationFields(collectionName) {
 }
 
 export function getRelationOptionLabel(record) {
-  return (
-    record?.displayName ||
-    record?.title ||
-    record?.excerpt ||
-    record?.nickname ||
-    record?.username ||
-    record?.name ||
-    record?.tagname ||
-    record?.sortname ||
-    record?.filename ||
-    record?.alias ||
-    record?._id ||
-    '-'
-  )
+  if (!record) {
+    return '-'
+  }
+
+  if ([1, 2, 3].includes(Number(record.type))) {
+    return getPostDisplayTitle(record)
+  }
+
+  return getRelationDisplayName(record)
 }
 
 export function getRelationIdValue(value) {

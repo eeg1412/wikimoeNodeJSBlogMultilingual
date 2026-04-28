@@ -1,3 +1,5 @@
+import { limitStr } from '@/utils/utils'
+
 export const SUPPORTED_LANGUAGE_OPTIONS = [
   { label: '简体中文', value: 'zh-CN' },
   { label: '繁体中文（香港）', value: 'zh-HK' },
@@ -224,16 +226,29 @@ export function stripText(value) {
     .trim()
 }
 
+function getTweetMediaTitle(post) {
+  const mediaList = Array.isArray(post?.coverImages) ? post.coverImages : []
+  if (mediaList.length === 0) {
+    return ''
+  }
+
+  const videoCount = mediaList.filter(item => {
+    return String(item?.mimetype || '').startsWith('video')
+  }).length
+  const imageCount = mediaList.length - videoCount
+
+  if (imageCount > 0 && videoCount === 0) {
+    return `${imageCount}张图片`
+  }
+  if (videoCount > 0 && imageCount === 0) {
+    return `${videoCount}个视频`
+  }
+  return `${mediaList.length}个媒体`
+}
+
 export function getPostDisplayTitle(post) {
   if (!post) {
     return '-'
-  }
-
-  if (Number(post.type) === 2) {
-    const tweetTitle = stripText(post.excerpt)
-    if (tweetTitle) {
-      return tweetTitle
-    }
   }
 
   const title = stripText(post.title)
@@ -241,9 +256,21 @@ export function getPostDisplayTitle(post) {
     return title
   }
 
-  const excerpt = stripText(post.excerpt)
+  if (Number(post.type) === 2) {
+    const mediaTitle = getTweetMediaTitle(post)
+    if (mediaTitle) {
+      return mediaTitle
+    }
+
+    const tweetText = stripText(post.excerpt).replace(/\s+/g, ' ')
+    if (tweetText) {
+      return limitStr(tweetText, 50)
+    }
+  }
+
+  const excerpt = stripText(post.excerpt).replace(/\s+/g, ' ')
   if (excerpt) {
-    return excerpt
+    return limitStr(excerpt, 50)
   }
 
   return '未命名内容'
@@ -252,6 +279,10 @@ export function getPostDisplayTitle(post) {
 export function getRelationDisplayName(record) {
   if (!record) {
     return '-'
+  }
+
+  if ([1, 2, 3].includes(Number(record.type))) {
+    return getPostDisplayTitle(record)
   }
 
   if (record.displayName) {

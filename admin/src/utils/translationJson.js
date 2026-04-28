@@ -1,8 +1,11 @@
 import {
   getRelationEditFields,
-  getRelationOptionLabel,
   getRelationTranslationFields
 } from '@/utils/relationEditFields'
+import {
+  getPostDisplayTitle,
+  getRelationDisplayName
+} from '@/utils/multilingual'
 
 export const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 export const TRANSLATION_JSON_VERSION = 2
@@ -1091,8 +1094,23 @@ function createPostEntry(form, fieldConfig, options = {}) {
   )
 }
 
+function getRelationRecordDisplayName(record, relationField = {}) {
+  if (!record) {
+    return '未命名内容'
+  }
+
+  if (relationField.collectionName === 'posts' && relationField.postType) {
+    return getPostDisplayTitle({
+      ...record,
+      type: record.type || relationField.postType
+    })
+  }
+
+  return getRelationDisplayName(record)
+}
+
 function createRelationEntry(relationField, record, editField, options = {}) {
-  const recordLabel = getRelationOptionLabel(record)
+  const recordLabel = getRelationRecordDisplayName(record, relationField)
   const valueType =
     editField.type === 'richText'
       ? STRUCTURED_RICH_TEXT_VALUE_TYPE
@@ -1108,7 +1126,11 @@ function createRelationEntry(relationField, record, editField, options = {}) {
         relationField: relationField.field,
         collectionName: relationField.collectionName,
         recordId: record._id,
+        recordKind: record.recordKind,
+        sourceRecordId: normalizeStringValue(record._id),
         sourceId: normalizeStringValue(record.sourceId),
+        sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+        relationTypeLabel: relationField.label,
         recordLabel,
         fieldName: editField.name,
         label: `${recordLabel} / ${editField.label}`,
@@ -1129,7 +1151,11 @@ function createRelationEntry(relationField, record, editField, options = {}) {
       relationField: relationField.field,
       collectionName: relationField.collectionName,
       recordId: record._id,
+      recordKind: record.recordKind,
+      sourceRecordId: normalizeStringValue(record._id),
       sourceId: normalizeStringValue(record.sourceId),
+      sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+      relationTypeLabel: relationField.label,
       recordLabel,
       fieldName: editField.name,
       label: `${recordLabel} / ${editField.label}`,
@@ -1149,14 +1175,20 @@ function buildParentRelationEntry(
   parentEditField,
   options = {}
 ) {
-  const parentLabel = getRelationOptionLabel(parentRecord)
+  const parentLabel = getRelationRecordDisplayName(parentRecord, {
+    collectionName: parentRelationField.relationCollectionName
+  })
   return buildTextEntry(
     {
       id: `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`,
       scope: 'parentRelation',
       collectionName: parentRelationField.relationCollectionName,
       recordId: parentRecord._id,
+      recordKind: parentRecord.recordKind,
+      sourceRecordId: normalizeStringValue(parentRecord._id),
       sourceId: normalizeStringValue(parentRecord.sourceId),
+      sourceSnapshotId: normalizeStringValue(parentRecord.sourceSnapshotId),
+      relationTypeLabel: parentRelationField.label,
       recordLabel: parentLabel,
       fieldName: parentEditField.name,
       label: `${parentLabel} / ${parentEditField.label}`,
@@ -1304,11 +1336,23 @@ export function buildTranslationExportPayload({ form, selectedEntries }) {
       if (entry.recordId) {
         exportEntry.recordId = entry.recordId
       }
+      if (entry.recordKind) {
+        exportEntry.recordKind = entry.recordKind
+      }
+      if (entry.sourceRecordId) {
+        exportEntry.sourceRecordId = entry.sourceRecordId
+      }
       if (entry.sourceId) {
         exportEntry.sourceId = entry.sourceId
       }
+      if (entry.sourceSnapshotId) {
+        exportEntry.sourceSnapshotId = entry.sourceSnapshotId
+      }
       if (entry.recordLabel) {
         exportEntry.recordLabel = entry.recordLabel
+      }
+      if (entry.relationTypeLabel) {
+        exportEntry.relationTypeLabel = entry.relationTypeLabel
       }
       if (entry.assets && Object.keys(entry.assets).length > 0) {
         exportEntry.assets = entry.assets
@@ -1319,16 +1363,7 @@ export function buildTranslationExportPayload({ form, selectedEntries }) {
   }
 }
 
-function buildTranslationEntryMatchKey(entry) {
-  if (entry.scope === 'post') {
-    return `post:${entry.fieldName}`
-  }
-
-  const sourceId = normalizeStringValue(entry.sourceId)
-  if (!sourceId) {
-    return ''
-  }
-
+function buildRelationEntryMatchKey(entry, sourceId) {
   if (entry.scope === 'relation') {
     return [
       'relation',
@@ -1351,6 +1386,23 @@ function buildTranslationEntryMatchKey(entry) {
   return ''
 }
 
+function buildTranslationEntryMatchKeys(entry) {
+  if (entry.scope === 'post') {
+    return [`post:${entry.fieldName}`]
+  }
+
+  const sourceId = normalizeStringValue(entry.sourceId)
+  if (!sourceId) {
+    return []
+  }
+
+  const matchKey = buildRelationEntryMatchKey(entry, sourceId)
+  if (!matchKey) {
+    return []
+  }
+  return [matchKey]
+}
+
 function buildMappedSourceEntry(sourceEntry, targetEntry) {
   const value = cloneSerializableValue(sourceEntry.value)
   return {
@@ -1361,38 +1413,195 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
   }
 }
 
+function getSkippedEntryDisplayName(entry) {
+  const recordLabel = normalizeStringValue(entry.recordLabel)
+  if (recordLabel) {
+    return recordLabel
+  }
+
+  const label = normalizeStringValue(entry.label)
+  if (label.includes(' / ')) {
+    return label.split(' / ')[0]
+  }
+  if (label) {
+    return label
+  }
+  return normalizeStringValue(entry.id) || '未命名内容'
+}
+
+function getSkippedEntryTypeLabel(entry) {
+  const relationTypeLabel = normalizeStringValue(entry.relationTypeLabel)
+  if (relationTypeLabel) {
+    return relationTypeLabel
+  }
+
+  const groupLabel = normalizeStringValue(entry.groupLabel)
+  if (groupLabel.includes(' / ')) {
+    const parts = groupLabel.split(' / ')
+    const lastPart = parts[parts.length - 1]
+    if (lastPart) {
+      return lastPart
+    }
+  }
+
+  if (entry.scope === 'relation') {
+    return '关联内容'
+  }
+  if (entry.scope === 'parentRelation') {
+    return '父级关联'
+  }
+  return '内容'
+}
+
+function buildSkippedEntryGroupKey(entry, reasonType) {
+  if (entry.scope === 'relation') {
+    return [
+      reasonType,
+      entry.scope,
+      entry.relationField || '',
+      entry.collectionName || '',
+      normalizeStringValue(entry.sourceId || entry.recordId || entry.recordLabel)
+    ].join(':')
+  }
+
+  if (entry.scope === 'parentRelation') {
+    return [
+      reasonType,
+      entry.scope,
+      entry.collectionName || '',
+      normalizeStringValue(entry.sourceId || entry.recordId || entry.recordLabel)
+    ].join(':')
+  }
+
+  return [reasonType, entry.scope || '', entry.id || ''].join(':')
+}
+
+function buildMissingTargetMessage(entry) {
+  const displayName = getSkippedEntryDisplayName(entry)
+  const typeLabel = getSkippedEntryTypeLabel(entry)
+  if (entry.scope === 'post') {
+    return `当前文章缺少「${displayName}」对应内容，已跳过`
+  }
+  if (entry.scope === 'relation') {
+    return `${typeLabel}「${displayName}」还没有当前语言版本，已跳过`
+  }
+  if (entry.scope === 'parentRelation') {
+    return `父级${typeLabel}「${displayName}」还没有当前语言版本，已跳过`
+  }
+  return `「${displayName}」还没有当前语言版本，已跳过`
+}
+
+function buildTypeMismatchMessage(entry) {
+  const displayName = getSkippedEntryDisplayName(entry)
+  return `「${displayName}」的数据类型和当前语言版本不一致，已跳过`
+}
+
+function buildMissingSourceIdMessage(entry) {
+  const displayName = getSkippedEntryDisplayName(entry)
+  const typeLabel = getSkippedEntryTypeLabel(entry)
+  if (entry.scope === 'relation') {
+    return `${typeLabel}「${displayName}」源快照缺少 sourceId，已跳过`
+  }
+  if (entry.scope === 'parentRelation') {
+    return `父级${typeLabel}「${displayName}」源快照缺少 sourceId，已跳过`
+  }
+  return `「${displayName}」源快照缺少 sourceId，已跳过`
+}
+
+function buildSkippedEntryAction(entry, reasonType) {
+  if (
+    reasonType === 'missingTarget' &&
+    entry.scope === 'relation' &&
+    entry.collectionName === 'posts' &&
+    entry.relationField &&
+    entry.sourceId &&
+    entry.recordId
+  ) {
+    return {
+      actionType: 'createTranslationPost',
+      sourceSnapshotId: entry.recordId,
+      relationField: entry.relationField,
+      collectionName: entry.collectionName
+    }
+  }
+
+  return {}
+}
+
+function addSkippedEntry(skippedEntries, skippedEntryMap, entry, reasonType) {
+  const key = buildSkippedEntryGroupKey(entry, reasonType)
+  if (skippedEntryMap.has(key)) {
+    return
+  }
+
+  let message = buildMissingTargetMessage(entry)
+  let reason = '缺少当前语言版本'
+  if (reasonType === 'typeMismatch') {
+    message = buildTypeMismatchMessage(entry)
+    reason = '数据类型不一致'
+  }
+  if (reasonType === 'missingSourceId') {
+    message = buildMissingSourceIdMessage(entry)
+    reason = '源快照缺少 sourceId'
+  }
+
+  skippedEntryMap.set(key, true)
+  skippedEntries.push({
+    id: key,
+    label: getSkippedEntryDisplayName(entry),
+    reason,
+    message,
+    ...buildSkippedEntryAction(entry, reasonType)
+  })
+}
+
 export function buildSourceToTargetTranslationEntries({
   sourceEntries,
   targetEntries
 }) {
   const targetEntryMap = new Map()
   targetEntries.forEach(entry => {
-    const key = buildTranslationEntryMatchKey(entry)
-    if (key) {
+    const keyList = buildTranslationEntryMatchKeys(entry)
+    keyList.forEach(key => {
       targetEntryMap.set(key, entry)
-    }
+    })
   })
 
   const entries = []
   const skippedEntries = []
+  const skippedEntryMap = new Map()
   sourceEntries.forEach(sourceEntry => {
-    const key = buildTranslationEntryMatchKey(sourceEntry)
-    const targetEntry = targetEntryMap.get(key)
+    const keyList = buildTranslationEntryMatchKeys(sourceEntry)
+    if (sourceEntry.scope !== 'post' && keyList.length === 0) {
+      addSkippedEntry(
+        skippedEntries,
+        skippedEntryMap,
+        sourceEntry,
+        'missingSourceId'
+      )
+      return
+    }
+
+    const targetEntry = keyList
+      .map(key => targetEntryMap.get(key))
+      .find(Boolean)
     if (!targetEntry) {
-      skippedEntries.push({
-        id: sourceEntry.id,
-        label: sourceEntry.label,
-        reason: '当前语言中找不到对应条目'
-      })
+      addSkippedEntry(
+        skippedEntries,
+        skippedEntryMap,
+        sourceEntry,
+        'missingTarget'
+      )
       return
     }
 
     if (sourceEntry.valueType !== targetEntry.valueType) {
-      skippedEntries.push({
-        id: sourceEntry.id,
-        label: sourceEntry.label,
-        reason: '源条目和目标条目的类型不一致'
-      })
+      addSkippedEntry(
+        skippedEntries,
+        skippedEntryMap,
+        sourceEntry,
+        'typeMismatch'
+      )
       return
     }
 

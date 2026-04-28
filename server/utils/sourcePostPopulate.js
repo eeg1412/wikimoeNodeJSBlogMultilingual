@@ -1,9 +1,10 @@
 function buildSourcePostPopulate() {
   const matchStatus = { $in: [0, 1] }
+  const sourceIdentitySelect =
+    'languageCode sourceLanguageCode sourceId sourceCollection sourceSnapshotId translationGroupId recordKind snapshotVersion sourceSnapshotAt sourceUpdatedAt sourceHash'
   const postCoverPopulate = {
     path: 'coverImages',
-    select:
-      'filename filesize filepath thumfor width height thumWidth thumHeight mimetype album description is360Panorama status createdAt updatedAt'
+    select: `filename filesize filepath thumfor width height thumWidth thumHeight mimetype album description is360Panorama status createdAt updatedAt ${sourceIdentitySelect}`
   }
 
   return [
@@ -42,15 +43,13 @@ function buildSourcePostPopulate() {
     {
       path: 'postList',
       match: { status: matchStatus, type: 1 },
-      select:
-        'title _id coverImages alias date status type excerpt updatedAt createdAt',
+      select: `title _id coverImages alias date status type excerpt updatedAt createdAt ${sourceIdentitySelect}`,
       populate: postCoverPopulate
     },
     {
       path: 'tweetList',
       match: { status: matchStatus, type: 2 },
-      select:
-        'title _id coverImages alias date status type excerpt updatedAt createdAt',
+      select: `title _id coverImages alias date status type excerpt updatedAt createdAt ${sourceIdentitySelect}`,
       populate: postCoverPopulate
     },
     {
@@ -83,15 +82,13 @@ function buildSourcePostPopulate() {
     {
       path: 'contentPostList',
       match: { status: matchStatus, type: 1 },
-      select:
-        'title _id coverImages alias date status type excerpt updatedAt createdAt',
+      select: `title _id coverImages alias date status type excerpt updatedAt createdAt ${sourceIdentitySelect}`,
       populate: postCoverPopulate
     },
     {
       path: 'contentTweetList',
       match: { status: matchStatus, type: 2 },
-      select:
-        'title _id coverImages alias date status type excerpt updatedAt createdAt',
+      select: `title _id coverImages alias date status type excerpt updatedAt createdAt ${sourceIdentitySelect}`,
       populate: postCoverPopulate
     },
     {
