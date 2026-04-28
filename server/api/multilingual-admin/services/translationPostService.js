@@ -149,6 +149,84 @@ const POST_EDITABLE_FIELDS = [
   'client__v'
 ]
 
+const SOURCE_POST_LIST_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'excerpt',
+  'alias',
+  'type',
+  'status',
+  'date',
+  'sourceId',
+  'sourceLanguageCode',
+  'languageCode',
+  'translationGroupId',
+  'snapshotVersion',
+  'sourceSnapshotAt',
+  'sourceUpdatedAt',
+  'updatedAt',
+  'sort',
+  'tags',
+  'mappointList',
+  'bangumiList',
+  'movieList',
+  'gameList',
+  'bookList',
+  'postList',
+  'tweetList',
+  'eventList',
+  'voteList',
+  'contentBangumiList',
+  'contentMovieList',
+  'contentGameList',
+  'contentBookList',
+  'contentPostList',
+  'contentTweetList',
+  'contentEventList',
+  'contentVoteList',
+  'seriesSortList',
+  'contentSeriesSortList'
+].join(' ')
+
+const TRANSLATION_POST_LIST_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'excerpt',
+  'alias',
+  'type',
+  'languageCode',
+  'translationGroupId',
+  'status',
+  'snapshotVersion',
+  'sourceChanged',
+  'pendingReview',
+  'sourceChangedAt',
+  'lastChangDate',
+  'date',
+  'updatedAt',
+  'sort',
+  'tags',
+  'mappointList',
+  'bangumiList',
+  'movieList',
+  'gameList',
+  'bookList',
+  'postList',
+  'tweetList',
+  'eventList',
+  'voteList',
+  'contentBangumiList',
+  'contentMovieList',
+  'contentGameList',
+  'contentBookList',
+  'contentPostList',
+  'contentTweetList',
+  'contentEventList',
+  'contentVoteList',
+  'seriesSortList',
+  'contentSeriesSortList'
+].join(' ')
+
 function getPostModel() {
   return getMultilingualModel('posts')
 }
@@ -1166,9 +1244,8 @@ async function buildTranslationMatrixMap(translationGroupIds) {
     translationGroupId: { $in: translationGroupIds },
     recordKind: TRANSLATION_RECORD_KIND
   })
-    .select(
-      '_id title excerpt alias type languageCode translationGroupId status snapshotVersion sourceChanged pendingReview sourceChangedAt lastChangDate updatedAt'
-    )
+    .select(TRANSLATION_POST_LIST_SELECT_FIELDS)
+    .populate(buildMultilingualPostPopulate())
     .lean()
 
   for (const translation of translations) {
@@ -1256,9 +1333,8 @@ async function getTranslationPostListBySource(query = {}) {
   const PostModel = getPostModel()
   const total = await PostModel.countDocuments(sourceParams)
   const sourcePosts = await PostModel.find(sourceParams)
-    .select(
-      '_id title excerpt alias type status sourceId sourceLanguageCode languageCode translationGroupId snapshotVersion sourceSnapshotAt sourceUpdatedAt updatedAt'
-    )
+    .select(SOURCE_POST_LIST_SELECT_FIELDS)
+    .populate(buildMultilingualPostPopulate())
     .sort({ sourceSnapshotAt: -1, updatedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)

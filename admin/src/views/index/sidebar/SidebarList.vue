@@ -108,6 +108,20 @@
                 <el-form-item label="标题" prop="title">
                   <el-input v-model="element.title"></el-input>
                 </el-form-item>
+                <el-form-item label="说明" v-if="element.type === 8">
+                  <div class="sidebar-form-tip">
+                    <div>
+                      分类项名称取自当前语言的分类翻译。未翻译的分类会继续显示源语言内容。
+                    </div>
+                    <el-button
+                      type="primary"
+                      link
+                      @click="goRelationList('sorts')"
+                    >
+                      前往“关联内容”补齐分类翻译
+                    </el-button>
+                  </div>
+                </el-form-item>
                 <!-- content -->
                 <el-form-item
                   label="内容"
@@ -204,7 +218,72 @@ import RichEditor5 from '@/components/RichEditor5'
 import GoogleAdInput from '@/components/GoogleAdInput'
 import { escapeHtml } from '@/utils/utils'
 import CheckDialogService from '@/services/CheckDialogService'
-import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
+import {
+  SUPPORTED_LANGUAGE_OPTIONS,
+  getLocalizedSidebarBuiltinTitle,
+  normalizeSidebarBuiltinTitle
+} from '@/utils/multilingual'
+
+const SIDEBAR_TEMPLATE_CONFIG_MAP = {
+  1: {
+    content: '',
+    count: 1,
+    status: 0
+  },
+  3: {
+    content: '',
+    count: 10,
+    status: 0
+  },
+  4: {
+    content: '',
+    count: 10,
+    status: 0
+  },
+  8: {
+    content: '',
+    count: 1,
+    status: 0
+  },
+  9: {
+    content: '',
+    count: 1,
+    status: 0
+  },
+  10: {
+    content: '',
+    count: 1,
+    status: 0
+  },
+  11: {
+    content: '',
+    count: 1,
+    status: 0
+  },
+  12: {
+    content: '',
+    count: 5,
+    status: 0
+  },
+  13: {
+    content: '',
+    count: 10,
+    status: 0
+  },
+  14: {
+    content: '',
+    count: 10,
+    status: 0
+  },
+  15: {
+    content: '',
+    count: 10,
+    status: 0
+  }
+}
+
+const SIDEBAR_BASE_TEMPLATE_TYPES = [1, 11, 10]
+const SIDEBAR_SINGLE_TEMPLATE_TYPES = [3, 4, 8, 9, 12, 13, 14, 15]
 
 export default {
   components: {
@@ -221,133 +300,47 @@ export default {
     const params = reactive({
       languageCode: route.query.languageCode || 'zh-CN'
     })
+
+    const normalizeSidebarItem = item => {
+      return {
+        ...item,
+        title: normalizeSidebarBuiltinTitle(
+          item?.title,
+          item?.type,
+          params.languageCode
+        )
+      }
+    }
+
+    const buildSidebarTemplate = type => {
+      const config = SIDEBAR_TEMPLATE_CONFIG_MAP[type]
+      if (!config) {
+        return null
+      }
+
+      return {
+        title: getLocalizedSidebarBuiltinTitle(type, params.languageCode),
+        content: config.content,
+        count: config.count,
+        type,
+        taxis: 0,
+        status: config.status
+      }
+    }
+
     const sidebarSettingsTemplate = computed(() => {
-      const base = [
-        // 1:自定义内容 3:最新评论 4:随机标签 5:随机文章 7:搜索 8:分类 9:归档 10:谷歌广告 11:自定义HTML 12:热门文章 13:当季追番 14:攻略中 15:阅读中
-        {
-          title: '自定义内容',
-          content: '',
-          count: 1,
-          type: 1,
-          taxis: 0,
-          status: 0
-        },
-        // 自定义HTML
-        {
-          title: '自定义HTML',
-          content: '',
-          count: 1,
-          type: 11,
-          taxis: 0,
-          status: 0
-        },
-        // 谷歌广告
-        {
-          title: '谷歌广告',
-          content: '',
-          count: 1,
-          type: 10,
-          taxis: 0,
-          status: 0
-        }
-      ]
-      const only1 = [
-        {
-          title: '最新评论',
-          content: '',
-          count: 10,
-          type: 3,
-          taxis: 0,
-          status: 0
-        },
-        {
-          title: '随机标签',
-          content: '',
-          count: 10,
-          type: 4,
-          taxis: 0,
-          status: 0
-        },
-        // {
-        //   title: '随机文章',
-        //   content: '',
-        //   count: 10,
-        //   type: 5,
-        //   taxis: 0,
-        //   status: 0,
-        // },
-        // {
-        //   title: '相册',
-        //   content: '',
-        //   count: 10,
-        //   type: 6,
-        //   taxis: 0,
-        //   status: 0,
-        // },
-        // {
-        //   title: '搜索',
-        //   content: '',
-        //   count: 1,
-        //   type: 7,
-        //   taxis: 0,
-        //   status: 0,
-        // },
-        {
-          title: '分类',
-          content: '',
-          count: 1,
-          type: 8,
-          taxis: 0,
-          status: 0
-        },
-        {
-          title: '归档',
-          content: '',
-          count: 1,
-          type: 9,
-          taxis: 0,
-          status: 0
-        },
-        // 热门文章
-        {
-          title: '热门文章',
-          content: '',
-          count: 5,
-          type: 12,
-          taxis: 0,
-          status: 0
-        },
-        // 当季追番
-        {
-          title: '当季追番',
-          content: '',
-          count: 10,
-          type: 13,
-          taxis: 0,
-          status: 0
-        },
-        // 攻略中
-        {
-          title: '攻略中',
-          content: '',
-          count: 10,
-          type: 14,
-          taxis: 0,
-          status: 0
-        },
-        // 阅读中
-        {
-          title: '阅读中',
-          content: '',
-          count: 10,
-          type: 15,
-          taxis: 0,
-          status: 0
-        }
-      ]
       // 检查 sidebarSettingsForm 里存在的 type，如果存在，只输出sidebarSettingsForm中没有的type
       const typeList = sidebarSettingsForm.value.map(item => item.type)
-      const result = only1.filter(item => !typeList.includes(item.type))
+      const base = SIDEBAR_BASE_TEMPLATE_TYPES.map(type => {
+        return buildSidebarTemplate(type)
+      }).filter(Boolean)
+      const result = SIDEBAR_SINGLE_TEMPLATE_TYPES.filter(type => {
+        return !typeList.includes(type)
+      })
+        .map(type => {
+          return buildSidebarTemplate(type)
+        })
+        .filter(Boolean)
       return base.concat(result)
     })
 
@@ -363,27 +356,32 @@ export default {
 
     const getSidebarList = () => {
       authApi.getSidebarList(params).then(res => {
-        sidebarSettingsForm.value = res.data.list
+        sidebarSettingsForm.value = (res.data.list || []).map(item => {
+          return normalizeSidebarItem(item)
+        })
       })
     }
     const handleSideBarCommand = command => {
-      const item = sidebarSettingsTemplate.value.find(
-        item => item.type === command
-      )
+      const item = buildSidebarTemplate(command)
+      if (!item) {
+        return
+      }
       authApi
         .createSidebar({ ...item, languageCode: params.languageCode })
         .then(res => {
           // 在前面插入
-          sidebarSettingsForm.value.unshift(res.data.data)
+          sidebarSettingsForm.value.unshift(normalizeSidebarItem(res.data.data))
         })
         .catch(err => {
           console.log(err)
         })
     }
     const sidebarSettingsSubmit = item => {
+      const payload = normalizeSidebarItem(item)
       authApi
-        .updateSidebar({ ...item, languageCode: params.languageCode })
+        .updateSidebar({ ...payload, languageCode: params.languageCode })
         .then(res => {
+          item.title = payload.title
           ElMessage.success('更新成功')
         })
         .catch(err => {
@@ -443,6 +441,16 @@ export default {
       })
     }
 
+    const goRelationList = collectionName => {
+      router.push({
+        name: 'RelationList',
+        query: {
+          languageCode: params.languageCode,
+          collectionName
+        }
+      })
+    }
+
     onMounted(() => {
       getSidebarList()
     })
@@ -464,7 +472,8 @@ export default {
       sidebarSettingsDelete,
       showIdList,
       canDrag,
-      onDragBtnClick
+      onDragBtnClick,
+      goRelationList
     }
   }
 }
@@ -472,5 +481,10 @@ export default {
 <style scoped>
 .handle {
   cursor: move;
+}
+
+.sidebar-form-tip {
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 </style>

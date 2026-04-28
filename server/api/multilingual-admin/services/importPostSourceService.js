@@ -107,6 +107,40 @@ const POST_RELATION_FIELDS = [
   ...Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
 ]
 
+const SOURCE_POST_LIST_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'alias',
+  'type',
+  'status',
+  'date',
+  'updatedAt',
+  'createdAt',
+  'author',
+  'excerpt',
+  'sort',
+  'tags',
+  'mappointList',
+  'bangumiList',
+  'movieList',
+  'gameList',
+  'bookList',
+  'postList',
+  'tweetList',
+  'eventList',
+  'voteList',
+  'contentBangumiList',
+  'contentMovieList',
+  'contentGameList',
+  'contentBookList',
+  'contentPostList',
+  'contentTweetList',
+  'contentEventList',
+  'contentVoteList',
+  'seriesSortList',
+  'contentSeriesSortList'
+].join(' ')
+
 const COLLECTION_DEPENDENCY_FIELDS = {
   users: [{ field: 'cover', collectionName: 'attachments' }],
   sorts: [{ field: 'parent', collectionName: 'sorts' }],
@@ -1143,14 +1177,11 @@ async function getSourceDatabasePostList(query = {}) {
   const total = await sourcePostsRepository.countDocuments(params)
   const sourcePostQuery = sourcePostsRepository.find(
     params,
-    '_id title alias type status date updatedAt createdAt author excerpt',
+    SOURCE_POST_LIST_SELECT_FIELDS,
     {
       sort: { date: -1, _id: -1 },
       lean: true,
-      populate: {
-        path: 'author',
-        select: '_id username nickname photo'
-      }
+      populate: buildSourcePostPopulate()
     }
   )
   const list = await sourcePostQuery.skip((page - 1) * limit).limit(limit)
@@ -1176,17 +1207,8 @@ async function getSourceDatabasePostList(query = {}) {
     list: list.map(item => {
       const snapshot = snapshotMap.get(String(item._id)) || null
       return {
-        _id: item._id,
+        ...item,
         sourceId: item._id,
-        title: item.title,
-        alias: item.alias,
-        type: item.type,
-        status: item.status,
-        date: item.date,
-        updatedAt: item.updatedAt,
-        createdAt: item.createdAt,
-        excerpt: item.excerpt,
-        author: item.author || null,
         sourceLanguageCode,
         hasSnapshot: Boolean(snapshot),
         snapshot

@@ -123,6 +123,46 @@
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn prop="alias" label="Alias" min-width="150" />
+        <ResponsiveTableColumn label="分类" min-width="160">
+          <template #default="{ row }">
+            {{ row.sort?.sortname || '-' }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="标签" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.tags?.length" class="table-tag-list">
+              <el-tag
+                v-for="tag in row.tags"
+                :key="tag._id"
+                size="small"
+                effect="plain"
+              >
+                #{{ tag.tagname }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="地点" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.mappointList?.length" class="table-tag-list">
+              <el-tag
+                v-for="mappoint in row.mappointList"
+                :key="mappoint._id"
+                size="small"
+                effect="plain"
+              >
+                {{ mappoint.title }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="关联与相关内容" min-width="420">
+          <template #default="{ row }">
+            <PostRelationSummary :post="row" />
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getPostStatusTagType(row.status)" effect="plain">
@@ -233,6 +273,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
+import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -244,6 +285,9 @@ import {
 } from '@/utils/multilingual'
 
 export default {
+  components: {
+    PostRelationSummary
+  },
   setup() {
     const router = useRouter()
     const tableRef = ref(null)
@@ -490,6 +534,16 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.table-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-empty-text {
+  color: var(--el-text-color-secondary);
 }
 
 .result-title {

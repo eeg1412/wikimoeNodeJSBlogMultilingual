@@ -26,6 +26,12 @@ const ALLOWED_COLLECTION_NAMES = new Set([
   'attachments'
 ])
 
+const DEFAULT_LIST_COLLECTION_NAMES = Array.from(ALLOWED_COLLECTION_NAMES).filter(
+  collectionName => {
+    return collectionName !== 'attachments'
+  }
+)
+
 const SYSTEM_FIELDS = new Set([
   '_id',
   'id',
@@ -311,7 +317,7 @@ function toRelationListItem(item, collectionName) {
 async function listRelationsAcrossCollections(input) {
   const collectionNameList = input.collectionName
     ? [input.collectionName]
-    : getAllowedCollectionNameList()
+    : DEFAULT_LIST_COLLECTION_NAMES
   const params = buildRelationListParams(input)
   const resultList = []
 

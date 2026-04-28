@@ -122,9 +122,73 @@
                 <ResponsiveTableColumn label="标题" min-width="220">
                   <template #default="{ row: childRow }">
                     <span v-if="childRow.translation">
-                      {{ getPostDisplayTitle(childRow.translation) }}
+                      <div class="source-title">
+                        {{ getPostDisplayTitle(childRow.translation) }}
+                      </div>
+                      <div
+                        v-if="childRow.translation.alias"
+                        class="source-meta"
+                      >
+                        Alias: {{ childRow.translation.alias }}
+                      </div>
                     </span>
                     <el-tag v-else type="info" effect="plain">未创建</el-tag>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="分类" min-width="140">
+                  <template #default="{ row: childRow }">
+                    <span v-if="childRow.translation">
+                      {{ childRow.translation.sort?.sortname || '-' }}
+                    </span>
+                    <span v-else class="table-empty-text">-</span>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="标签" min-width="220">
+                  <template #default="{ row: childRow }">
+                    <div
+                      v-if="childRow.translation?.tags?.length"
+                      class="table-tag-list"
+                    >
+                      <el-tag
+                        v-for="tag in childRow.translation.tags"
+                        :key="tag._id"
+                        size="small"
+                        effect="plain"
+                      >
+                        #{{ tag.tagname }}
+                      </el-tag>
+                    </div>
+                    <span v-else class="table-empty-text">-</span>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn label="地点" min-width="220">
+                  <template #default="{ row: childRow }">
+                    <div
+                      v-if="childRow.translation?.mappointList?.length"
+                      class="table-tag-list"
+                    >
+                      <el-tag
+                        v-for="mappoint in childRow.translation.mappointList"
+                        :key="mappoint._id"
+                        size="small"
+                        effect="plain"
+                      >
+                        {{ mappoint.title }}
+                      </el-tag>
+                    </div>
+                    <span v-else class="table-empty-text">-</span>
+                  </template>
+                </ResponsiveTableColumn>
+                <ResponsiveTableColumn
+                  label="关联与相关内容"
+                  min-width="420"
+                >
+                  <template #default="{ row: childRow }">
+                    <PostRelationSummary
+                      v-if="childRow.translation"
+                      :post="childRow.translation"
+                    />
+                    <span v-else class="table-empty-text">-</span>
                   </template>
                 </ResponsiveTableColumn>
                 <ResponsiveTableColumn label="状态" width="100">
@@ -201,6 +265,9 @@
             <div class="source-title">
               {{ getPostDisplayTitle(row.sourcePost) }}
             </div>
+            <div v-if="row.sourcePost.alias" class="source-meta">
+              Alias: {{ row.sourcePost.alias }}
+            </div>
             <div class="source-meta">源 ID：{{ row.sourcePost.sourceId }}</div>
           </template>
         </ResponsiveTableColumn>
@@ -214,6 +281,49 @@
         <ResponsiveTableColumn label="源语言" width="150">
           <template #default="{ row }">
             {{ getLanguageText(row.sourcePost.sourceLanguageCode) }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="分类" min-width="160">
+          <template #default="{ row }">
+            {{ row.sourcePost.sort?.sortname || '-' }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="标签" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.sourcePost.tags?.length" class="table-tag-list">
+              <el-tag
+                v-for="tag in row.sourcePost.tags"
+                :key="tag._id"
+                size="small"
+                effect="plain"
+              >
+                #{{ tag.tagname }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="地点" min-width="220">
+          <template #default="{ row }">
+            <div
+              v-if="row.sourcePost.mappointList?.length"
+              class="table-tag-list"
+            >
+              <el-tag
+                v-for="mappoint in row.sourcePost.mappointList"
+                :key="mappoint._id"
+                size="small"
+                effect="plain"
+              >
+                {{ mappoint.title }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="关联与相关内容" min-width="420">
+          <template #default="{ row }">
+            <PostRelationSummary :post="row.sourcePost" />
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="快照版本" width="100">
@@ -361,6 +471,7 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
+import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -373,6 +484,9 @@ import {
 } from '@/utils/multilingual'
 
 export default {
+  components: {
+    PostRelationSummary
+  },
   setup() {
     const router = useRouter()
     const tableRef = ref(null)
@@ -664,6 +778,16 @@ export default {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
+}
+
+.table-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-empty-text {
+  color: var(--el-text-color-secondary);
 }
 
 .language-version-tags {

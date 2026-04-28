@@ -383,9 +383,9 @@ export default {
       const defaultParams = {
         page: 1,
         limit: 20,
-        keyword: '',
-        languageCode: '',
-        collectionName: ''
+        keyword: route.query.keyword || '',
+        languageCode: route.query.languageCode || '',
+        collectionName: route.query.collectionName || ''
       }
 
       return defaultParams
