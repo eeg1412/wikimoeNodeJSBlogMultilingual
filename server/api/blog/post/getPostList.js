@@ -4,6 +4,9 @@ const sortUtils = require('../../../mongodb/utils/sorts')
 const tagsUtils = require('../../../mongodb/utils/tags')
 const utils = require('../../../utils/utils')
 const cacheDataUtils = require('../../../config/cacheData')
+const {
+  syncSourcePostInteractionStats
+} = require('../../../utils/sourcePostInteractionStats')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
@@ -462,7 +465,9 @@ module.exports = async function (req, res, next) {
       voteFliter:
         '_id endTime maxSelect showResultAfter title options.title options._id'
     })
-    .then(data => {
+    .then(async data => {
+      await syncSourcePostInteractionStats(data.list)
+
       // 返回格式list,total
       res.send({
         list: data.list,

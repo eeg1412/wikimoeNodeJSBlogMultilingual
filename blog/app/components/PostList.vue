@@ -752,8 +752,10 @@ const likePost = post => {
         item => item._id === post._id
       )
 
-      const post = postsData.value.list[postIndex]
-      const newLikeCount = newLike ? post.likes + 1 : post.likes - 1
+      const targetPost = postsData.value.list[postIndex]
+      const newLikeCount = newLike
+        ? targetPost.likes + 1
+        : targetPost.likes - 1
       postsData.value.list[postIndex].likes = newLikeCount
       postsData.value.list[postIndex].isLike = newLike
     })

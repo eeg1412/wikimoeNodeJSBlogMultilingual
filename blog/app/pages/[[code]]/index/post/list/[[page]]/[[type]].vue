@@ -10,6 +10,7 @@ const { languageCode } = useLang()
 languageCode.value
 
 definePageMeta({
+  alias: ['/:code?'],
   name: 'postList'
 })
 onMounted(() => {

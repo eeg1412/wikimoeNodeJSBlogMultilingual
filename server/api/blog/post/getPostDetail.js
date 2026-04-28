@@ -4,6 +4,10 @@ const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const { ObjectId } = require('mongodb')
+const {
+  applySourcePostStats,
+  buildSourcePostStatsMap
+} = require('../../../utils/sourcePostInteractionStats')
 
 module.exports = async function (req, res, next) {
   const languageCode = cacheDataUtils.getRequestLanguageCode(req)
@@ -86,6 +90,8 @@ module.exports = async function (req, res, next) {
         return
       }
       const jsonData = data.toJSON()
+      const sourcePostStatsMap = await buildSourcePostStatsMap([jsonData])
+      applySourcePostStats(jsonData, sourcePostStatsMap)
       const type = jsonData.type
       const sitePostRandomSimilarCount =
         global.$globalConfig?.sitePostSettings?.sitePostRandomSimilarCount || 0
