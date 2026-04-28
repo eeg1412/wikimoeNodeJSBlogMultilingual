@@ -234,10 +234,10 @@ function buildPreviewText(value, valueType) {
     : previewText || '空内容'
 }
 
-function buildTextEntry(baseData) {
+function buildTextEntry(baseData, options = {}) {
   const valueType = baseData.valueType || 'plainText'
   const value = normalizeEntryValue(baseData.value, valueType)
-  if (!hasMeaningfulEntryValue(value, valueType)) {
+  if (!options.includeEmpty && !hasMeaningfulEntryValue(value, valueType)) {
     return null
   }
 
@@ -1051,7 +1051,7 @@ export function deserializeRichTextText(text, assets = {}) {
   return htmlList.join('')
 }
 
-function createPostEntry(form, fieldConfig) {
+function createPostEntry(form, fieldConfig, options = {}) {
   const label = fieldConfig.getLabel
     ? fieldConfig.getLabel(form)
     : fieldConfig.label
@@ -1059,33 +1059,39 @@ function createPostEntry(form, fieldConfig) {
     const richTextResult = serializeRichTextHtmlToDocument(
       form[fieldConfig.name]
     )
-    return buildTextEntry({
+    return buildTextEntry(
+      {
+        id: `post.${fieldConfig.name}`,
+        scope: 'post',
+        fieldName: fieldConfig.name,
+        label,
+        groupLabel: '文章正文',
+        valueType: fieldConfig.valueType,
+        value: richTextResult.document,
+        defaultSelected: fieldConfig.defaultSelected,
+        optional: Boolean(fieldConfig.optional)
+      },
+      options
+    )
+  }
+
+  return buildTextEntry(
+    {
       id: `post.${fieldConfig.name}`,
       scope: 'post',
       fieldName: fieldConfig.name,
       label,
       groupLabel: '文章正文',
       valueType: fieldConfig.valueType,
-      value: richTextResult.document,
+      value: form[fieldConfig.name],
       defaultSelected: fieldConfig.defaultSelected,
       optional: Boolean(fieldConfig.optional)
-    })
-  }
-
-  return buildTextEntry({
-    id: `post.${fieldConfig.name}`,
-    scope: 'post',
-    fieldName: fieldConfig.name,
-    label,
-    groupLabel: '文章正文',
-    valueType: fieldConfig.valueType,
-    value: form[fieldConfig.name],
-    defaultSelected: fieldConfig.defaultSelected,
-    optional: Boolean(fieldConfig.optional)
-  })
+    },
+    options
+  )
 }
 
-function createRelationEntry(relationField, record, editField) {
+function createRelationEntry(relationField, record, editField, options = {}) {
   const recordLabel = getRelationOptionLabel(record)
   const valueType =
     editField.type === 'richText'
@@ -1095,60 +1101,73 @@ function createRelationEntry(relationField, record, editField) {
     const richTextResult = serializeRichTextHtmlToDocument(
       record[editField.name]
     )
-    return buildTextEntry({
+    return buildTextEntry(
+      {
+        id: `relation.${relationField.field}.${record._id}.${editField.name}`,
+        scope: 'relation',
+        relationField: relationField.field,
+        collectionName: relationField.collectionName,
+        recordId: record._id,
+        sourceId: normalizeStringValue(record.sourceId),
+        recordLabel,
+        fieldName: editField.name,
+        label: `${recordLabel} / ${editField.label}`,
+        groupLabel: `关联内容 / ${relationField.label}`,
+        valueType,
+        value: richTextResult.document,
+        defaultSelected: !editField.translationOptional,
+        optional: Boolean(editField.translationOptional)
+      },
+      options
+    )
+  }
+
+  return buildTextEntry(
+    {
       id: `relation.${relationField.field}.${record._id}.${editField.name}`,
       scope: 'relation',
       relationField: relationField.field,
       collectionName: relationField.collectionName,
       recordId: record._id,
+      sourceId: normalizeStringValue(record.sourceId),
       recordLabel,
       fieldName: editField.name,
       label: `${recordLabel} / ${editField.label}`,
       groupLabel: `关联内容 / ${relationField.label}`,
       valueType,
-      value: richTextResult.document,
+      value: record[editField.name],
       defaultSelected: !editField.translationOptional,
       optional: Boolean(editField.translationOptional)
-    })
-  }
-
-  return buildTextEntry({
-    id: `relation.${relationField.field}.${record._id}.${editField.name}`,
-    scope: 'relation',
-    relationField: relationField.field,
-    collectionName: relationField.collectionName,
-    recordId: record._id,
-    recordLabel,
-    fieldName: editField.name,
-    label: `${recordLabel} / ${editField.label}`,
-    groupLabel: `关联内容 / ${relationField.label}`,
-    valueType,
-    value: record[editField.name],
-    defaultSelected: !editField.translationOptional,
-    optional: Boolean(editField.translationOptional)
-  })
+    },
+    options
+  )
 }
 
 function buildParentRelationEntry(
   parentRelationField,
   parentRecord,
-  parentEditField
+  parentEditField,
+  options = {}
 ) {
   const parentLabel = getRelationOptionLabel(parentRecord)
-  return buildTextEntry({
-    id: `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`,
-    scope: 'parentRelation',
-    collectionName: parentRelationField.relationCollectionName,
-    recordId: parentRecord._id,
-    recordLabel: parentLabel,
-    fieldName: parentEditField.name,
-    label: `${parentLabel} / ${parentEditField.label}`,
-    groupLabel: `父级关联 / ${parentRelationField.label}`,
-    valueType: 'plainText',
-    value: parentRecord[parentEditField.name],
-    defaultSelected: !parentEditField.translationOptional,
-    optional: Boolean(parentEditField.translationOptional)
-  })
+  return buildTextEntry(
+    {
+      id: `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`,
+      scope: 'parentRelation',
+      collectionName: parentRelationField.relationCollectionName,
+      recordId: parentRecord._id,
+      sourceId: normalizeStringValue(parentRecord.sourceId),
+      recordLabel: parentLabel,
+      fieldName: parentEditField.name,
+      label: `${parentLabel} / ${parentEditField.label}`,
+      groupLabel: `父级关联 / ${parentRelationField.label}`,
+      valueType: 'plainText',
+      value: parentRecord[parentEditField.name],
+      defaultSelected: !parentEditField.translationOptional,
+      optional: Boolean(parentEditField.translationOptional)
+    },
+    options
+  )
 }
 
 function getParentTranslationFields(parentRelationField) {
@@ -1167,8 +1186,10 @@ function getParentTranslationFields(parentRelationField) {
 export function buildTranslationExportEntries({
   form,
   relationFields,
-  relationRecords
+  relationRecords,
+  includeEmpty = false
 }) {
+  const buildOptions = { includeEmpty }
   const entryList = []
   const exportedParentIdSet = new Set()
   POST_TRANSLATION_FIELDS.forEach(fieldConfig => {
@@ -1176,7 +1197,7 @@ export function buildTranslationExportEntries({
       return
     }
 
-    const entry = createPostEntry(form, fieldConfig)
+    const entry = createPostEntry(form, fieldConfig, buildOptions)
     if (entry) {
       entryList.push(entry)
     }
@@ -1202,7 +1223,12 @@ export function buildTranslationExportEntries({
       }
 
       translationFieldList.forEach(editField => {
-        const entry = createRelationEntry(relationField, record, editField)
+        const entry = createRelationEntry(
+          relationField,
+          record,
+          editField,
+          buildOptions
+        )
         if (entry) {
           entryList.push(entry)
         }
@@ -1227,7 +1253,8 @@ export function buildTranslationExportEntries({
             const entry = buildParentRelationEntry(
               parentRelationField,
               parentRecord,
-              parentEditField
+              parentEditField,
+              buildOptions
             )
             if (entry) {
               exportedParentIdSet.add(parentEntryId)
@@ -1277,6 +1304,9 @@ export function buildTranslationExportPayload({ form, selectedEntries }) {
       if (entry.recordId) {
         exportEntry.recordId = entry.recordId
       }
+      if (entry.sourceId) {
+        exportEntry.sourceId = entry.sourceId
+      }
       if (entry.recordLabel) {
         exportEntry.recordLabel = entry.recordLabel
       }
@@ -1286,6 +1316,92 @@ export function buildTranslationExportPayload({ form, selectedEntries }) {
 
       return exportEntry
     })
+  }
+}
+
+function buildTranslationEntryMatchKey(entry) {
+  if (entry.scope === 'post') {
+    return `post:${entry.fieldName}`
+  }
+
+  const sourceId = normalizeStringValue(entry.sourceId)
+  if (!sourceId) {
+    return ''
+  }
+
+  if (entry.scope === 'relation') {
+    return [
+      'relation',
+      entry.relationField || '',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+
+  if (entry.scope === 'parentRelation') {
+    return [
+      'parentRelation',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+
+  return ''
+}
+
+function buildMappedSourceEntry(sourceEntry, targetEntry) {
+  const value = cloneSerializableValue(sourceEntry.value)
+  return {
+    ...targetEntry,
+    value,
+    previewText: buildPreviewText(value, targetEntry.valueType),
+    previewRawValue: buildPreviewRawValue(value, targetEntry.valueType)
+  }
+}
+
+export function buildSourceToTargetTranslationEntries({
+  sourceEntries,
+  targetEntries
+}) {
+  const targetEntryMap = new Map()
+  targetEntries.forEach(entry => {
+    const key = buildTranslationEntryMatchKey(entry)
+    if (key) {
+      targetEntryMap.set(key, entry)
+    }
+  })
+
+  const entries = []
+  const skippedEntries = []
+  sourceEntries.forEach(sourceEntry => {
+    const key = buildTranslationEntryMatchKey(sourceEntry)
+    const targetEntry = targetEntryMap.get(key)
+    if (!targetEntry) {
+      skippedEntries.push({
+        id: sourceEntry.id,
+        label: sourceEntry.label,
+        reason: '当前语言中找不到对应条目'
+      })
+      return
+    }
+
+    if (sourceEntry.valueType !== targetEntry.valueType) {
+      skippedEntries.push({
+        id: sourceEntry.id,
+        label: sourceEntry.label,
+        reason: '源条目和目标条目的类型不一致'
+      })
+      return
+    }
+
+    entries.push(buildMappedSourceEntry(sourceEntry, targetEntry))
+  })
+
+  return {
+    entries,
+    skippedEntries
   }
 }
 
@@ -1419,7 +1535,8 @@ function normalizeImportedEntryForCurrentEntry(entry, currentEntry) {
 export function buildTranslationImportPreview({
   parsedPayload,
   currentEntries,
-  form
+  form,
+  referenceEntries = []
 }) {
   if (parsedPayload.meta.postId !== form.id) {
     throw new Error('JSON postId 与当前文章不匹配')
@@ -1430,6 +1547,9 @@ export function buildTranslationImportPreview({
 
   const currentEntryMap = new Map(
     currentEntries.map(entry => [entry.id, entry])
+  )
+  const referenceEntryMap = new Map(
+    referenceEntries.map(entry => [entry.id, entry])
   )
   const relationUpdateMap = new Map()
   const postPatch = {}
@@ -1468,6 +1588,10 @@ export function buildTranslationImportPreview({
 
     let nextHtml = ''
     let currentHtml = ''
+    let sourceHtml = ''
+    let sourceValue = ''
+    let hasSourceValue = false
+    const referenceEntry = referenceEntryMap.get(entry.id)
     if (isRichTextValueType(currentEntry.valueType)) {
       currentHtml = buildRichTextHtmlFromEntryValue(
         currentEntry.valueType,
@@ -1480,12 +1604,29 @@ export function buildTranslationImportPreview({
         normalizedImportEntry.assets || {}
       )
     }
+    if (referenceEntry) {
+      hasSourceValue = true
+      sourceValue = buildPreviewRawValue(
+        referenceEntry.value,
+        referenceEntry.valueType
+      )
+      if (isRichTextValueType(referenceEntry.valueType)) {
+        sourceHtml = buildRichTextHtmlFromEntryValue(
+          referenceEntry.valueType,
+          referenceEntry.value,
+          referenceEntry.assets || {}
+        )
+      }
+    }
 
     changeList.push({
       id: entry.id,
       label: currentEntry.label,
       groupLabel: currentEntry.groupLabel,
       valueType: currentEntry.valueType,
+      hasSourceValue,
+      sourceValue,
+      sourceHtml,
       currentValue: buildPreviewRawValue(currentValue, currentEntry.valueType),
       nextValue: buildPreviewRawValue(
         nextValue,

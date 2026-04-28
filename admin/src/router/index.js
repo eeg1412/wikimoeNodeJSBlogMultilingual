@@ -162,6 +162,17 @@ const routes = [
           import('../views/index/config/MultilingualMediaSettings.vue')
       },
       {
+        path: '/settings/ai',
+        name: 'MultilingualAiSettings',
+        component: () =>
+          import('../views/index/config/MultilingualAiSettings.vue')
+      },
+      {
+        path: '/ai/usage/summary',
+        name: 'AiUsageSummary',
+        component: () => import('../views/index/ai/AiUsageSummary.vue')
+      },
+      {
         path: '/home',
         name: 'Home',
         redirect: '/dashboard/multilingual'

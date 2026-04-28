@@ -110,6 +110,24 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/settings/media/update')
   },
   {
+    path: '/settings/ai/get',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/settings/ai/get')
+  },
+  {
+    path: '/settings/ai/update',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/settings/ai/update')
+  },
+  {
+    path: '/ai/usage/summary',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/ai/usage/getSummary')
+  },
+  {
     path: '/dashboard/summary',
     method: 'get',
     middleware: [checkAuth],
@@ -384,6 +402,12 @@ const multilingualAdminRouteSetting = [
     method: 'put',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/post/updatePost')
+  },
+  {
+    path: '/translation/post/ai-translate-stream',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/ai/streamTranslatePost')
   },
   {
     path: '/translation/relation/update',

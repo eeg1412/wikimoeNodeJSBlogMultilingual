@@ -241,6 +241,33 @@ const menuGroups = [
         name: 'MultilingualMediaSettings',
         title: '媒体设置',
         icon: 'fas fa-fw fa-photo-video pr10'
+      },
+      {
+        name: 'MultilingualAiSettings',
+        title: 'AI 设置',
+        icon: 'fas fa-fw fa-robot pr10'
+      }
+    ]
+  },
+  {
+    index: 'statistics',
+    title: '统计',
+    icon: 'fas fa-fw fa-chart-pie pr10',
+    children: [
+      {
+        name: 'AiUsageSummary',
+        title: 'AI 用量统计',
+        icon: 'fas fa-fw fa-chart-bar pr10'
+      },
+      {
+        name: 'ReaderlogList',
+        title: '访客统计',
+        icon: 'fas fa-fw fa-user-clock pr10'
+      },
+      {
+        name: 'ReferrerList',
+        title: '访问来源',
+        icon: 'fas fa-fw fa-external-link-alt pr10'
       }
     ]
   },
@@ -253,16 +280,6 @@ const menuGroups = [
         name: 'BackupList',
         title: '备份',
         icon: 'fas fa-fw fa-archive pr10'
-      },
-      {
-        name: 'ReaderlogList',
-        title: '访客统计',
-        icon: 'fas fa-fw fa-user-clock pr10'
-      },
-      {
-        name: 'ReferrerList',
-        title: '访问来源',
-        icon: 'fas fa-fw fa-external-link-alt pr10'
       }
     ]
   }

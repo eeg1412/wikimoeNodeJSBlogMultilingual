@@ -327,6 +327,9 @@
 
         <el-form-item>
           <el-button @click="goList">返回列表</el-button>
+          <el-button type="success" @click="openAiTranslationDialog">
+            AI 翻译
+          </el-button>
           <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
           <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
           <el-button
@@ -482,6 +485,20 @@
               {{ item.label }}
             </div>
             <div class="translation-import-preview-columns">
+              <div
+                v-if="item.hasSourceValue"
+                class="translation-import-preview-panel"
+              >
+                <div class="translation-import-preview-panel-title">源文</div>
+                <div
+                  v-if="item.sourceHtml"
+                  class="translation-import-preview-html"
+                  v-html="item.sourceHtml"
+                />
+                <pre class="translation-import-preview-raw">{{
+                  item.sourceValue
+                }}</pre>
+              </div>
               <div class="translation-import-preview-panel">
                 <div class="translation-import-preview-panel-title">当前</div>
                 <div
@@ -517,6 +534,264 @@
           @click="confirmTranslationJsonImport"
         >
           确认导入
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="aiDialogVisible"
+      title="DeepSeek AI 翻译"
+      width="min(1100px, 96vw)"
+      destroy-on-close
+      append-to-body
+      :show-close="!isAiBusy"
+      :close-on-click-modal="!isAiBusy"
+      :close-on-press-escape="!isAiBusy"
+      :before-close="handleAiDialogBeforeClose"
+    >
+      <div
+        v-loading="aiApplying"
+        element-loading-text="正在写入，请稍候"
+        class="ai-translation-dialog-body"
+      >
+        <el-skeleton v-if="aiLoading" :rows="8" animated />
+        <template v-else>
+          <el-descriptions class="mb20" :column="3" border>
+            <el-descriptions-item label="源语言">
+              {{ getLanguageText(form.sourceLanguageCode) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="目标语言">
+              {{ getLanguageText(form.languageCode) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="可翻译条目">
+              {{ aiEntryList.length }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div
+            v-if="aiSkippedEntries.length > 0 && !aiImportPreview"
+            class="translation-json-warning-list"
+          >
+            <div class="translation-json-group-title">已跳过条目</div>
+            <div
+              v-for="item in aiSkippedEntries"
+              :key="item.id"
+              class="translation-json-warning-item"
+            >
+              {{ item.label || item.id }}：{{ item.reason }}
+            </div>
+          </div>
+
+          <template v-if="!aiImportPreview">
+            <div class="translation-json-toolbar">
+              <div class="cGray666">
+                已选择 {{ selectedAiEntryIds.length }} 项
+              </div>
+              <div class="translation-json-toolbar-actions">
+                <el-button
+                  size="small"
+                  :disabled="isAiBusy"
+                  @click="selectAllAiEntries"
+                >
+                  全选
+                </el-button>
+                <el-button
+                  size="small"
+                  :disabled="isAiBusy"
+                  @click="clearAiEntries"
+                >
+                  清空
+                </el-button>
+              </div>
+            </div>
+
+            <el-checkbox-group
+              v-model="selectedAiEntryIds"
+              class="w_10"
+              :disabled="isAiBusy"
+            >
+              <div
+                v-for="group in aiEntryGroups"
+                :key="group.label"
+                class="translation-json-group"
+              >
+                <div class="translation-json-group-title">
+                  {{ group.label }}
+                </div>
+                <div class="translation-json-entry-list">
+                  <el-checkbox
+                    v-for="entry in group.entries"
+                    :key="entry.id"
+                    :label="entry.id"
+                    class="translation-json-entry"
+                  >
+                    <div class="translation-json-entry-label">
+                      {{ entry.label }}
+                    </div>
+                    <div class="translation-json-entry-preview">
+                      {{ entry.previewText }}
+                    </div>
+                  </el-checkbox>
+                </div>
+              </div>
+            </el-checkbox-group>
+
+            <el-form class="ai-translation-prompt-form" label-width="110px">
+              <el-form-item label="此次提示词">
+                <el-input
+                  v-model="aiPrompt"
+                  type="textarea"
+                  :rows="5"
+                  :disabled="isAiBusy"
+                  placeholder="可补充本次翻译的语气、专有名词、保留词或风格要求"
+                />
+              </el-form-item>
+            </el-form>
+
+            <div
+              v-if="aiStreamStatusList.length > 0 || aiStreamContent"
+              class="ai-stream-feedback"
+            >
+              <div class="translation-json-group-title">实时反馈</div>
+              <div
+                v-for="item in aiStreamStatusList"
+                :key="item.id"
+                class="ai-stream-status-item"
+              >
+                {{ item.message }}
+              </div>
+              <pre v-if="aiStreamContent" class="ai-stream-content">{{
+                aiStreamContent
+              }}</pre>
+            </div>
+          </template>
+
+          <div v-else class="translation-import-preview-section">
+            <el-alert
+              class="mb20"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="确认写入后，会立即保存当前文章和相关关联内容。若当前页存在未保存改动，也会一并提交。"
+            />
+
+            <el-descriptions class="mb20" :column="3" border>
+              <el-descriptions-item label="可写入变更">
+                {{ aiImportPreview.changeCount }}
+              </el-descriptions-item>
+              <el-descriptions-item label="跳过条目">
+                {{ aiImportPreview.skippedCount }}
+              </el-descriptions-item>
+              <el-descriptions-item label="目标语言">
+                {{ getLanguageText(form.languageCode) }}
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <div
+              v-if="aiImportPreview.warningList.length > 0"
+              class="translation-json-warning-list"
+            >
+              <div class="translation-json-group-title">跳过说明</div>
+              <div
+                v-for="warning in aiImportPreview.warningList"
+                :key="warning"
+                class="translation-json-warning-item"
+              >
+                {{ warning }}
+              </div>
+            </div>
+
+            <div
+              v-for="group in aiImportPreviewGroups"
+              :key="group.label"
+              class="translation-import-preview-group"
+            >
+              <div class="translation-json-group-title">{{ group.label }}</div>
+              <div
+                v-for="item in group.entries"
+                :key="item.id"
+                class="translation-import-preview-item"
+              >
+                <div class="translation-import-preview-item-title">
+                  {{ item.label }}
+                </div>
+                <div class="translation-import-preview-columns">
+                  <div
+                    v-if="item.hasSourceValue"
+                    class="translation-import-preview-panel"
+                  >
+                    <div class="translation-import-preview-panel-title">
+                      源文
+                    </div>
+                    <div
+                      v-if="item.sourceHtml"
+                      class="translation-import-preview-html"
+                      v-html="item.sourceHtml"
+                    />
+                    <pre class="translation-import-preview-raw">{{
+                      item.sourceValue
+                    }}</pre>
+                  </div>
+                  <div class="translation-import-preview-panel">
+                    <div class="translation-import-preview-panel-title">
+                      当前
+                    </div>
+                    <div
+                      v-if="item.currentHtml"
+                      class="translation-import-preview-html"
+                      v-html="item.currentHtml"
+                    />
+                    <pre class="translation-import-preview-raw">{{
+                      item.currentValue
+                    }}</pre>
+                  </div>
+                  <div class="translation-import-preview-panel">
+                    <div class="translation-import-preview-panel-title">
+                      AI 翻译后
+                    </div>
+                    <div
+                      v-if="item.nextHtml"
+                      class="translation-import-preview-html"
+                      v-html="item.nextHtml"
+                    />
+                    <pre class="translation-import-preview-raw">{{
+                      item.nextValue
+                    }}</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button :disabled="isAiBusy" @click="aiDialogVisible = false">
+          取消
+        </el-button>
+        <el-button
+          v-if="aiImportPreview"
+          :disabled="isAiBusy"
+          @click="resetAiTranslationPreview"
+        >
+          返回调整
+        </el-button>
+        <el-button
+          v-if="!aiImportPreview"
+          type="primary"
+          :loading="aiTranslating"
+          :disabled="isAiBusy || aiEntryList.length === 0"
+          @click="requestAiTranslation"
+        >
+          开始翻译
+        </el-button>
+        <el-button
+          v-else
+          type="primary"
+          :loading="aiApplying"
+          :disabled="isAiBusy || aiImportPreview.changeCount === 0"
+          @click="confirmAiTranslationImport"
+        >
+          确认写入
         </el-button>
       </template>
     </el-dialog>
@@ -575,6 +850,7 @@ import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import { multilingualApi } from '@/api'
+import store from '@/store'
 import {
   getLanguageText,
   getPostStatusText,
@@ -591,6 +867,7 @@ import {
   buildTranslationExportPayload,
   buildTranslationImportPreview,
   buildTranslationJsonFilename,
+  buildSourceToTargetTranslationEntries,
   parseTranslationImportPayload
 } from '@/utils/translationJson'
 
@@ -860,10 +1137,12 @@ export default {
     const contentTab = ref('richText')
     const contentSource = ref('')
     const relationRecords = reactive(createRelationRecords())
+    const originalEditorVersion = ref(undefined)
     const form = reactive({
       id: '',
       languageCode: '',
       sourceLanguageCode: '',
+      sourceSnapshotId: '',
       snapshotVersion: 1,
       pendingReview: false,
       author: null,
@@ -919,6 +1198,19 @@ export default {
     const importPreview = ref(null)
     const importing = ref(false)
     const importFileInputRef = ref(null)
+    const aiDialogVisible = ref(false)
+    const aiLoading = ref(false)
+    const aiTranslating = ref(false)
+    const aiApplying = ref(false)
+    const aiEntryList = ref([])
+    const aiSkippedEntries = ref([])
+    const selectedAiEntryIds = ref([])
+    const aiPrompt = ref('')
+    const aiImportPreview = ref(null)
+    const sourceReferenceEntries = ref([])
+    const aiStreamStatusList = ref([])
+    const aiStreamContent = ref('')
+    const aiStreamReasoning = ref('')
 
     const typeTitle = computed(() => getPostTypeText(form.type))
     const relationEditFields = computed(() => {
@@ -968,13 +1260,95 @@ export default {
     const importPreviewGroups = computed(() => {
       return groupEntryList(importPreview.value?.changeList || [])
     })
+    const aiEntryGroups = computed(() => {
+      return groupEntryList(aiEntryList.value)
+    })
+    const aiImportPreviewGroups = computed(() => {
+      return groupEntryList(aiImportPreview.value?.changeList || [])
+    })
+    const isAiBusy = computed(() => {
+      return aiTranslating.value || aiApplying.value
+    })
 
-    function buildTranslationEntries() {
+    function buildTranslationEntries(options = {}) {
+      if (contentTab.value === 'sourceCode') {
+        form.content = contentSource.value
+      }
+
       return buildTranslationExportEntries({
         form,
         relationFields: ALL_RELATION_FIELDS,
-        relationRecords
+        relationRecords,
+        includeEmpty: Boolean(options.includeEmpty)
       })
+    }
+
+    function buildRelationRecordsFromPost(post) {
+      const records = createRelationRecords()
+      records.author = post.author ? [post.author] : []
+      records.sort = post.sort ? [post.sort] : []
+      ALL_RELATION_FIELDS.forEach(field => {
+        if (field.field === 'author' || field.field === 'sort') {
+          return
+        }
+        records[field.field] = []
+        if (Array.isArray(post[field.field])) {
+          records[field.field] = post[field.field].filter(Boolean)
+        }
+      })
+      return records
+    }
+
+    function buildSourceSnapshotEntries(sourcePost) {
+      const sourceForm = {
+        ...sourcePost,
+        id: sourcePost._id,
+        languageCode: sourcePost.languageCode || sourcePost.sourceLanguageCode,
+        sourceLanguageCode: sourcePost.sourceLanguageCode
+      }
+      return buildTranslationExportEntries({
+        form: sourceForm,
+        relationFields: ALL_RELATION_FIELDS,
+        relationRecords: buildRelationRecordsFromPost(sourcePost)
+      })
+    }
+
+    async function loadSourceReferenceEntries() {
+      if (sourceReferenceEntries.value.length > 0) {
+        return {
+          entries: sourceReferenceEntries.value,
+          skippedEntries: []
+        }
+      }
+
+      const sourceSnapshotId = getSourceSnapshotId()
+      if (!sourceSnapshotId) {
+        return {
+          entries: [],
+          skippedEntries: []
+        }
+      }
+
+      const response = await multilingualApi.getSourcePostDetail({
+        id: sourceSnapshotId
+      })
+      const sourceDetail = response.data.data || {}
+      const sourcePost = sourceDetail.post
+      if (!sourcePost) {
+        return {
+          entries: [],
+          skippedEntries: []
+        }
+      }
+
+      const sourceEntries = buildSourceSnapshotEntries(sourcePost)
+      const targetEntries = buildTranslationEntries({ includeEmpty: true })
+      const mappedResult = buildSourceToTargetTranslationEntries({
+        sourceEntries,
+        targetEntries
+      })
+      sourceReferenceEntries.value = mappedResult.entries
+      return mappedResult
     }
 
     function isVideoAttachment(record) {
@@ -1154,6 +1528,8 @@ export default {
       form.id = post._id
       form.languageCode = post.languageCode
       form.sourceLanguageCode = post.sourceLanguageCode
+      form.sourceSnapshotId = post.sourceSnapshotId || ''
+      sourceReferenceEntries.value = []
       form.snapshotVersion = post.snapshotVersion
       form.pendingReview = Boolean(post.pendingReview)
       setRelationRecordList('author', post.author ? [post.author] : [])
@@ -1169,7 +1545,15 @@ export default {
       form.allowRemark = Boolean(post.allowRemark)
       form.template = post.template || ''
       form.code = post.code || ''
-      form.editorVersion = Number(post.editorVersion || 5)
+      originalEditorVersion.value = undefined
+      if (
+        Object.prototype.hasOwnProperty.call(post, 'editorVersion') &&
+        post.editorVersion !== null &&
+        typeof post.editorVersion !== 'undefined'
+      ) {
+        originalEditorVersion.value = Number(post.editorVersion || 5)
+      }
+      form.editorVersion = originalEditorVersion.value || 5
 
       setRelationRecordList('sort', post.sort ? [post.sort] : [])
       ALL_RELATION_FIELDS.forEach(field => {
@@ -1306,6 +1690,19 @@ export default {
       }
     }
 
+    function buildImportSubmitData(postPatch) {
+      const submitData = {
+        ...buildSubmitData(false),
+        ...postPatch
+      }
+      if (typeof originalEditorVersion.value === 'undefined') {
+        delete submitData.editorVersion
+      } else {
+        submitData.editorVersion = originalEditorVersion.value
+      }
+      return submitData
+    }
+
     function submit(confirmReview) {
       saving.value = true
       multilingualApi
@@ -1406,20 +1803,22 @@ export default {
       reader.readAsText(file, 'utf-8')
     }
 
-    function parseTranslationJsonImport() {
+    async function parseTranslationJsonImport() {
       if (!importJsonText.value.trim()) {
         ElMessage.warning('请先粘贴或选择 JSON 内容')
         return
       }
 
       try {
+        const referenceResult = await loadSourceReferenceEntries()
         const parsedPayload = parseTranslationImportPayload(
           importJsonText.value
         )
         const preview = buildTranslationImportPreview({
           parsedPayload,
-          currentEntries: buildTranslationEntries(),
-          form
+          currentEntries: buildTranslationEntries({ includeEmpty: true }),
+          form,
+          referenceEntries: referenceResult.entries
         })
         importPreview.value = preview
         if (preview.changeCount === 0) {
@@ -1428,6 +1827,31 @@ export default {
       } catch (error) {
         ElMessage.error(error?.message || 'JSON 解析失败')
       }
+    }
+
+    async function applyTranslationImportPreview(preview) {
+      const relationUpdates = preview.applyPlan.relationUpdates
+      if (relationUpdates.length > 0) {
+        await Promise.all(
+          relationUpdates.map(updateItem => {
+            return multilingualApi.updateTranslationRelation({
+              collectionName: updateItem.collectionName,
+              id: updateItem.id,
+              languageCode: form.languageCode,
+              payload: updateItem.payload
+            })
+          })
+        )
+      }
+
+      const postPatch = preview.applyPlan.postPatch
+      if (Object.keys(postPatch).length > 0) {
+        await multilingualApi.updateTranslationPost(
+          buildImportSubmitData(postPatch)
+        )
+      }
+
+      await getPostDetail()
     }
 
     async function confirmTranslationJsonImport() {
@@ -1452,35 +1876,291 @@ export default {
 
       importing.value = true
       try {
-        const relationUpdates = importPreview.value.applyPlan.relationUpdates
-        if (relationUpdates.length > 0) {
-          await Promise.all(
-            relationUpdates.map(updateItem => {
-              return multilingualApi.updateTranslationRelation({
-                collectionName: updateItem.collectionName,
-                id: updateItem.id,
-                languageCode: form.languageCode,
-                payload: updateItem.payload
-              })
-            })
-          )
-        }
-
-        const postPatch = importPreview.value.applyPlan.postPatch
-        if (Object.keys(postPatch).length > 0) {
-          await multilingualApi.updateTranslationPost({
-            ...buildSubmitData(false),
-            ...postPatch
-          })
-        }
-
-        await getPostDetail()
+        await applyTranslationImportPreview(importPreview.value)
         importDialogVisible.value = false
         importJsonText.value = ''
         importPreview.value = null
         ElMessage.success('JSON 导入成功')
       } finally {
         importing.value = false
+      }
+    }
+
+    function resetAiTranslationState() {
+      aiEntryList.value = []
+      aiSkippedEntries.value = []
+      selectedAiEntryIds.value = []
+      aiPrompt.value = ''
+      aiImportPreview.value = null
+      aiStreamStatusList.value = []
+      aiStreamContent.value = ''
+      aiStreamReasoning.value = ''
+    }
+
+    function resetAiStreamState() {
+      aiStreamStatusList.value = []
+      aiStreamContent.value = ''
+      aiStreamReasoning.value = ''
+    }
+
+    function pushAiStreamStatus(message) {
+      if (!message) {
+        return
+      }
+      aiStreamStatusList.value.push({
+        id: `${Date.now()}-${aiStreamStatusList.value.length}`,
+        message
+      })
+    }
+
+    function handleAiDialogBeforeClose(done) {
+      if (isAiBusy.value) {
+        return
+      }
+      done()
+    }
+
+    function getSourceSnapshotId() {
+      return form.sourceSnapshotId || detailData.value?.post?.sourceSnapshotId
+    }
+
+    function openAiTranslationDialog() {
+      const sourceSnapshotId = getSourceSnapshotId()
+      if (!sourceSnapshotId) {
+        ElMessage.warning('当前文章缺少源快照，无法进行 AI 翻译')
+        return
+      }
+
+      resetAiTranslationState()
+      aiDialogVisible.value = true
+      aiLoading.value = true
+      loadSourceReferenceEntries()
+        .then(mappedResult => {
+          aiEntryList.value = mappedResult.entries
+          aiSkippedEntries.value = mappedResult.skippedEntries
+          selectedAiEntryIds.value = aiEntryList.value
+            .filter(entry => entry.defaultSelected)
+            .map(entry => entry.id)
+          if (aiEntryList.value.length === 0) {
+            ElMessage.warning('没有找到可提交给 AI 的源内容条目')
+          }
+        })
+        .finally(() => {
+          aiLoading.value = false
+        })
+    }
+
+    function selectAllAiEntries() {
+      selectedAiEntryIds.value = aiEntryList.value.map(entry => entry.id)
+    }
+
+    function clearAiEntries() {
+      selectedAiEntryIds.value = []
+    }
+
+    function resetAiTranslationPreview() {
+      aiImportPreview.value = null
+      resetAiStreamState()
+    }
+
+    function parseClientSseBlock(block) {
+      const eventData = {
+        eventName: 'message',
+        data: {}
+      }
+      const dataLines = []
+      block.split(/\r?\n/).forEach(line => {
+        if (line.startsWith('event:')) {
+          eventData.eventName = line.slice(6).trim()
+        }
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart())
+        }
+      })
+      if (dataLines.length === 0) {
+        return null
+      }
+      try {
+        eventData.data = JSON.parse(dataLines.join('\n'))
+      } catch (error) {
+        eventData.data = {}
+      }
+      return eventData
+    }
+
+    function findClientSseBoundary(buffer) {
+      const lfIndex = buffer.indexOf('\n\n')
+      const crlfIndex = buffer.indexOf('\r\n\r\n')
+      if (lfIndex < 0 && crlfIndex < 0) {
+        return { index: -1, length: 0 }
+      }
+      if (lfIndex < 0) {
+        return { index: crlfIndex, length: 4 }
+      }
+      if (crlfIndex < 0) {
+        return { index: lfIndex, length: 2 }
+      }
+      if (lfIndex < crlfIndex) {
+        return { index: lfIndex, length: 2 }
+      }
+      return { index: crlfIndex, length: 4 }
+    }
+
+    function handleAiStreamEvent(eventData, selectedEntries) {
+      if (!eventData) {
+        return null
+      }
+      const data = eventData.data || {}
+      if (eventData.eventName === 'status') {
+        pushAiStreamStatus(data.message)
+      }
+      if (eventData.eventName === 'chunk') {
+        if (data.reasoningDelta) {
+          aiStreamReasoning.value += data.reasoningDelta
+        }
+        if (data.contentDelta) {
+          aiStreamContent.value += data.contentDelta
+        }
+      }
+      if (eventData.eventName === 'result') {
+        const preview = buildTranslationImportPreview({
+          parsedPayload: data.payload,
+          currentEntries: buildTranslationEntries({ includeEmpty: true }),
+          form,
+          referenceEntries: selectedEntries
+        })
+        aiImportPreview.value = preview
+        if (preview.changeCount === 0) {
+          ElMessage.info('AI 返回结果中没有可写入的变更')
+        }
+      }
+      if (eventData.eventName === 'error') {
+        return new Error(data.message || 'AI 翻译失败')
+      }
+      return null
+    }
+
+    async function readAiTranslationStream(response, selectedEntries) {
+      if (!response.body) {
+        throw new Error('浏览器不支持读取 AI 翻译流')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let streamError = null
+
+      function consumeBuffer() {
+        let boundary = findClientSseBoundary(buffer)
+        while (boundary.index >= 0) {
+          const block = buffer.slice(0, boundary.index)
+          buffer = buffer.slice(boundary.index + boundary.length)
+          const eventData = parseClientSseBlock(block)
+          const error = handleAiStreamEvent(eventData, selectedEntries)
+          if (error) {
+            streamError = error
+          }
+          boundary = findClientSseBoundary(buffer)
+        }
+      }
+
+      let done = false
+      while (!done) {
+        const result = await reader.read()
+        done = result.done
+        if (result.value) {
+          buffer += decoder.decode(result.value, { stream: !done })
+          consumeBuffer()
+        }
+      }
+
+      if (buffer.trim()) {
+        const eventData = parseClientSseBlock(buffer)
+        const error = handleAiStreamEvent(eventData, selectedEntries)
+        if (error) {
+          streamError = error
+        }
+      }
+
+      if (streamError) {
+        throw streamError
+      }
+    }
+
+    async function requestAiTranslation() {
+      if (selectedAiEntryIds.value.length === 0) {
+        ElMessage.warning('请至少选择一项翻译内容')
+        return
+      }
+
+      const selectedIdSet = new Set(selectedAiEntryIds.value)
+      const selectedEntries = aiEntryList.value.filter(entry => {
+        return selectedIdSet.has(entry.id)
+      })
+
+      resetAiStreamState()
+      aiImportPreview.value = null
+      aiTranslating.value = true
+      try {
+        pushAiStreamStatus('正在开始翻译')
+        const response = await fetch(
+          '/api/multilingual-admin/translation/post/ai-translate-stream',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${store.getters.adminToken}`
+            },
+            body: JSON.stringify({
+              postId: form.id,
+              sourceLanguageCode: form.sourceLanguageCode,
+              targetLanguageCode: form.languageCode,
+              prompt: aiPrompt.value,
+              entries: selectedEntries
+            })
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error(`AI 翻译请求失败：${response.status}`)
+        }
+
+        await readAiTranslationStream(response, selectedEntries)
+      } catch (error) {
+        ElMessage.error(error?.message || 'AI 翻译失败')
+      } finally {
+        aiTranslating.value = false
+      }
+    }
+
+    async function confirmAiTranslationImport() {
+      if (!aiImportPreview.value || aiImportPreview.value.changeCount === 0) {
+        ElMessage.warning('请先完成 AI 翻译预览')
+        return
+      }
+
+      try {
+        await ElMessageBox.confirm(
+          '确认写入后，将立即保存 AI 翻译结果。请确认预览内容无误。',
+          '确认写入 AI 翻译',
+          {
+            type: 'warning',
+            confirmButtonText: '确认写入',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+
+      aiApplying.value = true
+      try {
+        await applyTranslationImportPreview(aiImportPreview.value)
+        aiDialogVisible.value = false
+        resetAiTranslationState()
+        ElMessage.success('AI 翻译已写入')
+      } finally {
+        aiApplying.value = false
       }
     }
 
@@ -1496,10 +2176,24 @@ export default {
       Document,
       EditPen,
       VideoPlay,
+      aiApplying,
+      aiDialogVisible,
+      aiEntryGroups,
+      aiEntryList,
+      aiImportPreview,
+      aiImportPreviewGroups,
+      aiLoading,
+      aiPrompt,
+      aiSkippedEntries,
+      aiStreamContent,
+      aiStreamStatusList,
+      aiTranslating,
       authorName,
       authorRecord,
+      clearAiEntries,
       contentSource,
       contentTab,
+      confirmAiTranslationImport,
       confirmReview,
       detailData,
       detailRelationFields: DETAIL_RELATION_FIELDS,
@@ -1520,7 +2214,9 @@ export default {
       loading,
       onContentTabChange,
       openMediaPreview,
+      openAiTranslationDialog,
       openRelationEditor,
+      handleAiDialogBeforeClose,
       handleRelationParentUpdated,
       importDialogVisible,
       importFileInputRef,
@@ -1535,9 +2231,12 @@ export default {
       relationEditVisible,
       relationRecords,
       relationSaving,
+      isAiBusy,
       postEditorVersion,
       resetRandomAlias,
+      resetAiTranslationPreview,
       selectedExportIds,
+      selectedAiEntryIds,
       clearExportEntries,
       confirmTranslationJsonImport,
       downloadTranslationJson,
@@ -1545,8 +2244,10 @@ export default {
       openTranslationJsonExport,
       openTranslationJsonImport,
       parseTranslationJsonImport,
+      requestAiTranslation,
       saveRelationEdit,
       saving,
+      selectAllAiEntries,
       selectAllExportEntries,
       submit,
       syncRelationIds,
@@ -1781,6 +2482,40 @@ export default {
   margin-top: 20px;
 }
 
+.ai-translation-prompt-form {
+  margin-top: 18px;
+}
+
+.ai-translation-dialog-body {
+  min-height: 180px;
+}
+
+.ai-stream-feedback {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-light);
+  background: var(--el-fill-color-lighter);
+}
+
+.ai-stream-status-item {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.ai-stream-content {
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+}
+
 .translation-import-preview-item {
   padding: 14px;
   border-radius: 8px;
@@ -1794,7 +2529,7 @@ export default {
 
 .translation-import-preview-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -1825,6 +2560,7 @@ export default {
 .translation-import-preview-html :deep(img),
 .translation-import-preview-html :deep(video) {
   max-width: 100%;
+  height: auto;
 }
 
 .translation-import-preview-raw {

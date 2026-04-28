@@ -68,6 +68,25 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
+    getAiSettings(data = {}, noLoading = false) {
+      return api.get('/settings/ai/get', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    updateAiSettings(data) {
+      return api.put('/settings/ai/update', data, {
+        shouldAdminJWT: true
+      })
+    },
+    getAiUsageSummary(data = {}, noLoading = false) {
+      return api.get('/ai/usage/summary', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationPost(data) {
       return api.post('/translation/post/create', data, {
         shouldAdminJWT: true
