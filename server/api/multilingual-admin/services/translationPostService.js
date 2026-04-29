@@ -1,5 +1,6 @@
 const mongoose = require('mongoose')
 const utils = require('../../../utils/utils')
+const cacheDataUtils = require('../../../config/cacheData')
 const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
@@ -1393,6 +1394,9 @@ async function copySourceSnapshotRecord(
     data._id = recordId
     await new model(data).save()
     const createdRecord = { _id: recordId }
+    if (collectionName === 'sorts') {
+      cacheDataUtils.invalidateSortListCache(context.languageCode)
+    }
     increaseCopiedCount(context, collectionName, 'created')
     context.copyCache.set(cacheKey, createdRecord)
     return createdRecord
@@ -1891,6 +1895,8 @@ async function createTranslationPost(body = {}) {
           copyPostRelations: true
         }
       )
+
+      cacheDataUtils.invalidateSortListCache(input.languageCode)
 
       return {
         translationPostId: translationPost._id,
@@ -2601,6 +2607,10 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
     { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
     { $set: updateData }
   )
+
+  if (input.collectionName === 'posts' || input.collectionName === 'sorts') {
+    cacheDataUtils.invalidateSortListCache(record.languageCode)
+  }
 
   if (input.collectionName === 'posts') {
     return await getTranslationPostDetail(record._id)

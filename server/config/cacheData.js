@@ -67,6 +67,23 @@ exports.getRequestLanguageCode = function (req) {
 exports.getLanguageCache = getLanguageCache
 exports.getTranslationParams = getTranslationParams
 
+exports.invalidateSortListCache = function (
+  languageCodeInput = DEFAULT_LANGUAGE_CODE
+) {
+  const languageCode = getLanguageCode(languageCodeInput)
+  if (!languageCode) {
+    return null
+  }
+
+  const languageCache = getLanguageCache(languageCode)
+  if (!languageCache) {
+    return null
+  }
+
+  languageCache.sortList = null
+  return languageCache
+}
+
 exports.getNaviList = async function (
   languageCodeInput = DEFAULT_LANGUAGE_CODE
 ) {

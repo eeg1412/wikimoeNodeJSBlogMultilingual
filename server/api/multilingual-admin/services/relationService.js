@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const cacheDataUtils = require('../../../config/cacheData')
 const { normalizeLanguageCode } = require('../../../utils/language')
 const {
   ApiError,
@@ -563,6 +564,10 @@ async function updateRelation(body = {}) {
     { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
     { $set: updateData }
   )
+
+  if (input.collectionName === 'sorts') {
+    cacheDataUtils.invalidateSortListCache(record.languageCode)
+  }
 
   return await Model.findOne({ _id: record._id }).lean()
 }
