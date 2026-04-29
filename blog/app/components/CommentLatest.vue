@@ -24,7 +24,7 @@
         <div class="comment-latest-item-date">
           <ClientOnly
             ><span :title="formatDate(item.date, 'yyyy-MM-dd hh:mm:ss')">{{
-              fromNow(item.date, 'yyyy-MM-dd hh:mm')
+              fromNowText(item.date, 'yyyy-MM-dd hh:mm')
             }}</span
             ><template #fallback>{{
               formatDate(item.date, 'yyyy-MM-dd hh:mm')
@@ -51,6 +51,7 @@ import { getCommentLatestApi } from '@/api/comment'
 const props = defineProps({})
 const router = useRouter()
 const { languageCode, t } = useLang()
+const { fromNowText } = useLocalizedText()
 
 const { data: commentLatest } = await getCommentLatestApi()
 

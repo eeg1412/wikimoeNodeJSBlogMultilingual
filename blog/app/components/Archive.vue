@@ -18,7 +18,12 @@
           }"
           class="archive-list-item-link common-a"
         >
-          {{ item.year }}年{{ item.month }}月({{ formatCount(item.count) }})
+          {{
+            t('common.calendar.yearMonth', {
+              year: item.year,
+              month: item.month
+            })
+          }}({{ formatCount(item.count) }})
         </NuxtLink>
       </li>
     </ul>

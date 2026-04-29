@@ -34,7 +34,7 @@
               ><span class="tenten"></span>
               <ClientOnly
                 ><span class="cGray94" :title="formatDate(item.date)">{{
-                  fromNow(item.date, 'yyyy-MM-dd')
+                  fromNowText(item.date, 'yyyy-MM-dd')
                 }}</span
                 ><template #fallback
                   ><span class="cGray94">{{ item.dateStr }}</span></template
@@ -153,7 +153,9 @@
                     name="i-heroicons-book-open"
                   />
                   <span>{{
-                    t('common.post.views', { count: formatNumber(item.views) })
+                    t('common.post.views', {
+                      count: formatNumberText(item.views)
+                    })
                   }}</span>
                 </NuxtLink>
               </div>
@@ -175,7 +177,7 @@
                   />
                   <span>{{
                     t('common.post.comments', {
-                      count: formatNumber(item.comnum)
+                      count: formatNumberText(item.comnum)
                     })
                   }}</span>
                 </NuxtLink>
@@ -201,7 +203,7 @@
 
                     <span>{{
                       t('common.post.shares', {
-                        count: formatNumber(item.shares)
+                        count: formatNumberText(item.shares)
                       })
                     }}</span>
                   </button>
@@ -239,7 +241,9 @@
                 />
 
                 <span>{{
-                  t('common.post.likes', { count: formatNumber(item.likes) })
+                  t('common.post.likes', {
+                    count: formatNumberText(item.likes)
+                  })
                 }}</span>
               </div>
               <div class="dflex flexCenter opacity-20" v-else>
@@ -250,7 +254,9 @@
                 />
 
                 <span>{{
-                  t('common.post.likes', { count: formatNumber(item.likes) })
+                  t('common.post.likes', {
+                    count: formatNumberText(item.likes)
+                  })
                 }}</span>
               </div>
             </div>
@@ -411,6 +417,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useWToast()
 const { languageCode, t } = useLang()
+const { formatNumberText, fromNowText } = useLocalizedText()
 languageCode.value
 
 const postRouteType = computed(() => route.params.type)
@@ -532,9 +539,9 @@ const routePagination = computed(() => {
 if (!/^\d+$/.test(page)) {
   showError({
     statusCode: 404,
-    message: '页面不存在'
+    message: t('common.error.notFound')
   })
-  throw new Error('页面不存在')
+  throw new Error(t('common.error.notFound'))
 }
 const [postsDataResponse] = await Promise.all([
   getPostsApi({
@@ -568,7 +575,7 @@ const showTopIcon = item => {
 }
 if (postsData?.value?.list) {
   postsData.value.list.forEach((item, index) => {
-    postsData.value.list[index].dateStr = fromNow(item.date, 'yyyy-MM-dd')
+    postsData.value.list[index].dateStr = fromNowText(item.date, 'yyyy-MM-dd')
     postsData.value.list[index].showTopIcon = showTopIcon(item)
   })
 }
@@ -753,9 +760,7 @@ const likePost = post => {
       )
 
       const targetPost = postsData.value.list[postIndex]
-      const newLikeCount = newLike
-        ? targetPost.likes + 1
-        : targetPost.likes - 1
+      const newLikeCount = newLike ? targetPost.likes + 1 : targetPost.likes - 1
       postsData.value.list[postIndex].likes = newLikeCount
       postsData.value.list[postIndex].isLike = newLike
     })

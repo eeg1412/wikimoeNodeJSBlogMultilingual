@@ -1,4 +1,8 @@
-import { DEFAULT_LANGUAGE_CODE, normalizeLanguageCode } from '@/lang'
+import {
+  DEFAULT_LANGUAGE_CODE,
+  getLanguageText,
+  normalizeLanguageCode
+} from '@/lang'
 
 const MULTILINGUAL_BASE_URL = '/api/multilingual-blog'
 
@@ -109,7 +113,10 @@ class MultilingualHttpRequest {
             console.log('statusCode', statusCode)
             showError({
               statusCode: statusCode || 500,
-              message: '服务器正在维护中，请稍后再试。'
+              message: getLanguageText(
+                getRequestLanguageCode(data, options),
+                'common.error.maintenance'
+              )
             })
           } else {
             resolve(res)

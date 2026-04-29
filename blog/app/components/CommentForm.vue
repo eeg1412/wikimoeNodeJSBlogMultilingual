@@ -462,7 +462,7 @@ const removeUserInfo = () => {
   form.url = ''
   // 提示
   toast.add({
-    title: '已清除个人信息',
+    title: t('common.comment.userInfoCleared'),
     icon: 'i-heroicons-check-circle',
     color: 'green'
   })

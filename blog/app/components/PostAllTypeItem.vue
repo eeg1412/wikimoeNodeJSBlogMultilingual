@@ -28,7 +28,11 @@
         class="text-xs text-gray-600 dark:text-gray-300 mt-1"
         v-if="item.date"
       >
-        发表于：{{ formatDate(item.date, 'yyyy-MM-dd hh:mm') }}
+        {{
+          t('common.post.publishedAt', {
+            date: formatDate(item.date, 'yyyy-MM-dd hh:mm')
+          })
+        }}
       </div>
     </div>
   </nuxt-link>
@@ -44,7 +48,7 @@ const props = defineProps({
 })
 
 const { options } = useOptions()
-const { languageCode } = useLang()
+const { languageCode, t } = useLang()
 
 const getLinkObj = item => {
   let linkObj = {}
@@ -85,7 +89,7 @@ const getRandomPostTitle = item => {
     default:
       break
   }
-  return title
+  return title || t('common.post.noTitle')
 }
 
 const getRandomPostCategory = item => {
@@ -94,15 +98,15 @@ const getRandomPostCategory = item => {
   switch (type) {
     // tweet
     case 2:
-      category = '推文'
+      category = t('common.post.tweet')
       break
     // blog
     case 1:
-      category = '博文'
+      category = t('common.post.blog')
       break
     // page
     case 3:
-      category = '页面'
+      category = t('common.post.page')
       break
     default:
       break

@@ -1,3 +1,9 @@
+import {
+  DEFAULT_LANGUAGE_CODE,
+  getLanguageText,
+  normalizeLanguageCode
+} from '@/lang'
+
 const SOURCE_BASE_URL = '/api/source-blog'
 
 export const SOURCE_ENDPOINT_PREFIXES = [
@@ -10,6 +16,29 @@ export const SOURCE_ENDPOINT_PREFIXES = [
   '/comment/like/log/list',
   '/link/list'
 ]
+
+function getRouteCode() {
+  if (typeof useRoute !== 'function') {
+    return null
+  }
+
+  try {
+    const route = useRoute()
+    const code = route.params.code
+
+    if (Array.isArray(code)) {
+      return code[0]
+    }
+
+    return code
+  } catch (error) {
+    return null
+  }
+}
+
+function getRequestLanguageCode() {
+  return normalizeLanguageCode(getRouteCode()) || DEFAULT_LANGUAGE_CODE
+}
 
 function createRequestOptions(method, data, options = {}) {
   const requestOptions = {
@@ -41,7 +70,10 @@ class SourceHttpRequest {
             console.log('statusCode', statusCode)
             showError({
               statusCode: statusCode || 500,
-              message: '服务器正在维护中，请稍后再试。'
+              message: getLanguageText(
+                getRequestLanguageCode(),
+                'common.error.maintenance'
+              )
             })
           } else {
             resolve(res)

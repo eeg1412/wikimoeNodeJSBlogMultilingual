@@ -38,6 +38,7 @@
 import { deleteCommentRetractApi } from '@/api/comment'
 const emits = defineEmits(['refresh'])
 const { t } = useLang()
+const { copyText } = useLocalizedText()
 const props = defineProps({
   commentid: {
     type: String,
@@ -133,7 +134,7 @@ const retractComment = () => {
         actions: [
           {
             label: t('common.comment.copyContent'),
-            click: () => copyToClipboard(props.content, toast)
+            click: () => copyText(props.content, toast)
           }
         ]
       })

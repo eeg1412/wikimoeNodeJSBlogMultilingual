@@ -9,6 +9,8 @@ export default {
     delete: '删除',
     search: '搜索',
     reset: '重置',
+    previous: '上一张',
+    next: '下一张',
     preview: '预览',
     publish: '发布'
   },
@@ -16,6 +18,141 @@ export default {
     loading: '加载中',
     empty: '暂无内容',
     error: '加载失败'
+  },
+  time: {
+    justNow: '刚刚',
+    secondsAgo: '{count}秒前',
+    minutesAgo: '{count}分钟前',
+    hoursAgo: '{count}小时前',
+    daysAgo: '{count}天前'
+  },
+  error: {
+    refresh: '尝试刷新',
+    backHome: '返回首页',
+    notFound: '您访问的页面不存在。',
+    forbidden: '您当前没有权限访问此页面。',
+    maintenanceUpdating: '服务器正在更新维护中，请稍后再试。',
+    maintenance: '服务器正在维护中，请稍后再试。'
+  },
+  calendar: {
+    weekdaysShort: ['日', '一', '二', '三', '四', '五', '六'],
+    yearMonth: '{year}年{month}月'
+  },
+  clipboard: {
+    copySuccess: '复制成功',
+    copyFailed: '复制失败'
+  },
+  album: {
+    empty: '暂无相关内容'
+  },
+  emoji: {
+    button: '表情',
+    empty: '暂无表情',
+    frequent: '常用'
+  },
+  image: {
+    loading: '图片加载中...',
+    loadFailed: '图片加载失败'
+  },
+  panorama: {
+    zoom: '缩放',
+    zoomOut: '缩小',
+    zoomIn: '放大',
+    moveUp: '向上移动',
+    moveDown: '向下移动',
+    moveLeft: '向左移动',
+    moveRight: '向右移动',
+    description: '描述',
+    download: '下载',
+    fullscreen: '全屏',
+    loading: '加载中...',
+    menu: '菜单',
+    close: '关闭',
+    twoFingers: '使用双指导航',
+    ctrlZoom: '使用Ctrl+滚轮缩放图片',
+    loadError: '全景图无法加载',
+    webglError: '您的浏览器似乎不支持WebGL',
+    gyroscope: '动态体感视角',
+    screenshot: '截图',
+    switchLens: '切换镜头模式',
+    descriptionToggle: '描述开关',
+    panorama360: '360°全景',
+    vrMode: 'VR模式',
+    vrEnterFailed: '进入VR模式失败，请检查权限或设备支持情况',
+    vrInitFailed: '初始化VR模式失败，请检查权限或设备支持情况'
+  },
+  vote: {
+    endTime: '截止时间',
+    totalVotes: '共 {count} 票',
+    maxSelect: '最多可选择 {count} 项',
+    showResultAfter: '投票后显示票数',
+    chooseOption: '请选择选项',
+    success: '投票成功',
+    loading: '加载中...',
+    voting: '正在投票...',
+    voted: '已投票',
+    sameIpVoted: '同IP地址已投票',
+    ended: '投票已结束',
+    submit: '提交',
+    maxSelectExceeded: '最多只能选择{count}项'
+  },
+  rating: {
+    points: '{score}分',
+    level: {
+      masterpiece: '神作',
+      excellent: '佳作',
+      good: '良作',
+      okay: '还行',
+      poor: '劣作',
+      bad: '差',
+      terrible: '烂作',
+      awful: '烂差',
+      confused: '迷',
+      none: '暂无评分'
+    }
+  },
+  media: {
+    bangumi: '番剧',
+    movie: '电影',
+    browseAll: '浏览所有媒体'
+  },
+  season: {
+    winter: '冬季新番',
+    spring: '春季新番',
+    summer: '夏季新番',
+    autumn: '秋季新番',
+    all: '所有季度'
+  },
+  duration: {
+    minute: '{count}分钟',
+    hour: '{count}小时',
+    day: '{count}天',
+    week: '{count}周',
+    weekDay: '{weeks}周{days}天',
+    month: '{count}个月',
+    monthDay: '{months}个月{days}天',
+    year: '{count}年',
+    yearMonth: '{years}年{months}个月'
+  },
+  acgn: {
+    relatedPost: '相关文章',
+    relatedAlbum: '相关相册',
+    noContent: '暂无内容',
+    labels: '标记：',
+    expand: '<更多>',
+    collapse: '<收起>',
+    yearSeason: '{year}年{season}',
+    dateFormat: 'yyyy年M月dd日 h时',
+    dropped: '已弃坑',
+    reading: '阅读中',
+    playing: '攻略中',
+    readAfterDropped: '阅读{duration}后弃坑',
+    playAfterDropped: '游玩{duration}后弃坑',
+    accumulatedRead: '已累计阅读',
+    totalRead: '共计阅读',
+    accumulatedPlay: '已累计游玩',
+    totalPlay: '共计游玩',
+    watchedOn: '{year}年{month}月{day}日观看'
   },
   navigation: {
     home: '首页',
@@ -26,12 +163,113 @@ export default {
     placeholder: '请输入关键词',
     title: '搜索：{keyword}'
   },
+  trend: {
+    heat: '热度'
+  },
+  map: {
+    markerListTitle: '地图标记点列表',
+    viewDetail: '点击查看详情',
+    emptyMarkers: '暂无地点标记',
+    relatedPostEmpty: '暂无相关文章',
+    dataLoading: '数据加载中...',
+    zoomIn: '放大',
+    zoomOut: '缩小'
+  },
+  qrcode: {
+    title: '二维码',
+    emptyText: '二维码内容不能为空',
+    generateFailed: '生成二维码失败'
+  },
+  share: {
+    title: '分享至',
+    copyLink: '复制链接',
+    toWeibo: '分享到新浪微博',
+    toQzone: '分享到QQ空间',
+    toX: '分享到X',
+    toFacebook: '分享到Facebook',
+    toReddit: '分享到Reddit',
+    toTelegram: '分享到Telegram',
+    toLine: '分享到LINE',
+    toWhatsapp: '分享到WhatsApp'
+  },
+  theme: {
+    title: '主题模式',
+    system: '跟随系统',
+    light: '浅色模式',
+    dark: '深色模式'
+  },
+  related: {
+    blog: '相关博文：',
+    tweet: '相关推文：',
+    event: '相关活动：',
+    work: '相关作品：',
+    vote: '相关投票：'
+  },
+  link: {
+    noDescription: '暂无描述'
+  },
+  pageAbout: {
+    noDescription: '暂无介绍'
+  },
+  pageEvent: {
+    emptyMonth: '该月无事发生',
+    emptyDay: '当日无事发生',
+    dayTitle: '{date}活动',
+    dayDateFormat: 'yyyy年M月d日'
+  },
+  pageBangumi: {
+    keywordLabel: '关键词',
+    keywordPlaceholder: '请输入关键词',
+    yearLabel: '年份',
+    seasonLabel: '季度',
+    statusLabel: '状态',
+    cancel: '取消',
+    apply: '筛选',
+    defaultSort: '默认排序',
+    ratingSort: '按评分排序',
+    allYears: '所有年份',
+    yearValue: '{year}年',
+    allStatus: '全部',
+    droppedStatus: '弃坑',
+    appliedFilters: '已应用{count}项筛选',
+    allContent: '所有内容',
+    totalBangumi: '共计{count}部番剧'
+  },
+  pageMedia: {
+    keywordLabel: '关键词',
+    keywordPlaceholder: '请输入关键词',
+    typeLabel: '类型',
+    allTypes: '全部类型',
+    platformLabel: '平台',
+    allPlatforms: '全部平台',
+    statusLabel: '状态',
+    watchYearLabel: '观看年份',
+    allYears: '全部年份',
+    cancel: '取消',
+    apply: '筛选',
+    startTimeSort: '按开始时间排序',
+    watchTimeSort: '按观看时间排序',
+    ratingSort: '按评分排序',
+    allContent: '所有内容',
+    appliedFilters: '已应用{count}项筛选',
+    totalWorks: '共{count}部作品',
+    totalMovies: '共{count}部电影',
+    bookUnread: '尚未阅读',
+    bookReading: '阅读中',
+    bookFinished: '已读完',
+    gameUnplayed: '尚未攻略',
+    gamePlaying: '攻略中',
+    gameFinished: '已通关'
+  },
   footer: {
     sitemap: '站点地图',
     rssSubscribe: 'RSS订阅：',
     rssAll: '全站订阅',
     rssBlog: '订阅博文',
-    rssTweet: '订阅推文'
+    rssTweet: '订阅推文',
+    rssAllTitle: 'RSS',
+    rssBlogTitle: '博客 RSS',
+    rssTweetTitle: '推文 RSS'
   },
   post: {
     pinned: '置顶',
@@ -44,6 +282,9 @@ export default {
     allTypes: '全部类型',
     blog: '博文',
     tweet: '推文',
+    page: '页面',
+    shortBlog: '博',
+    shortTweet: '推',
     listHome: '首页',
     listHomePage: '首页 - 第{page}页',
     listKeyword: '搜索：{keyword}',
@@ -57,8 +298,10 @@ export default {
     listGame: '游戏相关文章',
     listDefault: '文章列表',
     noTitle: '暂无标题',
+    noTitleOrContent: '暂无标题或内容',
     tweetTitle: '推文',
     author: '作者：',
+    publishedAt: '发表于：{date}',
     time: '时间：',
     sort: '分类：',
     runCode: '运行代码',
@@ -68,6 +311,7 @@ export default {
     publish: '发表评论：',
     saveUserInfo: '提交后保存此个人信息',
     clearUserInfo: '立即清除个人信息',
+    userInfoCleared: '已清除个人信息',
     placeholder: '说点什么吧...',
     nickname: '昵称',
     email: '邮箱（选填）',

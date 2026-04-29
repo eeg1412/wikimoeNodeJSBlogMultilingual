@@ -22,9 +22,9 @@ const page = route.params.page
 if (!/^\d+$/.test(page)) {
   showError({
     statusCode: 404,
-    message: '页面不存在'
+    message: t('common.error.notFound')
   })
-  throw new Error('页面不存在')
+  throw new Error(t('common.error.notFound'))
 }
 // 设置SEO
 useSeoMeta({

@@ -5,6 +5,7 @@
  */
 export function useArticleJsonLd() {
   const { options } = useOptions()
+  const { t } = useLang()
   const {
     generateSeoTitle,
     generateSeoDescription,
@@ -51,7 +52,7 @@ export function useArticleJsonLd() {
     const jsonLd = {
       '@context': 'https://schema.org',
       '@type': articleType,
-      headline: seoTitle || '无标题',
+      headline: seoTitle || t('common.post.noTitle'),
       author: authorInfo,
       datePublished: post.date || post.createDate,
       url: postUrl,
@@ -142,7 +143,10 @@ export function useArticleJsonLd() {
    * @param {String} listName - 列表名称（如"首页"、"标签文章"等）
    * @returns {Object} JSON-LD 结构化数据
    */
-  function generateItemListJsonLd(posts, listName = '文章列表') {
+  function generateItemListJsonLd(
+    posts,
+    listName = t('common.post.listDefault')
+  ) {
     if (!posts || !Array.isArray(posts) || posts.length === 0) return null
     if (!options.value) return null
 
@@ -160,9 +164,9 @@ export function useArticleJsonLd() {
       // 推文类型必须使用智能标题裁切
       let itemName
       if (post.type === 2) {
-        itemName = generateSeoTitle(post) || '推文'
+        itemName = generateSeoTitle(post) || t('common.post.tweetTitle')
       } else {
-        itemName = post.title || '无标题'
+        itemName = post.title || t('common.post.noTitle')
       }
 
       // 根据文章类型确定 @type

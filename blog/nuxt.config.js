@@ -106,13 +106,13 @@ export default defineNuxtConfig({
     head: {
       charset: 'utf-8',
       viewport:
-        'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0',
-      link: [
-        {
-          rel: 'icon',
-          href: withMultilingualLocalPublicAssetBase('/favicon.ico')
-        }
-      ]
+        'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0'
+      // link: [
+      //   {
+      //     rel: 'icon',
+      //     href: withMultilingualLocalPublicAssetBase('/favicon.ico')
+      //   }
+      // ]
     }
     // 因为nuxt的页面动画有BUG导致两次运行onmounted，所以关闭
     // pageTransition: { name: 'page', mode: 'out-in' },

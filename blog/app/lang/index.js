@@ -1,9 +1,21 @@
 import zhCNCommon from './zh-CN/common'
+import zhCNAlmanac from './zh-CN/almanac'
+import zhCNSeeking from './zh-CN/seeking'
 import zhHKCommon from './zh-HK/common'
+import zhHKAlmanac from './zh-HK/almanac'
+import zhHKSeeking from './zh-HK/seeking'
 import zhTWCommon from './zh-TW/common'
+import zhTWAlmanac from './zh-TW/almanac'
+import zhTWSeeking from './zh-TW/seeking'
 import zhSGCommon from './zh-SG/common'
+import zhSGAlmanac from './zh-SG/almanac'
+import zhSGSeeking from './zh-SG/seeking'
 import jaJPCommon from './ja-JP/common'
+import jaJPAlmanac from './ja-JP/almanac'
+import jaJPSeeking from './ja-JP/seeking'
 import enUSCommon from './en-US/common'
+import enUSAlmanac from './en-US/almanac'
+import enUSSeeking from './en-US/seeking'
 
 export const SUPPORTED_LANGUAGE_CODES = [
   'zh-CN',
@@ -25,22 +37,34 @@ export const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce(
 
 const LANGUAGE_TEXT_MAP = {
   'zh-CN': {
-    common: zhCNCommon
+    common: zhCNCommon,
+    almanac: zhCNAlmanac,
+    seeking: zhCNSeeking
   },
   'zh-HK': {
-    common: zhHKCommon
+    common: zhHKCommon,
+    almanac: zhHKAlmanac,
+    seeking: zhHKSeeking
   },
   'zh-TW': {
-    common: zhTWCommon
+    common: zhTWCommon,
+    almanac: zhTWAlmanac,
+    seeking: zhTWSeeking
   },
   'zh-SG': {
-    common: zhSGCommon
+    common: zhSGCommon,
+    almanac: zhSGAlmanac,
+    seeking: zhSGSeeking
   },
   'ja-JP': {
-    common: jaJPCommon
+    common: jaJPCommon,
+    almanac: jaJPAlmanac,
+    seeking: jaJPSeeking
   },
   'en-US': {
-    common: enUSCommon
+    common: enUSCommon,
+    almanac: enUSAlmanac,
+    seeking: enUSSeeking
   }
 }
 

@@ -58,7 +58,7 @@
             >
               <div class="text-2xl text-center">
                 <WUIIcon class="animate-spin" name="i-heroicons-arrow-path" />
-                <div class="text-lg">读取中</div>
+                <div class="text-lg">{{ t('common.status.loading') }}</div>
               </div>
             </div>
           </div>
@@ -127,7 +127,7 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 
-const { languageCode } = useLang()
+const { languageCode, t } = useLang()
 
 const props = defineProps({
   content: {

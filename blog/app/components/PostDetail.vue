@@ -221,7 +221,7 @@
             variant="outline"
             :label="
               t('common.post.shares', {
-                count: formatNumber(postData.data.shares)
+                count: formatNumberText(postData.data.shares)
               })
             "
             :trailing="false"
@@ -239,7 +239,7 @@
             :variant="colorMode.value === 'dark' ? 'soft' : 'solid'"
             :label="
               t('common.post.likes', {
-                count: formatNumber(postData.data.likes)
+                count: formatNumberText(postData.data.likes)
               })
             "
             :trailing="false"
@@ -254,7 +254,7 @@
             variant="outline"
             :label="
               t('common.post.likes', {
-                count: formatNumber(postData.data.likes)
+                count: formatNumberText(postData.data.likes)
               })
             "
             :trailing="false"
@@ -272,7 +272,7 @@
             disabled
             :label="
               t('common.post.likes', {
-                count: formatNumber(postData.data.likes)
+                count: formatNumberText(postData.data.likes)
               })
             "
             :trailing="false"
@@ -455,7 +455,9 @@
                       <ClientOnly
                         ><span
                           :title="formatDate(item.date, 'yyyy-MM-dd hh:mm:ss')"
-                          >{{ fromNow(item.date, 'yyyy-MM-dd hh:mm') }}</span
+                          >{{
+                            fromNowText(item.date, 'yyyy-MM-dd hh:mm')
+                          }}</span
                         ><template #fallback>{{
                           formatDate(item.date, 'yyyy-MM-dd hh:mm')
                         }}</template>
@@ -478,7 +480,7 @@
                               )
                             "
                             >{{
-                              fromNow(item.parent.date, 'yyyy-MM-dd hh:mm')
+                              fromNowText(item.parent.date, 'yyyy-MM-dd hh:mm')
                             }}</span
                           ><template #fallback>{{
                             formatDate(item.parent.date, 'yyyy-MM-dd hh:mm')
@@ -512,7 +514,7 @@
                         v-if="checkIsCommentLike(item._id)"
                         @click="likeComment(item._id)"
                         :loading="likeCommentIsLoading[item._id] === true"
-                        >{{ formatNumber(item.likes) }}</WUIButton
+                        >{{ formatNumberText(item.likes) }}</WUIButton
                       >
                       <WUIButton
                         size="2xs"
@@ -522,7 +524,7 @@
                         @click="likeComment(item._id)"
                         :loading="likeCommentIsLoading[item._id] === true"
                         v-else
-                        >{{ formatNumber(item.likes) }}</WUIButton
+                        >{{ formatNumberText(item.likes) }}</WUIButton
                       >
                       <template
                         v-if="
@@ -693,6 +695,7 @@ const id = route.params.id
 const routeName = route.name
 const toast = useWToast()
 const { languageCode, t } = useLang()
+const { formatNumberText, fromNowText } = useLocalizedText()
 languageCode.value
 
 let type = null

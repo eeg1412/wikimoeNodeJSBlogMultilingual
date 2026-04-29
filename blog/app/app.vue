@@ -10,7 +10,11 @@
 </template>
 <script setup>
 import { postLogCreateApi, putLogUpdatePerformanceApi } from '@/api/log'
-import { DEFAULT_LANGUAGE_CODE, normalizeLanguageCode } from '@/lang'
+import {
+  DEFAULT_LANGUAGE_CODE,
+  getLanguageText,
+  normalizeLanguageCode
+} from '@/lang'
 import { isChunkAssetError, trackChunkAssetError } from '@/utils/chunk-error'
 
 const nuxtApp = useNuxtApp()
@@ -68,21 +72,21 @@ const rssHead = () => {
       {
         rel: 'alternate',
         type: 'application/rss+xml',
-        title: 'RSS',
+        title: getLanguageText(languageCode, 'common.footer.rssAllTitle'),
         href: `${siteUrl}/${languageCode}/rss`
       },
       // rss for blog
       {
         rel: 'alternate',
         type: 'application/rss+xml',
-        title: 'RSS for blog',
+        title: getLanguageText(languageCode, 'common.footer.rssBlogTitle'),
         href: `${siteUrl}/${languageCode}/rss/blog`
       },
       // rss for tweet
       {
         rel: 'alternate',
         type: 'application/rss+xml',
-        title: 'RSS for tweet',
+        title: getLanguageText(languageCode, 'common.footer.rssTweetTitle'),
         href: `${siteUrl}/${languageCode}/rss/tweet`
       }
     ]
