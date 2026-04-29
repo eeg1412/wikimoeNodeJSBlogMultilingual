@@ -151,17 +151,17 @@ export default defineNuxtConfig({
   css: ['~/assets/css/common.css', 'photoswipe/style.css'],
 
   runtimeConfig: {
-    apiDomain: getEnvValue('NUXT_API_DOMAIN'),
-    sourceApiDomain: getEnvValue('NUXT_SOURCE_API_DOMAIN'),
-    sourceAssetDomain: getEnvValue('NUXT_SOURCE_ASSET_DOMAIN'),
+    apiDomain: '',
+    sourceApiDomain: '',
+    sourceAssetDomain: '',
     swrEnabled: '',
     swrCacheMaxage: '',
     swrCacheStaleMaxage: '',
     swrCacheMaxPage: '',
     swrCacheTtl: '',
     public: {
-      apiDomain: getEnvValue('NUXT_API_DOMAIN'),
-      version: process.env.npm_package_version
+      apiDomain: '',
+      version: ''
     }
   },
 
