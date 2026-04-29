@@ -494,6 +494,89 @@ function getSourceIdentityId(sourceObject) {
   return toObjectId(sourceObject)
 }
 
+function getRequiredSourcePostSnapshotIdentity(sourcePost) {
+  const sourceSnapshotId = toObjectId(sourcePost)
+  if (!sourceSnapshotId) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照身份缺失，已停止创建以避免串源',
+      'sourceSnapshotId',
+      409
+    )
+  }
+
+  const sourceId = toObjectId(sourcePost.sourceId)
+  if (!sourceId) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照缺少源文章 ID，已停止创建以避免串源',
+      'sourceId',
+      409,
+      {
+        sourceSnapshotId: String(sourceSnapshotId)
+      }
+    )
+  }
+
+  const translationGroupId = toObjectId(sourcePost.translationGroupId)
+  if (!translationGroupId) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照翻译组缺失，已停止创建以避免串源',
+      'translationGroupId',
+      409,
+      {
+        sourceSnapshotId: String(sourceSnapshotId),
+        sourceId: String(sourceId)
+      }
+    )
+  }
+
+  if (!isSameObjectIdValue(translationGroupId, sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照翻译组与源快照身份不一致，已停止创建以避免串源',
+      'translationGroupId',
+      409,
+      {
+        sourceSnapshotId: String(sourceSnapshotId),
+        sourceId: String(sourceId),
+        translationGroupId: String(translationGroupId)
+      }
+    )
+  }
+
+  return {
+    sourceSnapshotId,
+    sourceId,
+    translationGroupId
+  }
+}
+
+function canRepairLegacyPostIdentity(record, expectedIdentity) {
+  const existingSourceId = toObjectId(record.sourceId)
+  if (!existingSourceId) {
+    return false
+  }
+
+  if (!isSameObjectIdValue(existingSourceId, expectedIdentity.sourceId)) {
+    return false
+  }
+
+  const existingSourceSnapshotId = toObjectId(record.sourceSnapshotId)
+  if (
+    existingSourceSnapshotId &&
+    !isSameObjectIdValue(
+      existingSourceSnapshotId,
+      expectedIdentity.sourceSnapshotId
+    )
+  ) {
+    return false
+  }
+
+  return true
+}
+
 function isDocumentObject(value) {
   return Boolean(
     value && typeof value === 'object' && !isBsonObjectId(value) && value._id
@@ -818,7 +901,13 @@ function buildTranslationRecordFilter(
   context,
   options = {}
 ) {
-  const sourceId = getSourceIdentityId(sourceObject)
+  const postIdentity =
+    collectionName === SOURCE_POST_COLLECTION
+      ? getRequiredSourcePostSnapshotIdentity(sourceObject)
+      : null
+  const sourceId = postIdentity
+    ? postIdentity.sourceId
+    : getSourceIdentityId(sourceObject)
   const filter = {
     sourceCollection: collectionName,
     sourceId,
@@ -827,19 +916,9 @@ function buildTranslationRecordFilter(
   }
 
   if (collectionName === SOURCE_POST_COLLECTION) {
-    const sourceSnapshotId = toObjectId(sourceObject)
     const translationGroupId = options.useSelfTranslationGroup
-      ? toObjectId(sourceObject.translationGroupId) || sourceSnapshotId
+      ? postIdentity.translationGroupId
       : toObjectId(context.translationGroupId)
-
-    if (!sourceSnapshotId) {
-      throw new ApiError(
-        ERROR_CODES.CONTENT_FIELD_INVALID,
-        '源快照身份缺失，已停止创建以避免串源',
-        'sourceSnapshotId',
-        409
-      )
-    }
 
     if (!translationGroupId) {
       throw new ApiError(
@@ -850,7 +929,24 @@ function buildTranslationRecordFilter(
       )
     }
 
-    filter.sourceSnapshotId = sourceSnapshotId
+    if (
+      !isSameObjectIdValue(translationGroupId, postIdentity.translationGroupId)
+    ) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '源快照翻译组与当前上下文不匹配，已停止创建以避免串源',
+        'translationGroupId',
+        409,
+        {
+          expectedTranslationGroupId: String(postIdentity.translationGroupId),
+          actualTranslationGroupId: String(translationGroupId),
+          sourceSnapshotId: String(postIdentity.sourceSnapshotId),
+          sourceId: String(postIdentity.sourceId)
+        }
+      )
+    }
+
+    filter.sourceSnapshotId = postIdentity.sourceSnapshotId
     filter.translationGroupId = translationGroupId
   }
 
@@ -886,11 +982,12 @@ async function findExistingTranslationRecord(
       .lean()
 
     if (conflictingRecord) {
-      const existingSourceId = toObjectId(conflictingRecord.sourceId)
-      if (
-        !existingSourceId ||
-        isSameObjectIdValue(existingSourceId, filter.sourceId)
-      ) {
+      const expectedIdentity = {
+        sourceSnapshotId: filter.sourceSnapshotId,
+        sourceId: filter.sourceId,
+        translationGroupId: filter.translationGroupId
+      }
+      if (canRepairLegacyPostIdentity(conflictingRecord, expectedIdentity)) {
         await model.updateOne(
           { _id: conflictingRecord._id },
           {
@@ -1144,9 +1241,14 @@ async function buildTranslationRecordData(
   options
 ) {
   const sourceObject = cloneValue(sourceDoc)
-  const sourceId = getSourceIdentityId(sourceObject)
+  const postIdentity =
+    collectionName === SOURCE_POST_COLLECTION
+      ? getRequiredSourcePostSnapshotIdentity(sourceObject)
+      : null
+  const sourceId = postIdentity
+    ? postIdentity.sourceId
+    : getSourceIdentityId(sourceObject)
   const data = stripFields(sourceObject, SYSTEM_FIELDS)
-  const recordId = options.recordId
 
   applyCollectionDefaults(collectionName, data, sourceObject, context)
 
@@ -1155,7 +1257,9 @@ async function buildTranslationRecordData(
     sourceObject.sourceLanguageCode || context.sourceLanguageCode
   data.sourceId = sourceId
   data.sourceCollection = collectionName
-  data.sourceSnapshotId = context.sourceSnapshotId
+  data.sourceSnapshotId = postIdentity
+    ? postIdentity.sourceSnapshotId
+    : context.sourceSnapshotId
   data.recordKind = TRANSLATION_RECORD_KIND
   data.snapshotVersion =
     sourceObject.snapshotVersion || context.snapshotVersion || 1
@@ -1167,18 +1271,7 @@ async function buildTranslationRecordData(
 
   if (collectionName === 'posts') {
     if (options.useSelfTranslationGroup === true) {
-      const selfTranslationGroupId =
-        toObjectId(sourceObject.translationGroupId) || toObjectId(sourceObject)
-      if (!selfTranslationGroupId) {
-        throw new ApiError(
-          ERROR_CODES.CONTENT_FIELD_INVALID,
-          '源快照翻译组缺失，已停止创建以避免串源',
-          'translationGroupId',
-          409
-        )
-      }
-
-      data.translationGroupId = selfTranslationGroupId
+      data.translationGroupId = postIdentity.translationGroupId
     } else {
       const contextTranslationGroupId = toObjectId(context.translationGroupId)
       if (!contextTranslationGroupId) {
@@ -1187,6 +1280,26 @@ async function buildTranslationRecordData(
           '源快照翻译组缺失，已停止创建以避免串源',
           'translationGroupId',
           409
+        )
+      }
+
+      if (
+        !isSameObjectIdValue(
+          contextTranslationGroupId,
+          postIdentity.translationGroupId
+        )
+      ) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_FIELD_INVALID,
+          '源快照翻译组与当前上下文不匹配，已停止创建以避免串源',
+          'translationGroupId',
+          409,
+          {
+            expectedTranslationGroupId: String(postIdentity.translationGroupId),
+            actualTranslationGroupId: String(contextTranslationGroupId),
+            sourceSnapshotId: String(postIdentity.sourceSnapshotId),
+            sourceId: String(postIdentity.sourceId)
+          }
         )
       }
 
@@ -1213,7 +1326,13 @@ async function copySourceSnapshotRecord(
   }
 
   const sourceObject = cloneValue(sourceDoc)
-  const sourceId = getSourceIdentityId(sourceObject)
+  const sourceIdentity =
+    collectionName === SOURCE_POST_COLLECTION
+      ? getRequiredSourcePostSnapshotIdentity(sourceObject)
+      : null
+  const sourceId = sourceIdentity
+    ? sourceIdentity.sourceId
+    : getSourceIdentityId(sourceObject)
   if (!sourceId) {
     return null
   }
@@ -1317,11 +1436,12 @@ async function copyRelationToLanguage(
 }
 
 function buildCopyContext(sourcePost, languageCode, now) {
+  const sourceIdentity = getRequiredSourcePostSnapshotIdentity(sourcePost)
   return {
     languageCode,
     sourceLanguageCode: sourcePost.sourceLanguageCode,
-    translationGroupId: toObjectId(sourcePost.translationGroupId),
-    sourceSnapshotId: sourcePost._id,
+    translationGroupId: sourceIdentity.translationGroupId,
+    sourceSnapshotId: sourceIdentity.sourceSnapshotId,
     snapshotVersion: sourcePost.snapshotVersion || 1,
     sourceSnapshotAt: sourcePost.sourceSnapshotAt || now,
     now,
@@ -1418,7 +1538,11 @@ async function findSourcePostSnapshot(sourceSnapshotId) {
     .populate(buildMultilingualPostPopulate())
     .lean()
 
-  return sourcePost
+  if (!sourcePost) {
+    return sourcePost
+  }
+
+  return await normalizeSourcePostSnapshotIdentity(sourcePost)
 }
 
 async function ensureSourcePostSnapshotRelations(sourcePost) {
@@ -1645,9 +1769,10 @@ function assertSourcePostTypeMatchesRelationField(relationField, sourcePost) {
 }
 
 async function findExistingTranslationForSourcePost(sourcePost, languageCode) {
-  const sourceSnapshotId = toObjectId(sourcePost)
-  const sourceId = getSourceIdentityId(sourcePost)
-  const translationGroupId = toObjectId(sourcePost.translationGroupId)
+  const sourceIdentity = getRequiredSourcePostSnapshotIdentity(sourcePost)
+  const sourceSnapshotId = sourceIdentity.sourceSnapshotId
+  const sourceId = sourceIdentity.sourceId
+  const translationGroupId = sourceIdentity.translationGroupId
   const PostModel = getPostModel()
   const existingTranslation = await PostModel.findOne({
     translationGroupId,
@@ -1673,8 +1798,7 @@ async function findExistingTranslationForSourcePost(sourcePost, languageCode) {
     return null
   }
 
-  const existingSourceId = toObjectId(conflictingTranslation.sourceId)
-  if (!existingSourceId || isSameObjectIdValue(existingSourceId, sourceId)) {
+  if (canRepairLegacyPostIdentity(conflictingTranslation, sourceIdentity)) {
     await PostModel.updateOne(
       { _id: conflictingTranslation._id },
       {
@@ -1719,15 +1843,9 @@ async function createTranslationPost(body = {}) {
   const sourcePostSummary = await findSourcePostSnapshotSummary(
     input.sourceSnapshotId
   )
-  const translationGroupId = toObjectId(sourcePostSummary.translationGroupId)
-  if (!translationGroupId) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_FIELD_INVALID,
-      '源快照翻译组缺失，已停止创建以避免串源',
-      'translationGroupId',
-      409
-    )
-  }
+  const sourceIdentity =
+    getRequiredSourcePostSnapshotIdentity(sourcePostSummary)
+  const translationGroupId = sourceIdentity.translationGroupId
 
   return await utils.executeInLock(
     getTranslationPostCreateLockKey(translationGroupId, input.languageCode),
@@ -1874,7 +1992,7 @@ async function getTranslationGroupIdsByTranslationFilter(filter) {
 
 function getSourcePostGroupKey(sourcePost) {
   return String(
-    toObjectId(sourcePost.translationGroupId) || toObjectId(sourcePost)
+    getRequiredSourcePostSnapshotIdentity(sourcePost).translationGroupId
   )
 }
 
@@ -1918,6 +2036,14 @@ async function repairTranslationPostIdentityForSource(record, sourcePost) {
   }
 
   if (!isSameObjectIdValue(record.sourceId, sourcePost.sourceId)) {
+    return record
+  }
+
+  const recordSourceSnapshotId = toObjectId(record.sourceSnapshotId)
+  if (
+    recordSourceSnapshotId &&
+    !isSameObjectIdValue(recordSourceSnapshotId, sourcePost._id)
+  ) {
     return record
   }
 

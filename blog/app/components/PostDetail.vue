@@ -356,6 +356,7 @@
         <div class="comment-list-body">
           <!-- 评论form -->
           <LazyCommentForm
+            v-if="sourcePostid"
             :postid="sourcePostid"
             :allowRemark="postData.data.allowRemark"
             @refresh="refreshCommentList"
@@ -557,6 +558,7 @@
                   <div class="mt-5" v-if="commentid === item._id">
                     <!-- 回复表单 -->
                     <LazyCommentForm
+                      v-if="sourcePostid"
                       :id="`${item._id}-reply`"
                       :postid="sourcePostid"
                       :commentid="commentid"
@@ -615,6 +617,7 @@
               v-else-if="
                 options.siteEnableComment &&
                 postData.data.allowRemark &&
+                sourcePostid &&
                 !commentLoading
               "
             >
@@ -736,7 +739,7 @@ const runCode = () => {
   newWindow.document.write(runCodeContent)
 }
 const postid = postData.value.data._id
-const sourcePostid = postData.value.data.sourceId || postid
+const sourcePostid = postData.value.data.sourceId
 // comment
 const commentPage = ref(1)
 const commentData = ref({
@@ -764,6 +767,16 @@ const changeCommentSort = type => {
   getCommentList()
 }
 const getCommentList = async goToCommentListRef => {
+  if (!sourcePostid) {
+    commentData.value = {
+      list: [],
+      total: 0,
+      size: 1
+    }
+    commentLoading.value = false
+    return
+  }
+
   commentLoading.value = true
   await getCommentListApi({
     id: sourcePostid,
@@ -919,6 +932,13 @@ const likeListInited = ref(false)
 const likeListLoading = ref(false)
 const likeList = ref([])
 const postLikeLogList = () => {
+  if (!sourcePostid) {
+    likeList.value = []
+    likeListInited.value = true
+    likeListLoading.value = false
+    return
+  }
+
   const postIdList = [sourcePostid]
   likeListLoading.value = true
   postLikeLogListApi({ postIdList })
@@ -952,6 +972,10 @@ const getLikeDataByPostId = () => {
 
 const likePostIsLoading = ref(false)
 const likePost = () => {
+  if (!sourcePostid) {
+    return
+  }
+
   if (likePostIsLoading.value) {
     return
   }

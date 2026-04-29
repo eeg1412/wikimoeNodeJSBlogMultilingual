@@ -426,9 +426,7 @@ export default {
 
     const currentAiRecordId = computed(() => aiRecord.value?._id || '')
     const currentAiSourceLanguageCode = computed(() => {
-      return (
-        aiRecord.value?.sourceLanguageCode || aiRecord.value?.languageCode || ''
-      )
+      return aiRecord.value?.sourceLanguageCode || ''
     })
     const currentAiTargetLanguageCode = computed(() => {
       return aiRecord.value?.languageCode || ''
@@ -599,8 +597,8 @@ export default {
       }
     }
 
-    const loadSourceAiEntries = async currentEntries => {
-      if (!aiRecord.value?.sourceId) {
+    const loadSourceAiEntries = async (currentEntries, sourceLanguageCode) => {
+      if (!aiRecord.value?.sourceId || !sourceLanguageCode) {
         return { entries: [] }
       }
       const collectionName = getRowCollectionName(aiRecord.value)
@@ -608,7 +606,7 @@ export default {
         {
           collectionName,
           sourceId: aiRecord.value.sourceId,
-          languageCode: aiRecord.value.sourceLanguageCode,
+          languageCode: sourceLanguageCode,
           page: 1,
           limit: 1
         },

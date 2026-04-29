@@ -741,6 +741,23 @@
 
           <template v-if="!aiImportPreview">
             <el-form class="translation-json-option-form" label-width="110px">
+              <el-form-item label="源语言">
+                <el-select
+                  v-model="aiSourceLanguageCode"
+                  class="w_10"
+                  :disabled="isAiBusy"
+                  filterable
+                  placeholder="请选择源语言"
+                  @change="handleAiSourceLanguageChange"
+                >
+                  <el-option
+                    v-for="option in languageOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
               <el-form-item label="翻译用文章">
                 <el-radio-group
                   v-model="aiBaseMode"
@@ -1072,7 +1089,8 @@ import {
   getPostStatusText,
   getPostTypeTagType,
   getPostTypeText,
-  getRelationDisplayName
+  getRelationDisplayName,
+  SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
 import {
   createApiErrorFromResponse,
@@ -1438,6 +1456,7 @@ export default {
     const selectedAiEntryIds = ref([])
     const aiPrompt = ref('')
     const aiBaseMode = ref('source')
+    const aiSourceLanguageCode = ref('')
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
     const aiStreamStatusList = ref([])
@@ -1533,12 +1552,14 @@ export default {
     const isAiBusy = computed(() => {
       return aiLoading.value || aiTranslating.value || aiApplying.value
     })
-    const currentAiSourceLanguageCode = computed(() => {
-      if (aiBaseMode.value === 'current') {
-        return form.languageCode
-      }
-      return form.sourceLanguageCode
-    })
+    const languageOptions = computed(() => SUPPORTED_LANGUAGE_OPTIONS)
+    const currentAiSourceLanguageCode = computed(
+      () => aiSourceLanguageCode.value
+    )
+
+    function getDefaultAiSourceLanguageCode() {
+      return form.sourceLanguageCode || ''
+    }
 
     function buildTranslationEntries(options = {}) {
       if (contentTab.value === 'sourceCode') {
@@ -2334,6 +2355,7 @@ export default {
       selectedAiEntryIds.value = []
       aiPrompt.value = ''
       aiBaseMode.value = 'source'
+      aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
       aiImportPreview.value = null
       sourceReferenceEntries.value = []
       aiStreamStatusList.value = []
@@ -2519,6 +2541,10 @@ export default {
       refreshAiTranslationCandidates()
     }
 
+    function handleAiSourceLanguageChange() {
+      resetAiTranslationPreview()
+    }
+
     function selectAllAiEntries() {
       selectedAiEntryIds.value = aiEntryList.value.map(entry => entry.id)
     }
@@ -2610,7 +2636,7 @@ export default {
       return null
     }
 
-    async function readAiTranslationStream(response, referenceEntries) {
+    async function readAiTranslationStream(response, previewReferenceEntries) {
       if (!response.body) {
         throw new Error('浏览器不支持读取 AI 翻译流')
       }
@@ -2626,7 +2652,7 @@ export default {
           const block = buffer.slice(0, boundary.index)
           buffer = buffer.slice(boundary.index + boundary.length)
           const eventData = parseClientSseBlock(block)
-          const error = handleAiStreamEvent(eventData, selectedEntries)
+          const error = handleAiStreamEvent(eventData, previewReferenceEntries)
           if (error) {
             streamError = error
           }
@@ -2646,7 +2672,7 @@ export default {
 
       if (buffer.trim()) {
         const eventData = parseClientSseBlock(buffer)
-        const error = handleAiStreamEvent(eventData, referenceEntries)
+        const error = handleAiStreamEvent(eventData, previewReferenceEntries)
         if (error) {
           streamError = error
         }
@@ -2666,6 +2692,10 @@ export default {
         ElMessage.warning('请至少选择一项翻译内容')
         return
       }
+      if (!aiSourceLanguageCode.value) {
+        ElMessage.warning('请选择源语言')
+        return
+      }
 
       const selectedIdSet = new Set(selectedAiEntryIds.value)
       const selectedEntries = aiEntryList.value.filter(entry => {
@@ -2676,7 +2706,6 @@ export default {
       aiImportPreview.value = null
       aiTranslating.value = true
       try {
-        const referenceResult = await loadSourceReferenceEntries()
         pushAiStreamStatus('正在开始翻译')
         const response = await fetch(
           '/api/multilingual-admin/translation/post/ai-translate-stream',
@@ -2688,7 +2717,7 @@ export default {
             },
             body: JSON.stringify({
               postId: form.id,
-              sourceLanguageCode: currentAiSourceLanguageCode.value,
+              sourceLanguageCode: aiSourceLanguageCode.value,
               targetLanguageCode: form.languageCode,
               prompt: aiPrompt.value,
               entries: selectedEntries
@@ -2700,7 +2729,7 @@ export default {
           throw await createApiErrorFromResponse(response, 'AI 翻译请求失败')
         }
 
-        await readAiTranslationStream(response, referenceResult.entries || [])
+        await readAiTranslationStream(response, selectedEntries)
       } catch (error) {
         extractApiErrorMessages(error).forEach(message => {
           ElMessage.error(message)
@@ -2765,6 +2794,7 @@ export default {
       aiImportPreviewGroups,
       aiLoading,
       aiPrompt,
+      aiSourceLanguageCode,
       aiSkippedEntries,
       aiStreamFeedbackRef,
       aiStreamContent,
@@ -2786,6 +2816,7 @@ export default {
       detailRelationFields: DETAIL_RELATION_FIELDS,
       form,
       currentAiSourceLanguageCode,
+      languageOptions,
       exportDialogVisible,
       exportBaseMode,
       exportEntryGroups,
@@ -2813,6 +2844,7 @@ export default {
       openRelationEditor,
       handleAiBaseModeChange,
       handleAiDialogBeforeClose,
+      handleAiSourceLanguageChange,
       handleRelationParentUpdated,
       importDialogVisible,
       importFileInputRef,

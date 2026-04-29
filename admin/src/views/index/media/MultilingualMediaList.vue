@@ -534,11 +534,7 @@ export default {
 
     const currentAiRecordId = computed(() => currentRow.value?._id || '')
     const currentAiSourceLanguageCode = computed(() => {
-      return (
-        currentRow.value?.sourceLanguageCode ||
-        currentRow.value?.languageCode ||
-        ''
-      )
+      return currentRow.value?.sourceLanguageCode || ''
     })
     const currentAiTargetLanguageCode = computed(() => {
       return currentRow.value?.languageCode || ''
@@ -937,15 +933,15 @@ export default {
       }
     }
 
-    const loadSourceAiEntries = async currentEntries => {
-      if (!currentRow.value?.sourceId) {
+    const loadSourceAiEntries = async (currentEntries, sourceLanguageCode) => {
+      if (!currentRow.value?.sourceId || !sourceLanguageCode) {
         return { entries: [] }
       }
       const response = await multilingualApi.getMediaList(
         {
           recordKind: 'source',
           sourceId: currentRow.value.sourceId,
-          languageCode: currentRow.value.sourceLanguageCode,
+          languageCode: sourceLanguageCode,
           page: 1,
           limit: 1
         },

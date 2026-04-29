@@ -27,6 +27,23 @@
 
         <template v-if="!preview">
           <el-form class="translation-json-option-form" label-width="110px">
+            <el-form-item label="源语言">
+              <el-select
+                v-model="selectedSourceLanguageCode"
+                class="w_10"
+                :disabled="isBusy"
+                filterable
+                placeholder="请选择源语言"
+                @change="handleSourceLanguageChange"
+              >
+                <el-option
+                  v-for="option in languageOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
             <el-form-item label="翻译用内容">
               <el-radio-group
                 v-model="baseMode"
@@ -218,7 +235,10 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
-import { getLanguageText } from '@/utils/multilingual'
+import {
+  getLanguageText,
+  SUPPORTED_LANGUAGE_OPTIONS
+} from '@/utils/multilingual'
 import {
   createApiErrorFromResponse,
   extractApiErrorMessages
@@ -269,6 +289,7 @@ export default {
     const translating = ref(false)
     const applying = ref(false)
     const baseMode = ref('source')
+    const selectedSourceLanguageCode = ref('')
     const entryList = ref([])
     const currentEntryList = ref([])
     const selectedEntryIds = ref([])
@@ -294,15 +315,18 @@ export default {
       return loading.value || translating.value || applying.value
     })
     const currentTargetLanguageCode = computed(() => props.targetLanguageCode)
-    const requestSourceLanguageCode = computed(() => {
-      if (baseMode.value === 'current') {
-        return props.targetLanguageCode
-      }
-      return props.sourceLanguageCode
-    })
+    const languageOptions = computed(() => SUPPORTED_LANGUAGE_OPTIONS)
+    const requestSourceLanguageCode = computed(
+      () => selectedSourceLanguageCode.value
+    )
+
+    function getDefaultSourceLanguageCode() {
+      return props.sourceLanguageCode || ''
+    }
 
     function resetState() {
       baseMode.value = 'source'
+      selectedSourceLanguageCode.value = getDefaultSourceLanguageCode()
       entryList.value = []
       currentEntryList.value = []
       selectedEntryIds.value = []
@@ -326,6 +350,13 @@ export default {
       streamContent.value = ''
     }
 
+    function handleSourceLanguageChange() {
+      resetPreview()
+      if (baseMode.value === 'source') {
+        reloadEntries()
+      }
+    }
+
     async function reloadEntries() {
       const requestId = entryLoadRequestId + 1
       entryLoadRequestId = requestId
@@ -343,7 +374,10 @@ export default {
         currentEntryList.value = currentResult.entries || []
         let sourceResult = currentResult
         if (requestMode === 'source') {
-          sourceResult = await props.loadSourceEntries(currentEntryList.value)
+          sourceResult = await props.loadSourceEntries(
+            currentEntryList.value,
+            requestSourceLanguageCode.value
+          )
         }
         if (
           requestId !== entryLoadRequestId ||
@@ -523,6 +557,10 @@ export default {
         ElMessage.warning('请至少选择一项翻译内容')
         return
       }
+      if (!requestSourceLanguageCode.value) {
+        ElMessage.warning('请选择源语言')
+        return
+      }
       const selectedIdSet = new Set(selectedEntryIds.value)
       const selectedEntries = entryList.value.filter(entry => {
         return selectedIdSet.has(entry.id)
@@ -598,7 +636,9 @@ export default {
       entryGroups,
       entryList,
       getLanguageText,
+      handleSourceLanguageChange,
       isBusy,
+      languageOptions,
       loading,
       preview,
       prompt,
@@ -608,6 +648,7 @@ export default {
       resetPreview,
       selectAll,
       selectedEntryIds,
+      selectedSourceLanguageCode,
       streamContent,
       streamStatusList,
       targetLanguageCode: currentTargetLanguageCode,

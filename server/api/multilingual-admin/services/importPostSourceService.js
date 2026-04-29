@@ -743,7 +743,16 @@ async function buildSourceRecordData(
   data.sourceLanguageCode = context.sourceLanguageCode
   data.sourceId = sourceId
   data.sourceCollection = collectionName
-  data.sourceSnapshotId = context.sourceSnapshotId || recordId || null
+  if (!context.sourceSnapshotId) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照上下文缺失，已停止导入以避免关联内容串源',
+      'sourceSnapshotId',
+      409
+    )
+  }
+
+  data.sourceSnapshotId = context.sourceSnapshotId
   data.recordKind = context.recordKind
   data.snapshotVersion = context.snapshotVersion
   data.sourceSnapshotAt = context.sourceSnapshotAt
@@ -753,7 +762,16 @@ async function buildSourceRecordData(
   if (collectionName === 'posts' && options.useSelfTranslationGroup) {
     data.translationGroupId = recordId
   } else {
-    data.translationGroupId = context.translationGroupId || recordId
+    if (!context.translationGroupId) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '源快照翻译组上下文缺失，已停止导入以避免关联内容串源',
+        'translationGroupId',
+        409
+      )
+    }
+
+    data.translationGroupId = context.translationGroupId
   }
 
   if (collectionName === 'posts') {
@@ -1114,7 +1132,7 @@ async function repairSourcePostSnapshotRelations(sourcePost) {
     return sourcePost
   }
 
-  const sourceId = toObjectId(sourcePost.sourceId || sourcePost)
+  const sourceId = toObjectId(sourcePost.sourceId)
   if (!sourceId) {
     return sourcePost
   }
@@ -1181,9 +1199,17 @@ function buildEmptyTranslationSummary() {
 }
 
 function getSourcePostGroupKey(sourcePost) {
-  return String(
-    toObjectId(sourcePost.translationGroupId) || toObjectId(sourcePost)
-  )
+  const translationGroupId = toObjectId(sourcePost.translationGroupId)
+  if (translationGroupId) {
+    return String(translationGroupId)
+  }
+
+  const sourceSnapshotId = toObjectId(sourcePost)
+  if (sourceSnapshotId) {
+    return String(sourceSnapshotId)
+  }
+
+  return ''
 }
 
 function isTranslationMatchedSourcePost(translation, sourcePost) {
