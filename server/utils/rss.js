@@ -134,7 +134,7 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
     }
     const size = parseInt(siteRssMaxCount) || 1
     const filter =
-      '-voteList -bangumiList -movieList -bookList -eventList -gameList -postList -seriesSortList -code -editorVersion'
+      '-voteList -bangumiList -movieList -bookList -eventList -gameList -postList -tweetList -seriesSortList -code -editorVersion'
     const data = await postUtils
       .findPage(params, sort, 1, size, filter, {
         authorFilter: 'nickname',

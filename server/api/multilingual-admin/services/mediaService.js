@@ -4,6 +4,7 @@ const path = require('path')
 const mongoose = require('mongoose')
 const utils = require('../../../utils/utils')
 const { normalizeLanguageCode } = require('../../../utils/language')
+const { getSourceSeoSettings } = require('../../../utils/sourceSeoSettings')
 const mediaSettingsService = require('./mediaSettingsService')
 const {
   ApiError,
@@ -39,6 +40,46 @@ function parsePositiveInteger(value, defaultValue, maxValue) {
   }
 
   return numberValue
+}
+
+function parseMediaTypeList(value) {
+  if (!value) {
+    return []
+  }
+
+  let rawList = value
+  if (!Array.isArray(rawList)) {
+    rawList = String(value).split(',')
+  }
+
+  const typeList = []
+  rawList.forEach(item => {
+    const type = String(item || '').trim()
+    if (type !== 'image' && type !== 'video') {
+      return
+    }
+    if (!typeList.includes(type)) {
+      typeList.push(type)
+    }
+  })
+
+  return typeList
+}
+
+function parseOptionalBoolean(value) {
+  if (value === undefined || value === null || value === '') {
+    return null
+  }
+
+  if (value === true || value === 'true' || value === '1') {
+    return true
+  }
+
+  if (value === false || value === 'false' || value === '0') {
+    return false
+  }
+
+  return null
 }
 
 function parseOptionalObjectId(value, fieldName) {
@@ -84,6 +125,8 @@ function parseAttachmentListQuery(query = {}) {
     languageCode,
     recordKind,
     mediaMode,
+    typeList: parseMediaTypeList(query.typeList || query['typeList[]']),
+    is360Panorama: parseOptionalBoolean(query.is360Panorama),
     sourceId: parseOptionalObjectId(query.sourceId, 'sourceId'),
     keyword: String(query.keyword || '').trim(),
     page: parsePositiveInteger(query.page, 1),
@@ -117,6 +160,16 @@ function buildAttachmentKeywordParams(keyword) {
   return { $or: orList }
 }
 
+function buildAttachmentTypeParams(typeList) {
+  if (!typeList || typeList.length === 0 || typeList.length >= 2) {
+    return null
+  }
+
+  return {
+    mimetype: new RegExp(`^${typeList[0]}/`, 'i')
+  }
+}
+
 async function listAttachments(query = {}) {
   const input = parseAttachmentListQuery(query)
   const AttachmentModel = getAttachmentModel()
@@ -132,9 +185,20 @@ async function listAttachments(query = {}) {
   if (input.sourceId) {
     params.sourceId = input.sourceId
   }
+  if (input.is360Panorama !== null) {
+    params.is360Panorama = input.is360Panorama
+  }
+
   const keywordParams = buildAttachmentKeywordParams(input.keyword)
+  const typeParams = buildAttachmentTypeParams(input.typeList)
   if (keywordParams) {
-    params.$or = keywordParams.$or
+    if (typeParams) {
+      params.$and = [keywordParams, typeParams]
+    } else {
+      params.$or = keywordParams.$or
+    }
+  } else if (typeParams) {
+    Object.assign(params, typeParams)
   }
 
   const total = await AttachmentModel.countDocuments(params)
@@ -143,12 +207,14 @@ async function listAttachments(query = {}) {
     .skip((input.page - 1) * input.limit)
     .limit(input.limit)
     .lean()
+  const sourceSettings = await getSourceSeoSettings()
 
   return {
     list,
     total,
     page: input.page,
-    limit: input.limit
+    limit: input.limit,
+    sourceSiteUrl: sourceSettings.siteUrl || ''
   }
 }
 
@@ -765,6 +831,133 @@ async function replaceLocalAttachment(body = {}, file, coverFile) {
   }
 }
 
+function parseLocalAttachmentInput(body = {}) {
+  const languageCode = normalizeLanguageCode(body.languageCode)
+  if (!languageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'languageCode',
+      400
+    )
+  }
+
+  return {
+    languageCode,
+    name: String(body.name || '').trim(),
+    description: String(body.description || '').trim(),
+    imageOptions: parseImageReplacementOptions(body)
+  }
+}
+
+function hasRemoteOrigin(attachment) {
+  if (attachment.remoteSourceId) {
+    return true
+  }
+
+  if (attachment.remoteFilepath) {
+    return true
+  }
+
+  if (
+    attachment.remoteSnapshot &&
+    Object.keys(attachment.remoteSnapshot).length > 0
+  ) {
+    return true
+  }
+
+  return false
+}
+
+function isPureLocalAttachment(attachment) {
+  if (!attachment || attachment.mediaMode !== 'local') {
+    return false
+  }
+
+  return !hasRemoteOrigin(attachment)
+}
+
+async function createLocalAttachment(body = {}, file, coverFile) {
+  if (!file || !file.buffer) {
+    throw new ApiError(
+      ERROR_CODES.UPLOAD_INVALID,
+      'file is required',
+      'file',
+      400
+    )
+  }
+
+  const input = parseLocalAttachmentInput(body)
+  const AttachmentModel = getAttachmentModel()
+  const attachmentId = new mongoose.Types.ObjectId()
+  const storageData = await saveLocalFile(file, String(attachmentId), {
+    body,
+    coverFile,
+    imageOptions: input.imageOptions
+  })
+
+  const now = new Date()
+  const createData = {
+    _id: attachmentId,
+    ...storageData.updateData,
+    name: input.name || storageData.updateData.filename || 'local-file',
+    description: input.description,
+    languageCode: input.languageCode,
+    sourceLanguageCode: input.languageCode,
+    sourceId: attachmentId,
+    sourceCollection: 'attachments',
+    sourceSnapshotId: null,
+    translationGroupId: attachmentId,
+    recordKind: TRANSLATION_RECORD_KIND,
+    snapshotVersion: 1,
+    sourceSnapshotAt: now,
+    sourceUpdatedAt: null,
+    sourceHash: `local:${String(attachmentId)}`,
+    mediaMode: 'local',
+    remoteSourceId: null,
+    remoteFilepath: '',
+    remoteSnapshot: {},
+    localFilepath: storageData.updateData.filepath,
+    localThumbnailPath: storageData.updateData.thumfor || '',
+    localStorageStatus: 'stored'
+  }
+
+  try {
+    const attachment = await AttachmentModel.create(createData)
+    return attachment.toObject()
+  } catch (error) {
+    await cleanupCreatedFiles(storageData.createdFiles)
+    throw error
+  }
+}
+
+async function deletePureLocalAttachment(body = {}) {
+  const input = parseAttachmentInput(body)
+  const attachment = await findAttachment(input)
+
+  if (!isPureLocalAttachment(attachment)) {
+    throw new ApiError(
+      ERROR_CODES.MEDIA_MODE_INVALID,
+      '仅纯本地媒体允许直接删除',
+      'mediaMode',
+      400
+    )
+  }
+
+  const localPathList = [
+    attachment.localFilepath || attachment.filepath,
+    attachment.localThumbnailPath || attachment.thumfor
+  ]
+  await safeDeleteContentFiles(localPathList)
+
+  await attachment.deleteOne()
+
+  return {
+    id: input.id,
+    deleted: true
+  }
+}
+
 function getSnapshotValue(snapshot, field, fallbackValue) {
   if (snapshot && snapshot[field] !== undefined && snapshot[field] !== null) {
     return snapshot[field]
@@ -836,6 +1029,15 @@ async function convertLocalAttachmentToRemote(body = {}) {
     )
   }
 
+  if (!hasRemoteOrigin(attachment)) {
+    throw new ApiError(
+      ERROR_CODES.MEDIA_MODE_INVALID,
+      '纯本地媒体不能转回远程',
+      'mediaMode',
+      400
+    )
+  }
+
   const localPathList = [
     attachment.localFilepath || attachment.filepath,
     attachment.localThumbnailPath || attachment.thumfor
@@ -859,8 +1061,11 @@ async function convertLocalAttachmentToRemote(body = {}) {
 module.exports = {
   DELETE_LOCAL_FILE_CONFIRM_TEXT,
   listAttachments,
+  createLocalAttachment,
+  deletePureLocalAttachment,
   replaceLocalAttachment,
   convertLocalAttachmentToRemote,
   normalizeStoredContentPath,
-  safeDeleteContentFiles
+  safeDeleteContentFiles,
+  isPureLocalAttachment
 }

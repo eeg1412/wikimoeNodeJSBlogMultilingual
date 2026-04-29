@@ -15,6 +15,7 @@ const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
+const RELATION_COPY_CONCURRENCY = 4
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -216,6 +217,16 @@ function toObjectId(value) {
   return new mongoose.Types.ObjectId(String(documentId))
 }
 
+function isSameObjectIdValue(left, right) {
+  const leftId = toObjectId(left)
+  const rightId = toObjectId(right)
+  if (!leftId || !rightId) {
+    return false
+  }
+
+  return String(leftId) === String(rightId)
+}
+
 function getDocumentIdString(value) {
   const objectId = toObjectId(value)
   if (!objectId) {
@@ -396,6 +407,88 @@ function getCacheKey(collectionName, sourceDoc, context) {
   ].join(':')
 }
 
+function getContextCache(context, cacheName) {
+  if (!context[cacheName]) {
+    context[cacheName] = new Map()
+  }
+
+  return context[cacheName]
+}
+
+async function getOrCreateCopyResult(context, cacheKey, factory) {
+  const copyPromiseCache = getContextCache(context, 'copyPromiseCache')
+  if (copyPromiseCache.has(cacheKey)) {
+    return await copyPromiseCache.get(cacheKey)
+  }
+
+  const copyPromise = (async () => {
+    try {
+      return await factory()
+    } finally {
+      copyPromiseCache.delete(cacheKey)
+    }
+  })()
+
+  copyPromiseCache.set(cacheKey, copyPromise)
+  return await copyPromise
+}
+
+function getSourceRecordCacheKey(collectionName, sourceValue) {
+  const sourceId = getDocumentIdString(sourceValue)
+  if (!sourceId) {
+    return ''
+  }
+
+  return [collectionName, sourceId].join(':')
+}
+
+function getUniqueRelationSourceList(sourceList) {
+  if (!Array.isArray(sourceList) || sourceList.length === 0) {
+    return []
+  }
+
+  const result = []
+  const seenSourceIdSet = new Set()
+
+  for (const sourceItem of sourceList) {
+    const sourceId = getDocumentIdString(sourceItem)
+    if (!sourceId) {
+      result.push(sourceItem)
+      continue
+    }
+
+    if (seenSourceIdSet.has(sourceId)) {
+      continue
+    }
+
+    seenSourceIdSet.add(sourceId)
+    result.push(sourceItem)
+  }
+
+  return result
+}
+
+async function mapWithConcurrency(itemList, concurrency, mapper) {
+  if (!Array.isArray(itemList) || itemList.length === 0) {
+    return []
+  }
+
+  const result = new Array(itemList.length)
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, itemList.length)
+
+  async function worker() {
+    while (nextIndex < itemList.length) {
+      const currentIndex = nextIndex
+      nextIndex++
+      result[currentIndex] = await mapper(itemList[currentIndex], currentIndex)
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return result
+}
+
 function getSourcePopulateForCollection(collectionName) {
   if (collectionName === 'posts') {
     return buildSourcePostPopulate()
@@ -424,7 +517,20 @@ function getSourcePopulateForCollection(collectionName) {
   return undefined
 }
 
-async function resolveSourceRecord(collectionName, sourceValue) {
+async function loadSourceRecord(collectionName, sourceId) {
+  const repository = getSourceRepository(collectionName)
+  const options = {
+    lean: true
+  }
+  const populate = getSourcePopulateForCollection(collectionName)
+  if (populate) {
+    options.populate = populate
+  }
+
+  return await repository.findOne({ _id: sourceId }, undefined, options)
+}
+
+async function resolveSourceRecord(collectionName, sourceValue, context) {
   if (!sourceValue) {
     return null
   }
@@ -438,14 +544,22 @@ async function resolveSourceRecord(collectionName, sourceValue) {
     return null
   }
 
-  const repository = getSourceRepository(collectionName)
-  const options = {}
-  const populate = getSourcePopulateForCollection(collectionName)
-  if (populate) {
-    options.populate = populate
+  const cacheKey = getSourceRecordCacheKey(collectionName, sourceId)
+  if (!cacheKey) {
+    return await loadSourceRecord(collectionName, sourceId)
   }
 
-  return await repository.findOne({ _id: sourceId }, undefined, options)
+  const sourceRecordCache = getContextCache(context, 'sourceRecordCache')
+  if (!sourceRecordCache.has(cacheKey)) {
+    sourceRecordCache.set(cacheKey, loadSourceRecord(collectionName, sourceId))
+  }
+
+  try {
+    return await sourceRecordCache.get(cacheKey)
+  } catch (error) {
+    sourceRecordCache.delete(cacheKey)
+    throw error
+  }
 }
 
 function buildRemoteSnapshot(sourceObject) {
@@ -492,7 +606,11 @@ function applyCollectionDefaults(collectionName, data, sourceObject, context) {
 }
 
 async function copyRelatedRecord(collectionName, sourceValue, context) {
-  const sourceRecord = await resolveSourceRecord(collectionName, sourceValue)
+  const sourceRecord = await resolveSourceRecord(
+    collectionName,
+    sourceValue,
+    context
+  )
   if (!sourceRecord) {
     return null
   }
@@ -507,23 +625,18 @@ async function copyRelatedRecord(collectionName, sourceValue, context) {
 }
 
 async function copyRelatedRecordList(collectionName, sourceList, context) {
-  const result = []
-  if (!Array.isArray(sourceList)) {
-    return result
-  }
-
-  for (const sourceItem of sourceList) {
-    const copiedRecord = await copyRelatedRecord(
-      collectionName,
-      sourceItem,
-      context
-    )
-    if (copiedRecord && copiedRecord._id) {
-      result.push(copiedRecord._id)
+  const uniqueSourceList = getUniqueRelationSourceList(sourceList)
+  const copiedRecordList = await mapWithConcurrency(
+    uniqueSourceList,
+    RELATION_COPY_CONCURRENCY,
+    async sourceItem => {
+      return await copyRelatedRecord(collectionName, sourceItem, context)
     }
-  }
+  )
 
-  return result
+  return copiedRecordList
+    .filter(copiedRecord => copiedRecord && copiedRecord._id)
+    .map(copiedRecord => copiedRecord._id)
 }
 
 async function applyDependencyFields(
@@ -533,24 +646,56 @@ async function applyDependencyFields(
   context
 ) {
   const dependencies = COLLECTION_DEPENDENCY_FIELDS[collectionName] || []
-  for (const dependency of dependencies) {
-    const sourceValue = sourceObject[dependency.field]
-    if (!sourceValue) {
-      data[dependency.field] = null
-      continue
-    }
+  const dependencyEntries = await mapWithConcurrency(
+    dependencies,
+    RELATION_COPY_CONCURRENCY,
+    async dependency => {
+      const sourceValue = sourceObject[dependency.field]
+      if (!sourceValue) {
+        return {
+          field: dependency.field,
+          value: null
+        }
+      }
 
+      const copiedRecord = await copyRelatedRecord(
+        dependency.collectionName,
+        sourceValue,
+        context
+      )
+
+      return {
+        field: dependency.field,
+        value: copiedRecord && copiedRecord._id ? copiedRecord._id : null
+      }
+    }
+  )
+
+  for (const entry of dependencyEntries) {
+    data[entry.field] = entry.value
+  }
+}
+
+async function copyPostRelationField(field, sourceObject, context) {
+  if (POST_SINGLE_RELATION_COLLECTIONS[field]) {
     const copiedRecord = await copyRelatedRecord(
-      dependency.collectionName,
-      sourceValue,
+      POST_SINGLE_RELATION_COLLECTIONS[field],
+      sourceObject[field],
       context
     )
     if (copiedRecord && copiedRecord._id) {
-      data[dependency.field] = copiedRecord._id
-    } else {
-      data[dependency.field] = null
+      return copiedRecord._id
     }
+
+    return null
   }
+
+  const collectionName = POST_ARRAY_RELATION_COLLECTIONS[field]
+  return await copyRelatedRecordList(
+    collectionName,
+    sourceObject[field] || [],
+    context
+  )
 }
 
 async function applyPostRelationFields(data, sourceObject, context, options) {
@@ -565,27 +710,19 @@ async function applyPostRelationFields(data, sourceObject, context, options) {
     fieldsToCopy.push(...POST_RELATION_FIELDS)
   }
 
-  for (const field of fieldsToCopy) {
-    if (POST_SINGLE_RELATION_COLLECTIONS[field]) {
-      const copiedRecord = await copyRelatedRecord(
-        POST_SINGLE_RELATION_COLLECTIONS[field],
-        sourceObject[field],
-        context
-      )
-      if (copiedRecord && copiedRecord._id) {
-        data[field] = copiedRecord._id
-      } else {
-        data[field] = null
+  const relationEntries = await mapWithConcurrency(
+    fieldsToCopy,
+    RELATION_COPY_CONCURRENCY,
+    async field => {
+      return {
+        field,
+        value: await copyPostRelationField(field, sourceObject, context)
       }
-      continue
     }
+  )
 
-    const collectionName = POST_ARRAY_RELATION_COLLECTIONS[field]
-    data[field] = await copyRelatedRecordList(
-      collectionName,
-      sourceObject[field] || [],
-      context
-    )
+  for (const entry of relationEntries) {
+    data[entry.field] = entry.value
   }
 }
 
@@ -672,49 +809,63 @@ async function copySourceRecord(
     copyPostRelations: true,
     ...options
   }
-  const model = getMultilingualModel(collectionName)
   const cacheKey = getCacheKey(collectionName, sourceDoc, context)
 
   if (context.copyCache.has(cacheKey)) {
     return context.copyCache.get(cacheKey)
   }
 
-  const filter = buildSourceRecordFilter(collectionName, sourceDoc, context)
-  const existingRecord = await model.findOne(filter)
   let recordId = recordOptions.recordId
-  if (!recordId && existingRecord) {
-    recordId = existingRecord._id
-  }
   if (!recordId) {
     recordId = new mongoose.Types.ObjectId()
   }
 
-  context.copyCache.set(cacheKey, { _id: recordId })
+  const shouldSeedPlaceholder =
+    collectionName === 'posts' && Boolean(recordOptions.recordId)
 
-  if (existingRecord && recordOptions.updateExisting !== true) {
-    increaseCopiedCount(context, collectionName, 'reused')
-    context.copyCache.set(cacheKey, existingRecord)
-    return existingRecord
+  if (shouldSeedPlaceholder) {
+    context.copyCache.set(cacheKey, { _id: recordId })
   }
 
-  const data = await buildSourceRecordData(collectionName, sourceDoc, context, {
-    ...recordOptions,
-    recordId
+  return await getOrCreateCopyResult(context, cacheKey, async () => {
+    const model = getMultilingualModel(collectionName)
+    const filter = buildSourceRecordFilter(collectionName, sourceDoc, context)
+    const existingRecord = await model.findOne(filter).select('_id').lean()
+    if (existingRecord && recordOptions.updateExisting !== true) {
+      increaseCopiedCount(context, collectionName, 'reused')
+      context.copyCache.set(cacheKey, existingRecord)
+      return existingRecord
+    }
+
+    if (existingRecord) {
+      recordId = existingRecord._id
+    }
+
+    const data = await buildSourceRecordData(
+      collectionName,
+      sourceDoc,
+      context,
+      {
+        ...recordOptions,
+        recordId
+      }
+    )
+
+    if (existingRecord) {
+      await model.updateOne({ _id: existingRecord._id }, { $set: data })
+      const updatedRecord = { _id: existingRecord._id }
+      increaseCopiedCount(context, collectionName, 'updated')
+      context.copyCache.set(cacheKey, updatedRecord)
+      return updatedRecord
+    }
+
+    data._id = recordId
+    await new model(data).save()
+    const createdRecord = { _id: recordId }
+    increaseCopiedCount(context, collectionName, 'created')
+    context.copyCache.set(cacheKey, createdRecord)
+    return createdRecord
   })
-
-  if (existingRecord) {
-    await model.updateOne({ _id: existingRecord._id }, { $set: data })
-    const updatedRecord = await model.findOne({ _id: existingRecord._id })
-    increaseCopiedCount(context, collectionName, 'updated')
-    context.copyCache.set(cacheKey, updatedRecord)
-    return updatedRecord
-  }
-
-  data._id = recordId
-  const createdRecord = await new model(data).save()
-  increaseCopiedCount(context, collectionName, 'created')
-  context.copyCache.set(cacheKey, createdRecord)
-  return createdRecord
 }
 
 function parseSourcePostInput(body, forceOverwrite) {
@@ -781,7 +932,8 @@ async function findSourcePost(input) {
     query,
     undefined,
     {
-      populate: buildSourcePostPopulate()
+      populate: buildSourcePostPopulate(),
+      lean: true
     }
   )
 
@@ -836,19 +988,56 @@ async function markTranslationsPendingReview(translationGroupId, now) {
   return result.modifiedCount || 0
 }
 
+async function findExistingSourceSnapshot(sourceId, sourceLanguageCode) {
+  if (!sourceId) {
+    return null
+  }
+
+  const PostModel = getPostModel()
+  return await PostModel.findOne({
+    sourceCollection: SOURCE_POST_COLLECTION,
+    sourceId,
+    sourceLanguageCode,
+    recordKind: SOURCE_RECORD_KIND
+  })
+    .select('_id translationGroupId snapshotVersion sourceHash')
+    .lean()
+}
+
 async function importOrOverwriteSourcePost(body, forceOverwrite) {
   const input = parseSourcePostInput(body || {}, forceOverwrite)
+  let existingSnapshot = null
+
+  if (input.sourceId) {
+    existingSnapshot = await findExistingSourceSnapshot(
+      new mongoose.Types.ObjectId(input.sourceId),
+      input.sourceLanguageCode
+    )
+
+    if (existingSnapshot && input.overwrite !== true) {
+      throw new ApiError(
+        ERROR_CODES.SOURCE_EXISTS,
+        undefined,
+        'sourceId',
+        409,
+        {
+          sourceSnapshotId: existingSnapshot._id,
+          snapshotVersion: existingSnapshot.snapshotVersion
+        }
+      )
+    }
+  }
+
   const sourcePost = await findSourcePost(input)
   const sourceId = toObjectId(sourcePost)
   const sourceHash = createSourceHash(sourcePost)
-  const PostModel = getPostModel()
-  const sourceFilter = {
-    sourceCollection: SOURCE_POST_COLLECTION,
-    sourceId,
-    sourceLanguageCode: input.sourceLanguageCode,
-    recordKind: SOURCE_RECORD_KIND
+
+  if (!existingSnapshot) {
+    existingSnapshot = await findExistingSourceSnapshot(
+      sourceId,
+      input.sourceLanguageCode
+    )
   }
-  const existingSnapshot = await PostModel.findOne(sourceFilter)
 
   if (existingSnapshot && input.overwrite !== true) {
     throw new ApiError(ERROR_CODES.SOURCE_EXISTS, undefined, 'sourceId', 409, {
@@ -865,8 +1054,7 @@ async function importOrOverwriteSourcePost(body, forceOverwrite) {
 
   if (existingSnapshot) {
     sourceSnapshotId = existingSnapshot._id
-    translationGroupId =
-      existingSnapshot.translationGroupId || existingSnapshot._id
+    translationGroupId = sourceSnapshotId
     snapshotVersion = existingSnapshot.snapshotVersion || 1
     if (existingSnapshot.sourceHash !== sourceHash) {
       hasSourceHashChanged = true
@@ -992,12 +1180,78 @@ function buildEmptyTranslationSummary() {
   }
 }
 
-async function buildTranslationSummaryMap(translationGroupIds) {
-  const summaryMap = {}
-  for (const groupId of translationGroupIds) {
-    summaryMap[String(groupId)] = buildEmptyTranslationSummary()
+function getSourcePostGroupKey(sourcePost) {
+  return String(
+    toObjectId(sourcePost.translationGroupId) || toObjectId(sourcePost)
+  )
+}
+
+function isTranslationMatchedSourcePost(translation, sourcePost) {
+  if (!translation || !sourcePost) {
+    return false
   }
 
+  if (!isSameObjectIdValue(translation.sourceSnapshotId, sourcePost._id)) {
+    return false
+  }
+
+  if (!isSameObjectIdValue(translation.sourceId, sourcePost.sourceId)) {
+    return false
+  }
+
+  return true
+}
+
+async function normalizeSourcePostSnapshotIdentity(sourcePost) {
+  const sourceSnapshotId = toObjectId(sourcePost)
+  if (!sourceSnapshotId) {
+    return sourcePost
+  }
+
+  if (isSameObjectIdValue(sourcePost.translationGroupId, sourceSnapshotId)) {
+    return sourcePost
+  }
+
+  const PostModel = getPostModel()
+  await PostModel.updateOne(
+    {
+      _id: sourceSnapshotId,
+      recordKind: SOURCE_RECORD_KIND,
+      sourceCollection: SOURCE_POST_COLLECTION
+    },
+    {
+      $set: {
+        translationGroupId: sourceSnapshotId
+      }
+    }
+  )
+
+  return {
+    ...sourcePost,
+    translationGroupId: sourceSnapshotId
+  }
+}
+
+async function normalizeSourcePostSnapshotIdentityList(sourcePosts) {
+  return await Promise.all(
+    sourcePosts.map(sourcePost => {
+      return normalizeSourcePostSnapshotIdentity(sourcePost)
+    })
+  )
+}
+
+async function buildTranslationSummaryMap(sourcePosts) {
+  const summaryMap = {}
+  const sourcePostMap = new Map()
+  for (const sourcePost of sourcePosts) {
+    const groupKey = getSourcePostGroupKey(sourcePost)
+    summaryMap[groupKey] = buildEmptyTranslationSummary()
+    sourcePostMap.set(groupKey, sourcePost)
+  }
+
+  const translationGroupIds = Array.from(sourcePostMap.keys()).map(id => {
+    return new mongoose.Types.ObjectId(id)
+  })
   if (translationGroupIds.length === 0) {
     return summaryMap
   }
@@ -1008,14 +1262,15 @@ async function buildTranslationSummaryMap(translationGroupIds) {
     recordKind: TRANSLATION_RECORD_KIND
   })
     .select(
-      '_id translationGroupId languageCode status snapshotVersion sourceChanged pendingReview updatedAt'
+      '_id sourceId sourceSnapshotId translationGroupId languageCode status snapshotVersion sourceChanged pendingReview updatedAt'
     )
     .lean()
 
   for (const translation of translations) {
     const groupKey = String(translation.translationGroupId)
-    if (!summaryMap[groupKey]) {
-      summaryMap[groupKey] = buildEmptyTranslationSummary()
+    const sourcePost = sourcePostMap.get(groupKey)
+    if (!isTranslationMatchedSourcePost(translation, sourcePost)) {
+      continue
     }
 
     summaryMap[groupKey].total++
@@ -1109,14 +1364,11 @@ async function getSourcePostList(query = {}) {
     .limit(limit)
     .lean()
 
-  const translationGroupIds = list
-    .map(item => item.translationGroupId)
-    .filter(Boolean)
-  const summaryMap = await buildTranslationSummaryMap(translationGroupIds)
-  const rows = list.map(item => {
+  const normalizedList = await normalizeSourcePostSnapshotIdentityList(list)
+  const summaryMap = await buildTranslationSummaryMap(normalizedList)
+  const rows = normalizedList.map(item => {
     const summary =
-      summaryMap[String(item.translationGroupId)] ||
-      buildEmptyTranslationSummary()
+      summaryMap[getSourcePostGroupKey(item)] || buildEmptyTranslationSummary()
     return {
       _id: item._id,
       title: item.title,
@@ -1294,19 +1546,24 @@ async function getSourcePostDetail(id) {
     )
   }
 
+  post = await normalizeSourcePostSnapshotIdentity(post)
   post = await repairSourcePostSnapshotRelations(post)
+  post = await normalizeSourcePostSnapshotIdentity(post)
 
   const PostModel = getPostModel()
 
-  const translations = await PostModel.find({
+  const rawTranslations = await PostModel.find({
     translationGroupId: post.translationGroupId,
     recordKind: TRANSLATION_RECORD_KIND
   })
     .select(
-      '_id title excerpt alias type languageCode status snapshotVersion sourceChanged pendingReview sourceChangedAt updatedAt'
+      '_id title excerpt alias type sourceId sourceSnapshotId languageCode status snapshotVersion sourceChanged pendingReview sourceChangedAt updatedAt'
     )
     .sort({ languageCode: 1 })
     .lean()
+  const translations = rawTranslations.filter(translation => {
+    return isTranslationMatchedSourcePost(translation, post)
+  })
 
   return {
     post,

@@ -7,14 +7,6 @@
       </el-breadcrumb>
     </div>
 
-    <el-alert
-      class="mb20"
-      type="info"
-      :closable="false"
-      show-icon
-      title="源文章列表直接读取源站数据库。点击生成快照后写入多语言数据库；覆盖源快照不会删除旧关联、旧媒体和本地文件。"
-    />
-
     <div class="clearfix pb20">
       <div class="fl common-top-search-form-body">
         <el-form
@@ -86,7 +78,9 @@
       >
         <ResponsiveTableColumn label="类型" width="90">
           <template #default="{ row }">
-            <el-tag effect="plain">{{ getPostTypeText(row.type) }}</el-tag>
+            <el-tag :type="getPostTypeTagType(row.type)" effect="plain">
+              {{ getPostTypeText(row.type) }}
+            </el-tag>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源文章" min-width="280">
@@ -185,6 +179,7 @@
         <ResponsiveTableColumn label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button
+              v-if="!row.hasSnapshot"
               type="primary"
               size="small"
               :loading="rowActionLoadingMap[row.sourceId]"
@@ -226,7 +221,12 @@
       />
     </div>
 
-    <el-dialog v-model="resultDialogVisible" title="快照生成结果" width="760px">
+    <el-dialog
+      v-model="resultDialogVisible"
+      title="快照生成结果"
+      width="760px"
+      align-center
+    >
       <template v-if="result">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="源快照 ID">
@@ -265,6 +265,7 @@
       v-model="languageDialogVisible"
       :title="languageDialogTitle"
       width="480px"
+      align-center
       destroy-on-close
     >
       <el-form :model="languageForm" label-width="110px" @submit.prevent>
@@ -303,6 +304,7 @@ import {
   getPostStatusTagType,
   getPostStatusText,
   getPostDisplayTitle,
+  getPostTypeTagType,
   getPostTypeText
 } from '@/utils/multilingual'
 
@@ -579,6 +581,7 @@ export default {
       copiedCountRows,
       rowActionLoadingMap,
       getLanguageText,
+      getPostTypeTagType,
       getPostTypeText,
       getPostStatusText,
       getPostStatusTagType,

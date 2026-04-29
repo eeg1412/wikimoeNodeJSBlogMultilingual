@@ -3,6 +3,7 @@
     v-model="visible"
     :title="title"
     width="min(980px, 96vw)"
+    align-center
     destroy-on-close
     append-to-body
     :show-close="!isBusy"
@@ -39,7 +40,14 @@
           </el-form>
 
           <div class="translation-json-toolbar">
-            <div class="cGray666">已选择 {{ selectedEntryIds.length }} 项</div>
+            <div class="translation-dialog-intro">
+              <div class="translation-dialog-intro-title">选择 AI 翻译字段</div>
+              <div class="translation-dialog-intro-text">
+                已选择
+                {{ selectedEntryIds.length }}
+                项。按分组检查字段，卡片会直接显示所属对象与字段类型。
+              </div>
+            </div>
             <div class="translation-json-toolbar-actions">
               <el-button size="small" :disabled="isBusy" @click="selectAll">
                 全选
@@ -60,17 +68,30 @@
               :key="group.label"
               class="translation-json-group"
             >
-              <div class="translation-json-group-title">{{ group.label }}</div>
+              <div class="translation-json-group-header">
+                <div class="translation-json-group-heading">
+                  <div
+                    v-if="group.meta.eyebrow"
+                    class="translation-json-group-eyebrow"
+                  >
+                    {{ group.meta.eyebrow }}
+                  </div>
+                  <div class="translation-json-group-title">
+                    {{ group.meta.title || group.label || '未命名分组' }}
+                  </div>
+                </div>
+                <div class="translation-json-group-count">
+                  {{ group.entries.length }} 项
+                </div>
+              </div>
               <div class="translation-json-entry-list">
                 <el-checkbox
                   v-for="entry in group.entries"
                   :key="entry.id"
-                  :label="entry.id"
+                  :value="entry.id"
                   class="translation-json-entry"
                 >
-                  <div class="translation-json-entry-label">
-                    {{ entry.label }}
-                  </div>
+                  <TranslationEntryMeta :entry="entry" />
                   <div class="translation-json-entry-preview">
                     {{ entry.previewText }}
                   </div>
@@ -144,7 +165,7 @@
             class="translation-import-preview-item"
           >
             <div class="translation-import-preview-item-title">
-              {{ item.label }}
+              <TranslationEntryMeta :entry="item" />
             </div>
             <div class="translation-import-preview-columns">
               <div class="translation-import-preview-panel">
@@ -196,23 +217,14 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
+import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import { getLanguageText } from '@/utils/multilingual'
+import {
+  createApiErrorFromResponse,
+  extractApiErrorMessages
+} from '@/utils/apiError'
+import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
 import { renderRichTextDocument } from '@/utils/translationJson'
-
-function groupEntryList(entryList) {
-  const groupMap = new Map()
-  entryList.forEach(entry => {
-    const groupLabel = entry.groupLabel || '未分组'
-    if (!groupMap.has(groupLabel)) {
-      groupMap.set(groupLabel, [])
-    }
-    groupMap.get(groupLabel).push(entry)
-  })
-
-  return Array.from(groupMap.entries()).map(([label, entries]) => {
-    return { label, entries }
-  })
-}
 
 function stringifyValue(valueType, value) {
   if (valueType === 'richTextDocument') {
@@ -237,6 +249,9 @@ function toFinalValue(valueType, value) {
 
 export default {
   name: 'ContentAiTranslationDialog',
+  components: {
+    TranslationEntryMeta
+  },
   props: {
     modelValue: { type: Boolean, default: false },
     title: { type: String, default: 'AI 翻译' },
@@ -272,7 +287,9 @@ export default {
       }
     })
 
-    const entryGroups = computed(() => groupEntryList(entryList.value))
+    const entryGroups = computed(() =>
+      groupTranslationEntryList(entryList.value)
+    )
     const isBusy = computed(() => {
       return loading.value || translating.value || applying.value
     })
@@ -534,11 +551,13 @@ export default {
           }
         )
         if (!response.ok) {
-          throw new Error(`AI 翻译请求失败：${response.status}`)
+          throw await createApiErrorFromResponse(response, 'AI 翻译请求失败')
         }
         await readStream(response)
       } catch (error) {
-        ElMessage.error(error?.message || 'AI 翻译失败')
+        extractApiErrorMessages(error).forEach(message => {
+          ElMessage.error(message)
+        })
       } finally {
         translating.value = false
       }
@@ -620,42 +639,119 @@ export default {
   margin-bottom: 12px;
 }
 
-.translation-json-group,
-.translation-import-preview-item,
+.translation-dialog-intro {
+  min-width: 0;
+}
+
+.translation-dialog-intro-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.translation-dialog-intro-text {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.translation-json-group {
+  margin-bottom: 18px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--el-bg-color);
+}
+
 .translation-json-warning-list {
   margin-bottom: 18px;
   border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 14px;
-  background: var(--el-fill-color-lighter);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.translation-json-group-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.translation-json-group-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.translation-json-group-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--el-color-primary);
 }
 
 .translation-json-group-title {
   font-weight: 600;
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  margin: 4px 0 0;
+  min-height: 21px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--el-text-color-primary);
+}
+
+.translation-json-group-count {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  min-height: 24px;
+  color: var(--el-color-primary-dark-2);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .translation-json-entry-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
 .translation-json-entry {
   width: 100%;
   margin-right: 0;
   align-items: flex-start;
+  padding: 10px 0;
+}
+
+.translation-json-entry + .translation-json-entry {
+  border-top: 1px dashed var(--el-border-color-lighter);
 }
 
 .translation-json-entry :deep(.el-checkbox__label) {
   width: 100%;
+  padding-left: 12px;
 }
 
-.translation-json-entry-label {
-  font-weight: 500;
-  color: var(--el-text-color-primary);
+.translation-json-entry :deep(.el-checkbox__input) {
+  margin-top: 4px;
 }
 
-.translation-json-entry-preview,
+.translation-json-entry-preview {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--el-border-color);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .translation-json-warning-item,
 .ai-stream-status-item {
   margin-top: 4px;
@@ -663,12 +759,21 @@ export default {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
 }
 
 .translation-import-preview-item {
+  margin-bottom: 18px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 14px;
+  padding: 16px;
   background: var(--el-bg-color);
-  border-color: var(--el-border-color-lighter);
+}
+
+.translation-import-preview-item-title {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
 }
 
 .translation-import-preview-item + .translation-import-preview-item {
@@ -719,6 +824,14 @@ export default {
   .translation-import-preview-columns {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .translation-json-group-header {
+    flex-direction: column;
+  }
+
+  .translation-json-group-count {
+    align-self: flex-start;
   }
 
   .translation-json-toolbar-actions {

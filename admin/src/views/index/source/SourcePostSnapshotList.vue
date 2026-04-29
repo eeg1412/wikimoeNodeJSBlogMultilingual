@@ -97,7 +97,9 @@
       >
         <ResponsiveTableColumn label="类型" width="90">
           <template #default="{ row }">
-            <el-tag effect="plain">{{ getPostTypeText(row.type) }}</el-tag>
+            <el-tag :type="getPostTypeTagType(row.type)" effect="plain">
+              {{ getPostTypeText(row.type) }}
+            </el-tag>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn prop="title" label="源标题" min-width="240">
@@ -174,6 +176,7 @@
       v-model="detailDialogVisible"
       title="源文章快照详情"
       width="80%"
+      align-center
       class="source-post-detail-dialog"
       destroy-on-close
     >
@@ -262,6 +265,7 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
   getPostDisplayTitle,
+  getPostTypeTagType,
   getPostTypeText,
   getTranslationProgress
 } from '@/utils/multilingual'
@@ -420,6 +424,7 @@ export default {
       detailData,
       getLanguageText,
       getPostDisplayTitle,
+      getPostTypeTagType,
       getPostTypeText,
       getTranslationProgress,
       getSummaryLanguageList,

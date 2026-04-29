@@ -9,7 +9,7 @@
       />
     </div>
     <div v-if="isRichMode">
-      <RichEditor5 v-model:content="valueHtml" />
+      <RichEditor5 v-model:content="valueHtml" :language-code="languageCode" />
     </div>
     <div v-else>
       <el-input
@@ -35,6 +35,10 @@ export default {
     isRichMode: {
       type: Boolean,
       default: true
+    },
+    languageCode: {
+      type: String,
+      default: ''
     }
   },
   components: {

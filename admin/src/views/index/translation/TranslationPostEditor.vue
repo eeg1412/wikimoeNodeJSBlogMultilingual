@@ -24,7 +24,9 @@
           {{ getLanguageText(form.languageCode) }}
         </el-descriptions-item>
         <el-descriptions-item label="类型">
-          {{ getPostTypeText(form.type) }}
+          <el-tag :type="getPostTypeTagType(form.type)" effect="plain">
+            {{ getPostTypeText(form.type) }}
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="作者">
           <span class="relation-inline-name">{{ authorName }}</span>
@@ -73,11 +75,13 @@
                 <RichEditor4
                   v-if="postEditorVersion === 4"
                   v-model:content="form.content"
+                  :language-code="form.languageCode"
                 />
                 <RichEditor5
                   v-else
                   v-model:content="form.content"
                   :isPost="true"
+                  :language-code="form.languageCode"
                 />
               </el-tab-pane>
               <el-tab-pane label="源代码" name="sourceCode">
@@ -227,7 +231,7 @@
 
         <div class="config-border-item" v-if="form.type === 2">
           <div class="config-border-item-title">
-            <div>推文内关联内容设定</div>
+            <div>推文内关联内容</div>
             <div class="f12 cGray666">※会显示在文章列表页和详情页的正文中</div>
           </div>
           <el-form-item
@@ -245,7 +249,7 @@
 
         <div class="config-border-item">
           <div class="config-border-item-title">
-            <div>详情页相关内容设定</div>
+            <div>详情页相关内容</div>
             <div class="f12 cGray666">※仅显示在详情页下方的相关内容</div>
           </div>
           <el-form-item
@@ -325,27 +329,53 @@
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item>
-          <el-button @click="goList">返回列表</el-button>
-          <el-button type="success" @click="openAiTranslationDialog">
-            AI 翻译
-          </el-button>
-          <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
-          <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
-          <el-button type="warning" :loading="saving" @click="restoreSnapshot">
-            同步快照
-          </el-button>
-          <el-button
-            v-if="form.pendingReview"
-            :loading="saving"
-            @click="confirmReview"
+        <div class="translation-editor-action-bar">
+          <div class="translation-editor-action-group">
+            <el-button @click="goList">返回列表</el-button>
+          </div>
+
+          <div class="translation-editor-action-divider" />
+
+          <div class="translation-editor-action-group">
+            <el-button type="success" @click="openAiTranslationDialog">
+              AI 翻译
+            </el-button>
+            <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
+            <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
+          </div>
+
+          <div class="translation-editor-action-divider" />
+
+          <div class="translation-editor-action-group">
+            <el-button
+              type="warning"
+              plain
+              :loading="saving"
+              @click="restoreSnapshot"
+            >
+              同步快照
+            </el-button>
+            <el-button
+              v-if="form.pendingReview"
+              type="success"
+              plain
+              :loading="saving"
+              @click="confirmReview"
+            >
+              确认复核
+            </el-button>
+          </div>
+
+          <div class="translation-editor-action-spacer" />
+
+          <div
+            class="translation-editor-action-group translation-editor-action-group-save"
           >
-            确认复核
-          </el-button>
-          <el-button type="primary" :loading="saving" @click="submit(false)">
-            保存
-          </el-button>
-        </el-form-item>
+            <el-button type="primary" :loading="saving" @click="submit(false)">
+              保存
+            </el-button>
+          </div>
+        </div>
       </el-form>
     </div>
 
@@ -353,13 +383,17 @@
       v-model="exportDialogVisible"
       title="导出翻译 JSON"
       width="min(980px, 96vw)"
+      align-center
       destroy-on-close
       append-to-body
     >
       <div class="translation-json-toolbar">
-        <div class="cGray666">
-          勾选需要交给 AI 翻译的字段。富文本会导出为结构化
-          JSON，尽量保留编辑器结构与媒体属性。
+        <div class="translation-dialog-intro">
+          <div class="translation-dialog-intro-title">选择导出字段</div>
+          <div class="translation-dialog-intro-text">
+            勾选需要交给 AI 翻译的字段。富文本会导出为结构化
+            JSON，尽量保留编辑器结构与媒体属性。
+          </div>
         </div>
         <div class="translation-json-toolbar-actions">
           <el-button size="small" @click="selectAllExportEntries">
@@ -392,11 +426,22 @@
             :max="50"
             controls-position="right"
           />
+          <div class="w_10 cGray666 mt10">
+            启用后会先让你选择导出目录，再一次性写入全部切片文件，避免浏览器批量下载漏文件。
+          </div>
         </el-form-item>
       </el-form>
       <el-skeleton v-if="exportLoading" :rows="4" animated />
       <div class="translation-json-selected-count cGray666">
         已选择 {{ selectedExportIds.length }} 项
+      </div>
+      <div
+        v-if="exportSliceSummary"
+        class="translation-json-selected-count cGray666"
+      >
+        当前预计生成 {{ exportSliceSummary.total }} 片，包含
+        {{ exportSliceSummary.totalEntries }} 个翻译单元，来自
+        {{ exportSliceSummary.sourceEntries }} 个原始条目。
       </div>
       <el-checkbox-group
         v-if="!exportLoading"
@@ -408,15 +453,30 @@
           :key="group.label"
           class="translation-json-group"
         >
-          <div class="translation-json-group-title">{{ group.label }}</div>
+          <div class="translation-json-group-header">
+            <div class="translation-json-group-heading">
+              <div
+                v-if="group.meta.eyebrow"
+                class="translation-json-group-eyebrow"
+              >
+                {{ group.meta.eyebrow }}
+              </div>
+              <div class="translation-json-group-title">
+                {{ group.meta.title || group.label || '未命名分组' }}
+              </div>
+            </div>
+            <div class="translation-json-group-count">
+              {{ group.entries.length }} 项
+            </div>
+          </div>
           <div class="translation-json-entry-list">
             <el-checkbox
               v-for="entry in group.entries"
               :key="entry.id"
-              :label="entry.id"
+              :value="entry.id"
               class="translation-json-entry"
             >
-              <div class="translation-json-entry-label">{{ entry.label }}</div>
+              <TranslationEntryMeta :entry="entry" />
               <div class="translation-json-entry-preview">
                 {{ entry.previewText }}
               </div>
@@ -436,13 +496,18 @@
       v-model="importDialogVisible"
       title="导入翻译 JSON"
       width="min(1100px, 96vw)"
+      align-center
       destroy-on-close
       append-to-body
     >
       <div class="translation-json-toolbar">
-        <div class="cGray666">
-          支持直接粘贴 AI 返回的 JSON，或选择本地 JSON
-          文件。结构化富文本会先展示回写预览，再二次确认导入。
+        <div class="translation-dialog-intro">
+          <div class="translation-dialog-intro-title">导入翻译内容</div>
+          <div class="translation-dialog-intro-text">
+            支持直接粘贴 AI 返回的 JSON，也支持粘贴多个切片 JSON
+            或一次选择多个本地 JSON
+            文件。结构化富文本会先展示回写预览，再二次确认导入。
+          </div>
         </div>
         <div class="translation-json-toolbar-actions">
           <el-button size="small" @click="triggerImportFilePicker">
@@ -454,6 +519,7 @@
         ref="importFileInputRef"
         class="translation-json-hidden-input"
         type="file"
+        multiple
         accept=".json,application/json"
         @change="handleImportFileChange"
       />
@@ -461,8 +527,12 @@
         v-model="importJsonText"
         type="textarea"
         :rows="12"
-        placeholder="请粘贴 JSON 内容"
+        placeholder="请粘贴一个完整 JSON，或粘贴多个切片 JSON（片段之间用空行分隔）"
       />
+      <div v-if="importSelectedFileCount > 0" class="mt10 cGray666">
+        已选择 {{ importSelectedFileCount }} 个 JSON
+        文件，内容已合并到上方输入框。
+      </div>
       <div class="mt10">
         <el-button type="primary" @click="parseTranslationJsonImport">
           解析并预览
@@ -509,21 +579,47 @@
           :key="group.label"
           class="translation-import-preview-group"
         >
-          <div class="translation-json-group-title">{{ group.label }}</div>
+          <div class="translation-json-group-header">
+            <div class="translation-json-group-heading">
+              <div
+                v-if="group.meta.eyebrow"
+                class="translation-json-group-eyebrow"
+              >
+                {{ group.meta.eyebrow }}
+              </div>
+              <div class="translation-json-group-title">
+                {{ group.meta.title || group.label || '未命名分组' }}
+              </div>
+            </div>
+            <div class="translation-json-group-count">
+              {{ group.entries.length }} 项
+            </div>
+          </div>
           <div
             v-for="item in group.entries"
             :key="item.id"
             class="translation-import-preview-item"
           >
             <div class="translation-import-preview-item-title">
-              {{ item.label }}
+              <TranslationEntryMeta :entry="item" />
             </div>
             <div class="translation-import-preview-columns">
               <div
                 v-if="item.hasSourceValue"
                 class="translation-import-preview-panel"
               >
-                <div class="translation-import-preview-panel-title">源文</div>
+                <div class="translation-import-preview-panel-title">
+                  源文
+                  <div
+                    v-if="
+                      item.sourceRecordLabel &&
+                      item.sourceRecordLabel !== item.recordLabel
+                    "
+                    class="translation-import-preview-panel-context"
+                  >
+                    {{ item.sourceRecordLabel }}
+                  </div>
+                </div>
                 <div
                   v-if="item.sourceHtml"
                   class="translation-import-preview-html"
@@ -576,6 +672,7 @@
       v-model="aiDialogVisible"
       title="DeepSeek AI 翻译"
       width="min(1100px, 96vw)"
+      align-center
       destroy-on-close
       append-to-body
       :show-close="!isAiBusy"
@@ -656,8 +753,15 @@
               </el-form-item>
             </el-form>
             <div class="translation-json-toolbar">
-              <div class="cGray666">
-                已选择 {{ selectedAiEntryIds.length }} 项
+              <div class="translation-dialog-intro">
+                <div class="translation-dialog-intro-title">
+                  选择 AI 翻译字段
+                </div>
+                <div class="translation-dialog-intro-text">
+                  已选择
+                  {{ selectedAiEntryIds.length }} 项。按分组检查本次会提交给
+                  DeepSeek 的字段，关联内容会直接显示所属对象与具体字段。
+                </div>
               </div>
               <div class="translation-json-toolbar-actions">
                 <el-button
@@ -687,19 +791,30 @@
                 :key="group.label"
                 class="translation-json-group"
               >
-                <div class="translation-json-group-title">
-                  {{ group.label }}
+                <div class="translation-json-group-header">
+                  <div class="translation-json-group-heading">
+                    <div
+                      v-if="group.meta.eyebrow"
+                      class="translation-json-group-eyebrow"
+                    >
+                      {{ group.meta.eyebrow }}
+                    </div>
+                    <div class="translation-json-group-title">
+                      {{ group.meta.title || group.label || '未命名分组' }}
+                    </div>
+                  </div>
+                  <div class="translation-json-group-count">
+                    {{ group.entries.length }} 项
+                  </div>
                 </div>
                 <div class="translation-json-entry-list">
                   <el-checkbox
                     v-for="entry in group.entries"
                     :key="entry.id"
-                    :label="entry.id"
+                    :value="entry.id"
                     class="translation-json-entry"
                   >
-                    <div class="translation-json-entry-label">
-                      {{ entry.label }}
-                    </div>
+                    <TranslationEntryMeta :entry="entry" />
                     <div class="translation-json-entry-preview">
                       {{ entry.previewText }}
                     </div>
@@ -722,6 +837,7 @@
 
             <div
               v-if="aiStreamStatusList.length > 0 || aiStreamContent"
+              ref="aiStreamFeedbackRef"
               class="ai-stream-feedback"
             >
               <div class="translation-json-group-title">实时反馈</div>
@@ -778,14 +894,29 @@
               :key="group.label"
               class="translation-import-preview-group"
             >
-              <div class="translation-json-group-title">{{ group.label }}</div>
+              <div class="translation-json-group-header">
+                <div class="translation-json-group-heading">
+                  <div
+                    v-if="group.meta.eyebrow"
+                    class="translation-json-group-eyebrow"
+                  >
+                    {{ group.meta.eyebrow }}
+                  </div>
+                  <div class="translation-json-group-title">
+                    {{ group.meta.title || group.label || '未命名分组' }}
+                  </div>
+                </div>
+                <div class="translation-json-group-count">
+                  {{ group.entries.length }} 项
+                </div>
+              </div>
               <div
                 v-for="item in group.entries"
                 :key="item.id"
                 class="translation-import-preview-item"
               >
                 <div class="translation-import-preview-item-title">
-                  {{ item.label }}
+                  <TranslationEntryMeta :entry="item" />
                 </div>
                 <div class="translation-import-preview-columns">
                   <div
@@ -794,6 +925,15 @@
                   >
                     <div class="translation-import-preview-panel-title">
                       源文
+                      <div
+                        v-if="
+                          item.sourceRecordLabel &&
+                          item.sourceRecordLabel !== item.recordLabel
+                        "
+                        class="translation-import-preview-panel-context"
+                      >
+                        {{ item.sourceRecordLabel }}
+                      </div>
                     </div>
                     <div
                       v-if="item.sourceHtml"
@@ -872,6 +1012,7 @@
       v-model="relationEditVisible"
       :title="relationEditTitle"
       width="min(860px, 94vw)"
+      align-center
       destroy-on-close
       append-to-body
     >
@@ -903,6 +1044,7 @@ import {
   computed,
   defineComponent,
   h,
+  nextTick,
   onMounted,
   reactive,
   ref,
@@ -921,15 +1063,22 @@ import RichEditor4 from '@/components/RichEditor4.vue'
 import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
+import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
 import {
   getLanguageText,
   getPostDisplayTitle,
   getPostStatusText,
+  getPostTypeTagType,
   getPostTypeText,
   getRelationDisplayName
 } from '@/utils/multilingual'
+import {
+  createApiErrorFromResponse,
+  extractApiErrorMessages
+} from '@/utils/apiError'
+import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
 import { loadAndOpenImg, nowTimestampToBase36WithRandom } from '@/utils/utils'
 import {
   getRelationEditFields,
@@ -941,6 +1090,7 @@ import {
   buildTranslationExportPayload,
   buildTranslationImportPreview,
   buildTranslationJsonFilename,
+  buildTranslationJsonSliceFilename,
   buildSourceToTargetTranslationEntries,
   parseTranslationImportPayload
 } from '@/utils/translationJson'
@@ -974,51 +1124,59 @@ const TWEET_CONTENT_RELATION_FIELDS = [
     label: '关联活动',
     field: 'contentEventList',
     collectionName: 'events',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联投票',
     field: 'contentVoteList',
     collectionName: 'votes',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联博文',
     field: 'contentPostList',
     collectionName: 'posts',
     multiple: true,
-    postType: 1
+    postType: 1,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联推文',
     field: 'contentTweetList',
     collectionName: 'posts',
     multiple: true,
-    postType: 2
+    postType: 2,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联番剧',
     field: 'contentBangumiList',
     collectionName: 'bangumis',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联电影',
     field: 'contentMovieList',
     collectionName: 'movies',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联书籍',
     field: 'contentBookList',
     collectionName: 'books',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   },
   {
     label: '关联游戏',
     field: 'contentGameList',
     collectionName: 'games',
-    multiple: true
+    multiple: true,
+    relationScope: 'tweetContent'
   }
 ]
 
@@ -1027,51 +1185,59 @@ const DETAIL_RELATION_FIELDS = [
     label: '相关活动',
     field: 'eventList',
     collectionName: 'events',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   },
   {
     label: '相关投票',
     field: 'voteList',
     collectionName: 'votes',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   },
   {
     label: '相关博文',
     field: 'postList',
     collectionName: 'posts',
     multiple: true,
-    postType: 1
+    postType: 1,
+    relationScope: 'detail'
   },
   {
     label: '相关推文',
     field: 'tweetList',
     collectionName: 'posts',
     multiple: true,
-    postType: 2
+    postType: 2,
+    relationScope: 'detail'
   },
   {
     label: '相关番剧',
     field: 'bangumiList',
     collectionName: 'bangumis',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   },
   {
     label: '相关电影',
     field: 'movieList',
     collectionName: 'movies',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   },
   {
     label: '相关书籍',
     field: 'bookList',
     collectionName: 'books',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   },
   {
     label: '相关游戏',
     field: 'gameList',
     collectionName: 'games',
-    multiple: true
+    multiple: true,
+    relationScope: 'detail'
   }
 ]
 
@@ -1096,24 +1262,6 @@ function getRecordIdList(records) {
   }
 
   return records.map(item => item._id).filter(Boolean)
-}
-
-function groupEntryList(entryList) {
-  const groupMap = new Map()
-  entryList.forEach(entry => {
-    const groupLabel = entry.groupLabel || '未分组'
-    if (!groupMap.has(groupLabel)) {
-      groupMap.set(groupLabel, [])
-    }
-    groupMap.get(groupLabel).push(entry)
-  })
-
-  return Array.from(groupMap.entries()).map(([label, entries]) => {
-    return {
-      label,
-      entries
-    }
-  })
 }
 
 function getRelationRecordDisplayName(record, field = {}) {
@@ -1203,6 +1351,7 @@ export default {
     RichEditor5,
     RichEditor4,
     RelationBusinessFieldEditor,
+    TranslationEntryMeta,
     VideoPlay
   },
   setup() {
@@ -1279,6 +1428,7 @@ export default {
     const importPreview = ref(null)
     const importing = ref(false)
     const importFileInputRef = ref(null)
+    const importSelectedFileCount = ref(0)
     const aiDialogVisible = ref(false)
     const aiLoading = ref(false)
     const aiTranslating = ref(false)
@@ -1293,6 +1443,7 @@ export default {
     const aiStreamStatusList = ref([])
     const aiStreamContent = ref('')
     const aiStreamReasoning = ref('')
+    const aiStreamFeedbackRef = ref(null)
     const skippedTranslationCreatingIds = ref([])
     const creatingAllSkippedTranslations = ref(false)
     let aiEntryLoadRequestId = 0
@@ -1327,16 +1478,52 @@ export default {
       return getRelationName(authorRecord.value)
     })
     const exportEntryGroups = computed(() => {
-      return groupEntryList(exportEntryList.value)
+      return groupTranslationEntryList(exportEntryList.value)
+    })
+    const selectedExportEntryList = computed(() => {
+      const selectedIdSet = new Set(selectedExportIds.value)
+      return exportEntryList.value.filter(entry => {
+        return selectedIdSet.has(entry.id)
+      })
+    })
+    const exportSliceSummary = computed(() => {
+      if (
+        !exportUseSlices.value ||
+        selectedExportEntryList.value.length === 0
+      ) {
+        return null
+      }
+
+      const jsonPayload = buildTranslationExportPayload({
+        form: buildCurrentExportForm(),
+        selectedEntries: selectedExportEntryList.value,
+        sliceOptions: {
+          enabled: true,
+          size: exportSliceSize.value
+        }
+      })
+      const sliceMeta = jsonPayload.meta?.slice || {}
+      const total = Number(sliceMeta.total || 0)
+      if (!total) {
+        return null
+      }
+
+      return {
+        total,
+        totalEntries: Number(sliceMeta.totalEntries || 0),
+        sourceEntries: Number(
+          sliceMeta.sourceEntries || selectedExportEntryList.value.length
+        )
+      }
     })
     const importPreviewGroups = computed(() => {
-      return groupEntryList(importPreview.value?.changeList || [])
+      return groupTranslationEntryList(importPreview.value?.changeList || [])
     })
     const aiEntryGroups = computed(() => {
-      return groupEntryList(aiEntryList.value)
+      return groupTranslationEntryList(aiEntryList.value)
     })
     const aiImportPreviewGroups = computed(() => {
-      return groupEntryList(aiImportPreview.value?.changeList || [])
+      return groupTranslationEntryList(aiImportPreview.value?.changeList || [])
     })
     const creatableAiSkippedEntries = computed(() => {
       return aiSkippedEntries.value.filter(item => {
@@ -1820,7 +2007,7 @@ export default {
     async function restoreSnapshot() {
       try {
         await ElMessageBox.confirm(
-          '确认将当前文章还原为最新源快照内容，并把状态改为草稿？',
+          '确认将当前文章还原为最新源快照内容，并同步作者、分类、标签、地点、媒体、推文内关联内容、详情页相关内容及排序引用？只会更新这些引用索引，不覆盖已编辑的关联内容本身；文章状态会改为草稿，旧关联和旧媒体不会删除。',
           '同步快照',
           {
             type: 'warning',
@@ -1836,6 +2023,7 @@ export default {
       try {
         const response = await multilingualApi.restoreTranslationPostSnapshot({
           id: form.id,
+          sourceSnapshotId: form.sourceSnapshotId,
           languageCode: form.languageCode
         })
         applyPostDetailData(response.data.data)
@@ -1851,10 +2039,12 @@ export default {
 
     async function refreshExportEntries() {
       exportLoading.value = true
+      const loadOptions = {}
+      // const loadOptions = { force: true }
       try {
         const result = await loadTranslationEntriesByBaseMode(
           exportBaseMode.value,
-          { force: true }
+          loadOptions
         )
         const entryList = result.entries || []
         exportEntryList.value = entryList
@@ -1885,22 +2075,98 @@ export default {
       selectedExportIds.value = []
     }
 
-    function downloadTranslationJson() {
-      if (selectedExportIds.value.length === 0) {
-        ElMessage.warning('请至少选择一项导出内容')
-        return
-      }
-
-      const selectedIdSet = new Set(selectedExportIds.value)
-      const selectedEntries = exportEntryList.value.filter(entry => {
-        return selectedIdSet.has(entry.id)
-      })
+    function buildCurrentExportForm() {
       const exportForm = {
         ...form
       }
       if (exportBaseMode.value === 'current') {
         exportForm.sourceLanguageCode = form.languageCode
       }
+      return exportForm
+    }
+
+    function downloadJsonPayload(payload, filename) {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json;charset=utf-8'
+      })
+      const downloadUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = downloadUrl
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      URL.revokeObjectURL(downloadUrl)
+    }
+
+    function buildSliceExportPayload(jsonPayload, slice) {
+      return {
+        ...jsonPayload,
+        meta: {
+          ...(jsonPayload.meta || {}),
+          slice: {
+            ...(jsonPayload.meta?.slice || {}),
+            index: slice.index
+          }
+        },
+        slices: [slice]
+      }
+    }
+
+    async function writeJsonFileToDirectory(
+      directoryHandle,
+      filename,
+      payload
+    ) {
+      const fileHandle = await directoryHandle.getFileHandle(filename, {
+        create: true
+      })
+      const writable = await fileHandle.createWritable()
+      await writable.write(JSON.stringify(payload, null, 2))
+      await writable.close()
+    }
+
+    async function saveSlicedTranslationJsonToDirectory(
+      jsonPayload,
+      exportForm
+    ) {
+      const sliceList = jsonPayload.slices || []
+      if (sliceList.length === 0) {
+        return 0
+      }
+
+      const canPickDirectory =
+        typeof window !== 'undefined' &&
+        typeof window.showDirectoryPicker === 'function'
+      if (!canPickDirectory) {
+        throw new Error(
+          '当前浏览器不支持稳定的切片目录导出，请使用 Chromium 内核浏览器重新导出'
+        )
+      }
+
+      const directoryHandle = await window.showDirectoryPicker({
+        mode: 'readwrite'
+      })
+      const total = sliceList.length
+      for (const slice of sliceList) {
+        await writeJsonFileToDirectory(
+          directoryHandle,
+          buildTranslationJsonSliceFilename(exportForm, slice.index, total),
+          buildSliceExportPayload(jsonPayload, slice)
+        )
+      }
+
+      return total
+    }
+
+    async function downloadTranslationJson() {
+      if (selectedExportIds.value.length === 0) {
+        ElMessage.warning('请至少选择一项导出内容')
+        return
+      }
+
+      const selectedEntries = selectedExportEntryList.value
+      const exportForm = buildCurrentExportForm()
       const jsonPayload = buildTranslationExportPayload({
         form: exportForm,
         selectedEntries,
@@ -1909,24 +2175,37 @@ export default {
           size: exportSliceSize.value
         }
       })
-      const blob = new Blob([JSON.stringify(jsonPayload, null, 2)], {
-        type: 'application/json;charset=utf-8'
-      })
-      const downloadUrl = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = downloadUrl
-      anchor.download = buildTranslationJsonFilename(form)
-      document.body.appendChild(anchor)
-      anchor.click()
-      document.body.removeChild(anchor)
-      URL.revokeObjectURL(downloadUrl)
-      exportDialogVisible.value = false
-      ElMessage.success('JSON 已导出')
+
+      try {
+        if (exportUseSlices.value && Array.isArray(jsonPayload.slices)) {
+          const fileCount = await saveSlicedTranslationJsonToDirectory(
+            jsonPayload,
+            exportForm
+          )
+          exportDialogVisible.value = false
+          ElMessage.success(`已导出 ${fileCount} 个切片文件`)
+          return
+        }
+
+        downloadJsonPayload(
+          jsonPayload,
+          buildTranslationJsonFilename(exportForm)
+        )
+        exportDialogVisible.value = false
+        ElMessage.success('JSON 已导出')
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return
+        }
+
+        ElMessage.error(error?.message || 'JSON 导出失败')
+      }
     }
 
     function openTranslationJsonImport() {
       importJsonText.value = ''
       importPreview.value = null
+      importSelectedFileCount.value = 0
       importDialogVisible.value = true
     }
 
@@ -1934,21 +2213,36 @@ export default {
       importFileInputRef.value && importFileInputRef.value.click()
     }
 
-    function handleImportFileChange(event) {
-      const file = event.target.files?.[0]
+    function readImportFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = readerEvent => {
+          resolve(String(readerEvent.target?.result || ''))
+        }
+        reader.onerror = () => {
+          reject(new Error('JSON 文件读取失败'))
+        }
+        reader.readAsText(file, 'utf-8')
+      })
+    }
+
+    async function handleImportFileChange(event) {
+      const fileList = Array.from(event.target.files || [])
       event.target.value = ''
-      if (!file) {
+      importSelectedFileCount.value = fileList.length
+      if (fileList.length === 0) {
         return
       }
 
-      const reader = new FileReader()
-      reader.onload = readerEvent => {
-        importJsonText.value = String(readerEvent.target?.result || '')
+      try {
+        const textList = await Promise.all(
+          fileList.map(file => readImportFile(file))
+        )
+        importJsonText.value = textList.join('\n\n')
+        importPreview.value = null
+      } catch (error) {
+        ElMessage.error(error?.message || 'JSON 文件读取失败')
       }
-      reader.onerror = () => {
-        ElMessage.error('JSON 文件读取失败')
-      }
-      reader.readAsText(file, 'utf-8')
     }
 
     async function parseTranslationJsonImport() {
@@ -2085,16 +2379,18 @@ export default {
       const requestId = aiEntryLoadRequestId + 1
       aiEntryLoadRequestId = requestId
       aiLoading.value = true
-      sourceReferenceEntries.value = []
+      const loadOptions = {}
+      // sourceReferenceEntries.value = []
+      // const loadOptions = { force: true }
       try {
         const isDetailApplied = applyPostDetailData(nextDetailData)
         if (!isDetailApplied) {
-          await getPostDetail()
+          // await getPostDetail()
         }
         const requestMode = aiBaseMode.value
         const mappedResult = await loadTranslationEntriesByBaseMode(
           requestMode,
-          { force: true }
+          loadOptions
         )
         if (
           requestId !== aiEntryLoadRequestId ||
@@ -2175,6 +2471,17 @@ export default {
       aiStreamStatusList.value.push({
         id: `${Date.now()}-${aiStreamStatusList.value.length}`,
         message
+      })
+      scrollAiStreamFeedbackToBottom()
+    }
+
+    function scrollAiStreamFeedbackToBottom() {
+      nextTick(() => {
+        const feedbackElement = aiStreamFeedbackRef.value
+        if (!feedbackElement) {
+          return
+        }
+        feedbackElement.scrollTop = feedbackElement.scrollHeight
       })
     }
 
@@ -2268,7 +2575,7 @@ export default {
       return { index: crlfIndex, length: 4 }
     }
 
-    function handleAiStreamEvent(eventData, selectedEntries) {
+    function handleAiStreamEvent(eventData, referenceEntries) {
       if (!eventData) {
         return null
       }
@@ -2282,6 +2589,7 @@ export default {
         }
         if (data.contentDelta) {
           aiStreamContent.value += data.contentDelta
+          scrollAiStreamFeedbackToBottom()
         }
       }
       if (eventData.eventName === 'result') {
@@ -2289,7 +2597,7 @@ export default {
           parsedPayload: data.payload,
           currentEntries: buildTranslationEntries({ includeEmpty: true }),
           form,
-          referenceEntries: selectedEntries
+          referenceEntries
         })
         aiImportPreview.value = preview
         if (preview.changeCount === 0) {
@@ -2302,7 +2610,7 @@ export default {
       return null
     }
 
-    async function readAiTranslationStream(response, selectedEntries) {
+    async function readAiTranslationStream(response, referenceEntries) {
       if (!response.body) {
         throw new Error('浏览器不支持读取 AI 翻译流')
       }
@@ -2338,7 +2646,7 @@ export default {
 
       if (buffer.trim()) {
         const eventData = parseClientSseBlock(buffer)
-        const error = handleAiStreamEvent(eventData, selectedEntries)
+        const error = handleAiStreamEvent(eventData, referenceEntries)
         if (error) {
           streamError = error
         }
@@ -2368,6 +2676,7 @@ export default {
       aiImportPreview.value = null
       aiTranslating.value = true
       try {
+        const referenceResult = await loadSourceReferenceEntries()
         pushAiStreamStatus('正在开始翻译')
         const response = await fetch(
           '/api/multilingual-admin/translation/post/ai-translate-stream',
@@ -2388,12 +2697,14 @@ export default {
         )
 
         if (!response.ok) {
-          throw new Error(`AI 翻译请求失败：${response.status}`)
+          throw await createApiErrorFromResponse(response, 'AI 翻译请求失败')
         }
 
-        await readAiTranslationStream(response, selectedEntries)
+        await readAiTranslationStream(response, referenceResult.entries || [])
       } catch (error) {
-        ElMessage.error(error?.message || 'AI 翻译失败')
+        extractApiErrorMessages(error).forEach(message => {
+          ElMessage.error(message)
+        })
       } finally {
         aiTranslating.value = false
       }
@@ -2430,8 +2741,11 @@ export default {
       }
     }
 
-    watch(importJsonText, () => {
+    watch(importJsonText, value => {
       importPreview.value = null
+      if (!value.trim()) {
+        importSelectedFileCount.value = 0
+      }
     })
 
     onMounted(() => {
@@ -2452,6 +2766,7 @@ export default {
       aiLoading,
       aiPrompt,
       aiSkippedEntries,
+      aiStreamFeedbackRef,
       aiStreamContent,
       aiStreamStatusList,
       aiTranslating,
@@ -2476,10 +2791,12 @@ export default {
       exportEntryGroups,
       exportLoading,
       exportSliceSize,
+      exportSliceSummary,
       exportUseSlices,
       getImagePreviewUrl,
       getLanguageText,
       getPostStatusText,
+      getPostTypeTagType,
       getPostTypeText,
       getRelationField,
       getRelationName,
@@ -2502,6 +2819,7 @@ export default {
       importJsonText,
       importPreview,
       importPreviewGroups,
+      importSelectedFileCount,
       importing,
       relationEditFields,
       relationEditForm,
@@ -2695,6 +3013,23 @@ export default {
   margin-bottom: 12px;
 }
 
+.translation-dialog-intro {
+  min-width: 0;
+}
+
+.translation-dialog-intro-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.translation-dialog-intro-text {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
 .translation-json-toolbar-actions {
   display: flex;
   gap: 8px;
@@ -2715,29 +3050,76 @@ export default {
 }
 
 .translation-json-group,
-.translation-import-preview-group,
+.translation-import-preview-group {
+  margin-bottom: 18px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--el-bg-color);
+}
+
 .translation-json-warning-list {
   margin-bottom: 18px;
   border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 14px;
-  background: var(--el-fill-color-lighter);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.translation-json-group-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.translation-json-group-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.translation-json-group-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--el-color-primary);
 }
 
 .translation-json-group-title,
-.translation-import-preview-item-title,
 .translation-import-preview-panel-title {
   font-weight: 600;
 }
 
 .translation-json-group-title {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 0;
+  min-height: 21px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--el-text-color-primary);
+}
+
+.translation-json-group-count {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  min-height: 24px;
+  color: var(--el-color-primary-dark-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.translation-json-warning-list .translation-json-group-title {
   margin-bottom: 10px;
 }
 
 .ai-skipped-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
@@ -2748,32 +3130,47 @@ export default {
 
 .translation-json-entry-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
 }
 
 .translation-json-entry {
   width: 100%;
   margin-right: 0;
   align-items: flex-start;
+  padding: 10px 0;
+}
+
+.translation-json-entry + .translation-json-entry {
+  border-top: 1px dashed var(--el-border-color-lighter);
 }
 
 .translation-json-entry :deep(.el-checkbox__label) {
   width: 100%;
+  padding-left: 12px;
 }
 
-.translation-json-entry-label {
-  font-weight: 500;
-  color: var(--el-text-color-primary);
+.translation-json-entry :deep(.el-checkbox__input) {
+  margin-top: 4px;
 }
 
-.translation-json-entry-preview,
+.translation-json-entry-preview {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--el-border-color);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .translation-json-warning-item {
   margin-top: 4px;
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
 }
 
 .translation-json-hidden-input {
@@ -2806,6 +3203,8 @@ export default {
 .ai-stream-feedback {
   margin-top: 16px;
   padding: 14px;
+  max-height: 320px;
+  overflow-y: auto;
   border-radius: 8px;
   border: 1px solid var(--el-border-color-light);
   background: var(--el-fill-color-lighter);
@@ -2819,8 +3218,7 @@ export default {
 
 .ai-stream-content {
   margin: 10px 0 0;
-  max-height: 220px;
-  overflow: auto;
+  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: Consolas, 'Courier New', monospace;
@@ -2830,10 +3228,11 @@ export default {
 }
 
 .translation-import-preview-item {
-  padding: 14px;
-  border-radius: 8px;
+  padding: 16px;
+  border-radius: 12px;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 8px 18px rgb(31 35 41 / 4%);
 }
 
 .translation-import-preview-item + .translation-import-preview-item {
@@ -2856,6 +3255,15 @@ export default {
   color: var(--el-text-color-secondary);
 }
 
+.translation-import-preview-panel-context {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  word-break: break-word;
+}
+
 .translation-import-preview-html,
 .translation-import-preview-raw {
   padding: 10px;
@@ -2870,8 +3278,9 @@ export default {
   word-break: break-word;
 }
 
-.translation-import-preview-html :deep(img),
-.translation-import-preview-html :deep(video) {
+.translation-import-preview-html :deep(:not(.w-e-image-group-img-body) > img),
+.translation-import-preview-html
+  :deep(:not(.w-e-image-group-img-body) > video) {
   max-width: 100%;
   height: auto;
 }
@@ -2885,6 +3294,42 @@ export default {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.translation-editor-action-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--el-border-color-light);
+}
+
+.translation-editor-action-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.translation-editor-action-divider {
+  width: 1px;
+  min-height: 32px;
+  background: var(--el-border-color);
+}
+
+.translation-editor-action-spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
+}
+
+.translation-editor-action-group-save {
+  margin-left: auto;
+}
+
+.translation-editor-action-group-save :deep(.el-button) {
+  min-width: 112px;
 }
 
 @media (max-width: 767px) {
@@ -2913,6 +3358,46 @@ export default {
   .translation-import-preview-columns {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .translation-editor-action-bar {
+    align-items: stretch;
+  }
+
+  .translation-editor-action-divider,
+  .translation-editor-action-spacer {
+    display: none;
+  }
+
+  .translation-editor-action-group,
+  .translation-editor-action-group-save {
+    width: 100%;
+  }
+
+  .translation-editor-action-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .translation-editor-action-group-save {
+    margin-left: 0;
+  }
+
+  .translation-editor-action-group :deep(.el-button) {
+    width: 100%;
+    margin: 0;
+  }
+
+  .translation-editor-action-group-save :deep(.el-button) {
+    width: 100%;
+  }
+
+  .translation-json-group-header {
+    flex-direction: column;
+  }
+
+  .translation-json-group-count {
+    align-self: flex-start;
   }
 
   .translation-json-toolbar-actions {

@@ -2,9 +2,22 @@ import { createAPI } from './create-api'
 import auth from './module/auth'
 import multilingual from './module/multilingual'
 import { showLoading, hideLoading } from '@/utils/utils'
+import { extractApiErrorMessages } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import store from '../store'
+
+function showErrorMessages(error) {
+  const messageList = extractApiErrorMessages(error)
+  messageList.forEach(message => {
+    ElMessage.error({
+      message,
+      'custom-class': 'common-message-error'
+    })
+  })
+
+  return messageList
+}
 
 const api = createAPI({ baseURL: '/api/multilingual-admin' })
 //请求拦截器
@@ -50,26 +63,17 @@ api.interceptors.response.use(
     if (!noLoading) {
       hideLoading()
     }
+
+    const messageList = showErrorMessages(error)
+
     switch (status) {
       case 400:
+      case 409:
+        break
       case 403:
-        const errorList =
-          error?.response?.data?.errorList || error?.response?.data?.errors
-        if (typeof errorList === 'object') {
-          errorList.forEach(errorMessage => {
-            ElMessage.error({
-              message: errorMessage.message,
-              'custom-class': 'common-message-error'
-            })
-          })
-        }
         if (status === 403) {
           clearTimeout(goLoginFlagTimer)
           goLoginFlagTimer = setTimeout(() => {
-            ElMessage.error({
-              message: '请重新登录',
-              'custom-class': 'common-message-error'
-            })
             router.replace({ name: 'Login' })
           }, 200)
         }
@@ -79,36 +83,19 @@ api.interceptors.response.use(
         if (routeName !== 'Login') {
           clearTimeout(goLoginFlagTimer)
           goLoginFlagTimer = setTimeout(() => {
-            ElMessage.error({
-              message: '请重新登录',
-              'custom-class': 'common-message-error'
-            })
-            router.replace({ name: 'Login' })
-          }, 200)
-        } else {
-          const errorList =
-            error?.response?.data?.errorList || error?.response?.data?.errors
-          if (Array.isArray(errorList)) {
-            errorList.forEach(errorMessage => {
+            if (!messageList.includes('请重新登录')) {
               ElMessage.error({
-                message: errorMessage.message || errorMessage,
+                message: '请重新登录',
                 'custom-class': 'common-message-error'
               })
-            })
-          }
+            }
+            router.replace({ name: 'Login' })
+          }, 200)
         }
         break
       case 503:
-        ElMessage.error({
-          message: '服务器可能正在维护中，请稍后再试。',
-          'custom-class': 'common-message-error'
-        })
         break
       default:
-        ElMessage.error({
-          message: '发生错误。code:' + status,
-          'custom-class': 'common-message-error'
-        })
         console.error(error)
         break
     }

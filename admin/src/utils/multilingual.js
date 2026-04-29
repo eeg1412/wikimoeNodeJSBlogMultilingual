@@ -191,6 +191,17 @@ export function getPostTypeText(value) {
   return '-'
 }
 
+export function getPostTypeTagType(value) {
+  const postType = Number(value)
+  if (postType === 1) {
+    return 'success'
+  }
+  if (postType === 3) {
+    return 'info'
+  }
+  return undefined
+}
+
 export function getPostStatusText(value) {
   const option = findOption(POST_STATUS_OPTIONS, Number(value))
   if (option) {

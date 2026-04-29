@@ -307,20 +307,84 @@ export const formatDate = (value, format = 'YYYY/MM/DD HH:mm:ss') => {
   return moment(value).format(format)
 }
 
-export const formatResToForm = (form, obj) => {
-  Object.keys(form).forEach(key => {
-    if (obj[key]) {
-      // 判断form[key]的类型，有数字，字符串，布尔，数组，但是value只有字符串，所以需要转换
-      if (typeof form[key] === 'number') {
-        form[key] = Number(obj[key])
-      } else if (typeof form[key] === 'boolean') {
-        form[key] = obj[key] === 'true'
-      } else if (Array.isArray(form[key])) {
-        form[key] = obj[key].split(',')
-      } else {
-        form[key] = obj[key]
-      }
+const normalizeBooleanFormValue = (key, value) => {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (value === 'true' || value === '1') {
+    return true
+  }
+
+  if (value === 'false' || value === '0') {
+    return false
+  }
+
+  throw new TypeError(
+    `Invalid boolean form value for ${key}: ${Object.prototype.toString.call(value)}`
+  )
+}
+
+const normalizeNumberFormValue = (key, value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsedValue = Number(value)
+    if (Number.isFinite(parsedValue)) {
+      return parsedValue
     }
+  }
+
+  throw new TypeError(
+    `Invalid number form value for ${key}: ${Object.prototype.toString.call(value)}`
+  )
+}
+
+const normalizeArrayFormValue = (key, value) => {
+  if (Array.isArray(value)) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    if (!value) {
+      return []
+    }
+
+    return value.split(',')
+  }
+
+  throw new TypeError(
+    `Invalid array form value for ${key}: ${Object.prototype.toString.call(value)}`
+  )
+}
+
+export const formatResToForm = (form, obj = {}) => {
+  Object.keys(form).forEach(key => {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) {
+      return
+    }
+
+    const currentValue = form[key]
+    const nextValue = obj[key]
+
+    if (typeof currentValue === 'number') {
+      form[key] = normalizeNumberFormValue(key, nextValue)
+      return
+    }
+
+    if (typeof currentValue === 'boolean') {
+      form[key] = normalizeBooleanFormValue(key, nextValue)
+      return
+    }
+
+    if (Array.isArray(currentValue)) {
+      form[key] = normalizeArrayFormValue(key, nextValue)
+      return
+    }
+
+    form[key] = nextValue
   })
 }
 

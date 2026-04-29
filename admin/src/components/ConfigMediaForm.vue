@@ -260,7 +260,8 @@ export default {
               ElMessage.success('更新成功')
             })
             .catch(err => {
-              console.log(err)
+              console.error(err)
+              ElMessage.error(err?.message || '更新失败')
             })
         } else {
           // 弹窗
@@ -301,9 +302,11 @@ export default {
       request
         .then(res => {
           applyResponseToForm(res)
-        })
-        .finally(() => {
           inited.value = true
+        })
+        .catch(err => {
+          console.error(err)
+          ElMessage.error(err?.message || '获取媒体设置失败')
         })
     }
 

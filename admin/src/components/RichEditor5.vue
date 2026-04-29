@@ -14,18 +14,19 @@
       @onCreated="handleCreated"
       @onBlur="handleBlur"
     />
-    <AttachmentsDialog
+    <MultilingualRichMediaDialog
       :shouldSelectOk="true"
       ref="attachmentsDialogRef"
       @selectAttachments="selectAttachments"
-      :hasDelete="false"
       :typeList="[insertFnType]"
-      :is360Panorama="insertFnIs360Panorama"
+      :is360Panorama="mediaDialogIs360Panorama"
+      :language-code="languageCode"
     />
     <RichEditorEventSelectorDialog
       v-model:show="showEventDialog"
       :text="eventText"
       :id="eventId"
+      :language-code="languageCode"
       @ok="onEventDialogOk"
     />
   </div>
@@ -42,10 +43,10 @@ import {
   nextTick
 } from 'vue'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import AttachmentsDialog from '@/components/AttachmentsDialog'
+import MultilingualRichMediaDialog from '@/components/MultilingualRichMediaDialog.vue'
 import RichEditorEventSelectorDialog from '@/components/RichEditorEventSelectorDialog'
 import { Boot, DomEditor, SlateTransforms } from '@wangeditor/editor'
-import store from '@/store'
+import { getRichEditorMediaUrls } from '@/utils/richEditorMediaUrl'
 
 export default {
   props: {
@@ -56,12 +57,16 @@ export default {
     isPost: {
       type: Boolean,
       default: false
+    },
+    languageCode: {
+      type: String,
+      default: ''
     }
   },
   components: {
     Editor,
     Toolbar,
-    AttachmentsDialog,
+    MultilingualRichMediaDialog,
     RichEditorEventSelectorDialog
   },
   setup(props, { emit }) {
@@ -330,6 +335,12 @@ export default {
     let insertFn_ = null
     const insertFnType = ref(null)
     const insertFnIs360Panorama = ref(false)
+    const mediaDialogIs360Panorama = computed(() => {
+      if (insertFnIs360Panorama.value) {
+        return true
+      }
+      return undefined
+    })
     const attachmentsDialogRef = ref(null)
     const openAttachmentsDialogType = ref('')
     const openAttachmentsDialog = type => {
@@ -354,38 +365,30 @@ export default {
       })
     }
 
-    const siteUrl = computed(() => {
-      return store.state.siteUrl
-    })
     const getTime = () => {
       return new Date().getTime()
     }
+    const getMediaUrls = item => {
+      return getRichEditorMediaUrls(item, getTime(), {
+        sourceSiteUrl: item.sourceSiteUrl || ''
+      })
+    }
     const selectAttachments = async attachments => {
       console.log(attachments)
-      // let html = ''
-      // attachments.forEach((item) => {
-      //   // 写入img标签
-      //   html += `<img src="${siteUrl.value + item.filepath}" alt="${
-      //     item.filename
-      //   }" width="${item.thumWidth || item.width}" height="${
-      //     item.thumHeight || item.height
-      //   }" loading="lazy" />`
-      // })
       if (openAttachmentsDialogType.value === 'imageGroup') {
         const editor = editorRef.value
         editor.restoreSelection()
         setTimeout(() => {
           const children = attachments.map(item => {
+            const mediaUrls = getMediaUrls(item)
             return {
-              src: item.thumfor
-                ? `${siteUrl.value + item.thumfor}?t=${getTime()}`
-                : `${siteUrl.value + item.filepath}?t=${getTime()}`,
+              src: mediaUrls.src,
               width: item.thumWidth || item.width,
               height: item.thumHeight || item.height,
-              dataHref: `${siteUrl.value + item.filepath}?t=${getTime()}`,
+              dataHref: mediaUrls.href,
               dataHrefWidth: item.width,
               dataHrefHeight: item.height,
-              alt: item.description || item.filename || '',
+              alt: mediaUrls.alt,
               text: ''
             }
           })
@@ -403,21 +406,20 @@ export default {
           // 处理所有选中的图片
           if (attachments.length > 0) {
             // 创建每个全景图片的元素数组
-            const panoramaElems = attachments.map(item => ({
-              type: 'panorama360',
-              src: item.thumfor
-                ? `${siteUrl.value + item.thumfor}?t=${getTime()}`
-                : `${siteUrl.value + item.filepath}?t=${getTime()}`,
-              width: item.thumWidth || item.width || '100%',
-              height: item.thumHeight || item.height || '400px',
-              dataHref: item.filepath
-                ? `${siteUrl.value + item.filepath}?t=${getTime()}`
-                : '',
-              dataHrefWidth: item.width || '',
-              dataHrefHeight: item.height || '',
-              alt: item.description || item.filename || '360°全景图片',
-              children: [{ text: '' }]
-            }))
+            const panoramaElems = attachments.map(item => {
+              const mediaUrls = getMediaUrls(item)
+              return {
+                type: 'panorama360',
+                src: mediaUrls.src,
+                width: item.thumWidth || item.width || '100%',
+                height: item.thumHeight || item.height || '400px',
+                dataHref: mediaUrls.href,
+                dataHrefWidth: item.width || '',
+                dataHrefHeight: item.height || '',
+                alt: mediaUrls.alt || '360°全景图片',
+                children: [{ text: '' }]
+              }
+            })
 
             // 插入所有全景图片元素，并在每个元素之间插入换行（除了最后一个元素）
             for (let i = 0; i < panoramaElems.length; i++) {
@@ -437,19 +439,15 @@ export default {
         for (const item of attachments) {
           if (insertFn_) {
             let insertFnPromise = null
+            const mediaUrls = getMediaUrls(item)
             if (insertFnType.value === 'image') {
               insertFnPromise = insertFn_(
-                item.thumfor
-                  ? `${siteUrl.value + item.thumfor}?t=${getTime()}`
-                  : `${siteUrl.value + item.filepath}?t=${getTime()}`,
-                item.description || item.filename || '',
-                `${siteUrl.value + item.filepath}?t=${getTime()}`
+                mediaUrls.src,
+                mediaUrls.alt,
+                mediaUrls.href
               )
             } else if (insertFnType.value === 'video') {
-              insertFnPromise = insertFn_(
-                `${siteUrl.value + item.filepath}?t=${getTime()}`,
-                `${siteUrl.value + item.thumfor}?t=${getTime()}`
-              )
+              insertFnPromise = insertFn_(mediaUrls.href, mediaUrls.cover)
             }
 
             await insertFnPromise
@@ -550,6 +548,7 @@ export default {
       // 媒体库
       insertFnType,
       insertFnIs360Panorama,
+      mediaDialogIs360Panorama,
       attachmentsDialogRef,
       openAttachmentsDialog,
       selectAttachments,

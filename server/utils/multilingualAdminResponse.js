@@ -24,6 +24,9 @@ const ERROR_CODES = {
   AUTH_REQUIRED: 'AUTH_REQUIRED',
   AUTH_FAILED: 'AUTH_FAILED',
   AUTH_TOO_MANY_ATTEMPTS: 'AUTH_TOO_MANY_ATTEMPTS',
+  REQUEST_BODY_INVALID: 'REQUEST_BODY_INVALID',
+  API_NOT_FOUND: 'API_NOT_FOUND',
+  UPLOAD_INVALID: 'UPLOAD_INVALID',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   BACKUP_IN_PROGRESS: 'BACKUP_IN_PROGRESS',
   INTERNAL_ERROR: 'INTERNAL_ERROR'
@@ -54,6 +57,9 @@ const ERROR_MESSAGES = {
   [ERROR_CODES.AUTH_REQUIRED]: '认证失败',
   [ERROR_CODES.AUTH_FAILED]: '认证失败',
   [ERROR_CODES.AUTH_TOO_MANY_ATTEMPTS]: '登录失败次数过多，请稍后再试',
+  [ERROR_CODES.REQUEST_BODY_INVALID]: '请求体 JSON 格式错误',
+  [ERROR_CODES.API_NOT_FOUND]: '接口不存在',
+  [ERROR_CODES.UPLOAD_INVALID]: '文件上传失败',
   [ERROR_CODES.SERVICE_UNAVAILABLE]: '服务暂不可用',
   [ERROR_CODES.BACKUP_IN_PROGRESS]: '系统正在进行备份或还原操作，请稍后再试',
   [ERROR_CODES.INTERNAL_ERROR]: '请求处理失败'
@@ -71,18 +77,38 @@ class ApiError extends Error {
 }
 
 function buildErrorItem(code, message, field) {
+  const errorCode = code || ERROR_CODES.INTERNAL_ERROR
+  const errorMessage =
+    message || ERROR_MESSAGES[errorCode] || ERROR_MESSAGES.INTERNAL_ERROR
+
   return {
-    code,
-    message: message || ERROR_MESSAGES[code] || ERROR_MESSAGES.INTERNAL_ERROR,
+    code: errorCode,
+    message: errorMessage,
     field: field || null
   }
 }
 
+function buildErrorResponse(status, code, message, field, extra = {}) {
+  const errorItem = buildErrorItem(code, message, field)
+  const errorList = [errorItem]
+
+  return {
+    ...extra,
+    success: false,
+    status,
+    code: errorItem.code,
+    message: errorItem.message,
+    field: errorItem.field,
+    error: errorItem,
+    errorList,
+    errors: errorList
+  }
+}
+
 function sendError(res, status, code, message, field, extra = {}) {
-  return res.status(status).json({
-    errorList: [buildErrorItem(code, message, field)],
-    ...extra
-  })
+  return res.status(status).json(
+    buildErrorResponse(status, code, message, field, extra)
+  )
 }
 
 function handleApiError(
@@ -117,6 +143,7 @@ module.exports = {
   ERROR_CODES,
   ERROR_MESSAGES,
   ApiError,
+  buildErrorResponse,
   sendError,
   handleApiError
 }

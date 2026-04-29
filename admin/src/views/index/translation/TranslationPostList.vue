@@ -119,9 +119,12 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="类型" width="90">
           <template #default="{ row }">
-            <el-tag effect="plain">{{
-              getPostTypeText(row.sourcePost.type)
-            }}</el-tag>
+            <el-tag
+              :type="getPostTypeTagType(row.sourcePost.type)"
+              effect="plain"
+            >
+              {{ getPostTypeText(row.sourcePost.type) }}
+            </el-tag>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源语言" width="150">
@@ -224,6 +227,7 @@
       v-model="detailDialogVisible"
       title="编辑多语言文章"
       width="880px"
+      align-center
       destroy-on-close
     >
       <el-skeleton v-if="detailLoading" :rows="6" animated />
@@ -333,6 +337,7 @@ import {
   getPostStatusTagType,
   getPostStatusText,
   getPostDisplayTitle,
+  getPostTypeTagType,
   getPostTypeText
 } from '@/utils/multilingual'
 
@@ -594,6 +599,7 @@ export default {
       postTypeOptions: POST_TYPE_OPTIONS,
       postStatusOptions: POST_STATUS_OPTIONS,
       getLanguageText,
+      getPostTypeTagType,
       getPostStatusTagType,
       getPostStatusText,
       getPostTypeText,

@@ -1,36 +1,34 @@
 <template>
   <div class="editor-body">
     <div ref="editorRef"></div>
-    <AttachmentsDialog
+    <MultilingualRichMediaDialog
       :shouldSelectOk="true"
       ref="attachmentsDialogRef"
-      :hasDelete="false"
+      :typeList="['image']"
+      :language-code="languageCode"
       @selectAttachments="selectAttachments"
     />
   </div>
 </template>
 
 <script>
-import {
-  onBeforeUnmount,
-  ref,
-  shallowRef,
-  onMounted,
-  computed,
-  watch
-} from 'vue'
-import AttachmentsDialog from '@/components/AttachmentsDialog'
+import { onBeforeUnmount, ref, shallowRef, onMounted, watch } from 'vue'
+import MultilingualRichMediaDialog from '@/components/MultilingualRichMediaDialog.vue'
 import E from 'wangeditor'
-import store from '@/store'
+import { getRichEditorMediaUrls } from '@/utils/richEditorMediaUrl'
 
 export default {
   props: {
     content: {
       type: String,
       default: ''
+    },
+    languageCode: {
+      type: String,
+      default: ''
     }
   },
-  components: { AttachmentsDialog },
+  components: { MultilingualRichMediaDialog },
   setup(props, { emit }) {
     // 编辑器实例，必须用 shallowRef
     const editorRef = ref()
@@ -39,20 +37,23 @@ export default {
     const openAttachmentsDialog = () => {
       attachmentsDialogRef.value.open()
     }
-    const siteUrl = computed(() => {
-      return store.state.siteUrl
-    })
+    const getTime = () => {
+      return new Date().getTime()
+    }
     const selectAttachments = attachments => {
       console.log(attachments)
       attachments.forEach(item => {
+        const mediaUrls = getRichEditorMediaUrls(item, getTime(), {
+          sourceSiteUrl: item.sourceSiteUrl || ''
+        })
         // v4版本的data-href需要uri解码
         editor.cmd.do(
           'insertHTML',
-          `<img src="${siteUrl.value}${item.thumfor || item.filepath}" width="${
+          `<img src="${mediaUrls.src}" width="${
             item.thumWidth || item.width
           }" height="${item.thumHeight || item.height}" data-href="${
-            siteUrl.value
-          }${item.filepath}" />`
+            mediaUrls.href
+          }" />`
         )
       })
     }

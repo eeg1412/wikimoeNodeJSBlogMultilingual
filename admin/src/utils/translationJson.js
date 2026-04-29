@@ -95,6 +95,16 @@ const TOKEN_PREFIX = '__WIKIMOE_TRANSLATION_TOKEN_'
 const ASSET_ATTRIBUTE_REGEXP = /(\w+)="([^"]*)"/g
 const ASSET_PLACEHOLDER_REGEXP =
   /^\[(image|video|embed|event):([A-Za-z0-9_-]+)([^\]]*)\]$/
+const DETAIL_RELATION_FIELD_SET = new Set([
+  'eventList',
+  'voteList',
+  'postList',
+  'tweetList',
+  'bangumiList',
+  'movieList',
+  'bookList',
+  'gameList'
+])
 
 function normalizeStringValue(value) {
   if (value === null || value === undefined) {
@@ -1187,8 +1197,11 @@ function createPostEntry(form, fieldConfig, options = {}) {
         id: `post.${fieldConfig.name}`,
         scope: 'post',
         fieldName: fieldConfig.name,
+        fieldLabel: label,
         label,
         groupLabel: '文章正文',
+        groupCategory: '文章字段',
+        groupTitle: '文章正文',
         valueType: fieldConfig.valueType,
         value: richTextResult.document,
         defaultSelected: fieldConfig.defaultSelected,
@@ -1203,8 +1216,11 @@ function createPostEntry(form, fieldConfig, options = {}) {
       id: `post.${fieldConfig.name}`,
       scope: 'post',
       fieldName: fieldConfig.name,
+      fieldLabel: label,
       label,
       groupLabel: '文章正文',
+      groupCategory: '文章字段',
+      groupTitle: '文章正文',
       valueType: fieldConfig.valueType,
       value: form[fieldConfig.name],
       defaultSelected: fieldConfig.defaultSelected,
@@ -1229,8 +1245,54 @@ function getRelationRecordDisplayName(record, relationField = {}) {
   return getRelationDisplayName(record)
 }
 
+function getRelationScopeMeta(relationField = {}) {
+  if (relationField.relationScope === 'tweetContent') {
+    return {
+      relationScope: 'tweetContent',
+      relationScopeLabel: '推文内',
+      groupCategory: '推文内关联内容',
+      groupLabel: `推文内关联内容 / ${relationField.label}`
+    }
+  }
+
+  if (relationField.relationScope === 'detail') {
+    return {
+      relationScope: 'detail',
+      relationScopeLabel: '详情页',
+      groupCategory: '详情页相关内容',
+      groupLabel: `详情页相关内容 / ${relationField.label}`
+    }
+  }
+
+  if (String(relationField.field || '').startsWith('content')) {
+    return {
+      relationScope: 'tweetContent',
+      relationScopeLabel: '推文内',
+      groupCategory: '推文内关联内容',
+      groupLabel: `推文内关联内容 / ${relationField.label}`
+    }
+  }
+
+  if (DETAIL_RELATION_FIELD_SET.has(relationField.field)) {
+    return {
+      relationScope: 'detail',
+      relationScopeLabel: '详情页',
+      groupCategory: '详情页相关内容',
+      groupLabel: `详情页相关内容 / ${relationField.label}`
+    }
+  }
+
+  return {
+    relationScope: 'base',
+    relationScopeLabel: '',
+    groupCategory: '关联内容',
+    groupLabel: `关联内容 / ${relationField.label}`
+  }
+}
+
 function createRelationEntry(relationField, record, editField, options = {}) {
   const recordLabel = getRelationRecordDisplayName(record, relationField)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
   const valueType =
     editField.type === 'richText'
       ? STRUCTURED_RICH_TEXT_VALUE_TYPE
@@ -1247,14 +1309,20 @@ function createRelationEntry(relationField, record, editField, options = {}) {
         collectionName: relationField.collectionName,
         recordId: record._id,
         recordKind: record.recordKind,
+        postType: Number(record.type || relationField.postType || 0),
         sourceRecordId: normalizeStringValue(record._id),
         sourceId: normalizeStringValue(record.sourceId),
         sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+        relationScope: relationScopeMeta.relationScope,
+        relationScopeLabel: relationScopeMeta.relationScopeLabel,
         relationTypeLabel: relationField.label,
         recordLabel,
         fieldName: editField.name,
+        fieldLabel: editField.label,
         label: `${recordLabel} / ${editField.label}`,
-        groupLabel: `关联内容 / ${relationField.label}`,
+        groupLabel: relationScopeMeta.groupLabel,
+        groupCategory: relationScopeMeta.groupCategory,
+        groupTitle: relationField.label,
         valueType,
         value: richTextResult.document,
         defaultSelected: !editField.translationOptional,
@@ -1272,14 +1340,20 @@ function createRelationEntry(relationField, record, editField, options = {}) {
       collectionName: relationField.collectionName,
       recordId: record._id,
       recordKind: record.recordKind,
+      postType: Number(record.type || relationField.postType || 0),
       sourceRecordId: normalizeStringValue(record._id),
       sourceId: normalizeStringValue(record.sourceId),
       sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+      relationScope: relationScopeMeta.relationScope,
+      relationScopeLabel: relationScopeMeta.relationScopeLabel,
       relationTypeLabel: relationField.label,
       recordLabel,
       fieldName: editField.name,
+      fieldLabel: editField.label,
       label: `${recordLabel} / ${editField.label}`,
-      groupLabel: `关联内容 / ${relationField.label}`,
+      groupLabel: relationScopeMeta.groupLabel,
+      groupCategory: relationScopeMeta.groupCategory,
+      groupTitle: relationField.label,
       valueType,
       value: record[editField.name],
       defaultSelected: !editField.translationOptional,
@@ -1311,8 +1385,11 @@ function buildParentRelationEntry(
       relationTypeLabel: parentRelationField.label,
       recordLabel: parentLabel,
       fieldName: parentEditField.name,
+      fieldLabel: parentEditField.label,
       label: `${parentLabel} / ${parentEditField.label}`,
       groupLabel: `父级关联 / ${parentRelationField.label}`,
+      groupCategory: '父级关联',
+      groupTitle: parentRelationField.label,
       valueType: 'plainText',
       value: parentRecord[parentEditField.name],
       defaultSelected: !parentEditField.translationOptional,
@@ -1444,6 +1521,8 @@ export function buildRecordTranslationEntries({
     )
     if (entry) {
       entry.groupLabel = groupLabel
+      entry.groupCategory = '内容字段'
+      entry.groupTitle = groupLabel
       entryList.push(entry)
     }
   })
@@ -1495,6 +1574,9 @@ function buildExportEntryList(selectedEntries) {
     if (entry.recordKind) {
       exportEntry.recordKind = entry.recordKind
     }
+    if (entry.postType) {
+      exportEntry.postType = entry.postType
+    }
     if (entry.sourceRecordId) {
       exportEntry.sourceRecordId = entry.sourceRecordId
     }
@@ -1509,6 +1591,21 @@ function buildExportEntryList(selectedEntries) {
     }
     if (entry.relationTypeLabel) {
       exportEntry.relationTypeLabel = entry.relationTypeLabel
+    }
+    if (entry.relationScope) {
+      exportEntry.relationScope = entry.relationScope
+    }
+    if (entry.relationScopeLabel) {
+      exportEntry.relationScopeLabel = entry.relationScopeLabel
+    }
+    if (entry.fieldLabel) {
+      exportEntry.fieldLabel = entry.fieldLabel
+    }
+    if (entry.groupCategory) {
+      exportEntry.groupCategory = entry.groupCategory
+    }
+    if (entry.groupTitle) {
+      exportEntry.groupTitle = entry.groupTitle
     }
     if (entry.assets && Object.keys(entry.assets).length > 0) {
       exportEntry.assets = entry.assets
@@ -1624,6 +1721,7 @@ function mergeSlicedImportPayload(parsedData) {
   const sliceMeta = parsedData.meta?.slice || {}
   const expectedTotal = Number(sliceMeta.total || parsedData.slices.length)
   const expectedEntryTotal = Number(sliceMeta.totalEntries || 0)
+  const importedDocumentCount = Number(parsedData.__importDocumentCount || 0)
   if (!Number.isInteger(expectedTotal) || expectedTotal <= 0) {
     throw new Error('JSON 切片总数不合法')
   }
@@ -1652,7 +1750,14 @@ function mergeSlicedImportPayload(parsedData) {
 
   for (let index = 1; index <= expectedTotal; index += 1) {
     if (!sliceMap.has(index)) {
-      throw new Error(`JSON 切片不完整，缺少第 ${index}/${expectedTotal} 片`)
+      throw new Error(
+        buildMissingSliceImportError({
+          expectedTotal,
+          importedDocumentCount,
+          importedSliceCount: sliceMap.size,
+          missingIndex: index
+        })
+      )
     }
   }
 
@@ -2116,13 +2221,160 @@ export function buildTranslationJsonFilename(form) {
   return `translation-post-${languageCode}-${postId}.json`
 }
 
-export function parseTranslationImportPayload(jsonText) {
-  let parsedData = null
-  try {
-    parsedData = JSON.parse(jsonText)
-  } catch (error) {
-    throw new Error('JSON 解析失败，请检查语法是否正确')
+export function buildTranslationJsonSliceFilename(form, index, total) {
+  const baseFilename = buildTranslationJsonFilename(form).replace(/\.json$/, '')
+  const width = String(total || 1).length
+  const indexText = String(index).padStart(width, '0')
+  return `${baseFilename}-part-${indexText}-of-${total}.json`
+}
+
+function buildMissingSliceImportError({
+  expectedTotal,
+  importedDocumentCount,
+  importedSliceCount,
+  missingIndex
+}) {
+  let message = 'JSON 切片不完整'
+
+  if (importedDocumentCount > 0) {
+    message += `，当前导入了 ${importedDocumentCount} 个 JSON`
   }
+
+  if (importedSliceCount > 0) {
+    message += `，解析出 ${importedSliceCount}/${expectedTotal} 片`
+  } else {
+    message += '，当前没有读到有效切片'
+  }
+
+  message += `，缺少第 ${missingIndex}/${expectedTotal} 片`
+  message +=
+    '。如果这些文件来自旧版切片导出，浏览器可能拦截了部分下载；请重新导出完整切片后再导入。'
+
+  return message
+}
+
+function splitJsonDocumentTexts(jsonText) {
+  const text = normalizeStringValue(jsonText)
+  if (!text) {
+    return []
+  }
+
+  const documentTexts = []
+  let startIndex = -1
+  let depth = 0
+  let isInString = false
+  let isEscaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (isInString) {
+      if (isEscaped) {
+        isEscaped = false
+      } else if (char === '\\') {
+        isEscaped = true
+      } else if (char === '"') {
+        isInString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      isInString = true
+      continue
+    }
+    if (char === '{') {
+      if (depth === 0) {
+        startIndex = index
+      }
+      depth += 1
+      continue
+    }
+    if (char === '}') {
+      depth -= 1
+      if (depth < 0) {
+        throw new Error('JSON 结构不完整，请检查切片内容')
+      }
+      if (depth === 0 && startIndex >= 0) {
+        documentTexts.push(text.slice(startIndex, index + 1))
+        startIndex = -1
+      }
+      continue
+    }
+    if (depth === 0 && !/\s/.test(char)) {
+      throw new Error('多个 JSON 片段之间只能使用空白分隔')
+    }
+  }
+
+  if (depth !== 0 || isInString) {
+    throw new Error('JSON 结构不完整，请检查切片内容')
+  }
+  return documentTexts
+}
+
+function parseJsonDocumentList(jsonText) {
+  const text = normalizeStringValue(jsonText)
+  try {
+    return [JSON.parse(text)]
+  } catch (error) {
+    const documentTexts = splitJsonDocumentTexts(text)
+    if (documentTexts.length <= 1) {
+      throw new Error('JSON 解析失败，请检查语法是否正确')
+    }
+    return documentTexts.map((documentText, index) => {
+      try {
+        return JSON.parse(documentText)
+      } catch (parseError) {
+        throw new Error(`第 ${index + 1} 段 JSON 解析失败，请检查语法`)
+      }
+    })
+  }
+}
+
+function assertImportDocumentCompatible(baseDocument, documentItem, index) {
+  if (documentItem.schema !== baseDocument.schema) {
+    throw new Error(`第 ${index + 1} 段 JSON schema 与第 1 段不一致`)
+  }
+  if (Number(documentItem.version) !== Number(baseDocument.version)) {
+    throw new Error(`第 ${index + 1} 段 JSON version 与第 1 段不一致`)
+  }
+  const baseMeta = baseDocument.meta || {}
+  const itemMeta = documentItem.meta || {}
+  ;['postId', 'languageCode'].forEach(fieldName => {
+    if (itemMeta[fieldName] !== baseMeta[fieldName]) {
+      throw new Error(`第 ${index + 1} 段 JSON ${fieldName} 与第 1 段不一致`)
+    }
+  })
+}
+
+function mergeImportDocumentList(documentList) {
+  if (documentList.length === 1) {
+    return {
+      ...documentList[0],
+      __importDocumentCount: 1
+    }
+  }
+
+  const baseDocument = cloneSerializableValue(documentList[0])
+  baseDocument.__importDocumentCount = documentList.length
+  const slices = []
+  documentList.forEach((documentItem, index) => {
+    assertImportDocumentCompatible(baseDocument, documentItem, index)
+    if (!documentItem.meta?.slice) {
+      throw new Error(`第 ${index + 1} 段不是切片 JSON`)
+    }
+    if (!Array.isArray(documentItem.slices)) {
+      throw new Error(`第 ${index + 1} 段切片 JSON 缺少 slices`)
+    }
+    slices.push(...documentItem.slices)
+  })
+
+  delete baseDocument.entries
+  baseDocument.slices = slices
+  return baseDocument
+}
+
+export function parseTranslationImportPayload(jsonText) {
+  let parsedData = mergeImportDocumentList(parseJsonDocumentList(jsonText))
 
   if (
     !parsedData ||
@@ -2143,6 +2395,7 @@ export function parseTranslationImportPayload(jsonText) {
   }
   parsedData = mergeSlicedImportPayload(parsedData)
   parsedData = mergeRichTextSegmentImportPayload(parsedData)
+  delete parsedData.__importDocumentCount
   if (!Array.isArray(parsedData.entries) || parsedData.entries.length === 0) {
     throw new Error('JSON entries 不能为空')
   }
@@ -2328,10 +2581,24 @@ export function buildTranslationImportPreview({
 
     changeList.push({
       id: entry.id,
+      scope: currentEntry.scope,
       label: currentEntry.label,
       groupLabel: currentEntry.groupLabel,
+      groupCategory: currentEntry.groupCategory,
+      groupTitle: currentEntry.groupTitle,
       valueType: currentEntry.valueType,
+      fieldName: currentEntry.fieldName,
+      fieldLabel: currentEntry.fieldLabel,
+      recordLabel: currentEntry.recordLabel,
+      relationTypeLabel: currentEntry.relationTypeLabel,
+      collectionName: currentEntry.collectionName,
+      postType: currentEntry.postType,
+      optional: currentEntry.optional,
+      entryKind: currentEntry.entryKind,
+      segmentIndex: currentEntry.segmentIndex,
+      segmentTotal: currentEntry.segmentTotal,
       hasSourceValue,
+      sourceRecordLabel: referenceEntry?.recordLabel || '',
       sourceValue,
       sourceHtml,
       currentValue: buildPreviewRawValue(currentValue, currentEntry.valueType),

@@ -41,6 +41,7 @@
       v-else-if="field.type === 'richText'"
       class="relation-rich-editor"
       v-model:content="form[field.name]"
+      :language-code="languageCode"
     />
     <el-input
       v-else-if="field.type === 'textarea'"
@@ -55,6 +56,7 @@
     v-model="parentEditVisible"
     :title="parentEditTitle"
     width="min(520px, 94vw)"
+    align-center
     destroy-on-close
     append-to-body
   >

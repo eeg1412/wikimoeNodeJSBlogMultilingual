@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const utils = require('../../../utils/utils')
 const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
@@ -13,6 +14,7 @@ const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
+const RELATION_COPY_CONCURRENCY = 4
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -91,6 +93,13 @@ const POST_CONTENT_RELATION_FIELDS = [
   'contentEventList',
   'contentVoteList'
 ]
+
+const POST_RELATION_EXPECTED_TYPE_MAP = {
+  postList: 1,
+  contentPostList: 1,
+  tweetList: 2,
+  contentTweetList: 2
+}
 
 const POST_RELATION_FIELDS = [
   ...Object.keys(POST_SINGLE_RELATION_COLLECTIONS),
@@ -199,6 +208,9 @@ const TRANSLATION_POST_LIST_SELECT_FIELDS = [
   'lastChangDate',
   'date',
   'updatedAt',
+  'sourceId',
+  'sourceSnapshotId',
+  'sourceLanguageCode',
   'sort',
   'tags',
   'mappointList',
@@ -463,6 +475,16 @@ function toObjectId(value) {
   return new mongoose.Types.ObjectId(String(documentId))
 }
 
+function isSameObjectIdValue(left, right) {
+  const leftId = toObjectId(left)
+  const rightId = toObjectId(right)
+  if (!leftId || !rightId) {
+    return false
+  }
+
+  return String(leftId) === String(rightId)
+}
+
 function getSourceIdentityId(sourceObject) {
   const sourceId = toObjectId(sourceObject.sourceId)
   if (sourceId) {
@@ -643,12 +665,124 @@ function getCacheKey(collectionName, sourceObject, context) {
   ].join(':')
 }
 
-async function resolveSourceSnapshotRecord(collectionName, sourceRecordId) {
+function getContextCache(context, cacheName) {
+  if (!context[cacheName]) {
+    context[cacheName] = new Map()
+  }
+
+  return context[cacheName]
+}
+
+async function getOrCreateCopyResult(context, cacheKey, factory) {
+  const copyPromiseCache = getContextCache(context, 'copyPromiseCache')
+  if (copyPromiseCache.has(cacheKey)) {
+    return await copyPromiseCache.get(cacheKey)
+  }
+
+  const copyPromise = (async () => {
+    try {
+      return await factory()
+    } finally {
+      copyPromiseCache.delete(cacheKey)
+    }
+  })()
+
+  copyPromiseCache.set(cacheKey, copyPromise)
+  return await copyPromise
+}
+
+function getSourceSnapshotCacheKey(collectionName, sourceRecordId) {
+  const recordId = toObjectId(sourceRecordId)
+  if (!recordId) {
+    return ''
+  }
+
+  return [collectionName, String(recordId), SOURCE_RECORD_KIND].join(':')
+}
+
+function getUniqueRelationSourceList(sourceList) {
+  if (!Array.isArray(sourceList) || sourceList.length === 0) {
+    return []
+  }
+
+  const result = []
+  const seenSourceIdSet = new Set()
+
+  for (const sourceItem of sourceList) {
+    const sourceId = getSourceIdentityId(sourceItem)
+    if (!sourceId) {
+      result.push(sourceItem)
+      continue
+    }
+
+    const sourceIdText = String(sourceId)
+    if (seenSourceIdSet.has(sourceIdText)) {
+      continue
+    }
+
+    seenSourceIdSet.add(sourceIdText)
+    result.push(sourceItem)
+  }
+
+  return result
+}
+
+async function mapWithConcurrency(itemList, concurrency, mapper) {
+  if (!Array.isArray(itemList) || itemList.length === 0) {
+    return []
+  }
+
+  const result = new Array(itemList.length)
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, itemList.length)
+
+  async function worker() {
+    while (nextIndex < itemList.length) {
+      const currentIndex = nextIndex
+      nextIndex++
+      result[currentIndex] = await mapper(itemList[currentIndex], currentIndex)
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return result
+}
+
+async function loadSourceSnapshotRecord(collectionName, recordId) {
+  const model = getMultilingualModel(collectionName)
+  const query = model
+    .findOne({
+      _id: recordId,
+      recordKind: SOURCE_RECORD_KIND
+    })
+    .lean()
+  const populate = getSnapshotPopulateForCollection(collectionName)
+  if (populate) {
+    query.populate(populate)
+  }
+
+  const sourceRecord = await query
+  if (collectionName === SOURCE_POST_COLLECTION && sourceRecord) {
+    return await normalizeSourcePostSnapshotIdentity(sourceRecord)
+  }
+
+  return sourceRecord
+}
+
+async function resolveSourceSnapshotRecord(
+  collectionName,
+  sourceRecordId,
+  context
+) {
   if (!sourceRecordId) {
     return null
   }
 
   if (isDocumentObject(sourceRecordId)) {
+    if (collectionName === SOURCE_POST_COLLECTION) {
+      return await normalizeSourcePostSnapshotIdentity(sourceRecordId)
+    }
+
     return sourceRecordId
   }
 
@@ -657,44 +791,143 @@ async function resolveSourceSnapshotRecord(collectionName, sourceRecordId) {
     return null
   }
 
-  const model = getMultilingualModel(collectionName)
-  const query = model.findOne({
-    _id: recordId,
-    recordKind: SOURCE_RECORD_KIND
-  })
-  const populate = getSnapshotPopulateForCollection(collectionName)
-  if (populate) {
-    query.populate(populate)
+  const cacheKey = getSourceSnapshotCacheKey(collectionName, recordId)
+  if (!cacheKey) {
+    return await loadSourceSnapshotRecord(collectionName, recordId)
   }
 
-  return await query
+  const sourceRecordCache = getContextCache(context, 'sourceRecordCache')
+  if (!sourceRecordCache.has(cacheKey)) {
+    sourceRecordCache.set(
+      cacheKey,
+      loadSourceSnapshotRecord(collectionName, recordId)
+    )
+  }
+
+  try {
+    return await sourceRecordCache.get(cacheKey)
+  } catch (error) {
+    sourceRecordCache.delete(cacheKey)
+    throw error
+  }
 }
 
-function buildTranslationRecordFilter(collectionName, sourceObject, context) {
+function buildTranslationRecordFilter(
+  collectionName,
+  sourceObject,
+  context,
+  options = {}
+) {
   const sourceId = getSourceIdentityId(sourceObject)
-
-  return {
+  const filter = {
     sourceCollection: collectionName,
     sourceId,
     languageCode: context.languageCode,
     recordKind: TRANSLATION_RECORD_KIND
   }
+
+  if (collectionName === SOURCE_POST_COLLECTION) {
+    const sourceSnapshotId = toObjectId(sourceObject)
+    const translationGroupId = options.useSelfTranslationGroup
+      ? toObjectId(sourceObject.translationGroupId) || sourceSnapshotId
+      : toObjectId(context.translationGroupId)
+
+    if (!sourceSnapshotId) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '源快照身份缺失，已停止创建以避免串源',
+        'sourceSnapshotId',
+        409
+      )
+    }
+
+    if (!translationGroupId) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '源快照翻译组缺失，已停止创建以避免串源',
+        'translationGroupId',
+        409
+      )
+    }
+
+    filter.sourceSnapshotId = sourceSnapshotId
+    filter.translationGroupId = translationGroupId
+  }
+
+  return filter
 }
 
 async function findExistingTranslationRecord(
   model,
   collectionName,
   sourceObject,
-  context
+  context,
+  options = {}
 ) {
   const filter = buildTranslationRecordFilter(
     collectionName,
     sourceObject,
-    context
+    context,
+    options
   )
-  const existingRecord = await model.findOne(filter)
+  const existingRecord = await model.findOne(filter).select('_id').lean()
   if (existingRecord) {
     return existingRecord
+  }
+
+  if (collectionName === SOURCE_POST_COLLECTION && filter.translationGroupId) {
+    const conflictingRecord = await model
+      .findOne({
+        translationGroupId: filter.translationGroupId,
+        languageCode: context.languageCode,
+        recordKind: TRANSLATION_RECORD_KIND
+      })
+      .select('_id sourceId sourceSnapshotId translationGroupId languageCode')
+      .lean()
+
+    if (conflictingRecord) {
+      const existingSourceId = toObjectId(conflictingRecord.sourceId)
+      if (
+        !existingSourceId ||
+        isSameObjectIdValue(existingSourceId, filter.sourceId)
+      ) {
+        await model.updateOne(
+          { _id: conflictingRecord._id },
+          {
+            $set: {
+              sourceCollection: SOURCE_POST_COLLECTION,
+              sourceId: filter.sourceId,
+              sourceSnapshotId: filter.sourceSnapshotId,
+              translationGroupId: filter.translationGroupId
+            }
+          }
+        )
+
+        return { _id: conflictingRecord._id }
+      }
+
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '已存在同一源快照组的语言版本，但源快照身份不匹配，已停止创建以避免串源',
+        'sourceSnapshotId',
+        409,
+        {
+          existingTranslationId: String(conflictingRecord._id),
+          existingSourceSnapshotId: conflictingRecord.sourceSnapshotId
+            ? String(conflictingRecord.sourceSnapshotId)
+            : null,
+          expectedSourceSnapshotId: filter.sourceSnapshotId
+            ? String(filter.sourceSnapshotId)
+            : null,
+          existingSourceId: conflictingRecord.sourceId
+            ? String(conflictingRecord.sourceId)
+            : null,
+          expectedSourceId: filter.sourceId ? String(filter.sourceId) : null,
+          translationGroupId: String(filter.translationGroupId),
+          languageCode: context.languageCode
+        }
+      )
+    }
   }
 
   if (collectionName !== 'attachments') {
@@ -702,12 +935,15 @@ async function findExistingTranslationRecord(
   }
 
   const sourceId = getSourceIdentityId(sourceObject)
-  return await model.findOne({
-    sourceCollection: collectionName,
-    sourceId,
-    languageCode: context.languageCode,
-    mediaMode: 'remote'
-  })
+  return await model
+    .findOne({
+      sourceCollection: collectionName,
+      sourceId,
+      languageCode: context.languageCode,
+      mediaMode: 'remote'
+    })
+    .select('_id')
+    .lean()
 }
 
 function applyCollectionDefaults(collectionName, data, sourceObject, context) {
@@ -761,25 +997,24 @@ function applyPostDefaults(data, sourceObject, context) {
 }
 
 async function copyRelationListToLanguage(collectionName, sourceList, context) {
-  const result = []
-  if (!Array.isArray(sourceList)) {
-    return result
-  }
-
-  for (const sourceItem of sourceList) {
-    const copiedRecord = await copyRelationToLanguage(
-      collectionName,
-      sourceItem,
-      context.languageCode,
-      context.sourceSnapshotId,
-      context
-    )
-    if (copiedRecord && copiedRecord._id) {
-      result.push(copiedRecord._id)
+  const uniqueSourceList = getUniqueRelationSourceList(sourceList)
+  const copiedRecordList = await mapWithConcurrency(
+    uniqueSourceList,
+    RELATION_COPY_CONCURRENCY,
+    async sourceItem => {
+      return await copyRelationToLanguage(
+        collectionName,
+        sourceItem,
+        context.languageCode,
+        context.sourceSnapshotId,
+        context
+      )
     }
-  }
+  )
 
-  return result
+  return copiedRecordList
+    .filter(copiedRecord => copiedRecord && copiedRecord._id)
+    .map(copiedRecord => copiedRecord._id)
 }
 
 async function applyDependencyFields(
@@ -789,31 +1024,70 @@ async function applyDependencyFields(
   context
 ) {
   const dependencies = COLLECTION_DEPENDENCY_FIELDS[collectionName] || []
-  for (const dependency of dependencies) {
-    const sourceValue = sourceObject[dependency.field]
-    if (!sourceValue) {
-      data[dependency.field] = null
-      continue
-    }
+  const dependencyEntries = await mapWithConcurrency(
+    dependencies,
+    RELATION_COPY_CONCURRENCY,
+    async dependency => {
+      const sourceValue = sourceObject[dependency.field]
+      if (!sourceValue) {
+        return {
+          field: dependency.field,
+          value: null
+        }
+      }
 
+      const copiedRecord = await copyRelationToLanguage(
+        dependency.collectionName,
+        sourceValue,
+        context.languageCode,
+        context.sourceSnapshotId,
+        context
+      )
+
+      return {
+        field: dependency.field,
+        value: copiedRecord && copiedRecord._id ? copiedRecord._id : null
+      }
+    }
+  )
+
+  for (const entry of dependencyEntries) {
+    data[entry.field] = entry.value
+  }
+}
+
+async function copyPostRelationFieldToLanguage(field, sourceObject, context) {
+  const singleCollectionName = POST_SINGLE_RELATION_COLLECTIONS[field]
+  if (singleCollectionName) {
     const copiedRecord = await copyRelationToLanguage(
-      dependency.collectionName,
-      sourceValue,
+      singleCollectionName,
+      sourceObject[field],
       context.languageCode,
       context.sourceSnapshotId,
       context
     )
     if (copiedRecord && copiedRecord._id) {
-      data[dependency.field] = copiedRecord._id
-    } else {
-      data[dependency.field] = null
+      return copiedRecord._id
     }
+
+    return null
   }
+
+  const collectionName = POST_ARRAY_RELATION_COLLECTIONS[field]
+  return await copyRelationListToLanguage(
+    collectionName,
+    sourceObject[field] || [],
+    context
+  )
 }
 
 async function applyPostRelationFields(data, sourceObject, context, options) {
   for (const field of POST_RELATION_FIELDS) {
     delete data[field]
+  }
+
+  if (options.skipPostRelations === true) {
+    return
   }
 
   const fieldsToCopy = []
@@ -823,31 +1097,44 @@ async function applyPostRelationFields(data, sourceObject, context, options) {
     fieldsToCopy.push(...POST_RELATION_FIELDS)
   }
 
-  for (const field of fieldsToCopy) {
-    const singleCollectionName = POST_SINGLE_RELATION_COLLECTIONS[field]
-    if (singleCollectionName) {
-      const copiedRecord = await copyRelationToLanguage(
-        singleCollectionName,
-        sourceObject[field],
-        context.languageCode,
-        context.sourceSnapshotId,
-        context
-      )
-      if (copiedRecord && copiedRecord._id) {
-        data[field] = copiedRecord._id
-      } else {
-        data[field] = null
+  const relationEntries = await mapWithConcurrency(
+    fieldsToCopy,
+    RELATION_COPY_CONCURRENCY,
+    async field => {
+      return {
+        field,
+        value: await copyPostRelationFieldToLanguage(
+          field,
+          sourceObject,
+          context
+        )
       }
-      continue
     }
+  )
 
-    const collectionName = POST_ARRAY_RELATION_COLLECTIONS[field]
-    data[field] = await copyRelationListToLanguage(
-      collectionName,
-      sourceObject[field] || [],
-      context
-    )
+  for (const entry of relationEntries) {
+    data[entry.field] = entry.value
   }
+}
+
+async function buildPostRelationIndexUpdateData(sourcePost, context) {
+  const updateData = {}
+  const relationEntries = await mapWithConcurrency(
+    POST_RELATION_FIELDS,
+    RELATION_COPY_CONCURRENCY,
+    async field => {
+      return {
+        field,
+        value: await copyPostRelationFieldToLanguage(field, sourcePost, context)
+      }
+    }
+  )
+
+  for (const entry of relationEntries) {
+    updateData[entry.field] = entry.value
+  }
+
+  return updateData
 }
 
 async function buildTranslationRecordData(
@@ -879,8 +1166,32 @@ async function buildTranslationRecordData(
   data.sourceHash = sourceObject.sourceHash || ''
 
   if (collectionName === 'posts') {
-    data.translationGroupId =
-      context.translationGroupId || sourceObject.translationGroupId || recordId
+    if (options.useSelfTranslationGroup === true) {
+      const selfTranslationGroupId =
+        toObjectId(sourceObject.translationGroupId) || toObjectId(sourceObject)
+      if (!selfTranslationGroupId) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_FIELD_INVALID,
+          '源快照翻译组缺失，已停止创建以避免串源',
+          'translationGroupId',
+          409
+        )
+      }
+
+      data.translationGroupId = selfTranslationGroupId
+    } else {
+      const contextTranslationGroupId = toObjectId(context.translationGroupId)
+      if (!contextTranslationGroupId) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_FIELD_INVALID,
+          '源快照翻译组缺失，已停止创建以避免串源',
+          'translationGroupId',
+          409
+        )
+      }
+
+      data.translationGroupId = contextTranslationGroupId
+    }
     applyPostDefaults(data, sourceObject, context)
     await applyPostRelationFields(data, sourceObject, context, options)
   } else {
@@ -911,53 +1222,62 @@ async function copySourceSnapshotRecord(
     copyPostRelations: true,
     ...options
   }
-  const model = getMultilingualModel(collectionName)
   const cacheKey = getCacheKey(collectionName, sourceObject, context)
 
   if (context.copyCache.has(cacheKey)) {
     return context.copyCache.get(cacheKey)
   }
 
-  const existingRecord = await findExistingTranslationRecord(
-    model,
-    collectionName,
-    sourceObject,
-    context
-  )
-  if (existingRecord) {
-    increaseCopiedCount(context, collectionName, 'reused')
-    context.copyCache.set(cacheKey, existingRecord)
-    return existingRecord
-  }
-
   const recordId = recordOptions.recordId || new mongoose.Types.ObjectId()
-  context.copyCache.set(cacheKey, { _id: recordId })
+  const shouldSeedPlaceholder =
+    collectionName === 'posts' && Boolean(recordOptions.recordId)
 
-  const data = await buildTranslationRecordData(
-    collectionName,
-    sourceDoc,
-    context,
-    {
-      ...recordOptions,
-      recordId
-    }
-  )
-
-  if (collectionName === 'posts') {
-    await assertAliasAvailable(
-      context.languageCode,
-      data.alias,
-      data.type,
-      recordId,
-      data.status
-    )
+  if (shouldSeedPlaceholder) {
+    context.copyCache.set(cacheKey, { _id: recordId })
   }
 
-  data._id = recordId
-  const createdRecord = await new model(data).save()
-  increaseCopiedCount(context, collectionName, 'created')
-  context.copyCache.set(cacheKey, createdRecord)
-  return createdRecord
+  return await getOrCreateCopyResult(context, cacheKey, async () => {
+    const model = getMultilingualModel(collectionName)
+    const existingRecord = await findExistingTranslationRecord(
+      model,
+      collectionName,
+      sourceObject,
+      context,
+      recordOptions
+    )
+    if (existingRecord) {
+      increaseCopiedCount(context, collectionName, 'reused')
+      context.copyCache.set(cacheKey, existingRecord)
+      return existingRecord
+    }
+
+    const data = await buildTranslationRecordData(
+      collectionName,
+      sourceDoc,
+      context,
+      {
+        ...recordOptions,
+        recordId
+      }
+    )
+
+    if (collectionName === 'posts') {
+      await assertAliasAvailable(
+        context.languageCode,
+        data.alias,
+        data.type,
+        recordId,
+        data.status
+      )
+    }
+
+    data._id = recordId
+    await new model(data).save()
+    const createdRecord = { _id: recordId }
+    increaseCopiedCount(context, collectionName, 'created')
+    context.copyCache.set(cacheKey, createdRecord)
+    return createdRecord
+  })
 }
 
 async function copyRelationToLanguage(
@@ -969,7 +1289,8 @@ async function copyRelationToLanguage(
 ) {
   const sourceRecord = await resolveSourceSnapshotRecord(
     collectionName,
-    sourceRecordId
+    sourceRecordId,
+    context
   )
   if (!sourceRecord) {
     return null
@@ -978,11 +1299,13 @@ async function copyRelationToLanguage(
   const relationContext = {
     ...context,
     languageCode,
-    sourceSnapshotId: sourceSnapshotId || context.sourceSnapshotId
+    sourceSnapshotId:
+      toObjectId(sourceRecord) || sourceSnapshotId || context.sourceSnapshotId
   }
   const options = {}
   if (collectionName === 'posts') {
     options.copyPostRelations = false
+    options.useSelfTranslationGroup = true
   }
 
   return await copySourceSnapshotRecord(
@@ -997,7 +1320,7 @@ function buildCopyContext(sourcePost, languageCode, now) {
   return {
     languageCode,
     sourceLanguageCode: sourcePost.sourceLanguageCode,
-    translationGroupId: sourcePost.translationGroupId || sourcePost._id,
+    translationGroupId: toObjectId(sourcePost.translationGroupId),
     sourceSnapshotId: sourcePost._id,
     snapshotVersion: sourcePost.snapshotVersion || 1,
     sourceSnapshotAt: sourcePost.sourceSnapshotAt || now,
@@ -1007,7 +1330,7 @@ function buildCopyContext(sourcePost, languageCode, now) {
   }
 }
 
-async function findSourcePostSnapshot(sourceSnapshotId) {
+async function findSourcePostSnapshotSummary(sourceSnapshotId) {
   if (!mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
     throw new ApiError(
       ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
@@ -1018,11 +1341,14 @@ async function findSourcePostSnapshot(sourceSnapshotId) {
   }
 
   const PostModel = getPostModel()
-  const sourcePost = await PostModel.findOne({
-    _id: new mongoose.Types.ObjectId(sourceSnapshotId),
-    recordKind: SOURCE_RECORD_KIND,
-    sourceCollection: SOURCE_POST_COLLECTION
-  }).populate(buildMultilingualPostPopulate())
+  const sourcePost = await PostModel.findOne(
+    {
+      _id: new mongoose.Types.ObjectId(sourceSnapshotId),
+      recordKind: SOURCE_RECORD_KIND,
+      sourceCollection: SOURCE_POST_COLLECTION
+    },
+    '_id sourceId translationGroupId sourceLanguageCode alias type snapshotVersion sourceSnapshotAt'
+  ).lean()
 
   if (!sourcePost) {
     throw new ApiError(
@@ -1032,6 +1358,65 @@ async function findSourcePostSnapshot(sourceSnapshotId) {
       404
     )
   }
+
+  return await normalizeSourcePostSnapshotIdentity(sourcePost)
+}
+
+async function normalizeSourcePostSnapshotIdentity(sourcePost) {
+  const sourceSnapshotId = toObjectId(sourcePost)
+  if (!sourceSnapshotId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source snapshot id invalid',
+      'sourceSnapshotId',
+      404
+    )
+  }
+
+  if (isSameObjectIdValue(sourcePost.translationGroupId, sourceSnapshotId)) {
+    return sourcePost
+  }
+
+  const PostModel = getPostModel()
+  await PostModel.updateOne(
+    {
+      _id: sourceSnapshotId,
+      recordKind: SOURCE_RECORD_KIND,
+      sourceCollection: SOURCE_POST_COLLECTION
+    },
+    {
+      $set: {
+        translationGroupId: sourceSnapshotId
+      }
+    }
+  )
+
+  return {
+    ...sourcePost,
+    translationGroupId: sourceSnapshotId
+  }
+}
+
+async function normalizeSourcePostSnapshotIdentityList(sourcePosts) {
+  return await Promise.all(
+    sourcePosts.map(sourcePost => {
+      return normalizeSourcePostSnapshotIdentity(sourcePost)
+    })
+  )
+}
+
+async function findSourcePostSnapshot(sourceSnapshotId) {
+  const sourcePostSummary =
+    await findSourcePostSnapshotSummary(sourceSnapshotId)
+
+  const PostModel = getPostModel()
+  const sourcePost = await PostModel.findOne({
+    _id: sourcePostSummary._id,
+    recordKind: SOURCE_RECORD_KIND,
+    sourceCollection: SOURCE_POST_COLLECTION
+  })
+    .populate(buildMultilingualPostPopulate())
+    .lean()
 
   return sourcePost
 }
@@ -1055,36 +1440,27 @@ async function ensureSourcePostSnapshotRelations(sourcePost) {
 async function buildMissingPostRelationUpdateData(post, sourcePost, context) {
   const updateData = {}
 
-  for (const field of POST_RELATION_FIELDS) {
+  const missingFields = POST_RELATION_FIELDS.filter(field => {
     if (!isPostRelationMissing(post, field)) {
-      continue
+      return false
     }
 
-    if (!hasRelationValue(sourcePost[field])) {
-      continue
-    }
+    return hasRelationValue(sourcePost[field])
+  })
 
-    const singleCollectionName = POST_SINGLE_RELATION_COLLECTIONS[field]
-    if (singleCollectionName) {
-      const copiedRecord = await copyRelationToLanguage(
-        singleCollectionName,
-        sourcePost[field],
-        context.languageCode,
-        context.sourceSnapshotId,
-        context
-      )
-      if (copiedRecord && copiedRecord._id) {
-        updateData[field] = copiedRecord._id
+  const updateEntries = await mapWithConcurrency(
+    missingFields,
+    RELATION_COPY_CONCURRENCY,
+    async field => {
+      return {
+        field,
+        value: await copyPostRelationFieldToLanguage(field, sourcePost, context)
       }
-      continue
     }
+  )
 
-    const collectionName = POST_ARRAY_RELATION_COLLECTIONS[field]
-    updateData[field] = await copyRelationListToLanguage(
-      collectionName,
-      sourcePost[field],
-      context
-    )
+  for (const entry of updateEntries) {
+    updateData[entry.field] = entry.value
   }
 
   return updateData
@@ -1244,70 +1620,168 @@ function parseCreateRelationTranslationInput(body = {}) {
   }
 }
 
+function assertSourcePostTypeMatchesRelationField(relationField, sourcePost) {
+  const expectedType = POST_RELATION_EXPECTED_TYPE_MAP[relationField]
+  if (!expectedType) {
+    return
+  }
+
+  const actualType = Number(sourcePost?.type)
+  if (actualType === expectedType) {
+    return
+  }
+
+  throw new ApiError(
+    ERROR_CODES.CONTENT_FIELD_INVALID,
+    '关联字段与源文章类型不匹配',
+    'relationField',
+    400,
+    {
+      expectedType,
+      actualType,
+      relationField
+    }
+  )
+}
+
 async function findExistingTranslationForSourcePost(sourcePost, languageCode) {
-  const translationGroupId = sourcePost.translationGroupId || sourcePost._id
+  const sourceSnapshotId = toObjectId(sourcePost)
+  const sourceId = getSourceIdentityId(sourcePost)
+  const translationGroupId = toObjectId(sourcePost.translationGroupId)
   const PostModel = getPostModel()
-  return await PostModel.findOne({
+  const existingTranslation = await PostModel.findOne({
+    translationGroupId,
+    sourceSnapshotId,
+    sourceId,
+    languageCode,
+    recordKind: TRANSLATION_RECORD_KIND
+  })
+    .select('_id sourceId sourceSnapshotId translationGroupId languageCode')
+    .lean()
+  if (existingTranslation) {
+    return existingTranslation
+  }
+
+  const conflictingTranslation = await PostModel.findOne({
     translationGroupId,
     languageCode,
     recordKind: TRANSLATION_RECORD_KIND
   })
-    .select('_id translationGroupId languageCode')
+    .select('_id sourceId sourceSnapshotId translationGroupId languageCode')
     .lean()
+  if (!conflictingTranslation) {
+    return null
+  }
+
+  const existingSourceId = toObjectId(conflictingTranslation.sourceId)
+  if (!existingSourceId || isSameObjectIdValue(existingSourceId, sourceId)) {
+    await PostModel.updateOne(
+      { _id: conflictingTranslation._id },
+      {
+        $set: {
+          sourceCollection: SOURCE_POST_COLLECTION,
+          sourceId,
+          sourceSnapshotId,
+          translationGroupId
+        }
+      }
+    )
+
+    return { _id: conflictingTranslation._id }
+  }
+
+  throw new ApiError(
+    ERROR_CODES.CONTENT_FIELD_INVALID,
+    '已存在的语言版本与当前源快照身份不匹配，已停止创建以避免串源',
+    'sourceSnapshotId',
+    409,
+    {
+      translationPostId: conflictingTranslation._id,
+      expectedSourceSnapshotId: sourceSnapshotId,
+      actualSourceSnapshotId: conflictingTranslation.sourceSnapshotId,
+      expectedSourceId: sourceId,
+      actualSourceId: conflictingTranslation.sourceId,
+      languageCode
+    }
+  )
+}
+
+function getTranslationPostCreateLockKey(translationGroupId, languageCode) {
+  return [
+    'multilingualTranslationPostCreate',
+    String(translationGroupId),
+    languageCode
+  ].join(':')
 }
 
 async function createTranslationPost(body = {}) {
   const input = parseCreateInput(body)
-  let sourcePost = await findSourcePostSnapshot(input.sourceSnapshotId)
-  sourcePost = await ensureSourcePostSnapshotRelations(sourcePost)
-  const translationGroupId = sourcePost.translationGroupId || sourcePost._id
-  const PostModel = getPostModel()
-  const existingTranslation = await PostModel.findOne({
-    translationGroupId,
-    languageCode: input.languageCode,
-    recordKind: TRANSLATION_RECORD_KIND
-  }).lean()
-
-  if (existingTranslation) {
+  const sourcePostSummary = await findSourcePostSnapshotSummary(
+    input.sourceSnapshotId
+  )
+  const translationGroupId = toObjectId(sourcePostSummary.translationGroupId)
+  if (!translationGroupId) {
     throw new ApiError(
-      ERROR_CODES.TRANSLATION_EXISTS,
-      undefined,
-      'languageCode',
-      409,
-      {
-        translationPostId: existingTranslation._id,
-        translationGroupId,
-        languageCode: input.languageCode
-      }
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '源快照翻译组缺失，已停止创建以避免串源',
+      'translationGroupId',
+      409
     )
   }
 
-  await assertAliasAvailable(
-    input.languageCode,
-    sourcePost.alias,
-    sourcePost.type,
-    null,
-    0
-  )
+  return await utils.executeInLock(
+    getTranslationPostCreateLockKey(translationGroupId, input.languageCode),
+    async () => {
+      const existingTranslation = await findExistingTranslationForSourcePost(
+        sourcePostSummary,
+        input.languageCode
+      )
 
-  const now = new Date()
-  const context = buildCopyContext(sourcePost, input.languageCode, now)
-  const translationPost = await copySourceSnapshotRecord(
-    'posts',
-    sourcePost,
-    context,
-    {
-      recordId: new mongoose.Types.ObjectId(),
-      copyPostRelations: true
+      if (existingTranslation) {
+        throw new ApiError(
+          ERROR_CODES.TRANSLATION_EXISTS,
+          undefined,
+          'languageCode',
+          409,
+          {
+            translationPostId: existingTranslation._id,
+            translationGroupId,
+            languageCode: input.languageCode
+          }
+        )
+      }
+
+      let sourcePost = await findSourcePostSnapshot(input.sourceSnapshotId)
+      sourcePost = await ensureSourcePostSnapshotRelations(sourcePost)
+
+      await assertAliasAvailable(
+        input.languageCode,
+        sourcePost.alias,
+        sourcePost.type,
+        null,
+        0
+      )
+
+      const now = new Date()
+      const context = buildCopyContext(sourcePost, input.languageCode, now)
+      const translationPost = await copySourceSnapshotRecord(
+        'posts',
+        sourcePost,
+        context,
+        {
+          recordId: new mongoose.Types.ObjectId(),
+          copyPostRelations: true
+        }
+      )
+
+      return {
+        translationPostId: translationPost._id,
+        translationGroupId,
+        languageCode: input.languageCode,
+        copiedCounts: context.copiedCounts
+      }
     }
   )
-
-  return {
-    translationPostId: translationPost._id,
-    translationGroupId,
-    languageCode: input.languageCode,
-    copiedCounts: context.copiedCounts
-  }
 }
 
 async function createMissingPostRelationTranslation(body = {}) {
@@ -1327,12 +1801,17 @@ async function createMissingPostRelationTranslation(body = {}) {
     )
   }
 
-  let sourcePost = await findSourcePostSnapshot(input.sourceSnapshotId)
-  sourcePost = await ensureSourcePostSnapshotRelations(sourcePost)
+  const sourcePostSummary = await findSourcePostSnapshotSummary(
+    input.sourceSnapshotId
+  )
+  assertSourcePostTypeMatchesRelationField(
+    input.relationField,
+    sourcePostSummary
+  )
   let translationPostId = null
   let created = false
   const existingTranslation = await findExistingTranslationForSourcePost(
-    sourcePost,
+    sourcePostSummary,
     post.languageCode
   )
 
@@ -1393,12 +1872,87 @@ async function getTranslationGroupIdsByTranslationFilter(filter) {
   return Array.from(idSet).map(id => new mongoose.Types.ObjectId(id))
 }
 
-async function buildTranslationMatrixMap(translationGroupIds) {
-  const matrixMap = {}
-  for (const groupId of translationGroupIds) {
-    matrixMap[String(groupId)] = buildEmptyTranslationMatrix()
+function getSourcePostGroupKey(sourcePost) {
+  return String(
+    toObjectId(sourcePost.translationGroupId) || toObjectId(sourcePost)
+  )
+}
+
+function isTranslationMatchedSourcePost(translation, sourcePost) {
+  if (!translation || !sourcePost) {
+    return false
   }
 
+  if (
+    !isSameObjectIdValue(
+      translation.translationGroupId,
+      sourcePost.translationGroupId
+    )
+  ) {
+    return false
+  }
+
+  if (!isSameObjectIdValue(translation.sourceSnapshotId, sourcePost._id)) {
+    return false
+  }
+
+  if (!isSameObjectIdValue(translation.sourceId, sourcePost.sourceId)) {
+    return false
+  }
+
+  return true
+}
+
+async function repairTranslationPostIdentityForSource(record, sourcePost) {
+  if (isTranslationMatchedSourcePost(record, sourcePost)) {
+    return record
+  }
+
+  if (
+    !isSameObjectIdValue(
+      record.translationGroupId,
+      sourcePost.translationGroupId
+    )
+  ) {
+    return record
+  }
+
+  if (!isSameObjectIdValue(record.sourceId, sourcePost.sourceId)) {
+    return record
+  }
+
+  const PostModel = getPostModel()
+  await PostModel.updateOne(
+    { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
+    {
+      $set: {
+        sourceCollection: SOURCE_POST_COLLECTION,
+        sourceId: sourcePost.sourceId,
+        sourceSnapshotId: sourcePost._id,
+        translationGroupId: sourcePost.translationGroupId
+      }
+    }
+  )
+
+  record.sourceCollection = SOURCE_POST_COLLECTION
+  record.sourceId = sourcePost.sourceId
+  record.sourceSnapshotId = sourcePost._id
+  record.translationGroupId = sourcePost.translationGroupId
+  return record
+}
+
+async function buildTranslationMatrixMap(sourcePosts) {
+  const matrixMap = {}
+  const sourcePostMap = new Map()
+  for (const sourcePost of sourcePosts) {
+    const groupKey = getSourcePostGroupKey(sourcePost)
+    matrixMap[groupKey] = buildEmptyTranslationMatrix()
+    sourcePostMap.set(groupKey, sourcePost)
+  }
+
+  const translationGroupIds = Array.from(sourcePostMap.keys()).map(id => {
+    return new mongoose.Types.ObjectId(id)
+  })
   if (translationGroupIds.length === 0) {
     return matrixMap
   }
@@ -1414,8 +1968,9 @@ async function buildTranslationMatrixMap(translationGroupIds) {
 
   for (const translation of translations) {
     const groupKey = String(translation.translationGroupId)
-    if (!matrixMap[groupKey]) {
-      matrixMap[groupKey] = buildEmptyTranslationMatrix()
+    const sourcePost = sourcePostMap.get(groupKey)
+    if (!isTranslationMatchedSourcePost(translation, sourcePost)) {
+      continue
     }
     matrixMap[groupKey][translation.languageCode] = translation
   }
@@ -1516,12 +2071,11 @@ async function getTranslationPostListBySource(query = {}) {
     .limit(limit)
     .lean()
 
-  const translationGroupIds = sourcePosts
-    .map(item => item.translationGroupId)
-    .filter(Boolean)
-  const matrixMap = await buildTranslationMatrixMap(translationGroupIds)
-  const list = sourcePosts.map(sourcePost => {
-    const groupKey = String(sourcePost.translationGroupId)
+  const normalizedSourcePosts =
+    await normalizeSourcePostSnapshotIdentityList(sourcePosts)
+  const matrixMap = await buildTranslationMatrixMap(normalizedSourcePosts)
+  const list = normalizedSourcePosts.map(sourcePost => {
+    const groupKey = getSourcePostGroupKey(sourcePost)
     return {
       sourcePost,
       translations: matrixMap[groupKey] || buildEmptyTranslationMatrix()
@@ -1693,6 +2247,16 @@ function parseRestoreRecordInput(body = {}) {
     throw new ApiError(ERROR_CODES.CONTENT_ID_INVALID, undefined, 'id', 400)
   }
 
+  const sourceSnapshotId = String(body.sourceSnapshotId || '').trim()
+  if (sourceSnapshotId && !mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      undefined,
+      'sourceSnapshotId',
+      404
+    )
+  }
+
   const languageCode = body.languageCode
     ? normalizeLanguageCode(body.languageCode)
     : ''
@@ -1708,6 +2272,7 @@ function parseRestoreRecordInput(body = {}) {
   return {
     collectionName,
     id,
+    sourceSnapshotId,
     languageCode
   }
 }
@@ -1720,9 +2285,15 @@ async function findTranslationRecord(collectionName, id) {
   })
 }
 
-async function findSourceRecordSnapshot(collectionName, record) {
+async function findSourceRecordSnapshot(
+  collectionName,
+  record,
+  sourceSnapshotId
+) {
   if (collectionName === 'posts') {
-    return await findSourcePostSnapshot(record.sourceSnapshotId)
+    return await findSourcePostSnapshot(
+      sourceSnapshotId || record.sourceSnapshotId
+    )
   }
 
   const sourceId = toObjectId(record.sourceId)
@@ -1761,9 +2332,44 @@ function removeImmutableRestoreFields(data) {
   return updateData
 }
 
+async function buildPostRestoreUpdateData(record, sourceRecord, context, now) {
+  const data = await buildTranslationRecordData(
+    'posts',
+    sourceRecord,
+    context,
+    {
+      recordId: record._id,
+      copyPostRelations: false,
+      skipPostRelations: true
+    }
+  )
+  const updateData = removeImmutableRestoreFields(data)
+  const relationIndexUpdateData = await buildPostRelationIndexUpdateData(
+    sourceRecord,
+    context
+  )
+
+  Object.assign(updateData, relationIndexUpdateData)
+  delete updateData.alias
+  updateData.lastChangDate = now
+  updateData.status = 0
+  updateData.sourceChanged = false
+  updateData.pendingReview = false
+  updateData.sourceChangedAt = null
+  await assertAliasAvailable(
+    record.languageCode,
+    record.alias,
+    updateData.type,
+    record._id,
+    updateData.status
+  )
+
+  return updateData
+}
+
 async function restoreTranslationRecordFromSnapshot(body = {}) {
   const input = parseRestoreRecordInput(body)
-  const record = await findTranslationRecord(input.collectionName, input.id)
+  let record = await findTranslationRecord(input.collectionName, input.id)
   if (!record) {
     throw new ApiError(
       ERROR_CODES.CONTENT_NOT_FOUND,
@@ -1784,7 +2390,8 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
 
   let sourceRecord = await findSourceRecordSnapshot(
     input.collectionName,
-    record
+    record,
+    input.sourceSnapshotId
   )
   if (!sourceRecord) {
     throw new ApiError(
@@ -1797,6 +2404,35 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
 
   if (input.collectionName === 'posts') {
     sourceRecord = await ensureSourcePostSnapshotRelations(sourceRecord)
+    record = await repairTranslationPostIdentityForSource(record, sourceRecord)
+    if (!isTranslationMatchedSourcePost(record, sourceRecord)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '当前语言版本与源快照身份不匹配，已停止同步以避免串源',
+        'sourceSnapshotId',
+        409,
+        {
+          translationPostId: String(record._id),
+          translationGroupId: record.translationGroupId
+            ? String(record.translationGroupId)
+            : null,
+          sourceSnapshotId: record.sourceSnapshotId
+            ? String(record.sourceSnapshotId)
+            : null,
+          sourceId: record.sourceId ? String(record.sourceId) : null,
+          expectedTranslationGroupId: sourceRecord.translationGroupId
+            ? String(sourceRecord.translationGroupId)
+            : null,
+          expectedSourceSnapshotId: sourceRecord._id
+            ? String(sourceRecord._id)
+            : null,
+          expectedSourceId: sourceRecord.sourceId
+            ? String(sourceRecord.sourceId)
+            : null,
+          languageCode: record.languageCode
+        }
+      )
+    }
   }
 
   const now = new Date()
@@ -1812,31 +2448,26 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
     copiedCounts: {},
     copyCache: new Map()
   }
-  const data = await buildTranslationRecordData(
-    input.collectionName,
-    sourceRecord,
-    context,
-    {
-      recordId: record._id,
-      copyPostRelations: true
-    }
-  )
-  const updateData = removeImmutableRestoreFields(data)
+  let updateData = null
 
   if (input.collectionName === 'posts') {
-    delete updateData.alias
-    updateData.lastChangDate = now
-    updateData.status = 0
-    updateData.sourceChanged = false
-    updateData.pendingReview = false
-    updateData.sourceChangedAt = null
-    await assertAliasAvailable(
-      record.languageCode,
-      record.alias,
-      updateData.type,
-      record._id,
-      updateData.status
+    updateData = await buildPostRestoreUpdateData(
+      record,
+      sourceRecord,
+      context,
+      now
     )
+  } else {
+    const data = await buildTranslationRecordData(
+      input.collectionName,
+      sourceRecord,
+      context,
+      {
+        recordId: record._id,
+        copyPostRelations: true
+      }
+    )
+    updateData = removeImmutableRestoreFields(data)
   }
 
   const Model = getMultilingualModel(input.collectionName)

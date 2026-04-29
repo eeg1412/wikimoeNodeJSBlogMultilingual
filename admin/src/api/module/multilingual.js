@@ -144,6 +144,17 @@ export default function (api) {
         noLoading
       })
     },
+    createLocalMedia(data) {
+      return api.post('/media/create-local', data, {
+        shouldAdminJWT: true
+      })
+    },
+    deleteLocalMedia(data) {
+      return api.delete('/media/delete-local', {
+        params: data,
+        shouldAdminJWT: true
+      })
+    },
     replaceLocalMedia(data) {
       return api.post('/media/replace-local', data, {
         shouldAdminJWT: true

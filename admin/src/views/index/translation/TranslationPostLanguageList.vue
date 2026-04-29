@@ -158,6 +158,12 @@
                 v-else
                 type="primary"
                 size="small"
+                :loading="
+                  rowActionLoadingMap[getCreateActionKey(row.languageCode)]
+                "
+                :disabled="
+                  rowActionLoadingMap[getCreateActionKey(row.languageCode)]
+                "
                 @click="createTranslation(row.languageCode)"
               >
                 创建
@@ -215,6 +221,10 @@ export default {
       rowActionLoadingMap[id] = value
     }
 
+    function getCreateActionKey(languageCode) {
+      return `create:${languageCode}`
+    }
+
     function getLanguageList() {
       loading.value = true
       multilingualApi
@@ -237,6 +247,13 @@ export default {
         return
       }
 
+      const actionKey = getCreateActionKey(languageCode)
+      if (rowActionLoadingMap[actionKey]) {
+        return
+      }
+
+      setRowLoading(actionKey, true)
+
       ElMessageBox.confirm(
         `确认为 ${languageCode} 创建多语言文章？`,
         '创建语言版本',
@@ -258,9 +275,24 @@ export default {
           getLanguageList()
         })
         .catch(error => {
-          if (error !== 'cancel' && error !== 'close') {
-            console.log(error)
+          if (error === 'cancel' || error === 'close') {
+            return
           }
+
+          const errorCode = error?.response?.data?.errorList?.[0]?.code
+          if (errorCode === 'TRANSLATION_EXISTS') {
+            const translationPostId = error?.response?.data?.translationPostId
+            getLanguageList()
+            if (translationPostId) {
+              goTranslationEditor({ _id: translationPostId })
+            }
+            return
+          }
+
+          console.log(error)
+        })
+        .finally(() => {
+          setRowLoading(actionKey, false)
         })
     }
 
@@ -278,6 +310,7 @@ export default {
           setRowLoading(translation._id, true)
           return multilingualApi.restoreTranslationPostSnapshot({
             id: translation._id,
+            sourceSnapshotId: route.params.sourceSnapshotId,
             languageCode: translation.languageCode
           })
         })
@@ -309,6 +342,7 @@ export default {
     return {
       loading,
       rowActionLoadingMap,
+      getCreateActionKey,
       sourcePost,
       translationRows,
       createTranslation,

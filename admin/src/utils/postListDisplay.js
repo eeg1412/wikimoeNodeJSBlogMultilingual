@@ -98,8 +98,12 @@ export function buildMergedRelationContentList(post, prefix = '') {
   return mergedList
 }
 
-export function buildMergedRecommendContentList(post) {
+export function buildMergedDetailRelationList(post) {
   return buildMergedRelationContentList(post)
+}
+
+export function buildMergedRecommendContentList(post) {
+  return buildMergedDetailRelationList(post)
 }
 
 export function buildMergedContentRelationList(post) {

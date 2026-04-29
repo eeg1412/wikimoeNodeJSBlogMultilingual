@@ -13,6 +13,11 @@ var path = require('path')
 var cookieParser = require('cookie-parser')
 // var logger = require('morgan');
 const $mongodDB = require('./mongodb')
+const {
+  ERROR_CODES,
+  sendError,
+  handleApiError
+} = require('./utils/multilingualAdminResponse')
 global.$mongodDB = $mongodDB
 var history = require('connect-history-api-fallback')
 
@@ -102,11 +107,31 @@ app.use(
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.error('传入非法JSON格式')
-    return res.status(400) // Bad request
+    if (req.path.startsWith('/api/multilingual-admin')) {
+      return sendError(res, 400, ERROR_CODES.REQUEST_BODY_INVALID)
+    }
+
+    return res.status(400).send('Bad request')
   }
   next()
 })
 app.use('/api/multilingual-admin', multilingualAdminRouter)
+app.use('/api/multilingual-admin', function (req, res) {
+  return sendError(res, 404, ERROR_CODES.API_NOT_FOUND)
+})
+app.use('/api/multilingual-admin', function (error, req, res, next) {
+  if (res.headersSent) {
+    next(error)
+    return
+  }
+
+  if (error && error.name === 'MulterError') {
+    sendError(res, 400, ERROR_CODES.UPLOAD_INVALID, error.message)
+    return
+  }
+
+  handleApiError(res, error, 'multilingual admin route fail')
+})
 app.use('/api/multilingual-blog', multilingualBlogRouter)
 app.use('/:code/rss', multilingualRssRouter)
 // language sitemap.xml

@@ -80,6 +80,7 @@ var aiUsageLogs = new Schema(
     },
     date: {
       type: Date,
+      expires: 31968000,
       default: Date.now,
       index: true
     }

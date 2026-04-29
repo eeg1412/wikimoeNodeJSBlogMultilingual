@@ -452,6 +452,18 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/media/getList')
   },
   {
+    path: '/media/create-local',
+    method: 'post',
+    middleware: [checkAuth, upload.any()],
+    controller: require('../api/multilingual-admin/media/createLocal')
+  },
+  {
+    path: '/media/delete-local',
+    method: 'delete',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/media/deleteLocal')
+  },
+  {
     path: '/media/replace-local',
     method: 'post',
     middleware: [checkAuth, upload.any()],

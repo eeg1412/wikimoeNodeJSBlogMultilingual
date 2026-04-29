@@ -201,7 +201,7 @@
               AI 翻译
             </el-button>
             <el-button
-              v-if="!isSourceScope"
+              v-if="!isSourceScope && !isPureLocalMedia(row)"
               type="warning"
               size="small"
               @click="restoreSnapshot(row)"
@@ -217,12 +217,24 @@
               替换
             </el-button>
             <el-button
-              v-if="!isSourceScope && row.mediaMode === 'local'"
+              v-if="
+                !isSourceScope &&
+                row.mediaMode === 'local' &&
+                !isPureLocalMedia(row)
+              "
               type="warning"
               size="small"
               @click="openConvert(row)"
             >
               转远程
+            </el-button>
+            <el-button
+              v-if="!isSourceScope && isPureLocalMedia(row)"
+              type="danger"
+              size="small"
+              @click="deleteLocalMedia(row)"
+            >
+              删除
             </el-button>
           </template>
         </ResponsiveTableColumn>
@@ -242,7 +254,12 @@
       />
     </div>
 
-    <el-dialog v-model="detailDialogVisible" title="媒体详情" width="760px">
+    <el-dialog
+      v-model="detailDialogVisible"
+      title="媒体详情"
+      width="760px"
+      align-center
+    >
       <div v-if="currentRow" class="media-detail-preview">
         <button
           v-if="isImageMedia(currentRow) && getImagePreviewUrl(currentRow)"
@@ -320,6 +337,7 @@
       v-model="editDialogVisible"
       title="编辑媒体信息"
       width="560px"
+      align-center
       :close-on-click-modal="false"
     >
       <el-form :model="editForm" label-width="90px" @submit.prevent>
@@ -373,6 +391,7 @@
       v-model="replaceDialogVisible"
       title="替换为本地文件"
       width="760px"
+      align-center
       destroy-on-close
       :close-on-click-modal="false"
       @closed="resetReplaceForm"
@@ -593,6 +612,26 @@ export default {
         return item.label
       }
       return value || '-'
+    }
+
+    const hasRemoteOrigin = row => {
+      if (row?.remoteSourceId) {
+        return true
+      }
+      if (row?.remoteFilepath) {
+        return true
+      }
+      if (row?.remoteSnapshot && Object.keys(row.remoteSnapshot).length > 0) {
+        return true
+      }
+      return false
+    }
+
+    const isPureLocalMedia = row => {
+      if (!row || row.mediaMode !== 'local') {
+        return false
+      }
+      return !hasRemoteOrigin(row)
     }
 
     const getSizeText = row => {
@@ -1172,6 +1211,30 @@ export default {
         })
     }
 
+    const deleteLocalMedia = row => {
+      if (!isPureLocalMedia(row)) {
+        ElMessage.error('只有纯本地媒体可以直接删除')
+        return
+      }
+      currentRow.value = row
+      CheckDialogService.open({
+        correctAnswer: 'DELETE',
+        content:
+          '确认删除这个<span class="cRed">纯本地媒体文件</span>吗？文件会从服务器移除。',
+        success: () => {
+          return multilingualApi
+            .deleteLocalMedia({
+              id: row._id,
+              languageCode: row.languageCode
+            })
+            .then(() => {
+              ElMessage.success('删除成功')
+              getMediaList(false)
+            })
+        }
+      }).catch(() => {})
+    }
+
     watch(
       () => params.page,
       () => {
@@ -1218,6 +1281,7 @@ export default {
       mediaModeOptions,
       getLanguageText,
       getMediaModeText,
+      isPureLocalMedia,
       getSizeText,
       getFileSizeText,
       isImageMedia,
@@ -1245,7 +1309,8 @@ export default {
       replaceVideoLocal,
       getMediaSettingValues,
       handleReplaceSuccess,
-      convertRemote
+      convertRemote,
+      deleteLocalMedia
     }
   }
 }

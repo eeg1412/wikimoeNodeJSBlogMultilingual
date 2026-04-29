@@ -156,7 +156,12 @@
       />
     </div>
 
-    <el-dialog v-model="detailDialogVisible" title="关联内容详情" width="760px">
+    <el-dialog
+      v-model="detailDialogVisible"
+      title="关联内容详情"
+      width="760px"
+      align-center
+    >
       <el-descriptions v-if="currentRow" :column="2" border>
         <el-descriptions-item label="ID">{{
           currentRow._id
@@ -198,6 +203,7 @@
       v-model="editDialogVisible"
       title="编辑关联基础字段"
       width="min(860px, 94vw)"
+      align-center
     >
       <el-alert
         class="mb20"

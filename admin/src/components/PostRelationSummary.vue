@@ -1,13 +1,13 @@
 <template>
   <div>
-    <div class="post-list-about-body" v-if="recommendList.length > 0">
+    <div class="post-list-about-body" v-if="detailRelationList.length > 0">
       <div class="fb">
-        推文内关联内容<template v-if="hasRecommendCustomSort"
+        详情页相关内容<template v-if="hasDetailCustomSort"
           >(自定义排序)</template
         >：
       </div>
       <div
-        v-for="content in recommendList"
+        v-for="content in detailRelationList"
         :key="`${content.type}-${content._id || content.title}`"
         class="postlist-content-item"
         :class="{ danger: Number(content.status) === 0 }"
@@ -57,14 +57,14 @@
       </div>
     </div>
 
-    <div class="post-list-about-body" v-if="contentList.length > 0">
+    <div class="post-list-about-body" v-if="contentRelationList.length > 0">
       <div class="fb">
-        详情页相关内容<template v-if="hasContentCustomSort"
+        推文内关联内容<template v-if="hasContentCustomSort"
           >(自定义排序)</template
         >：
       </div>
       <div
-        v-for="content in contentList"
+        v-for="content in contentRelationList"
         :key="`${content.type}-${content._id || content.title}`"
         class="postlist-content-item"
         :class="{ danger: Number(content.status) === 0 }"
@@ -115,7 +115,7 @@
     </div>
 
     <span
-      v-if="recommendList.length === 0 && contentList.length === 0"
+      v-if="detailRelationList.length === 0 && contentRelationList.length === 0"
       class="empty-text"
     >
       -
@@ -128,7 +128,7 @@ import { computed } from 'vue'
 import { seasonToStr } from '@/utils/utils'
 import {
   buildMergedContentRelationList,
-  buildMergedRecommendContentList,
+  buildMergedDetailRelationList,
   checkShowText,
   setMovieTitle
 } from '@/utils/postListDisplay'
@@ -141,13 +141,13 @@ export default {
     }
   },
   setup(props) {
-    const recommendList = computed(() => {
-      return buildMergedRecommendContentList(props.post)
+    const detailRelationList = computed(() => {
+      return buildMergedDetailRelationList(props.post)
     })
-    const contentList = computed(() => {
+    const contentRelationList = computed(() => {
       return buildMergedContentRelationList(props.post)
     })
-    const hasRecommendCustomSort = computed(() => {
+    const hasDetailCustomSort = computed(() => {
       return Array.isArray(props.post?.seriesSortList)
         ? props.post.seriesSortList.length > 0
         : false
@@ -159,9 +159,9 @@ export default {
     })
 
     return {
-      recommendList,
-      contentList,
-      hasRecommendCustomSort,
+      detailRelationList,
+      contentRelationList,
+      hasDetailCustomSort,
       hasContentCustomSort,
       seasonToStr,
       checkShowText,

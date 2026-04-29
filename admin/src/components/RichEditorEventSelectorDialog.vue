@@ -52,7 +52,7 @@
 </template>
 <script>
 import { computed, reactive, ref, watch } from 'vue'
-import { authApi } from '@/api'
+import { multilingualApi } from '@/api'
 import { nextTick } from 'vue'
 export default {
   props: {
@@ -67,19 +67,16 @@ export default {
     text: {
       type: String,
       default: ''
+    },
+    languageCode: {
+      type: String,
+      default: ''
     }
   },
   emits: ['update:show', 'ok'],
   setup(props, { emit }) {
     const showDialog = computed({
       get() {
-        if (props.id) {
-          form.id = props.id
-          getEventDetail(props.id)
-        }
-        if (props.text) {
-          form.text = props.text
-        }
         return props.show
       },
       set(val) {
@@ -103,7 +100,10 @@ export default {
         }
         showDialog.value = false
         nextTick(() => {
-          emit('ok', form)
+          emit('ok', {
+            id: form.id,
+            text: form.text
+          })
         })
       })
     }
@@ -116,33 +116,70 @@ export default {
     // 活动
     const eventList = ref([])
     const eventListIsLoading = ref(false)
-    const eventListTimer = null
+    let eventListTimer = null
+    const getEventListFromResponse = response => {
+      const list = response.data.data?.list || []
+      return list.filter(item => {
+        return Number(item.status) === 1
+      })
+    }
     const getEventDetail = id => {
-      authApi
-        .getEventDetail({
-          id
-        })
+      if (!props.languageCode || !id) {
+        eventList.value = []
+        return
+      }
+      eventListIsLoading.value = true
+      multilingualApi
+        .getTranslationRelationList(
+          {
+            collectionName: 'events',
+            recordKind: 'translation',
+            languageCode: props.languageCode,
+            keyword: id,
+            page: 1,
+            limit: 1
+          },
+          true
+        )
         .then(res => {
-          eventList.value = [res.data.data]
+          const list = getEventListFromResponse(res)
+          const matchedItem = list.find(item => {
+            return String(item._id) === String(id)
+          })
+          if (matchedItem) {
+            eventList.value = [matchedItem]
+            return
+          }
+          eventList.value = list
         })
         .catch(() => {})
+        .finally(() => {
+          eventListIsLoading.value = false
+        })
     }
     const queryEventList = (query, options = {}) => {
       if (eventListTimer) {
         clearTimeout(eventListTimer)
       }
-      setTimeout(() => {
+      eventListTimer = setTimeout(() => {
+        if (!props.languageCode) {
+          eventList.value = []
+          return
+        }
         eventListIsLoading.value = true
         const params = {
+          collectionName: 'events',
+          recordKind: 'translation',
+          languageCode: props.languageCode,
           keyword: query,
           page: 1,
-          size: 50,
+          limit: 50,
           ...options
         }
-        authApi
-          .getEventList(params, { noLoading: true })
+        multilingualApi
+          .getTranslationRelationList(params, true)
           .then(res => {
-            eventList.value = res.data.list
+            eventList.value = getEventListFromResponse(res)
           })
           .catch(() => {})
           .finally(() => {
@@ -150,6 +187,29 @@ export default {
           })
       }, 300)
     }
+    watch(
+      () => props.show,
+      val => {
+        if (!val) {
+          return
+        }
+        form.id = props.id || null
+        form.text = props.text || ''
+        if (props.id) {
+          getEventDetail(props.id)
+          return
+        }
+        queryEventList('')
+      }
+    )
+    watch(
+      () => props.languageCode,
+      () => {
+        if (showDialog.value) {
+          queryEventList('')
+        }
+      }
+    )
     return {
       showDialog,
       form,

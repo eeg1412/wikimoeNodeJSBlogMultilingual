@@ -52,6 +52,7 @@
                     v-model:isRichMode="
                       settingsMap[item.value][getRichModeFieldName(field.name)]
                     "
+                    :language-code="item.value"
                   />
                   <el-switch
                     v-else-if="field.type === 'boolean'"

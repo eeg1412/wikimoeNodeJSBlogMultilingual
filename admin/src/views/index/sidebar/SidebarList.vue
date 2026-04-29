@@ -128,7 +128,10 @@
                   prop="content"
                   v-if="showConetntTypeList.includes(element.type)"
                 >
-                  <RichEditor5 v-model:content="element.content" />
+                  <RichEditor5
+                    v-model:content="element.content"
+                    :language-code="params.languageCode"
+                  />
                 </el-form-item>
                 <!-- showTextInputTypeList -->
                 <el-form-item
