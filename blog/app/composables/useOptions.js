@@ -8,7 +8,7 @@ const SOURCE_ASSET_PATH_PREFIXES = [
   '/web_demo/'
 ]
 
-const MULTILINGUAL_LOCAL_ASSET_PATH_PREFIXES = [
+const MULTILINGUAL_SERVER_ASSET_PATH_PREFIXES = [
   '/multilingual-assets/upload/',
   '/multilingual-assets/content/',
   '/multilingual-assets/ucloudImg/',
@@ -16,10 +16,10 @@ const MULTILINGUAL_LOCAL_ASSET_PATH_PREFIXES = [
   '/multilingual-assets/web_demo/'
 ]
 
-const MULTILINGUAL_LOCAL_ASSET_PREFIX = '/multilingual-assets'
-const MULTILINGUAL_LOCAL_ASSET_PROXY_PREFIX = '/api/multilingual-asset'
+const MULTILINGUAL_SERVER_ASSET_PREFIX = '/multilingual-assets'
+const MULTILINGUAL_SERVER_ASSET_PROXY_PREFIX = '/api/multilingual-asset'
 
-const MULTILINGUAL_LOCAL_ASSET_PATH_SET = new Set([
+const MULTILINGUAL_SERVER_ASSET_PATH_SET = new Set([
   '/multilingual-assets/sitemap.xsl'
 ])
 
@@ -39,11 +39,16 @@ function parseUrlParts(value) {
       return null
     }
 
-    const pathnameStartIndex = normalizedValue.indexOf('/', normalizedValue.indexOf('://') + 3)
-    normalizedValue = pathnameStartIndex >= 0 ? normalizedValue.slice(pathnameStartIndex) : '/'
+    const pathnameStartIndex = normalizedValue.indexOf(
+      '/',
+      normalizedValue.indexOf('://') + 3
+    )
+    normalizedValue =
+      pathnameStartIndex >= 0 ? normalizedValue.slice(pathnameStartIndex) : '/'
   } else if (normalizedValue.startsWith('//')) {
     const pathnameStartIndex = normalizedValue.indexOf('/', 2)
-    normalizedValue = pathnameStartIndex >= 0 ? normalizedValue.slice(pathnameStartIndex) : '/'
+    normalizedValue =
+      pathnameStartIndex >= 0 ? normalizedValue.slice(pathnameStartIndex) : '/'
   }
 
   let hash = ''
@@ -71,17 +76,17 @@ function isSourceAssetPath(pathname) {
   return SOURCE_ASSET_PATH_PREFIXES.some(prefix => pathname.startsWith(prefix))
 }
 
-function isMultilingualLocalAssetPath(pathname) {
-  if (MULTILINGUAL_LOCAL_ASSET_PATH_SET.has(pathname)) {
+function isMultilingualServerAssetPath(pathname) {
+  if (MULTILINGUAL_SERVER_ASSET_PATH_SET.has(pathname)) {
     return true
   }
 
-  return MULTILINGUAL_LOCAL_ASSET_PATH_PREFIXES.some(prefix => {
+  return MULTILINGUAL_SERVER_ASSET_PATH_PREFIXES.some(prefix => {
     return pathname.startsWith(prefix)
   })
 }
 
-function normalizeMultilingualLocalAssetUrl(value) {
+function normalizeMultilingualServerAssetUrl(value) {
   if (!value || typeof value !== 'string') {
     return value
   }
@@ -96,15 +101,15 @@ function normalizeMultilingualLocalAssetUrl(value) {
 
   const url = parseUrlParts(value)
 
-  if (!url || !isMultilingualLocalAssetPath(url.pathname)) {
+  if (!url || !isMultilingualServerAssetPath(url.pathname)) {
     return value
   }
 
-  const proxyPath = url.pathname.startsWith(MULTILINGUAL_LOCAL_ASSET_PREFIX)
-    ? url.pathname.slice(MULTILINGUAL_LOCAL_ASSET_PREFIX.length)
+  const proxyPath = url.pathname.startsWith(MULTILINGUAL_SERVER_ASSET_PREFIX)
+    ? url.pathname.slice(MULTILINGUAL_SERVER_ASSET_PREFIX.length)
     : url.pathname
 
-  return `${MULTILINGUAL_LOCAL_ASSET_PROXY_PREFIX}${proxyPath}${url.search}${url.hash}`
+  return `${MULTILINGUAL_SERVER_ASSET_PROXY_PREFIX}${proxyPath}${url.search}${url.hash}`
 }
 
 function normalizeSourceAssetUrl(value) {
@@ -130,10 +135,10 @@ function normalizeSourceAssetUrl(value) {
 }
 
 function normalizeAssetUrl(value) {
-  const multilingualLocalAssetUrl = normalizeMultilingualLocalAssetUrl(value)
+  const multilingualServerAssetUrl = normalizeMultilingualServerAssetUrl(value)
 
-  if (multilingualLocalAssetUrl !== value) {
-    return multilingualLocalAssetUrl
+  if (multilingualServerAssetUrl !== value) {
+    return multilingualServerAssetUrl
   }
 
   return normalizeSourceAssetUrl(value)
@@ -162,7 +167,9 @@ function normalizeOptions(data) {
   assetFieldList.forEach(field => {
     normalizedOptions[field] = normalizeAssetUrl(normalizedOptions[field])
   })
-  normalizedOptions.siteExtraCss = normalizeAssetCss(normalizedOptions.siteExtraCss)
+  normalizedOptions.siteExtraCss = normalizeAssetCss(
+    normalizedOptions.siteExtraCss
+  )
 
   return normalizedOptions
 }
@@ -188,7 +195,9 @@ export function useOptions() {
     const sourceOptions = sourceRes.data || {}
     const multilingualOptions = multilingualRes.data || {}
 
-    options.value = normalizeOptions(mergeOptions(sourceOptions, multilingualOptions))
+    options.value = normalizeOptions(
+      mergeOptions(sourceOptions, multilingualOptions)
+    )
   }
 
   return { options, getOptions }

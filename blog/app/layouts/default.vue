@@ -656,7 +656,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 .blog-layout-info-menu-bg {
-  background-image: url('/multilingual-assets/img/menuBg.png?v=2');
+  background-image: url('/_multilingual_public/img/menuBg.png?v=2');
   background-repeat: no-repeat;
   background-position: right bottom;
   background-size: 100%;

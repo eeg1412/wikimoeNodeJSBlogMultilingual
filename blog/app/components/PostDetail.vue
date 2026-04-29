@@ -723,7 +723,7 @@ const postAuthor = computed(() => {
 
   return {
     nickname: options.value?.siteTitle || 'Wikimoe',
-    photo: '/multilingual-assets/img/avatar/1.webp'
+    photo: '/_multilingual_public/img/avatar/1.webp'
   }
 })
 const pageTemplate = computed(() => {

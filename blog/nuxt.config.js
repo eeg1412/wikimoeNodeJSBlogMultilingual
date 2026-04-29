@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const MULTILINGUAL_PUBLIC_ASSET_BASE = '/multilingual-assets'
-const MULTILINGUAL_PUBLIC_ASSET_DIR = resolve(__dirname, 'public')
+const MULTILINGUAL_LOCAL_PUBLIC_ASSET_BASE = '/_multilingual_public'
+const MULTILINGUAL_LOCAL_PUBLIC_ASSET_DIR = resolve(__dirname, 'public')
 const LOCAL_ENV = readLocalEnv()
 
 function readLocalEnv() {
@@ -41,60 +41,60 @@ function getEnvValue(key) {
   return process.env[key] || LOCAL_ENV[key] || ''
 }
 
-function withMultilingualAssetBase(path) {
-  return `${MULTILINGUAL_PUBLIC_ASSET_BASE}${path}`
+function withMultilingualLocalPublicAssetBase(path) {
+  return `${MULTILINGUAL_LOCAL_PUBLIC_ASSET_BASE}${path}`
 }
 
 let routeRules = {
-  [withMultilingualAssetBase('/geojson/world-mid.json')]: {
+  [withMultilingualLocalPublicAssetBase('/geojson/world-mid.json')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/geojson/world-low.json')]: {
+  [withMultilingualLocalPublicAssetBase('/geojson/world-low.json')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 整个 avatar 目录
-  [withMultilingualAssetBase('/img/avatar/**')]: {
+  [withMultilingualLocalPublicAssetBase('/img/avatar/**')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 整个 icon 目录
-  [withMultilingualAssetBase('/img/icon/**')]: {
+  [withMultilingualLocalPublicAssetBase('/img/icon/**')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
   // 单个文件
-  [withMultilingualAssetBase('/img/bg_02_dark.png')]: {
+  [withMultilingualLocalPublicAssetBase('/img/bg_02_dark.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/img/bg_02.png')]: {
+  [withMultilingualLocalPublicAssetBase('/img/bg_02.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/img/menuBg.png')]: {
+  [withMultilingualLocalPublicAssetBase('/img/menuBg.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/img/mypage-banner.webp')]: {
+  [withMultilingualLocalPublicAssetBase('/img/mypage-banner.webp')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/img/nodata.webp')]: {
+  [withMultilingualLocalPublicAssetBase('/img/nodata.webp')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
   },
-  [withMultilingualAssetBase('/img/nopic400-565.png')]: {
+  [withMultilingualLocalPublicAssetBase('/img/nopic400-565.png')]: {
     headers: {
       'Cache-Control': 'public, max-age=31536000, immutable'
     }
@@ -110,7 +110,7 @@ export default defineNuxtConfig({
       link: [
         {
           rel: 'icon',
-          href: withMultilingualAssetBase('/favicon.ico')
+          href: withMultilingualLocalPublicAssetBase('/favicon.ico')
         }
       ]
     }
@@ -176,8 +176,8 @@ export default defineNuxtConfig({
   nitro: {
     publicAssets: [
       {
-        dir: MULTILINGUAL_PUBLIC_ASSET_DIR,
-        baseURL: MULTILINGUAL_PUBLIC_ASSET_BASE,
+        dir: MULTILINGUAL_LOCAL_PUBLIC_ASSET_DIR,
+        baseURL: MULTILINGUAL_LOCAL_PUBLIC_ASSET_BASE,
         maxAge: 31536000
       }
     ],

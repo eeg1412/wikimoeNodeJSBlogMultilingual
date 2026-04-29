@@ -6,6 +6,7 @@ const FORWARDED_SOURCE_ASSET_HEADERS = [
   'range',
   'user-agent'
 ]
+const MULTILINGUAL_LOCAL_PUBLIC_ASSET_PREFIX = '/_multilingual_public'
 
 function getSourceAssetRequestHeaders(event) {
   return FORWARDED_SOURCE_ASSET_HEADERS.reduce((headers, key) => {
@@ -30,7 +31,7 @@ function getFallbackAvatarPath(originalUrl) {
     return sum + item.charCodeAt()
   }, 0)
   const avatarIndex = seed % 176
-  return `/multilingual-assets/img/avatar/${avatarIndex}.webp`
+  return `${MULTILINGUAL_LOCAL_PUBLIC_ASSET_PREFIX}/img/avatar/${avatarIndex}.webp`
 }
 
 function getSourceAssetDomainList(config) {

@@ -211,49 +211,49 @@ const handleShare = platform => {
 const icons = [
   {
     key: 'weibo',
-    src: '/multilingual-assets/img/icon/sina-weibo.svg',
+    src: '/_multilingual_public/img/icon/sina-weibo.svg',
     alt: '分享到新浪微博',
     bg: 'bg-red-500'
   },
   {
     key: 'qq-zone',
-    src: '/multilingual-assets/img/icon/qq-zone.svg',
+    src: '/_multilingual_public/img/icon/qq-zone.svg',
     alt: '分享到QQ空间',
     bg: 'bg-yellow-400'
   },
   {
     key: 'x',
-    src: '/multilingual-assets/img/icon/x-icon.svg',
+    src: '/_multilingual_public/img/icon/x-icon.svg',
     alt: '分享到X',
     bg: 'bg-slate-700'
   },
   {
     key: 'facebook',
-    src: '/multilingual-assets/img/icon/facebook.svg',
+    src: '/_multilingual_public/img/icon/facebook.svg',
     alt: '分享到Facebook',
     bg: 'bg-blue-600'
   },
   {
     key: 'reddit',
-    src: '/multilingual-assets/img/icon/reddit.svg',
+    src: '/_multilingual_public/img/icon/reddit.svg',
     alt: '分享到Reddit',
     bg: 'bg-orange-400'
   },
   {
     key: 'telegram',
-    src: '/multilingual-assets/img/icon/telegram.svg',
+    src: '/_multilingual_public/img/icon/telegram.svg',
     alt: '分享到Telegram',
     bg: 'bg-cyan-500'
   },
   {
     key: 'line',
-    src: '/multilingual-assets/img/icon/line.svg',
+    src: '/_multilingual_public/img/icon/line.svg',
     alt: '分享到LINE',
     bg: 'bg-green-500'
   },
   {
     key: 'whatsapp',
-    src: '/multilingual-assets/img/icon/whatsapp.svg',
+    src: '/_multilingual_public/img/icon/whatsapp.svg',
     alt: '分享到WhatsApp',
     bg: 'bg-green-600'
   },

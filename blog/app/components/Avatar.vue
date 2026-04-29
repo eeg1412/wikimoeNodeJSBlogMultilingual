@@ -52,7 +52,7 @@ const src = computed(() => {
       return sum + item.charCodeAt()
     }, 0)
     const num = seed % 176
-    return `/multilingual-assets/img/avatar/${num}.webp`
+    return `/_multilingual_public/img/avatar/${num}.webp`
   }
 
   if (isMd5) {
