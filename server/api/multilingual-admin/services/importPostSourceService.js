@@ -1144,8 +1144,18 @@ async function getSourcePostList(query = {}) {
 async function getSourceDatabasePostList(query = {}) {
   const page = parsePositiveInteger(query.page, 1)
   const limit = parsePositiveInteger(query.limit, 20, 100)
-  const sourceLanguageCode =
-    normalizeLanguageCode(query.sourceLanguageCode) || DEFAULT_LANGUAGE_CODE
+  let sourceLanguageCode = ''
+  if (query.sourceLanguageCode) {
+    sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
+    if (!sourceLanguageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        undefined,
+        'sourceLanguageCode',
+        400
+      )
+    }
+  }
   const params = {
     type: { $in: [1, 2, 3] },
     status: { $ne: 99 }
@@ -1205,31 +1215,47 @@ async function getSourceDatabasePostList(query = {}) {
   const list = await sourcePostQuery.skip((page - 1) * limit).limit(limit)
   const sourceIds = list.map(item => item._id).filter(Boolean)
   const PostModel = getPostModel()
-  const snapshots = await PostModel.find({
+  const snapshotParams = {
     sourceCollection: SOURCE_POST_COLLECTION,
     sourceId: { $in: sourceIds },
-    sourceLanguageCode,
     recordKind: SOURCE_RECORD_KIND
-  })
+  }
+  if (sourceLanguageCode) {
+    snapshotParams.sourceLanguageCode = sourceLanguageCode
+  }
+  const snapshots = await PostModel.find(snapshotParams)
     .select(
-      '_id sourceId translationGroupId snapshotVersion sourceSnapshotAt updatedAt sourceHash'
+      '_id sourceId sourceLanguageCode translationGroupId snapshotVersion sourceSnapshotAt updatedAt sourceHash'
     )
     .lean()
 
   const snapshotMap = new Map()
+  const snapshotSummaryMap = new Map()
   for (const snapshot of snapshots) {
-    snapshotMap.set(String(snapshot.sourceId), snapshot)
+    const sourceIdText = String(snapshot.sourceId)
+    if (!snapshotSummaryMap.has(sourceIdText)) {
+      snapshotSummaryMap.set(sourceIdText, [])
+    }
+    snapshotSummaryMap.get(sourceIdText).push(snapshot)
+    if (sourceLanguageCode) {
+      snapshotMap.set(sourceIdText, snapshot)
+    }
   }
 
   return {
     list: list.map(item => {
-      const snapshot = snapshotMap.get(String(item._id)) || null
+      const sourceIdText = String(item._id)
+      let snapshot = null
+      if (sourceLanguageCode) {
+        snapshot = snapshotMap.get(sourceIdText) || null
+      }
+      const snapshotSummary = snapshotSummaryMap.get(sourceIdText) || []
       return {
         ...item,
         sourceId: item._id,
-        sourceLanguageCode,
-        hasSnapshot: Boolean(snapshot),
-        snapshot
+        hasSnapshot: snapshotSummary.length > 0,
+        snapshot,
+        snapshotSummary
       }
     }),
     total,

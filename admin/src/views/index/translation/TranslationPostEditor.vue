@@ -332,6 +332,9 @@
           </el-button>
           <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
           <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
+          <el-button type="warning" :loading="saving" @click="restoreSnapshot">
+            同步快照
+          </el-button>
           <el-button
             v-if="form.pendingReview"
             :loading="saving"
@@ -365,10 +368,41 @@
           <el-button size="small" @click="clearExportEntries">清空</el-button>
         </div>
       </div>
+      <el-form class="translation-json-option-form" label-width="110px">
+        <el-form-item label="翻译用文章">
+          <el-radio-group
+            v-model="exportBaseMode"
+            :disabled="exportLoading"
+            @change="refreshExportEntries"
+          >
+            <el-radio value="source">源文章</el-radio>
+            <el-radio value="current">当前文章</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="切片导出">
+          <el-switch v-model="exportUseSlices" />
+          <span v-if="exportUseSlices" class="translation-json-slice-label">
+            每片文本项
+          </span>
+          <el-input-number
+            v-if="exportUseSlices"
+            v-model="exportSliceSize"
+            class="ml10"
+            :min="1"
+            :max="50"
+            controls-position="right"
+          />
+        </el-form-item>
+      </el-form>
+      <el-skeleton v-if="exportLoading" :rows="4" animated />
       <div class="translation-json-selected-count cGray666">
         已选择 {{ selectedExportIds.length }} 项
       </div>
-      <el-checkbox-group v-model="selectedExportIds" class="w_10">
+      <el-checkbox-group
+        v-if="!exportLoading"
+        v-model="selectedExportIds"
+        class="w_10"
+      >
         <div
           v-for="group in exportEntryGroups"
           :key="group.label"
@@ -558,7 +592,7 @@
         <template v-else>
           <el-descriptions class="mb20" :column="3" border>
             <el-descriptions-item label="源语言">
-              {{ getLanguageText(form.sourceLanguageCode) }}
+              {{ getLanguageText(currentAiSourceLanguageCode) }}
             </el-descriptions-item>
             <el-descriptions-item label="目标语言">
               {{ getLanguageText(form.languageCode) }}
@@ -573,9 +607,7 @@
             class="translation-json-warning-list"
           >
             <div class="ai-skipped-header">
-              <div class="translation-json-group-title">
-                暂未翻译的关联内容
-              </div>
+              <div class="translation-json-group-title">暂未翻译的关联内容</div>
               <el-button
                 v-if="creatableAiSkippedEntries.length > 0"
                 size="small"
@@ -611,6 +643,18 @@
           </div>
 
           <template v-if="!aiImportPreview">
+            <el-form class="translation-json-option-form" label-width="110px">
+              <el-form-item label="翻译用文章">
+                <el-radio-group
+                  v-model="aiBaseMode"
+                  :disabled="isAiBusy"
+                  @change="handleAiBaseModeChange"
+                >
+                  <el-radio value="source">源文章</el-radio>
+                  <el-radio value="current">当前文章</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </el-form>
             <div class="translation-json-toolbar">
               <div class="cGray666">
                 已选择 {{ selectedAiEntryIds.length }} 项
@@ -1226,6 +1270,10 @@ export default {
     const exportDialogVisible = ref(false)
     const exportEntryList = ref([])
     const selectedExportIds = ref([])
+    const exportBaseMode = ref('source')
+    const exportLoading = ref(false)
+    const exportUseSlices = ref(false)
+    const exportSliceSize = ref(20)
     const importDialogVisible = ref(false)
     const importJsonText = ref('')
     const importPreview = ref(null)
@@ -1239,6 +1287,7 @@ export default {
     const aiSkippedEntries = ref([])
     const selectedAiEntryIds = ref([])
     const aiPrompt = ref('')
+    const aiBaseMode = ref('source')
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
     const aiStreamStatusList = ref([])
@@ -1246,6 +1295,7 @@ export default {
     const aiStreamReasoning = ref('')
     const skippedTranslationCreatingIds = ref([])
     const creatingAllSkippedTranslations = ref(false)
+    let aiEntryLoadRequestId = 0
 
     const typeTitle = computed(() => getPostTypeText(form.type))
     const relationEditFields = computed(() => {
@@ -1294,7 +1344,13 @@ export default {
       })
     })
     const isAiBusy = computed(() => {
-      return aiTranslating.value || aiApplying.value
+      return aiLoading.value || aiTranslating.value || aiApplying.value
+    })
+    const currentAiSourceLanguageCode = computed(() => {
+      if (aiBaseMode.value === 'current') {
+        return form.languageCode
+      }
+      return form.sourceLanguageCode
     })
 
     function buildTranslationEntries(options = {}) {
@@ -1376,6 +1432,19 @@ export default {
       })
       sourceReferenceEntries.value = mappedResult.entries
       return mappedResult
+    }
+
+    async function loadTranslationEntriesByBaseMode(mode, options = {}) {
+      if (mode === 'current') {
+        return {
+          entries: buildTranslationEntries(options),
+          skippedEntries: []
+        }
+      }
+
+      return await loadSourceReferenceEntries({
+        force: options.force === true
+      })
     }
 
     function isVideoAttachment(record) {
@@ -1748,22 +1817,64 @@ export default {
       submit(true)
     }
 
+    async function restoreSnapshot() {
+      try {
+        await ElMessageBox.confirm(
+          '确认将当前文章还原为最新源快照内容，并把状态改为草稿？',
+          '同步快照',
+          {
+            type: 'warning',
+            confirmButtonText: '同步快照',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+
+      saving.value = true
+      try {
+        const response = await multilingualApi.restoreTranslationPostSnapshot({
+          id: form.id,
+          languageCode: form.languageCode
+        })
+        applyPostDetailData(response.data.data)
+        ElMessage.success('已同步为最新快照草稿')
+      } finally {
+        saving.value = false
+      }
+    }
+
     function goList() {
       router.push({ name: 'TranslationPostList' })
     }
 
-    function openTranslationJsonExport() {
-      const entryList = buildTranslationEntries()
-      if (entryList.length === 0) {
-        ElMessage.warning('当前没有可导出的翻译内容')
-        return
+    async function refreshExportEntries() {
+      exportLoading.value = true
+      try {
+        const result = await loadTranslationEntriesByBaseMode(
+          exportBaseMode.value,
+          { force: true }
+        )
+        const entryList = result.entries || []
+        exportEntryList.value = entryList
+        selectedExportIds.value = entryList
+          .filter(entry => entry.defaultSelected)
+          .map(entry => entry.id)
+        if (entryList.length === 0) {
+          ElMessage.warning('当前没有可导出的翻译内容')
+        }
+      } finally {
+        exportLoading.value = false
       }
+    }
 
-      exportEntryList.value = entryList
-      selectedExportIds.value = entryList
-        .filter(entry => entry.defaultSelected)
-        .map(entry => entry.id)
+    async function openTranslationJsonExport() {
+      exportBaseMode.value = 'source'
+      exportEntryList.value = []
+      selectedExportIds.value = []
       exportDialogVisible.value = true
+      await refreshExportEntries()
     }
 
     function selectAllExportEntries() {
@@ -1784,9 +1895,19 @@ export default {
       const selectedEntries = exportEntryList.value.filter(entry => {
         return selectedIdSet.has(entry.id)
       })
+      const exportForm = {
+        ...form
+      }
+      if (exportBaseMode.value === 'current') {
+        exportForm.sourceLanguageCode = form.languageCode
+      }
       const jsonPayload = buildTranslationExportPayload({
-        form,
-        selectedEntries
+        form: exportForm,
+        selectedEntries,
+        sliceOptions: {
+          enabled: exportUseSlices.value,
+          size: exportSliceSize.value
+        }
       })
       const blob = new Blob([JSON.stringify(jsonPayload, null, 2)], {
         type: 'application/json;charset=utf-8'
@@ -1918,6 +2039,7 @@ export default {
       aiSkippedEntries.value = []
       selectedAiEntryIds.value = []
       aiPrompt.value = ''
+      aiBaseMode.value = 'source'
       aiImportPreview.value = null
       sourceReferenceEntries.value = []
       aiStreamStatusList.value = []
@@ -1930,9 +2052,9 @@ export default {
     function canCreateSkippedTranslation(item) {
       return Boolean(
         item &&
-          item.actionType === 'createTranslationPost' &&
-          item.sourceSnapshotId &&
-          item.relationField
+        item.actionType === 'createTranslationPost' &&
+        item.sourceSnapshotId &&
+        item.relationField
       )
     }
 
@@ -1960,6 +2082,8 @@ export default {
     }
 
     async function refreshAiTranslationCandidates(nextDetailData = null) {
+      const requestId = aiEntryLoadRequestId + 1
+      aiEntryLoadRequestId = requestId
       aiLoading.value = true
       sourceReferenceEntries.value = []
       try {
@@ -1967,14 +2091,26 @@ export default {
         if (!isDetailApplied) {
           await getPostDetail()
         }
-        const mappedResult = await loadSourceReferenceEntries({ force: true })
+        const requestMode = aiBaseMode.value
+        const mappedResult = await loadTranslationEntriesByBaseMode(
+          requestMode,
+          { force: true }
+        )
+        if (
+          requestId !== aiEntryLoadRequestId ||
+          requestMode !== aiBaseMode.value
+        ) {
+          return
+        }
         aiEntryList.value = mappedResult.entries
         aiSkippedEntries.value = mappedResult.skippedEntries
         selectedAiEntryIds.value = aiEntryList.value
           .filter(entry => entry.defaultSelected)
           .map(entry => entry.id)
       } finally {
-        aiLoading.value = false
+        if (requestId === aiEntryLoadRequestId) {
+          aiLoading.value = false
+        }
       }
     }
 
@@ -1985,11 +2121,12 @@ export default {
 
       setSkippedTranslationCreating(item, true)
       try {
-        const response = await multilingualApi.createMissingPostRelationTranslation({
-          postId: form.id,
-          sourceSnapshotId: item.sourceSnapshotId,
-          relationField: item.relationField
-        })
+        const response =
+          await multilingualApi.createMissingPostRelationTranslation({
+            postId: form.id,
+            sourceSnapshotId: item.sourceSnapshotId,
+            relationField: item.relationField
+          })
         const responseData = response.data.data || {}
         await refreshAiTranslationCandidates(responseData.post)
         ElMessage.success('已创建关联文章语言版本')
@@ -2009,11 +2146,12 @@ export default {
       try {
         let lastResponseData = null
         for (const item of itemList) {
-          const response = await multilingualApi.createMissingPostRelationTranslation({
-            postId: form.id,
-            sourceSnapshotId: item.sourceSnapshotId,
-            relationField: item.relationField
-          })
+          const response =
+            await multilingualApi.createMissingPostRelationTranslation({
+              postId: form.id,
+              sourceSnapshotId: item.sourceSnapshotId,
+              relationField: item.relationField
+            })
           lastResponseData = response.data.data || null
         }
         await refreshAiTranslationCandidates(lastResponseData?.post || null)
@@ -2059,22 +2197,19 @@ export default {
       }
 
       resetAiTranslationState()
+      aiBaseMode.value = 'source'
       aiDialogVisible.value = true
-      aiLoading.value = true
-      loadSourceReferenceEntries({ force: true })
-        .then(mappedResult => {
-          aiEntryList.value = mappedResult.entries
-          aiSkippedEntries.value = mappedResult.skippedEntries
-          selectedAiEntryIds.value = aiEntryList.value
-            .filter(entry => entry.defaultSelected)
-            .map(entry => entry.id)
-          if (aiEntryList.value.length === 0) {
-            ElMessage.warning('没有找到可提交给 AI 的源内容条目')
-          }
-        })
-        .finally(() => {
-          aiLoading.value = false
-        })
+      refreshAiTranslationCandidates().then(() => {
+        if (aiEntryList.value.length === 0) {
+          ElMessage.warning('没有找到可提交给 AI 的源内容条目')
+        }
+      })
+    }
+
+    function handleAiBaseModeChange() {
+      aiImportPreview.value = null
+      resetAiStreamState()
+      refreshAiTranslationCandidates()
     }
 
     function selectAllAiEntries() {
@@ -2215,6 +2350,10 @@ export default {
     }
 
     async function requestAiTranslation() {
+      if (aiLoading.value) {
+        ElMessage.warning('正在加载翻译用文章，请稍候')
+        return
+      }
       if (selectedAiEntryIds.value.length === 0) {
         ElMessage.warning('请至少选择一项翻译内容')
         return
@@ -2240,7 +2379,7 @@ export default {
             },
             body: JSON.stringify({
               postId: form.id,
-              sourceLanguageCode: form.sourceLanguageCode,
+              sourceLanguageCode: currentAiSourceLanguageCode.value,
               targetLanguageCode: form.languageCode,
               prompt: aiPrompt.value,
               entries: selectedEntries
@@ -2304,6 +2443,7 @@ export default {
       EditPen,
       VideoPlay,
       aiApplying,
+      aiBaseMode,
       aiDialogVisible,
       aiEntryGroups,
       aiEntryList,
@@ -2330,8 +2470,13 @@ export default {
       detailData,
       detailRelationFields: DETAIL_RELATION_FIELDS,
       form,
+      currentAiSourceLanguageCode,
       exportDialogVisible,
+      exportBaseMode,
       exportEntryGroups,
+      exportLoading,
+      exportSliceSize,
+      exportUseSlices,
       getImagePreviewUrl,
       getLanguageText,
       getPostStatusText,
@@ -2349,6 +2494,7 @@ export default {
       openMediaPreview,
       openAiTranslationDialog,
       openRelationEditor,
+      handleAiBaseModeChange,
       handleAiDialogBeforeClose,
       handleRelationParentUpdated,
       importDialogVisible,
@@ -2368,6 +2514,8 @@ export default {
       postEditorVersion,
       resetRandomAlias,
       resetAiTranslationPreview,
+      refreshExportEntries,
+      restoreSnapshot,
       selectedExportIds,
       selectedAiEntryIds,
       clearExportEntries,
@@ -2551,6 +2699,15 @@ export default {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.translation-json-option-form {
+  margin-bottom: 12px;
+}
+
+.translation-json-slice-label {
+  margin-left: 10px;
+  color: var(--el-text-color-secondary);
 }
 
 .translation-json-selected-count {

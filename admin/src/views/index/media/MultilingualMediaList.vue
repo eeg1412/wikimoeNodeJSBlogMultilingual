@@ -182,7 +182,7 @@
             {{ $formatDate(row.updatedAt || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="280" fixed="right">
+        <ResponsiveTableColumn label="操作" width="400" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">详情</el-button>
             <el-button
@@ -191,6 +191,22 @@
               @click="openEdit(row)"
             >
               编辑
+            </el-button>
+            <el-button
+              v-if="!isSourceScope"
+              type="success"
+              size="small"
+              @click="openAiTranslation(row)"
+            >
+              AI 翻译
+            </el-button>
+            <el-button
+              v-if="!isSourceScope"
+              type="warning"
+              size="small"
+              @click="restoreSnapshot(row)"
+            >
+              同步快照
             </el-button>
             <el-button
               v-if="!isSourceScope"
@@ -327,6 +343,9 @@
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="success" @click="openAiTranslation(currentRow)">
+          AI 翻译
+        </el-button>
         <el-button
           type="primary"
           :loading="editSubmitting"
@@ -336,6 +355,19 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <ContentAiTranslationDialog
+      v-model="aiDialogVisible"
+      title="AI 翻译媒体信息"
+      :content-id="currentAiRecordId"
+      content-type="media"
+      :source-language-code="currentAiSourceLanguageCode"
+      :target-language-code="currentAiTargetLanguageCode"
+      :snapshot-version="currentAiSnapshotVersion"
+      :load-source-entries="loadSourceAiEntries"
+      :load-current-entries="loadCurrentAiEntries"
+      @confirm="confirmAiTranslation"
+    />
 
     <el-dialog
       v-model="replaceDialogVisible"
@@ -443,9 +475,10 @@
 <script>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import CheckDialogService from '@/services/CheckDialogService'
+import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { loadAndOpenImg } from '@/utils/utils'
 import {
@@ -453,9 +486,11 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText
 } from '@/utils/multilingual'
+import { buildRecordTranslationEntries } from '@/utils/translationJson'
 
 export default {
   components: {
+    ContentAiTranslationDialog,
     VideoUploader
   },
   setup() {
@@ -466,6 +501,7 @@ export default {
     const currentRow = ref(null)
     const detailDialogVisible = ref(false)
     const editDialogVisible = ref(false)
+    const aiDialogVisible = ref(false)
     const replaceDialogVisible = ref(false)
     const selectedFile = ref(null)
     const imageFileList = ref([])
@@ -475,6 +511,21 @@ export default {
       name: '',
       description: '',
       is360Panorama: false
+    })
+
+    const currentAiRecordId = computed(() => currentRow.value?._id || '')
+    const currentAiSourceLanguageCode = computed(() => {
+      return (
+        currentRow.value?.sourceLanguageCode ||
+        currentRow.value?.languageCode ||
+        ''
+      )
+    })
+    const currentAiTargetLanguageCode = computed(() => {
+      return currentRow.value?.languageCode || ''
+    })
+    const currentAiSnapshotVersion = computed(() => {
+      return Number(currentRow.value?.snapshotVersion || 1)
     })
     const replaceOptions = reactive({
       noCompress: false,
@@ -812,6 +863,135 @@ export default {
         })
     }
 
+    const buildAiEntries = record => {
+      return buildRecordTranslationEntries({
+        record,
+        collectionName: 'attachments',
+        groupLabel: '媒体信息',
+        includeEmpty: true
+      })
+    }
+
+    const mapSourceEntriesToCurrent = (sourceEntries, currentEntries) => {
+      const sourceEntryMap = new Map(
+        sourceEntries.map(entry => [entry.fieldName, entry])
+      )
+      return currentEntries
+        .map(currentEntry => {
+          const sourceEntry = sourceEntryMap.get(currentEntry.fieldName)
+          if (!sourceEntry) {
+            return null
+          }
+          return {
+            ...currentEntry,
+            value: sourceEntry.value,
+            previewText: sourceEntry.previewText,
+            previewRawValue: sourceEntry.previewRawValue
+          }
+        })
+        .filter(Boolean)
+    }
+
+    const loadCurrentAiEntries = async () => {
+      return {
+        entries: currentRow.value ? buildAiEntries(currentRow.value) : []
+      }
+    }
+
+    const loadSourceAiEntries = async currentEntries => {
+      if (!currentRow.value?.sourceId) {
+        return { entries: [] }
+      }
+      const response = await multilingualApi.getMediaList(
+        {
+          recordKind: 'source',
+          sourceId: currentRow.value.sourceId,
+          languageCode: currentRow.value.sourceLanguageCode,
+          page: 1,
+          limit: 1
+        },
+        true
+      )
+      const list = response.data.data?.list || []
+      const sourceRecord = list.find(item => {
+        return String(item.sourceId) === String(currentRow.value.sourceId)
+      })
+      if (!sourceRecord) {
+        return { entries: [] }
+      }
+      return {
+        entries: mapSourceEntriesToCurrent(
+          buildAiEntries(sourceRecord),
+          currentEntries
+        )
+      }
+    }
+
+    const openAiTranslation = row => {
+      if (!row) {
+        return
+      }
+      currentRow.value = row
+      aiDialogVisible.value = true
+    }
+
+    const confirmAiTranslation = (payload, done) => {
+      if (!currentRow.value) {
+        done?.()
+        return
+      }
+      multilingualApi
+        .updateTranslationRelation({
+          collectionName: 'attachments',
+          id: currentRow.value._id,
+          languageCode: currentRow.value.languageCode,
+          payload
+        })
+        .then(response => {
+          updateMediaListRow(response.data.data)
+          Object.assign(editForm, payload)
+          aiDialogVisible.value = false
+          ElMessage.success('AI 翻译已写入')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          done?.()
+        })
+    }
+
+    const restoreSnapshot = row => {
+      if (!row) {
+        return
+      }
+      ElMessageBox.confirm(
+        '确认将该媒体还原为当前源快照？本地替换文件不会在此操作中删除。',
+        '同步快照',
+        {
+          type: 'warning',
+          confirmButtonText: '同步快照',
+          cancelButtonText: '取消'
+        }
+      )
+        .then(() => {
+          return multilingualApi.restoreMediaSnapshot({
+            id: row._id,
+            languageCode: row.languageCode
+          })
+        })
+        .then(response => {
+          updateMediaListRow(response.data.data)
+          getMediaList(false)
+          ElMessage.success('已同步为最新快照')
+        })
+        .catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+    }
+
     const openReplace = row => {
       currentRow.value = row
       resetReplaceForm()
@@ -1016,6 +1196,7 @@ export default {
       mediaList,
       total,
       currentRow,
+      aiDialogVisible,
       detailDialogVisible,
       editDialogVisible,
       replaceDialogVisible,
@@ -1023,6 +1204,10 @@ export default {
       replaceSubmitting,
       editSubmitting,
       editForm,
+      currentAiRecordId,
+      currentAiSnapshotVersion,
+      currentAiSourceLanguageCode,
+      currentAiTargetLanguageCode,
       replaceOptions,
       replaceOptionsCount,
       isSourceScope,
@@ -1043,6 +1228,11 @@ export default {
       getMediaList,
       openDetail,
       openEdit,
+      openAiTranslation,
+      confirmAiTranslation,
+      loadCurrentAiEntries,
+      loadSourceAiEntries,
+      restoreSnapshot,
       updateMediaInfo,
       openReplace,
       openConvert,

@@ -235,6 +235,48 @@ function parseInput(body = {}) {
   }
 }
 
+function parseGenericInput(body = {}) {
+  const sourceLanguageCode = normalizeLanguageCode(body.sourceLanguageCode)
+  const targetLanguageCode = normalizeLanguageCode(body.targetLanguageCode)
+  if (!sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'sourceLanguageCode',
+      400
+    )
+  }
+  if (!targetLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'targetLanguageCode',
+      400
+    )
+  }
+  if (!Array.isArray(body.entries) || body.entries.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '请至少选择一个翻译条目',
+      'entries',
+      400
+    )
+  }
+
+  body.entries.forEach((entry, index) => validateInputEntry(entry, index))
+
+  return {
+    contentId: String(body.contentId || '').trim(),
+    contentType: String(body.contentType || 'content').trim() || 'content',
+    sourceLanguageCode,
+    targetLanguageCode,
+    prompt: normalizePrompt(body.prompt),
+    entries: body.entries,
+    snapshotVersion: Number(body.snapshotVersion || 1) || 1,
+    sourceSnapshotId: body.sourceSnapshotId || null
+  }
+}
+
 async function getTranslationPost(input) {
   const PostModel = getPostModel()
   const post = await PostModel.findOne({
@@ -274,7 +316,8 @@ function buildSystemPrompt(settings) {
     'For richTextDocument values, the input value is indexedRichText with segments [{ index, text }]. Translate only the text field and keep every index unchanged.',
     'Some indexedRichText segments may include contextBefore/contextAfter. They are reference context only; do not translate or include them in output.',
     'The server will write translated segment text back into the original HTML by index. Do not invent HTML, attributes, tags, or extra indexes.',
-    'Do not change id, index, URLs, code identifiers, media paths, or non-natural-language values.',
+    'Do not change entry i, segment index, URLs, code identifiers, media paths, or non-natural-language values.',
+    'Return every input entry. If an entry should remain unchanged, return it with the same i and the original value.',
     'For plainText values, return a translated string.',
     'Do not add explanations, comments, or extra entries.',
     `Default site prompt: ${settings.deepSeekDefaultPrompt}`
@@ -290,9 +333,8 @@ function buildUserPrompt(input) {
         version: 1,
         entries: [
           {
-            id: 'entry id copied from input',
-            value:
-              'translated value; string for plainText/richTextLite, indexedRichText object for richTextDocument'
+            i: 'entry i copied from input',
+            v: 'translated value; string for plainText/richTextLite, indexedRichText object for richTextDocument'
           }
         ]
       },
@@ -308,20 +350,20 @@ function buildUserPrompt(input) {
       rules: [
         'Return only the requiredOutput object. Do not return this request object, response schema, rules, markdown, or explanations.',
         'The top-level JSON object must contain schema, version, and entries.',
-        'Return exactly one item in top-level entries for every input entry id.',
-        'Keep every id unchanged.',
-        'For indexedRichText values, return value as { type: "indexedRichText", segments: [{ index, text }] }. Return exactly one translated segment for every input segment.',
+        'Return exactly one item in top-level entries for every input entry i.',
+        'Keep every i unchanged.',
+        'Never omit an entry. If a value is a name, code-like text, or should not be translated, still return the same i and original v.',
+        'For indexedRichText values, return v as { type: "indexedRichText", segments: [{ index, text }] }. Return exactly one translated segment for every input segment.',
         'If a segment includes contextBefore/contextAfter, use it only to understand the boundary context. Output must contain translated text for the segment text only.',
         'Translate all visible natural-language text, including indexed text extracted from alt/title/placeholder/aria-label attributes.',
         'Never translate URLs, code identifiers, segment indexes, CSS classes, data-* attributes, or media paths.',
         'If a value contains code blocks, preserve code syntax and translate only comments or prose when clearly natural language.'
       ],
-      entries: input.entries.map(entry => ({
-        id: entry.id,
-        valueType: entry.valueType,
-        label: entry.label,
-        groupLabel: entry.groupLabel,
-        value: getAiPromptValue(entry)
+      entries: input.entries.map((entry, index) => ({
+        i: entry.aiIndex || String(index + 1),
+        t: entry.valueType,
+        n: entry.label,
+        v: getAiPromptValue(entry)
       }))
     },
     null,
@@ -465,15 +507,19 @@ function getAiPromptValue(entry) {
 }
 
 function prepareAiInput(input) {
-  const entries = input.entries.map(entry => {
-    if (entry.valueType !== 'richTextDocument') {
-      return entry
+  const entries = input.entries.map((entry, index) => {
+    const indexedEntry = {
+      ...entry,
+      aiIndex: String(index + 1)
+    }
+    if (indexedEntry.valueType !== 'richTextDocument') {
+      return indexedEntry
     }
 
-    const richTextSegments = collectRichTextSegments(entry.value)
-    entry.richTextSegments = richTextSegments
+    const richTextSegments = collectRichTextSegments(indexedEntry.value)
     return {
-      ...entry,
+      ...indexedEntry,
+      richTextSegments,
       aiValue: buildIndexedRichTextValue(richTextSegments)
     }
   })
@@ -482,6 +528,31 @@ function prepareAiInput(input) {
     ...input,
     entries
   }
+}
+
+function isPreparedAiEntry(entry) {
+  if (!entry || !entry.aiIndex) {
+    return false
+  }
+  if (entry.valueType !== 'richTextDocument') {
+    return true
+  }
+  return (
+    Array.isArray(entry.richTextSegments) &&
+    entry.aiValue &&
+    entry.aiValue.type === RICH_TEXT_INDEXED_VALUE_TYPE
+  )
+}
+
+function ensurePreparedAiInput(input) {
+  if (
+    input &&
+    Array.isArray(input.entries) &&
+    input.entries.every(entry => isPreparedAiEntry(entry))
+  ) {
+    return input
+  }
+  return prepareAiInput(input)
 }
 
 function getAiEntryTextLength(entry) {
@@ -955,6 +1026,20 @@ function parseAiContent(responseData) {
   }
 }
 
+function buildEntriesFromObjectMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return []
+  }
+  return Object.entries(value)
+    .map(([key, entryValue]) => {
+      if (/^\d+$/.test(key)) {
+        return { i: key, v: entryValue }
+      }
+      return { n: key, v: entryValue }
+    })
+    .filter(item => item.v !== undefined)
+}
+
 function normalizeResultEntries(resultData) {
   if (Array.isArray(resultData)) {
     return resultData
@@ -980,6 +1065,20 @@ function normalizeResultEntries(resultData) {
     if (Array.isArray(entries)) {
       return entries
     }
+    const mappedEntries = buildEntriesFromObjectMap(entries)
+    if (mappedEntries.length > 0) {
+      return mappedEntries
+    }
+  }
+
+  const ignoredKeys = new Set(['schema', 'version', 'meta', 'usage'])
+  const mappedEntries = buildEntriesFromObjectMap(
+    Object.fromEntries(
+      Object.entries(resultData).filter(([key]) => !ignoredKeys.has(key))
+    )
+  )
+  if (mappedEntries.length > 0) {
+    return mappedEntries
   }
 
   const actualKeys = Object.keys(resultData).join(', ')
@@ -1070,7 +1169,8 @@ function normalizeIndexedRichTextSegments(entry, value) {
       502
     )
   }
-  if (!Array.isArray(value.segments)) {
+  const segmentList = Array.isArray(value.segments) ? value.segments : value.s
+  if (!Array.isArray(segmentList)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
       `DeepSeek 返回的富文本 segments 不合法：${entry.label || entry.id}`,
@@ -1080,15 +1180,126 @@ function normalizeIndexedRichTextSegments(entry, value) {
   }
 
   const segmentMap = new Map()
-  value.segments.forEach(segment => {
-    if (!segment || typeof segment.index !== 'string') {
+  segmentList.forEach(segment => {
+    const segmentIndex = segment?.index || segment?.i
+    const segmentText = segment?.text ?? segment?.x ?? segment?.v
+    if (!segment || typeof segmentIndex !== 'string') {
       return
     }
-    if (typeof segment.text === 'string') {
-      segmentMap.set(segment.index, segment.text)
+    if (typeof segmentText === 'string') {
+      segmentMap.set(segmentIndex, segmentText)
     }
   })
   return segmentMap
+}
+
+function getResultEntryKey(item) {
+  if (!item || typeof item !== 'object') {
+    return ''
+  }
+  if (item.i !== undefined && item.i !== null) {
+    return String(item.i)
+  }
+  if (typeof item.id === 'string') {
+    return item.id
+  }
+  return ''
+}
+
+function getResultEntryValue(item) {
+  if (!item || typeof item !== 'object') {
+    return undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(item, 'v')) {
+    return item.v
+  }
+  return item.value
+}
+
+function normalizeFallbackKey(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function addCandidateKey(candidateList, value) {
+  const key = normalizeFallbackKey(value)
+  if (key && !candidateList.includes(key)) {
+    candidateList.push(key)
+  }
+}
+
+function getLabelLastPart(label) {
+  const text = String(label || '')
+  if (!text.includes(' / ')) {
+    return text
+  }
+  const parts = text.split(' / ')
+  return parts[parts.length - 1]
+}
+
+function getInputEntryCandidateKeys(entry) {
+  const candidateList = []
+  addCandidateKey(candidateList, entry.label)
+  addCandidateKey(candidateList, getLabelLastPart(entry.label))
+  addCandidateKey(candidateList, entry.fieldName)
+  addCandidateKey(candidateList, entry.n)
+  return candidateList
+}
+
+function getResultEntryCandidateKeys(item) {
+  const candidateList = []
+  addCandidateKey(candidateList, item.n)
+  addCandidateKey(candidateList, item.label)
+  addCandidateKey(candidateList, item.name)
+  addCandidateKey(candidateList, item.fieldName)
+  addCandidateKey(candidateList, getResultEntryKey(item))
+  return candidateList
+}
+
+function buildUniqueCandidateMap(itemList, getCandidateKeys) {
+  const candidateMap = new Map()
+  const duplicatedKeySet = new Set()
+  itemList.forEach(item => {
+    getCandidateKeys(item).forEach(key => {
+      if (duplicatedKeySet.has(key)) {
+        return
+      }
+      if (candidateMap.has(key)) {
+        candidateMap.delete(key)
+        duplicatedKeySet.add(key)
+        return
+      }
+      candidateMap.set(key, item)
+    })
+  })
+  return candidateMap
+}
+
+function findTranslatedEntry(
+  entry,
+  resultMap,
+  resultCandidateMap,
+  inputCandidateMap
+) {
+  const translatedEntry =
+    resultMap.get(entry.aiIndex) || resultMap.get(entry.id)
+  if (translatedEntry) {
+    return translatedEntry
+  }
+
+  const candidateList = getInputEntryCandidateKeys(entry)
+  for (const candidateKey of candidateList) {
+    if (inputCandidateMap.get(candidateKey) !== entry) {
+      continue
+    }
+    const fallbackEntry = resultCandidateMap.get(candidateKey)
+    if (fallbackEntry) {
+      return fallbackEntry
+    }
+  }
+  return null
 }
 
 function applyIndexedRichTextTranslation(entry, value) {
@@ -1182,27 +1393,46 @@ function normalizeTranslatedValue(entry, value) {
 }
 
 function buildTranslatedPayload(input, post, resultData) {
+  const preparedInput = ensurePreparedAiInput(input)
   const resultEntries = normalizeResultEntries(resultData)
   const resultMap = new Map()
   resultEntries.forEach(item => {
-    if (item && typeof item.id === 'string') {
-      resultMap.set(item.id, item)
+    const key = getResultEntryKey(item)
+    if (key) {
+      resultMap.set(key, item)
     }
   })
+  const resultCandidateMap = buildUniqueCandidateMap(
+    resultEntries,
+    getResultEntryCandidateKeys
+  )
+  const inputCandidateMap = buildUniqueCandidateMap(
+    preparedInput.entries,
+    getInputEntryCandidateKeys
+  )
 
-  const entries = input.entries.map(entry => {
-    const translatedEntry = resultMap.get(entry.id)
+  const entries = preparedInput.entries.map(entry => {
+    const translatedEntry = findTranslatedEntry(
+      entry,
+      resultMap,
+      resultCandidateMap,
+      inputCandidateMap
+    )
     if (!translatedEntry) {
+      const actualKeys = resultEntries
+        .map(item => getResultEntryKey(item) || item.n || item.label || '')
+        .filter(Boolean)
+        .join(', ')
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
-        `DeepSeek 返回结果缺少条目：${entry.label || entry.id}`,
+        `DeepSeek 返回结果缺少条目：${entry.label || entry.id}，期望 i=${entry.aiIndex}，实际返回：${actualKeys || '无'}`,
         'deepSeek',
         502
       )
     }
     const normalizedValue = normalizeTranslatedValue(
       entry,
-      translatedEntry.value
+      getResultEntryValue(translatedEntry)
     )
 
     const outputEntry = {
@@ -1252,11 +1482,15 @@ function buildTranslatedPayload(input, post, resultData) {
     schema: TRANSLATION_JSON_SCHEMA,
     version: TRANSLATION_JSON_VERSION,
     meta: {
-      postId: input.postId,
-      languageCode: input.targetLanguageCode,
-      sourceLanguageCode: input.sourceLanguageCode,
-      postType: Number(post.type || 1),
-      snapshotVersion: Number(post.snapshotVersion || 1),
+      postId: preparedInput.postId || '',
+      contentId: preparedInput.contentId || preparedInput.postId || '',
+      contentType: preparedInput.contentType || 'post',
+      languageCode: preparedInput.targetLanguageCode,
+      sourceLanguageCode: preparedInput.sourceLanguageCode,
+      postType: Number(post?.type || preparedInput.postType || 1),
+      snapshotVersion: Number(
+        post?.snapshotVersion || preparedInput.snapshotVersion || 1
+      ),
       exportedAt: new Date().toISOString(),
       generatedBy: 'deepseek',
       richTextFormat: 'structured-html-dom-v1',
@@ -1305,30 +1539,34 @@ function mergeUsage(leftUsage = {}, rightUsage = {}) {
 }
 
 function mergeChunkResultEntry(resultMap, entry) {
-  if (!entry || typeof entry.id !== 'string') {
+  const entryKey =
+    getResultEntryKey(entry) || getResultEntryCandidateKeys(entry)[0]
+  if (!entryKey) {
     return
   }
 
+  const value = getResultEntryValue(entry)
   if (
-    entry.value &&
-    entry.value.type === RICH_TEXT_INDEXED_VALUE_TYPE &&
-    Array.isArray(entry.value.segments)
+    value &&
+    value.type === RICH_TEXT_INDEXED_VALUE_TYPE &&
+    (Array.isArray(value.segments) || Array.isArray(value.s))
   ) {
-    if (!resultMap.has(entry.id)) {
-      resultMap.set(entry.id, {
-        id: entry.id,
-        value: {
+    const segmentList = Array.isArray(value.segments) ? value.segments : value.s
+    if (!resultMap.has(entryKey)) {
+      resultMap.set(entryKey, {
+        i: entryKey,
+        v: {
           type: RICH_TEXT_INDEXED_VALUE_TYPE,
           segments: []
         }
       })
     }
-    const mergedEntry = resultMap.get(entry.id)
-    mergedEntry.value.segments.push(...entry.value.segments)
+    const mergedEntry = resultMap.get(entryKey)
+    mergedEntry.v.segments.push(...segmentList)
     return
   }
 
-  resultMap.set(entry.id, entry)
+  resultMap.set(entryKey, entry)
 }
 
 function buildAggregateRawResponse({
@@ -1367,12 +1605,12 @@ async function recordTranslationUsage({
   await aiUsageService.recordAiUsageLog({
     provider: 'deepseek',
     model: responseData.model || '',
-    operation: 'translation.post',
+    operation: input.operation || 'translation.post',
     status,
     requestId: responseData.id || '',
-    postId: post._id,
-    translationGroupId: post.translationGroupId,
-    sourceSnapshotId: post.sourceSnapshotId,
+    postId: post?._id,
+    translationGroupId: post?.translationGroupId,
+    sourceSnapshotId: post?.sourceSnapshotId || input.sourceSnapshotId,
     sourceLanguageCode: input.sourceLanguageCode,
     targetLanguageCode: input.targetLanguageCode,
     usage: responseData.usage || {},
@@ -1445,7 +1683,7 @@ async function translatePostEntries(body = {}) {
   }
 
   const resultData = parseAiContent(responseData)
-  const payload = buildTranslatedPayload(input, post, resultData)
+  const payload = buildTranslatedPayload(aiInput, post, resultData)
 
   return {
     payload,
@@ -1455,9 +1693,7 @@ async function translatePostEntries(body = {}) {
   }
 }
 
-async function translatePostEntriesStream(body = {}, handlers = {}) {
-  const input = parseInput(body)
-  const post = await getTranslationPost(input)
+async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
   const aiInput = prepareAiInput(input)
@@ -1540,7 +1776,7 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
       chunkCount: inputChunks.length
     })
 
-    const payload = buildTranslatedPayload(input, post, {
+    const payload = buildTranslatedPayload(aiInput, post, {
       entries: Array.from(resultMap.values())
     })
     const data = {
@@ -1574,7 +1810,22 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
   }
 }
 
+async function translatePostEntriesStream(body = {}, handlers = {}) {
+  const input = parseInput(body)
+  const post = await getTranslationPost(input)
+  return await translatePreparedEntriesStream(input, post, handlers)
+}
+
+async function translateContentEntriesStream(body = {}, handlers = {}) {
+  const input = {
+    ...parseGenericInput(body),
+    operation: 'translation.content'
+  }
+  return await translatePreparedEntriesStream(input, null, handlers)
+}
+
 module.exports = {
   translatePostEntries,
-  translatePostEntriesStream
+  translatePostEntriesStream,
+  translateContentEntriesStream
 }

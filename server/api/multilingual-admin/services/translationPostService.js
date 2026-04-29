@@ -97,6 +97,24 @@ const POST_RELATION_FIELDS = [
   ...Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
 ]
 
+const RESTORABLE_COLLECTION_NAMES = new Set([
+  'users',
+  'sorts',
+  'tags',
+  'mappoints',
+  'bangumis',
+  'movies',
+  'games',
+  'gamePlatforms',
+  'books',
+  'booktypes',
+  'events',
+  'eventtypes',
+  'posts',
+  'votes',
+  'attachments'
+])
+
 const COLLECTION_DEPENDENCY_FIELDS = {
   users: [{ field: 'cover', collectionName: 'attachments' }],
   sorts: [{ field: 'parent', collectionName: 'sorts' }],
@@ -862,7 +880,7 @@ async function buildTranslationRecordData(
 
   if (collectionName === 'posts') {
     data.translationGroupId =
-      sourceObject.translationGroupId || context.translationGroupId || recordId
+      context.translationGroupId || sourceObject.translationGroupId || recordId
     applyPostDefaults(data, sourceObject, context)
     await applyPostRelationFields(data, sourceObject, context, options)
   } else {
@@ -1208,7 +1226,9 @@ function parseCreateRelationTranslationInput(body = {}) {
   }
 
   const relationField = String(body.relationField || '').trim()
-  if (POST_ARRAY_RELATION_COLLECTIONS[relationField] !== SOURCE_POST_COLLECTION) {
+  if (
+    POST_ARRAY_RELATION_COLLECTIONS[relationField] !== SOURCE_POST_COLLECTION
+  ) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
       'relationField is not a post relation field',
@@ -1409,6 +1429,18 @@ async function getTranslationPostListBySource(query = {}) {
   const sourceParams = {
     sourceCollection: SOURCE_POST_COLLECTION,
     recordKind: SOURCE_RECORD_KIND
+  }
+
+  if (query.sourceSnapshotId) {
+    if (!mongoose.Types.ObjectId.isValid(query.sourceSnapshotId)) {
+      throw new ApiError(
+        ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+        undefined,
+        'sourceSnapshotId',
+        404
+      )
+    }
+    sourceParams._id = new mongoose.Types.ObjectId(query.sourceSnapshotId)
   }
 
   if (query.sourceLanguageCode) {
@@ -1645,10 +1677,186 @@ async function updateTranslationPost(body = {}) {
   return await getTranslationPostDetail(post._id)
 }
 
+function parseRestoreRecordInput(body = {}) {
+  const collectionName = String(body.collectionName || 'posts').trim()
+  if (!RESTORABLE_COLLECTION_NAMES.has(collectionName)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'collectionName is not supported',
+      'collectionName',
+      400
+    )
+  }
+
+  const id = String(body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(ERROR_CODES.CONTENT_ID_INVALID, undefined, 'id', 400)
+  }
+
+  const languageCode = body.languageCode
+    ? normalizeLanguageCode(body.languageCode)
+    : ''
+  if (body.languageCode && !languageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'languageCode',
+      400
+    )
+  }
+
+  return {
+    collectionName,
+    id,
+    languageCode
+  }
+}
+
+async function findTranslationRecord(collectionName, id) {
+  const Model = getMultilingualModel(collectionName)
+  return await Model.findOne({
+    _id: new mongoose.Types.ObjectId(id),
+    recordKind: TRANSLATION_RECORD_KIND
+  })
+}
+
+async function findSourceRecordSnapshot(collectionName, record) {
+  if (collectionName === 'posts') {
+    return await findSourcePostSnapshot(record.sourceSnapshotId)
+  }
+
+  const sourceId = toObjectId(record.sourceId)
+  if (!sourceId) {
+    return null
+  }
+
+  const Model = getMultilingualModel(collectionName)
+  const query = Model.findOne({
+    sourceCollection: collectionName,
+    sourceId,
+    sourceLanguageCode: record.sourceLanguageCode,
+    recordKind: SOURCE_RECORD_KIND
+  })
+  const populate = getSnapshotPopulateForCollection(collectionName)
+  if (populate) {
+    query.populate(populate)
+  }
+  return await query
+}
+
+function removeImmutableRestoreFields(data) {
+  const updateData = { ...data }
+  delete updateData._id
+  delete updateData.id
+  delete updateData.createdAt
+  delete updateData.updatedAt
+  delete updateData.__v
+  delete updateData.languageCode
+  delete updateData.sourceLanguageCode
+  delete updateData.sourceId
+  delete updateData.sourceCollection
+  delete updateData.sourceSnapshotId
+  delete updateData.translationGroupId
+  delete updateData.recordKind
+  return updateData
+}
+
+async function restoreTranslationRecordFromSnapshot(body = {}) {
+  const input = parseRestoreRecordInput(body)
+  const record = await findTranslationRecord(input.collectionName, input.id)
+  if (!record) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      'translation record not found',
+      'id',
+      404
+    )
+  }
+
+  if (input.languageCode && input.languageCode !== record.languageCode) {
+    throw new ApiError(
+      ERROR_CODES.RELATION_LANGUAGE_MISMATCH,
+      undefined,
+      'languageCode',
+      409
+    )
+  }
+
+  let sourceRecord = await findSourceRecordSnapshot(
+    input.collectionName,
+    record
+  )
+  if (!sourceRecord) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source snapshot record not found',
+      'sourceId',
+      404
+    )
+  }
+
+  if (input.collectionName === 'posts') {
+    sourceRecord = await ensureSourcePostSnapshotRelations(sourceRecord)
+  }
+
+  const now = new Date()
+  const context = {
+    languageCode: record.languageCode,
+    sourceLanguageCode: record.sourceLanguageCode,
+    translationGroupId: record.translationGroupId,
+    sourceSnapshotId: record.sourceSnapshotId,
+    snapshotVersion:
+      sourceRecord.snapshotVersion || record.snapshotVersion || 1,
+    sourceSnapshotAt: sourceRecord.sourceSnapshotAt || now,
+    now,
+    copiedCounts: {},
+    copyCache: new Map()
+  }
+  const data = await buildTranslationRecordData(
+    input.collectionName,
+    sourceRecord,
+    context,
+    {
+      recordId: record._id,
+      copyPostRelations: true
+    }
+  )
+  const updateData = removeImmutableRestoreFields(data)
+
+  if (input.collectionName === 'posts') {
+    delete updateData.alias
+    updateData.lastChangDate = now
+    updateData.status = 0
+    updateData.sourceChanged = false
+    updateData.pendingReview = false
+    updateData.sourceChangedAt = null
+    await assertAliasAvailable(
+      record.languageCode,
+      record.alias,
+      updateData.type,
+      record._id,
+      updateData.status
+    )
+  }
+
+  const Model = getMultilingualModel(input.collectionName)
+  await Model.updateOne(
+    { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
+    { $set: updateData }
+  )
+
+  if (input.collectionName === 'posts') {
+    return await getTranslationPostDetail(record._id)
+  }
+
+  return await Model.findOne({ _id: record._id }).lean()
+}
+
 module.exports = {
   createMissingPostRelationTranslation,
   createTranslationPost,
   getTranslationPostListBySource,
   getTranslationPostDetail,
+  restoreTranslationRecordFromSnapshot,
   updateTranslationPost
 }

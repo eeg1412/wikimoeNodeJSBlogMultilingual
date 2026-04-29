@@ -96,6 +96,12 @@ const routes = [
           import('../views/index/translation/TranslationPostList.vue')
       },
       {
+        path: '/translation/post/language-list/:sourceSnapshotId',
+        name: 'TranslationPostLanguageList',
+        component: () =>
+          import('../views/index/translation/TranslationPostLanguageList.vue')
+      },
+      {
         path: '/translation/post/editor/:id',
         name: 'TranslationPostEdit',
         component: () =>

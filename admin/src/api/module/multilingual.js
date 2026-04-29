@@ -115,8 +115,18 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
+    restoreTranslationPostSnapshot(data) {
+      return api.post('/translation/post/restore-snapshot', data, {
+        shouldAdminJWT: true
+      })
+    },
     updateTranslationRelation(data) {
       return api.put('/translation/relation/update', data, {
+        shouldAdminJWT: true
+      })
+    },
+    restoreTranslationRelationSnapshot(data) {
+      return api.post('/translation/relation/restore-snapshot', data, {
         shouldAdminJWT: true
       })
     },
@@ -141,6 +151,11 @@ export default function (api) {
     },
     convertRemoteMedia(data) {
       return api.post('/media/convert-remote', data, {
+        shouldAdminJWT: true
+      })
+    },
+    restoreMediaSnapshot(data) {
+      return api.post('/media/restore-snapshot', data, {
         shouldAdminJWT: true
       })
     }

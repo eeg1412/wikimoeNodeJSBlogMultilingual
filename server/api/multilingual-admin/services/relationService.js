@@ -202,6 +202,17 @@ function parsePositiveInteger(value, defaultValue, maxValue) {
   return numberValue
 }
 
+function parseOptionalObjectId(value, fieldName) {
+  const id = String(value || '').trim()
+  if (!id) {
+    return null
+  }
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(ERROR_CODES.SOURCE_ID_INVALID, undefined, fieldName, 400)
+  }
+  return new mongoose.Types.ObjectId(id)
+}
+
 function parseCollectionNameList(value) {
   if (!value) {
     return []
@@ -276,6 +287,7 @@ function parseRelationListQuery(query = {}) {
     ),
     languageCode,
     recordKind,
+    sourceId: parseOptionalObjectId(query.sourceId, 'sourceId'),
     keyword: String(query.keyword || '').trim(),
     page: parsePositiveInteger(query.page, 1),
     limit: parsePositiveInteger(query.limit, 20, 100)
@@ -337,6 +349,10 @@ function buildRelationListParams(input) {
 
   if (input.languageCode) {
     params.languageCode = input.languageCode
+  }
+
+  if (input.sourceId) {
+    params.sourceId = input.sourceId
   }
 
   const keywordParams = buildKeywordParams(input.keyword)

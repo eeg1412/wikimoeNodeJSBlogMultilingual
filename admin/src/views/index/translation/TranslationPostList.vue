@@ -106,157 +106,6 @@
         height="100%"
         border
       >
-        <ResponsiveTableColumn type="expand" width="50" card-hidden>
-          <template #default="{ row }">
-            <div class="translation-child-table">
-              <ResponsiveTable
-                :data="getTranslationRows(row)"
-                row-key="languageCode"
-                border
-              >
-                <ResponsiveTableColumn label="语言" width="150">
-                  <template #default="{ row: childRow }">
-                    {{ getLanguageText(childRow.languageCode) }}
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="标题" min-width="220">
-                  <template #default="{ row: childRow }">
-                    <span v-if="childRow.translation">
-                      <div class="source-title">
-                        {{ getPostDisplayTitle(childRow.translation) }}
-                      </div>
-                      <div
-                        v-if="childRow.translation.alias"
-                        class="source-meta"
-                      >
-                        Alias: {{ childRow.translation.alias }}
-                      </div>
-                    </span>
-                    <el-tag v-else type="info" effect="plain">未创建</el-tag>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="分类" min-width="140">
-                  <template #default="{ row: childRow }">
-                    <span v-if="childRow.translation">
-                      {{ childRow.translation.sort?.sortname || '-' }}
-                    </span>
-                    <span v-else class="table-empty-text">-</span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="标签" min-width="220">
-                  <template #default="{ row: childRow }">
-                    <div
-                      v-if="childRow.translation?.tags?.length"
-                      class="table-tag-list"
-                    >
-                      <el-tag
-                        v-for="tag in childRow.translation.tags"
-                        :key="tag._id"
-                        size="small"
-                        effect="plain"
-                      >
-                        #{{ tag.tagname }}
-                      </el-tag>
-                    </div>
-                    <span v-else class="table-empty-text">-</span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="地点" min-width="220">
-                  <template #default="{ row: childRow }">
-                    <div
-                      v-if="childRow.translation?.mappointList?.length"
-                      class="table-tag-list"
-                    >
-                      <el-tag
-                        v-for="mappoint in childRow.translation.mappointList"
-                        :key="mappoint._id"
-                        size="small"
-                        effect="plain"
-                      >
-                        {{ mappoint.title }}
-                      </el-tag>
-                    </div>
-                    <span v-else class="table-empty-text">-</span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="关联与相关内容" min-width="420">
-                  <template #default="{ row: childRow }">
-                    <PostRelationSummary
-                      v-if="childRow.translation"
-                      :post="childRow.translation"
-                    />
-                    <span v-else class="table-empty-text">-</span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="状态" width="100">
-                  <template #default="{ row: childRow }">
-                    <el-tag
-                      v-if="childRow.translation"
-                      :type="getPostStatusTagType(childRow.translation.status)"
-                      effect="plain"
-                    >
-                      {{ getPostStatusText(childRow.translation.status) }}
-                    </el-tag>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="版本" width="90">
-                  <template #default="{ row: childRow }">
-                    <span v-if="childRow.translation">
-                      v{{ childRow.translation.snapshotVersion }}
-                    </span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="复核" width="110">
-                  <template #default="{ row: childRow }">
-                    <el-tag
-                      v-if="childRow.translation?.pendingReview"
-                      type="warning"
-                      effect="plain"
-                    >
-                      待复核
-                    </el-tag>
-                    <el-tag
-                      v-else-if="childRow.translation"
-                      type="success"
-                      effect="plain"
-                    >
-                      正常
-                    </el-tag>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="更新时间" width="180">
-                  <template #default="{ row: childRow }">
-                    <span v-if="childRow.translation">
-                      {{ $formatDate(childRow.translation.updatedAt) }}
-                    </span>
-                  </template>
-                </ResponsiveTableColumn>
-                <ResponsiveTableColumn label="操作" width="150" fixed="right">
-                  <template #default="{ row: childRow }">
-                    <el-button
-                      v-if="childRow.translation"
-                      type="primary"
-                      size="small"
-                      @click="goTranslationEditor(childRow.translation)"
-                    >
-                      编辑
-                    </el-button>
-                    <el-button
-                      v-else
-                      type="primary"
-                      size="small"
-                      @click="
-                        createTranslation(row.sourcePost, childRow.languageCode)
-                      "
-                    >
-                      创建
-                    </el-button>
-                  </template>
-                </ResponsiveTableColumn>
-              </ResponsiveTable>
-            </div>
-          </template>
-        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源文章" min-width="260">
           <template #default="{ row }">
             <div class="source-title">
@@ -346,6 +195,13 @@
         <ResponsiveTableColumn label="导入时间" width="180">
           <template #default="{ row }">
             {{ $formatDate(row.sourcePost.sourceSnapshotAt) }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="操作" width="130" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" size="small" @click="goLanguageList(row)">
+              语言版本
+            </el-button>
           </template>
         </ResponsiveTableColumn>
       </ResponsiveTable>
@@ -636,6 +492,13 @@ export default {
       })
     }
 
+    const goLanguageList = row => {
+      router.push({
+        name: 'TranslationPostLanguageList',
+        params: { sourceSnapshotId: row.sourcePost._id }
+      })
+    }
+
     const syncEditForm = post => {
       editForm.title = post?.title || ''
       editForm.alias = post?.alias || ''
@@ -741,6 +604,7 @@ export default {
       getTranslationPostList,
       createTranslation,
       openTranslationDetail,
+      goLanguageList,
       goTranslationEditor,
       saveDetail,
       confirmReview

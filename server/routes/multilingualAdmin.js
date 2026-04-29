@@ -410,16 +410,34 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/post/updatePost')
   },
   {
+    path: '/translation/post/restore-snapshot',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/post/restoreSnapshot')
+  },
+  {
     path: '/translation/post/ai-translate-stream',
     method: 'post',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/ai/streamTranslatePost')
   },
   {
+    path: '/translation/ai/translate-stream',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/ai/streamTranslateContent')
+  },
+  {
     path: '/translation/relation/update',
     method: 'put',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/relation/update')
+  },
+  {
+    path: '/translation/relation/restore-snapshot',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/relation/restoreSnapshot')
   },
   {
     path: '/translation/relation/list',
@@ -444,6 +462,12 @@ const multilingualAdminRouteSetting = [
     method: 'post',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/media/convertRemote')
+  },
+  {
+    path: '/media/restore-snapshot',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/media/restoreSnapshot')
   }
 ]
 

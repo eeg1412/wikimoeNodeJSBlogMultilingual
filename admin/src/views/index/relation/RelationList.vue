@@ -110,7 +110,7 @@
             {{ $formatDate(row.updatedAt || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="150" fixed="right">
+        <ResponsiveTableColumn label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">详情</el-button>
             <el-button
@@ -120,6 +120,22 @@
               @click="openEdit(row)"
             >
               编辑
+            </el-button>
+            <el-button
+              v-if="!isSourceScope"
+              type="success"
+              size="small"
+              @click="openAiTranslation(row)"
+            >
+              AI 翻译
+            </el-button>
+            <el-button
+              v-if="!isSourceScope"
+              type="warning"
+              size="small"
+              @click="restoreSnapshot(row)"
+            >
+              同步快照
             </el-button>
           </template>
         </ResponsiveTableColumn>
@@ -207,18 +223,35 @@
       <el-empty v-else description="当前类型暂无可编辑业务字段" />
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="success" @click="openAiTranslation(currentRow)">
+          AI 翻译
+        </el-button>
         <el-button type="primary" :loading="submitting" @click="submitUpdate">
           保存
         </el-button>
       </template>
     </el-dialog>
+
+    <ContentAiTranslationDialog
+      v-model="aiDialogVisible"
+      title="AI 翻译关联内容"
+      :content-id="currentAiRecordId"
+      content-type="relation"
+      :source-language-code="currentAiSourceLanguageCode"
+      :target-language-code="currentAiTargetLanguageCode"
+      :snapshot-version="currentAiSnapshotVersion"
+      :load-source-entries="loadSourceAiEntries"
+      :load-current-entries="loadCurrentAiEntries"
+      @confirm="confirmAiTranslation"
+    />
   </div>
 </template>
 
 <script>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import { multilingualApi } from '@/api'
 import {
@@ -232,6 +265,7 @@ import {
   getRelationFieldInitialValue,
   shouldSubmitRelationEditField
 } from '@/utils/relationEditFields'
+import { buildRecordTranslationEntries } from '@/utils/translationJson'
 
 function formatFieldValue(value) {
   if (value === null || value === undefined || value === '') {
@@ -258,6 +292,7 @@ function formatFieldValue(value) {
 
 export default {
   components: {
+    ContentAiTranslationDialog,
     RelationBusinessFieldEditor
   },
   props: {
@@ -288,6 +323,8 @@ export default {
     const currentRow = ref(null)
     const detailDialogVisible = ref(false)
     const editDialogVisible = ref(false)
+    const aiDialogVisible = ref(false)
+    const aiRecord = ref(null)
     const submitting = ref(false)
     const editForm = reactive({})
 
@@ -379,6 +416,19 @@ export default {
         currentCollectionName.value ||
         params.collectionName
       )
+    })
+
+    const currentAiRecordId = computed(() => aiRecord.value?._id || '')
+    const currentAiSourceLanguageCode = computed(() => {
+      return (
+        aiRecord.value?.sourceLanguageCode || aiRecord.value?.languageCode || ''
+      )
+    })
+    const currentAiTargetLanguageCode = computed(() => {
+      return aiRecord.value?.languageCode || ''
+    })
+    const currentAiSnapshotVersion = computed(() => {
+      return Number(aiRecord.value?.snapshotVersion || 1)
     })
 
     const detailFieldRows = computed(() => {
@@ -477,6 +527,167 @@ export default {
       editDialogVisible.value = true
     }
 
+    const getRowCollectionName = row => {
+      if (row?.collectionName) {
+        return row.collectionName
+      }
+      if (currentCollectionName.value) {
+        return currentCollectionName.value
+      }
+      return params.collectionName
+    }
+
+    const updateRelationListRow = record => {
+      const index = relationList.value.findIndex(item => {
+        return item._id === record._id
+      })
+      if (index >= 0) {
+        relationList.value[index] = {
+          ...relationList.value[index],
+          ...record,
+          collectionName: getRowCollectionName(relationList.value[index])
+        }
+      }
+      if (currentRow.value && currentRow.value._id === record._id) {
+        currentRow.value = {
+          ...currentRow.value,
+          ...record,
+          collectionName: getRowCollectionName(currentRow.value)
+        }
+      }
+    }
+
+    const buildAiEntries = record => {
+      const collectionName = getRowCollectionName(record)
+      return buildRecordTranslationEntries({
+        record,
+        collectionName,
+        groupLabel: getCollectionText(collectionName),
+        includeEmpty: true
+      })
+    }
+
+    const mapSourceEntriesToCurrent = (sourceEntries, currentEntries) => {
+      const sourceEntryMap = new Map(
+        sourceEntries.map(entry => [entry.fieldName, entry])
+      )
+      return currentEntries
+        .map(currentEntry => {
+          const sourceEntry = sourceEntryMap.get(currentEntry.fieldName)
+          if (!sourceEntry) {
+            return null
+          }
+          return {
+            ...currentEntry,
+            value: sourceEntry.value,
+            previewText: sourceEntry.previewText,
+            previewRawValue: sourceEntry.previewRawValue
+          }
+        })
+        .filter(Boolean)
+    }
+
+    const loadCurrentAiEntries = async () => {
+      return {
+        entries: aiRecord.value ? buildAiEntries(aiRecord.value) : []
+      }
+    }
+
+    const loadSourceAiEntries = async currentEntries => {
+      if (!aiRecord.value?.sourceId) {
+        return { entries: [] }
+      }
+      const collectionName = getRowCollectionName(aiRecord.value)
+      const response = await multilingualApi.getSourceRelationList(
+        {
+          collectionName,
+          sourceId: aiRecord.value.sourceId,
+          languageCode: aiRecord.value.sourceLanguageCode,
+          page: 1,
+          limit: 1
+        },
+        true
+      )
+      const list = response.data.data?.list || []
+      const sourceRecord = list.find(item => {
+        return String(item.sourceId) === String(aiRecord.value.sourceId)
+      })
+      if (!sourceRecord) {
+        return { entries: [] }
+      }
+      return {
+        entries: mapSourceEntriesToCurrent(
+          buildAiEntries(sourceRecord),
+          currentEntries
+        )
+      }
+    }
+
+    const openAiTranslation = row => {
+      if (!row) {
+        return
+      }
+      aiRecord.value = row
+      aiDialogVisible.value = true
+    }
+
+    const confirmAiTranslation = (payload, done) => {
+      if (!aiRecord.value) {
+        done?.()
+        return
+      }
+      const collectionName = getRowCollectionName(aiRecord.value)
+      multilingualApi
+        .updateTranslationRelation({
+          collectionName,
+          id: aiRecord.value._id,
+          languageCode: aiRecord.value.languageCode,
+          payload
+        })
+        .then(response => {
+          updateRelationListRow(response.data.data)
+          Object.keys(payload).forEach(key => {
+            editForm[key] = payload[key]
+          })
+          aiDialogVisible.value = false
+          ElMessage.success('AI 翻译已写入')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          done?.()
+        })
+    }
+
+    const restoreSnapshot = row => {
+      if (!row) {
+        return
+      }
+      ElMessageBox.confirm('确认将该内容还原为当前源快照？', '同步快照', {
+        type: 'warning',
+        confirmButtonText: '同步快照',
+        cancelButtonText: '取消'
+      })
+        .then(() => {
+          return multilingualApi.restoreTranslationRelationSnapshot({
+            collectionName: getRowCollectionName(row),
+            id: row._id,
+            languageCode: row.languageCode
+          })
+        })
+        .then(response => {
+          updateRelationListRow(response.data.data)
+          getRelationList(false)
+          ElMessage.success('已同步为最新快照')
+        })
+        .catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+    }
+
     const buildPayload = () => {
       const payload = {}
       currentEditFields.value.forEach(field => {
@@ -558,6 +769,7 @@ export default {
       params,
       relationList,
       total,
+      aiDialogVisible,
       loading,
       currentRow,
       detailFieldRows,
@@ -567,6 +779,10 @@ export default {
       submitting,
       editForm,
       editLanguageCode,
+      currentAiRecordId,
+      currentAiSnapshotVersion,
+      currentAiSourceLanguageCode,
+      currentAiTargetLanguageCode,
       currentEditFields,
       isSourceScope,
       isMixedCollectionPage,
@@ -580,8 +796,13 @@ export default {
       getRelationList,
       handlePageChange,
       handleParentRelationUpdated,
+      confirmAiTranslation,
+      loadCurrentAiEntries,
+      loadSourceAiEntries,
+      openAiTranslation,
       openDetail,
       openEdit,
+      restoreSnapshot,
       submitUpdate
     }
   }

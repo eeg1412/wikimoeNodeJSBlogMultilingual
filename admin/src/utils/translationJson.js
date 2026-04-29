@@ -17,6 +17,9 @@ const SUPPORTED_ENTRY_VALUE_TYPES = [
   LEGACY_RICH_TEXT_VALUE_TYPE,
   STRUCTURED_RICH_TEXT_VALUE_TYPE
 ]
+const RICH_TEXT_TEMPLATE_ENTRY_KIND = 'richTextTemplate'
+const RICH_TEXT_SEGMENT_ENTRY_KIND = 'richTextSegment'
+const RICH_TEXT_EXPORT_SEGMENT_MAX_LENGTH = 1200
 const RICH_TEXT_TRANSLATABLE_ATTRIBUTE_NAME_SET = new Set([
   'alt',
   'title',
@@ -206,6 +209,123 @@ function normalizeEntryValue(value, valueType) {
   }
 
   return normalizeStringValue(value)
+}
+
+function findRichTextExportSplitIndex(text, maxLength) {
+  const searchText = text.slice(0, maxLength)
+  const candidates = ['\n\n', '\n', '。', '！', '？', '. ', '! ', '? ', ' ']
+  let splitIndex = -1
+  candidates.forEach(candidate => {
+    const candidateIndex = searchText.lastIndexOf(candidate)
+    if (candidateIndex > splitIndex) {
+      splitIndex = candidateIndex + candidate.length
+    }
+  })
+  if (splitIndex <= 0) {
+    return maxLength
+  }
+  return splitIndex
+}
+
+function splitRichTextExportText(text) {
+  const parts = []
+  let restText = String(text || '')
+  while (restText.length > RICH_TEXT_EXPORT_SEGMENT_MAX_LENGTH) {
+    const splitIndex = findRichTextExportSplitIndex(
+      restText,
+      RICH_TEXT_EXPORT_SEGMENT_MAX_LENGTH
+    )
+    parts.push(restText.slice(0, splitIndex))
+    restText = restText.slice(splitIndex)
+  }
+  if (restText) {
+    parts.push(restText)
+  }
+  return parts
+}
+
+function pushRichTextExportSegments(segments, path, text) {
+  splitRichTextExportText(text).forEach(partText => {
+    if (!hasMeaningfulValue(partText)) {
+      return
+    }
+    segments.push({
+      segmentIndex: segments.length + 1,
+      path,
+      value: partText
+    })
+  })
+}
+
+function collectRichTextDocumentSegments(node, path = [], segments = []) {
+  if (!isPlainObject(node)) {
+    return segments
+  }
+
+  if (node.type === 'text') {
+    if (hasMeaningfulValue(node.text)) {
+      pushRichTextExportSegments(segments, path.concat('text'), node.text)
+    }
+    return segments
+  }
+
+  if (node.type === 'element' && isPlainObject(node.translatableAttrs)) {
+    Object.keys(node.translatableAttrs).forEach(attrName => {
+      const text = node.translatableAttrs[attrName]
+      if (hasMeaningfulValue(text)) {
+        pushRichTextExportSegments(
+          segments,
+          path.concat(['translatableAttrs', attrName]),
+          text
+        )
+      }
+    })
+  }
+
+  if (Array.isArray(node.children)) {
+    node.children.forEach((childNode, index) => {
+      collectRichTextDocumentSegments(
+        childNode,
+        path.concat(['children', index]),
+        segments
+      )
+    })
+  }
+
+  return segments
+}
+
+function buildRichTextDocumentSkeleton(node) {
+  if (!isPlainObject(node)) {
+    return node
+  }
+
+  const nextNode = cloneSerializableValue(node)
+  if (nextNode.type === 'text') {
+    if (hasMeaningfulValue(nextNode.text)) {
+      nextNode.text = ''
+    }
+    return nextNode
+  }
+
+  if (
+    nextNode.type === 'element' &&
+    isPlainObject(nextNode.translatableAttrs)
+  ) {
+    Object.keys(nextNode.translatableAttrs).forEach(attrName => {
+      if (hasMeaningfulValue(nextNode.translatableAttrs[attrName])) {
+        nextNode.translatableAttrs[attrName] = ''
+      }
+    })
+  }
+
+  if (Array.isArray(nextNode.children)) {
+    nextNode.children = nextNode.children.map(childNode => {
+      return buildRichTextDocumentSkeleton(childNode)
+    })
+  }
+
+  return nextNode
 }
 
 function hasMeaningfulEntryValue(value, valueType) {
@@ -1301,7 +1421,37 @@ export function buildTranslationExportEntries({
   return entryList
 }
 
-export function buildTranslationExportPayload({ form, selectedEntries }) {
+export function buildRecordTranslationEntries({
+  record,
+  collectionName,
+  groupLabel = '基础字段',
+  includeEmpty = false
+}) {
+  const buildOptions = { includeEmpty }
+  const entryList = []
+  const translationFieldList = getRelationTranslationFields(collectionName)
+
+  translationFieldList.forEach(editField => {
+    const entry = createRelationEntry(
+      {
+        field: 'record',
+        label: groupLabel,
+        collectionName
+      },
+      record,
+      editField,
+      buildOptions
+    )
+    if (entry) {
+      entry.groupLabel = groupLabel
+      entryList.push(entry)
+    }
+  })
+
+  return entryList
+}
+
+function buildExportBasePayload(form) {
   return {
     schema: TRANSLATION_JSON_SCHEMA,
     version: TRANSLATION_JSON_VERSION,
@@ -1316,50 +1466,392 @@ export function buildTranslationExportPayload({ form, selectedEntries }) {
       richTextInstruction:
         '富文本字段使用结构化 JSON 导出。只翻译 text 与 translatableAttrs 中的自然语言，不要修改 tag、attrs、children、src、href、style、data-* 等结构字段。'
     },
-    entries: selectedEntries.map(entry => {
-      const exportEntry = {
-        id: entry.id,
-        scope: entry.scope,
-        label: entry.label,
-        groupLabel: entry.groupLabel,
-        fieldName: entry.fieldName,
-        valueType: entry.valueType,
-        value: entry.value
-      }
+    entries: []
+  }
+}
 
-      if (entry.collectionName) {
-        exportEntry.collectionName = entry.collectionName
-      }
-      if (entry.relationField) {
-        exportEntry.relationField = entry.relationField
-      }
-      if (entry.recordId) {
-        exportEntry.recordId = entry.recordId
-      }
-      if (entry.recordKind) {
-        exportEntry.recordKind = entry.recordKind
-      }
-      if (entry.sourceRecordId) {
-        exportEntry.sourceRecordId = entry.sourceRecordId
-      }
-      if (entry.sourceId) {
-        exportEntry.sourceId = entry.sourceId
-      }
-      if (entry.sourceSnapshotId) {
-        exportEntry.sourceSnapshotId = entry.sourceSnapshotId
-      }
-      if (entry.recordLabel) {
-        exportEntry.recordLabel = entry.recordLabel
-      }
-      if (entry.relationTypeLabel) {
-        exportEntry.relationTypeLabel = entry.relationTypeLabel
-      }
-      if (entry.assets && Object.keys(entry.assets).length > 0) {
-        exportEntry.assets = entry.assets
-      }
+function buildExportEntryList(selectedEntries) {
+  return selectedEntries.map((entry, index) => {
+    const exportEntry = {
+      index: index + 1,
+      id: entry.id,
+      scope: entry.scope,
+      label: entry.label,
+      groupLabel: entry.groupLabel,
+      fieldName: entry.fieldName,
+      valueType: entry.valueType,
+      value: entry.value
+    }
 
-      return exportEntry
+    if (entry.collectionName) {
+      exportEntry.collectionName = entry.collectionName
+    }
+    if (entry.relationField) {
+      exportEntry.relationField = entry.relationField
+    }
+    if (entry.recordId) {
+      exportEntry.recordId = entry.recordId
+    }
+    if (entry.recordKind) {
+      exportEntry.recordKind = entry.recordKind
+    }
+    if (entry.sourceRecordId) {
+      exportEntry.sourceRecordId = entry.sourceRecordId
+    }
+    if (entry.sourceId) {
+      exportEntry.sourceId = entry.sourceId
+    }
+    if (entry.sourceSnapshotId) {
+      exportEntry.sourceSnapshotId = entry.sourceSnapshotId
+    }
+    if (entry.recordLabel) {
+      exportEntry.recordLabel = entry.recordLabel
+    }
+    if (entry.relationTypeLabel) {
+      exportEntry.relationTypeLabel = entry.relationTypeLabel
+    }
+    if (entry.assets && Object.keys(entry.assets).length > 0) {
+      exportEntry.assets = entry.assets
+    }
+
+    return exportEntry
+  })
+}
+
+function appendSlicedExportUnit(unitList, entry) {
+  unitList.push({
+    ...entry,
+    index: unitList.length + 1
+  })
+}
+
+function appendRichTextSlicedExportUnits(unitList, entry) {
+  const segmentList = collectRichTextDocumentSegments(entry.value)
+  if (segmentList.length === 0) {
+    appendSlicedExportUnit(unitList, entry)
+    return
+  }
+
+  appendSlicedExportUnit(unitList, {
+    ...entry,
+    entryKind: RICH_TEXT_TEMPLATE_ENTRY_KIND,
+    parentIndex: entry.index,
+    segmentTotal: segmentList.length,
+    value: buildRichTextDocumentSkeleton(entry.value),
+    note: '富文本结构模板。不要删除；实际可翻译文本在同 parentId 的 richTextSegment 条目中。'
+  })
+
+  segmentList.forEach(segment => {
+    appendSlicedExportUnit(unitList, {
+      ...entry,
+      id: `${entry.id}#segment.${segment.segmentIndex}`,
+      entryKind: RICH_TEXT_SEGMENT_ENTRY_KIND,
+      parentId: entry.id,
+      parentIndex: entry.index,
+      segmentIndex: segment.segmentIndex,
+      segmentTotal: segmentList.length,
+      path: segment.path,
+      label: `${entry.label} / 片段 ${segment.segmentIndex}`,
+      valueType: 'plainText',
+      value: segment.value
     })
+  })
+}
+
+function buildSlicedExportUnitList(entries) {
+  const unitList = []
+  entries.forEach(entry => {
+    if (entry.valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+      appendRichTextSlicedExportUnits(unitList, entry)
+      return
+    }
+    appendSlicedExportUnit(unitList, entry)
+  })
+  return unitList
+}
+
+function buildSlicedEntries(entries, sliceSize) {
+  const size = Math.max(1, Number(sliceSize || 20))
+  const unitList = buildSlicedExportUnitList(entries)
+  const slices = []
+  for (let index = 0; index < unitList.length; index += size) {
+    slices.push(unitList.slice(index, index + size))
+  }
+  return {
+    slices,
+    unitList,
+    size
+  }
+}
+
+export function buildTranslationExportPayload({
+  form,
+  selectedEntries,
+  sliceOptions = {}
+}) {
+  const payload = buildExportBasePayload(form)
+  const entries = buildExportEntryList(selectedEntries)
+  if (!sliceOptions.enabled) {
+    payload.entries = entries
+    return payload
+  }
+
+  const slicedResult = buildSlicedEntries(entries, sliceOptions.size)
+  delete payload.entries
+  payload.meta.slice = {
+    enabled: true,
+    total: slicedResult.slices.length,
+    totalEntries: slicedResult.unitList.length,
+    sourceEntries: entries.length,
+    size: slicedResult.size,
+    unit: 'translation-entry-or-rich-text-segment'
+  }
+  payload.slices = slicedResult.slices.map((sliceEntries, index) => {
+    return {
+      index: index + 1,
+      total: slicedResult.slices.length,
+      entries: sliceEntries
+    }
+  })
+  return payload
+}
+
+function mergeSlicedImportPayload(parsedData) {
+  if (!Array.isArray(parsedData.slices)) {
+    return parsedData
+  }
+
+  const sliceMeta = parsedData.meta?.slice || {}
+  const expectedTotal = Number(sliceMeta.total || parsedData.slices.length)
+  const expectedEntryTotal = Number(sliceMeta.totalEntries || 0)
+  if (!Number.isInteger(expectedTotal) || expectedTotal <= 0) {
+    throw new Error('JSON 切片总数不合法')
+  }
+
+  const sliceMap = new Map()
+  parsedData.slices.forEach((slice, index) => {
+    if (!slice || typeof slice !== 'object' || Array.isArray(slice)) {
+      throw new Error(`第 ${index + 1} 个切片格式不正确`)
+    }
+    const sliceIndex = Number(slice.index)
+    const sliceTotal = Number(slice.total || expectedTotal)
+    if (!Number.isInteger(sliceIndex) || sliceIndex <= 0) {
+      throw new Error(`第 ${index + 1} 个切片缺少合法 index`)
+    }
+    if (sliceTotal !== expectedTotal) {
+      throw new Error(`第 ${sliceIndex} 个切片 total 与 meta 不一致`)
+    }
+    if (sliceMap.has(sliceIndex)) {
+      throw new Error(`JSON 切片 ${sliceIndex} 重复`)
+    }
+    if (!Array.isArray(slice.entries)) {
+      throw new Error(`JSON 切片 ${sliceIndex} 缺少 entries`)
+    }
+    sliceMap.set(sliceIndex, slice.entries)
+  })
+
+  for (let index = 1; index <= expectedTotal; index += 1) {
+    if (!sliceMap.has(index)) {
+      throw new Error(`JSON 切片不完整，缺少第 ${index}/${expectedTotal} 片`)
+    }
+  }
+
+  const entries = []
+  for (let index = 1; index <= expectedTotal; index += 1) {
+    entries.push(...sliceMap.get(index))
+  }
+  if (expectedEntryTotal > 0 && entries.length !== expectedEntryTotal) {
+    throw new Error('JSON 切片条目总数不一致，可能缺少内容')
+  }
+
+  return {
+    ...parsedData,
+    entries
+  }
+}
+
+function isRichTextTemplateEntry(entry) {
+  return entry?.entryKind === RICH_TEXT_TEMPLATE_ENTRY_KIND
+}
+
+function isRichTextSegmentEntry(entry) {
+  return entry?.entryKind === RICH_TEXT_SEGMENT_ENTRY_KIND
+}
+
+function assertRichTextSegmentPath(path, label) {
+  if (!Array.isArray(path) || path.length === 0) {
+    throw new Error(`${label} 缺少合法 path`)
+  }
+  path.forEach((item, index) => {
+    const isValidItem = typeof item === 'string' || typeof item === 'number'
+    if (!isValidItem) {
+      throw new Error(`${label} 的 path[${index}] 不合法`)
+    }
+  })
+}
+
+function setRichTextDocumentValueByPath(documentValue, path, text) {
+  let current = documentValue
+  for (let index = 0; index < path.length - 1; index += 1) {
+    current = current?.[path[index]]
+    if (!isPlainObject(current) && !Array.isArray(current)) {
+      return false
+    }
+  }
+  const key = path[path.length - 1]
+  if (typeof key === 'undefined') {
+    return false
+  }
+  if (typeof current?.[key] !== 'string') {
+    return false
+  }
+  current[key] = text
+  return true
+}
+
+function buildMergedRichTextEntry(templateEntry, segmentList) {
+  const expectedTotal = Number(templateEntry.segmentTotal)
+  if (!Number.isInteger(expectedTotal) || expectedTotal < 0) {
+    throw new Error(
+      `${templateEntry.label || templateEntry.id} 的 segmentTotal 不合法`
+    )
+  }
+  if (segmentList.length !== expectedTotal) {
+    throw new Error(
+      `${templateEntry.label || templateEntry.id} 的富文本片段不完整，期望 ${expectedTotal} 个，实际 ${segmentList.length} 个`
+    )
+  }
+
+  const segmentIndexMap = new Map()
+  segmentList.forEach(segment => {
+    const segmentIndex = Number(segment.segmentIndex)
+    if (!Number.isInteger(segmentIndex) || segmentIndex <= 0) {
+      throw new Error(`${segment.label || segment.id} 的 segmentIndex 不合法`)
+    }
+    if (Number(segment.segmentTotal || expectedTotal) !== expectedTotal) {
+      throw new Error(`${segment.label || segment.id} 的 segmentTotal 不一致`)
+    }
+    if (segmentIndexMap.has(segmentIndex)) {
+      throw new Error(
+        `${templateEntry.label || templateEntry.id} 的富文本片段 ${segmentIndex} 重复`
+      )
+    }
+    if (typeof segment.value !== 'string') {
+      throw new Error(`${segment.label || segment.id} 的 value 必须是字符串`)
+    }
+    assertRichTextSegmentPath(segment.path, segment.label || segment.id)
+    segmentIndexMap.set(segmentIndex, segment)
+  })
+
+  for (let index = 1; index <= expectedTotal; index += 1) {
+    if (!segmentIndexMap.has(index)) {
+      throw new Error(
+        `${templateEntry.label || templateEntry.id} 的富文本片段不完整，缺少 ${index}/${expectedTotal}`
+      )
+    }
+  }
+
+  const documentValue = cloneSerializableValue(templateEntry.value)
+  const pathTextMap = new Map()
+  for (let index = 1; index <= expectedTotal; index += 1) {
+    const segment = segmentIndexMap.get(index)
+    const pathKey = JSON.stringify(segment.path)
+    if (!pathTextMap.has(pathKey)) {
+      pathTextMap.set(pathKey, {
+        path: segment.path,
+        text: ''
+      })
+    }
+    pathTextMap.get(pathKey).text += segment.value
+  }
+
+  for (const item of pathTextMap.values()) {
+    const isUpdated = setRichTextDocumentValueByPath(
+      documentValue,
+      item.path,
+      item.text
+    )
+    if (!isUpdated) {
+      throw new Error(
+        `${templateEntry.label || templateEntry.id} 的富文本片段回填失败`
+      )
+    }
+  }
+
+  validateRichTextDocumentNode(documentValue, templateEntry.id)
+  const mergedEntry = {
+    ...templateEntry,
+    valueType: STRUCTURED_RICH_TEXT_VALUE_TYPE,
+    value: documentValue
+  }
+  delete mergedEntry.entryKind
+  delete mergedEntry.parentId
+  delete mergedEntry.parentIndex
+  delete mergedEntry.segmentIndex
+  delete mergedEntry.segmentTotal
+  delete mergedEntry.path
+  delete mergedEntry.note
+  return mergedEntry
+}
+
+function mergeRichTextSegmentImportPayload(parsedData) {
+  const entries = parsedData.entries || []
+  const hasSegmentEntries = entries.some(entry => {
+    return isRichTextTemplateEntry(entry) || isRichTextSegmentEntry(entry)
+  })
+  if (!hasSegmentEntries) {
+    return parsedData
+  }
+
+  const templateMap = new Map()
+  const segmentMap = new Map()
+  entries.forEach(entry => {
+    if (isRichTextTemplateEntry(entry)) {
+      if (templateMap.has(entry.id)) {
+        throw new Error(`${entry.label || entry.id} 的富文本结构模板重复`)
+      }
+      templateMap.set(entry.id, entry)
+      return
+    }
+    if (isRichTextSegmentEntry(entry)) {
+      const parentId = normalizeStringValue(entry.parentId)
+      if (!parentId) {
+        throw new Error(`${entry.label || entry.id} 缺少 parentId`)
+      }
+      if (!segmentMap.has(parentId)) {
+        segmentMap.set(parentId, [])
+      }
+      segmentMap.get(parentId).push(entry)
+    }
+  })
+
+  for (const parentId of segmentMap.keys()) {
+    if (!templateMap.has(parentId)) {
+      throw new Error(`富文本片段 ${parentId} 缺少结构模板`)
+    }
+  }
+
+  const mergedTemplateMap = new Map()
+  for (const [templateId, templateEntry] of templateMap.entries()) {
+    mergedTemplateMap.set(
+      templateId,
+      buildMergedRichTextEntry(templateEntry, segmentMap.get(templateId) || [])
+    )
+  }
+
+  return {
+    ...parsedData,
+    entries: entries
+      .map(entry => {
+        if (isRichTextTemplateEntry(entry)) {
+          return mergedTemplateMap.get(entry.id)
+        }
+        if (isRichTextSegmentEntry(entry)) {
+          return null
+        }
+        return entry
+      })
+      .filter(Boolean)
   }
 }
 
@@ -1460,7 +1952,9 @@ function buildSkippedEntryGroupKey(entry, reasonType) {
       entry.scope,
       entry.relationField || '',
       entry.collectionName || '',
-      normalizeStringValue(entry.sourceId || entry.recordId || entry.recordLabel)
+      normalizeStringValue(
+        entry.sourceId || entry.recordId || entry.recordLabel
+      )
     ].join(':')
   }
 
@@ -1469,7 +1963,9 @@ function buildSkippedEntryGroupKey(entry, reasonType) {
       reasonType,
       entry.scope,
       entry.collectionName || '',
-      normalizeStringValue(entry.sourceId || entry.recordId || entry.recordLabel)
+      normalizeStringValue(
+        entry.sourceId || entry.recordId || entry.recordLabel
+      )
     ].join(':')
   }
 
@@ -1645,6 +2141,8 @@ export function parseTranslationImportPayload(jsonText) {
   if (!parsedData.meta || typeof parsedData.meta !== 'object') {
     throw new Error('JSON meta 缺失')
   }
+  parsedData = mergeSlicedImportPayload(parsedData)
+  parsedData = mergeRichTextSegmentImportPayload(parsedData)
   if (!Array.isArray(parsedData.entries) || parsedData.entries.length === 0) {
     throw new Error('JSON entries 不能为空')
   }

@@ -34,20 +34,6 @@
           </el-form-item>
           <el-form-item>
             <el-select
-              v-model="params.sourceLanguageCode"
-              placeholder="源语言"
-              style="width: 180px"
-            >
-              <el-option
-                v-for="item in languageOptions"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item>
-            <el-select
               v-model="params.type"
               placeholder="类型"
               clearable
@@ -172,13 +158,23 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="快照状态" min-width="190">
           <template #default="{ row }">
-            <el-tag v-if="row.hasSnapshot" type="success" effect="plain">
-              已生成 v{{ row.snapshot?.snapshotVersion || 1 }}
-            </el-tag>
-            <el-tag v-else type="info" effect="plain">未生成</el-tag>
-            <div class="snapshot-meta" v-if="row.snapshot?.sourceSnapshotAt">
-              {{ $formatDate(row.snapshot.sourceSnapshotAt) }}
+            <div
+              v-if="row.snapshotSummary?.length"
+              class="snapshot-language-tags"
+            >
+              <el-tag
+                v-for="snapshot in row.snapshotSummary"
+                :key="snapshot._id"
+                type="success"
+                size="small"
+                effect="plain"
+              >
+                {{ getLanguageText(snapshot.sourceLanguageCode) }} / v{{
+                  snapshot.snapshotVersion || 1
+                }}
+              </el-tag>
             </div>
+            <el-tag v-else type="info" effect="plain">未生成</el-tag>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源更新时间" width="180">
@@ -189,20 +185,19 @@
         <ResponsiveTableColumn label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="!row.hasSnapshot"
               type="primary"
               size="small"
               :loading="rowActionLoadingMap[row.sourceId]"
-              @click="importRow(row)"
+              @click="openLanguageDialog(row, 'import')"
             >
               生成快照
             </el-button>
             <el-button
-              v-else
+              v-if="row.hasSnapshot"
               type="warning"
               size="small"
               :loading="rowActionLoadingMap[row.sourceId]"
-              @click="overwriteRow(row)"
+              @click="openLanguageDialog(row, 'overwrite')"
             >
               覆盖快照
             </el-button>
@@ -265,6 +260,32 @@
         </div>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="languageDialogVisible"
+      :title="languageDialogTitle"
+      width="480px"
+      destroy-on-close
+    >
+      <el-form :model="languageForm" label-width="110px" @submit.prevent>
+        <el-form-item label="快照语言" required>
+          <el-select v-model="languageForm.sourceLanguageCode" class="w_10">
+            <el-option
+              v-for="item in languageOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="languageDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmLanguageAction">
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -278,11 +299,14 @@ import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
+  getLanguageText,
   getPostStatusTagType,
   getPostStatusText,
   getPostDisplayTitle,
   getPostTypeText
 } from '@/utils/multilingual'
+
+const SOURCE_IMPORT_LANGUAGE_STORAGE_KEY = 'wikimoe-source-import-language'
 
 export default {
   components: {
@@ -295,14 +319,26 @@ export default {
     const total = ref(0)
     const result = ref(null)
     const resultDialogVisible = ref(false)
+    const languageDialogVisible = ref(false)
+    const languageAction = ref('import')
+    const languageRow = ref(null)
     const rowActionLoadingMap = reactive({})
+    const languageForm = reactive({
+      sourceLanguageCode: 'zh-CN'
+    })
     const params = reactive({
       page: 1,
       limit: 20,
       keyword: '',
-      sourceLanguageCode: 'zh-CN',
       type: '',
       status: ''
+    })
+
+    const languageDialogTitle = computed(() => {
+      if (languageAction.value === 'overwrite') {
+        return '选择要覆盖的快照语言'
+      }
+      return '选择源文章快照语言'
     })
 
     const copiedCountRows = computed(() => {
@@ -321,8 +357,7 @@ export default {
     const getRequestParams = () => {
       const requestParams = {
         page: params.page,
-        limit: params.limit,
-        sourceLanguageCode: params.sourceLanguageCode
+        limit: params.limit
       }
       if (params.keyword) {
         requestParams.keyword = params.keyword
@@ -364,35 +399,84 @@ export default {
       row.snapshot = {
         _id: data.sourceSnapshotId,
         sourceId: row.sourceId,
+        sourceLanguageCode: data.sourceLanguageCode,
         translationGroupId: data.translationGroupId,
         snapshotVersion: data.snapshotVersion,
         sourceSnapshotAt: new Date()
       }
+      row.snapshotSummary = [
+        ...(row.snapshotSummary || []).filter(snapshot => {
+          return snapshot.sourceLanguageCode !== data.sourceLanguageCode
+        }),
+        row.snapshot
+      ]
     }
 
-    const importRow = async row => {
+    const getStoredSourceLanguageCode = () => {
+      const storedValue = localStorage.getItem(
+        SOURCE_IMPORT_LANGUAGE_STORAGE_KEY
+      )
+      const matched = SUPPORTED_LANGUAGE_OPTIONS.find(item => {
+        return item.value === storedValue
+      })
+      if (matched) {
+        return matched.value
+      }
+      return 'zh-CN'
+    }
+
+    const rememberSourceLanguageCode = sourceLanguageCode => {
+      localStorage.setItem(
+        SOURCE_IMPORT_LANGUAGE_STORAGE_KEY,
+        sourceLanguageCode
+      )
+    }
+
+    const openLanguageDialog = (row, action) => {
+      languageRow.value = row
+      languageAction.value = action
+      languageForm.sourceLanguageCode = getStoredSourceLanguageCode()
+      languageDialogVisible.value = true
+    }
+
+    const confirmLanguageAction = () => {
+      const row = languageRow.value
+      if (!row) {
+        return
+      }
+      rememberSourceLanguageCode(languageForm.sourceLanguageCode)
+      languageDialogVisible.value = false
+      if (languageAction.value === 'overwrite') {
+        overwriteRow(row, languageForm.sourceLanguageCode)
+        return
+      }
+      importRow(row, languageForm.sourceLanguageCode)
+    }
+
+    const importRow = async (row, sourceLanguageCode) => {
       setRowLoading(row, true)
       try {
         const response = await multilingualApi.importSourcePost({
           sourceId: String(row.sourceId),
-          sourceLanguageCode: params.sourceLanguageCode,
+          sourceLanguageCode,
           overwrite: false
         })
         result.value = response.data.data
+        result.value.sourceLanguageCode = sourceLanguageCode
         syncRowSnapshot(row, result.value)
         resultDialogVisible.value = true
         ElMessage.success('源文章快照生成成功')
         getSourceDatabasePostList(false)
       } catch (error) {
-        await handleImportError(row, error)
+        await handleImportError(row, error, sourceLanguageCode)
       } finally {
         setRowLoading(row, false)
       }
     }
 
-    const overwriteRow = row => {
+    const overwriteRow = (row, sourceLanguageCode) => {
       ElMessageBox.confirm(
-        `确认覆盖源文章「${getPostDisplayTitle(row)}」的 ${params.sourceLanguageCode} 快照？旧关联和旧媒体不会自动删除。`,
+        `确认覆盖源文章「${getPostDisplayTitle(row)}」的 ${sourceLanguageCode} 快照？旧关联和旧媒体不会自动删除。`,
         '确认覆盖源快照',
         {
           type: 'warning',
@@ -400,7 +484,7 @@ export default {
           cancelButtonText: '取消'
         }
       )
-        .then(() => submitOverwrite(row))
+        .then(() => submitOverwrite(row, sourceLanguageCode))
         .catch(error => {
           if (error !== 'cancel' && error !== 'close') {
             console.log(error)
@@ -408,15 +492,16 @@ export default {
         })
     }
 
-    const submitOverwrite = async row => {
+    const submitOverwrite = async (row, sourceLanguageCode) => {
       setRowLoading(row, true)
       try {
         const response = await multilingualApi.overwriteSourcePost({
           sourceId: String(row.sourceId),
-          sourceLanguageCode: params.sourceLanguageCode,
+          sourceLanguageCode,
           overwrite: true
         })
         result.value = response.data.data
+        result.value.sourceLanguageCode = sourceLanguageCode
         syncRowSnapshot(row, result.value)
         resultDialogVisible.value = true
         ElMessage.success('源文章快照覆盖成功')
@@ -426,7 +511,7 @@ export default {
       }
     }
 
-    const handleImportError = async (row, error) => {
+    const handleImportError = async (row, error, sourceLanguageCode) => {
       const responseData = error?.response?.data || {}
       const errorList = responseData.errorList || []
       const existsError = errorList.find(item => item.code === 'SOURCE_EXISTS')
@@ -450,7 +535,7 @@ export default {
             cancelButtonText: '取消'
           }
         )
-        await submitOverwrite(row)
+        await submitOverwrite(row, sourceLanguageCode)
       } catch (confirmError) {
         if (confirmError !== 'cancel' && confirmError !== 'close') {
           console.log(confirmError)
@@ -462,8 +547,7 @@ export default {
       router.push({
         name: 'SourcePostSnapshotList',
         query: {
-          keyword: String(row.sourceId),
-          sourceLanguageCode: params.sourceLanguageCode
+          keyword: String(row.sourceId)
         }
       })
     }
@@ -472,13 +556,6 @@ export default {
       () => params.page,
       () => {
         getSourceDatabasePostList(false)
-      }
-    )
-
-    watch(
-      () => params.sourceLanguageCode,
-      () => {
-        getSourceDatabasePostList(true)
       }
     )
 
@@ -496,15 +573,19 @@ export default {
       postStatusOptions: POST_STATUS_OPTIONS,
       result,
       resultDialogVisible,
+      languageDialogVisible,
+      languageDialogTitle,
+      languageForm,
       copiedCountRows,
       rowActionLoadingMap,
+      getLanguageText,
       getPostTypeText,
       getPostStatusText,
       getPostStatusTagType,
       getPostDisplayTitle,
       getSourceDatabasePostList,
-      importRow,
-      overwriteRow,
+      confirmLanguageAction,
+      openLanguageDialog,
       goSnapshot
     }
   }
@@ -537,6 +618,12 @@ export default {
 }
 
 .table-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.snapshot-language-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
