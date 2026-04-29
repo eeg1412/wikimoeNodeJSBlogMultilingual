@@ -71,6 +71,7 @@ export default {
   line-height: 1.5;
   color: var(--el-text-color-secondary);
   word-break: break-word;
+  white-space: normal;
 }
 
 .translation-entry-meta-tags {
