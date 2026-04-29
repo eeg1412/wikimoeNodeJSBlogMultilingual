@@ -950,6 +950,7 @@ export default {
         .then(response => {
           updateMediaListRow(response.data.data)
           Object.assign(editForm, payload)
+          getMediaList(false)
           aiDialogVisible.value = false
           ElMessage.success('AI 翻译已写入')
         })

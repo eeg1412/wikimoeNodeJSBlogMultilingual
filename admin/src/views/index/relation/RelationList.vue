@@ -649,6 +649,7 @@ export default {
           Object.keys(payload).forEach(key => {
             editForm[key] = payload[key]
           })
+          getRelationList(false)
           aiDialogVisible.value = false
           ElMessage.success('AI 翻译已写入')
         })
