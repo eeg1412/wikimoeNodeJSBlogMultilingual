@@ -1573,7 +1573,7 @@ function validateBlogRssSitemapRoutes() {
     'updateLanguageSitemap',
     'reflushLanguageSitemap',
     "recordKind: 'translation'",
-    '`/${languageCode}/index/${pathType}/${post.alias || post._id}`',
+    '`/${languageCode}/${pathType}/${post.alias || post._id}`',
     'path.join(sitemapCacheFolder, languageCode)',
     '`/${languageCode}`'
   ])

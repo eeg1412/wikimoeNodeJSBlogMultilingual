@@ -57,7 +57,7 @@ async function getLanguageSeoSettings(languageCode) {
 
 function getPostSitemapUrl(languageCode, post) {
   const pathType = post.type === 3 ? 'page' : 'post'
-  return `/${languageCode}/index/${pathType}/${post.alias || post._id}`
+  return `/${languageCode}/${pathType}/${post.alias || post._id}`
 }
 
 function getPostPriority(type) {

@@ -66,7 +66,7 @@ async function getLanguageSeoSettings(languageCode) {
 
 function getPostUrl(siteUrl, languageCode, post) {
   const pathType = post.type === 3 ? 'page' : 'post'
-  return `${siteUrl}/${languageCode}/index/${pathType}/${post.alias || post._id}`
+  return `${siteUrl}/${languageCode}/${pathType}/${post.alias || post._id}`
 }
 
 async function cleanLanguageRss(languageCode) {
