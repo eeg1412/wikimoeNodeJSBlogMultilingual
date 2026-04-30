@@ -161,7 +161,7 @@ export default defineNuxtConfig({
     swrCacheTtl: '',
     public: {
       apiDomain: '',
-      version: ''
+      version: process.env.npm_package_version
     }
   },
 
