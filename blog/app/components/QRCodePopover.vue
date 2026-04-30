@@ -55,7 +55,7 @@
 </template>
 <script setup>
 const { options } = useOptions()
-const { t } = useLang()
+const { t, localeUrl } = useLang()
 const { copyText } = useLocalizedText()
 const siteUrl = computed(() => options.value?.siteUrl)
 const siteEnableFooterQRCodeButton = computed(
@@ -70,16 +70,17 @@ const props = defineProps({
 })
 const toast = useWToast()
 
-// 生成文章链接
+// 生成文章链接（包含语言前缀）
 const getPostUrl = computed(() => {
   const baseUrl = siteUrl.value || ''
   const identifier = props.post.alias || props.post._id
-
+  let path = ''
   if (props.post.type === 3) {
-    return `${baseUrl}/page/${identifier}`
+    path = `/page/${identifier}`
   } else {
-    return `${baseUrl}/post/${identifier}`
+    path = `/post/${identifier}`
   }
+  return localeUrl(baseUrl, path)
 })
 </script>
 <style scoped>

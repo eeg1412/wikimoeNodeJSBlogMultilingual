@@ -52,7 +52,7 @@
 <script setup>
 import { putShareCountApi } from '@/api/post'
 const { options } = useOptions()
-const { t } = useLang()
+const { t, localeUrl } = useLang()
 const siteUrl = computed(() => options.value?.siteUrl)
 const siteTitle = computed(() => options.value?.siteTitle)
 const siteEnableShareButton = computed(
@@ -79,16 +79,17 @@ const getSourcePostId = () => {
   return props.post._id
 }
 
-// 生成文章链接
+// 生成文章链接（包含语言前缀）
 const getPostUrl = () => {
   const baseUrl = siteUrl.value || ''
   const identifier = props.post.alias || props.post._id
-
+  let path = ''
   if (props.post.type === 3) {
-    return `${baseUrl}/page/${identifier}`
+    path = `/page/${identifier}`
   } else {
-    return `${baseUrl}/post/${identifier}`
+    path = `/post/${identifier}`
   }
+  return localeUrl(baseUrl, path)
 }
 
 // 生成分享文案
