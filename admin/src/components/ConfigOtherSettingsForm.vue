@@ -108,6 +108,7 @@ import { authApi } from '@/api'
 import store from '@/store'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
+import ls from '@/utils/ls'
 
 export default {
   setup(props, { emit }) {
@@ -184,7 +185,7 @@ export default {
         name: 'Login'
       })
       // 清除token
-      localStorage.removeItem('adminToken')
+      ls.removeItem('adminToken')
       sessionStorage.removeItem('adminToken')
     }
     const handleFlushSecret = () => {

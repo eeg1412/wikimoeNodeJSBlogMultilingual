@@ -35,6 +35,7 @@
 <script setup>
 import emojiList from '@/utils/emoji.json'
 import { ref, computed } from 'vue'
+import ls from '@/utils/ls'
 
 const emits = defineEmits()
 const emoji = emojiList
@@ -66,7 +67,7 @@ const handleEmojiClick = item => {
   popoverShow.value = false
 }
 const getUsedEmoji = () => {
-  const usedEmojiStr = localStorage.getItem('usedEmoji')
+  const usedEmojiStr = ls.getItem('usedEmoji')
   if (usedEmojiStr) {
     try {
       usedEmoji.value = JSON.parse(usedEmojiStr)
@@ -82,7 +83,7 @@ const setUsedEmoji = item => {
   }
   usedEmoji.value.unshift(item)
   usedEmoji.value = usedEmoji.value.slice(0, 100)
-  localStorage.setItem('usedEmoji', JSON.stringify(usedEmoji.value))
+  ls.setItem('usedEmoji', JSON.stringify(usedEmoji.value))
 }
 const emojiBtnClick = () => {
   emojiInit()

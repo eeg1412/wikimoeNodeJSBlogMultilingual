@@ -296,6 +296,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import ls from '@/utils/ls'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -415,9 +416,7 @@ export default {
     }
 
     const getStoredSourceLanguageCode = () => {
-      const storedValue = localStorage.getItem(
-        SOURCE_IMPORT_LANGUAGE_STORAGE_KEY
-      )
+      const storedValue = ls.getItem(SOURCE_IMPORT_LANGUAGE_STORAGE_KEY)
       const matched = SUPPORTED_LANGUAGE_OPTIONS.find(item => {
         return item.value === storedValue
       })
@@ -428,10 +427,7 @@ export default {
     }
 
     const rememberSourceLanguageCode = sourceLanguageCode => {
-      localStorage.setItem(
-        SOURCE_IMPORT_LANGUAGE_STORAGE_KEY,
-        sourceLanguageCode
-      )
+      ls.setItem(SOURCE_IMPORT_LANGUAGE_STORAGE_KEY, sourceLanguageCode)
     }
 
     const openLanguageDialog = (row, action) => {

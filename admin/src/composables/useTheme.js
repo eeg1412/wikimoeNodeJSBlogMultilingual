@@ -1,6 +1,7 @@
 // src/composables/useTheme.js
 import { ref } from 'vue'
 import { applyThemeToDom } from '@/utils/theme.js'
+import ls from '@/utils/ls'
 
 const SYSTEM_THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)'
 const VALID_THEMES = ['light', 'dark']
@@ -37,8 +38,8 @@ const readSystemTheme = () => {
 }
 
 const persistThemeState = () => {
-  localStorage.setItem('theme-preference', theme.value)
-  localStorage.setItem('theme-follow-system', String(followSystem.value))
+  ls.setItem('theme-preference', theme.value)
+  ls.setItem('theme-follow-system', String(followSystem.value))
 }
 
 const applyTheme = nextTheme => {
@@ -81,8 +82,8 @@ export const initTheme = () => {
     return
   }
 
-  const savedTheme = localStorage.getItem('theme-preference')
-  const savedFollowSystem = localStorage.getItem('theme-follow-system')
+  const savedTheme = ls.getItem('theme-preference')
+  const savedFollowSystem = ls.getItem('theme-follow-system')
   const nextSystemTheme = readSystemTheme()
 
   if (systemPreferenceSupported.value) {

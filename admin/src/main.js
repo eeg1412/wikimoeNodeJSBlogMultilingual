@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+// localStorage wrapper is provided by '@/utils/ls' and used explicitly where needed
+// avoid global overrides to reduce invasiveness
 import router from './router'
 import store from './store'
 import ElementPlus from 'element-plus'

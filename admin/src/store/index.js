@@ -1,5 +1,6 @@
 import { createStore } from 'vuex'
 import { authApi } from '@/api'
+import ls from '@/utils/ls'
 
 const DEFAULT_BLOG_LANGUAGE_CODE = 'zh-CN'
 
@@ -13,7 +14,7 @@ function getDefaultBlogUrl() {
 
 export default createStore({
   state: {
-    adminToken: localStorage.getItem('adminToken') || '',
+    adminToken: ls.getItem('adminToken') || '',
     adminInfo: null,
     loadingShow: false,
     siteUrl: getDefaultBlogUrl()
@@ -54,7 +55,7 @@ export default createStore({
     },
 
     setAdminToken({ commit }, data) {
-      localStorage.setItem('adminToken', data)
+      ls.setItem('adminToken', data)
       commit('setAdminToken', data)
     },
 

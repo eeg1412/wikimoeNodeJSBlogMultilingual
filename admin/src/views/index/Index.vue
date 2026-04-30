@@ -109,6 +109,7 @@ import {
 import store from '@/store'
 import { ElMessageBox } from 'element-plus'
 import ThemeChanger from '@/components/ThemeChanger.vue'
+import ls from '@/utils/ls'
 
 const menuGroups = [
   {
@@ -308,7 +309,7 @@ export default {
         name: 'Login'
       })
       // 清除token
-      localStorage.removeItem('adminToken')
+      ls.removeItem('adminToken')
       sessionStorage.removeItem('adminToken')
     }
 

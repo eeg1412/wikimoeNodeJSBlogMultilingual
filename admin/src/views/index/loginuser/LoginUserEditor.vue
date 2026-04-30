@@ -136,6 +136,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { authApi } from '@/api'
 // ElMessage
 import { ElMessage } from 'element-plus'
+import ls from '@/utils/ls'
 import AttachmentsDialog from '@/components/AttachmentsDialog'
 import { loadAndOpenImg } from '@/utils/utils'
 
@@ -274,7 +275,7 @@ export default {
               formPassword.password = ''
               formPassword.confirmPassword = ''
               // 清除token
-              localStorage.removeItem('adminToken')
+              ls.removeItem('adminToken')
               store.dispatch('setAdminToken', '')
               // 登出
               router.replace({
