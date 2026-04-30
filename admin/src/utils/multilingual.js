@@ -268,14 +268,14 @@ export function getPostDisplayTitle(post) {
   }
 
   if (Number(post.type) === 2) {
-    const mediaTitle = getTweetMediaTitle(post)
-    if (mediaTitle) {
-      return mediaTitle
-    }
-
     const tweetText = stripText(post.excerpt).replace(/\s+/g, ' ')
     if (tweetText) {
       return limitStr(tweetText, 50)
+    }
+
+    const mediaTitle = getTweetMediaTitle(post)
+    if (mediaTitle) {
+      return mediaTitle
     }
   }
 
