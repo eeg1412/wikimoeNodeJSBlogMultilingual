@@ -75,47 +75,12 @@
             </div>
           </div>
 
-          <el-checkbox-group
+          <TranslationEntrySelectableGroups
             v-model="selectedEntryIds"
+            :groups="entryGroups"
             class="w_10"
             :disabled="isBusy"
-          >
-            <div
-              v-for="group in entryGroups"
-              :key="group.label"
-              class="translation-json-group"
-            >
-              <div class="translation-json-group-header">
-                <div class="translation-json-group-heading">
-                  <div
-                    v-if="group.meta.eyebrow"
-                    class="translation-json-group-eyebrow"
-                  >
-                    {{ group.meta.eyebrow }}
-                  </div>
-                  <div class="translation-json-group-title">
-                    {{ group.meta.title || group.label || '未命名分组' }}
-                  </div>
-                </div>
-                <div class="translation-json-group-count">
-                  {{ group.entries.length }} 项
-                </div>
-              </div>
-              <div class="translation-json-entry-list">
-                <el-checkbox
-                  v-for="entry in group.entries"
-                  :key="entry.id"
-                  :value="entry.id"
-                  class="translation-json-entry"
-                >
-                  <TranslationEntryMeta :entry="entry" />
-                  <div class="translation-json-entry-preview">
-                    {{ entry.previewText }}
-                  </div>
-                </el-checkbox>
-              </div>
-            </div>
-          </el-checkbox-group>
+          />
 
           <el-form class="ai-translation-prompt-form" label-width="110px">
             <el-form-item label="此次提示词">
@@ -235,6 +200,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
+import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
   getLanguageText,
   SUPPORTED_LANGUAGE_OPTIONS
@@ -270,7 +236,8 @@ function toFinalValue(valueType, value) {
 export default {
   name: 'ContentAiTranslationDialog',
   components: {
-    TranslationEntryMeta
+    TranslationEntryMeta,
+    TranslationEntrySelectableGroups
   },
   props: {
     modelValue: { type: Boolean, default: false },
@@ -352,9 +319,32 @@ export default {
 
     function handleSourceLanguageChange() {
       resetPreview()
-      if (baseMode.value === 'source') {
-        reloadEntries()
-      }
+      reloadEntries()
+    }
+
+    function attachEntryPreviewRows(entries, currentEntries, sourceEntries) {
+      const currentEntryMap = new Map(
+        currentEntries.map(entry => [entry.id, entry])
+      )
+      const sourceEntryMap = new Map(
+        sourceEntries.map(entry => [entry.id, entry])
+      )
+
+      return entries.map(entry => {
+        const currentEntry = currentEntryMap.get(entry.id)
+        const sourceEntry = sourceEntryMap.get(entry.id)
+        return {
+          ...entry,
+          currentPreviewText:
+            currentEntry?.previewText || entry.currentPreviewText || '',
+          currentPreviewRawValue:
+            currentEntry?.previewRawValue || entry.currentPreviewRawValue || '',
+          sourcePreviewText:
+            sourceEntry?.previewText || entry.sourcePreviewText || '',
+          sourcePreviewRawValue:
+            sourceEntry?.previewRawValue || entry.sourcePreviewRawValue || ''
+        }
+      })
     }
 
     async function reloadEntries() {
@@ -372,8 +362,8 @@ export default {
           return
         }
         currentEntryList.value = currentResult.entries || []
-        let sourceResult = currentResult
-        if (requestMode === 'source') {
+        let sourceResult = { entries: [] }
+        if (requestSourceLanguageCode.value) {
           sourceResult = await props.loadSourceEntries(
             currentEntryList.value,
             requestSourceLanguageCode.value
@@ -385,7 +375,14 @@ export default {
         ) {
           return
         }
-        entryList.value = sourceResult.entries || []
+        const sourceEntries = sourceResult.entries || []
+        const baseEntries =
+          requestMode === 'source' ? sourceEntries : currentEntryList.value
+        entryList.value = attachEntryPreviewRows(
+          baseEntries,
+          currentEntryList.value,
+          sourceEntries
+        )
         selectedEntryIds.value = entryList.value
           .filter(entry => entry.defaultSelected)
           .map(entry => entry.id)
@@ -780,17 +777,6 @@ export default {
 
 .translation-json-entry :deep(.el-checkbox__input) {
   margin-top: 4px;
-}
-
-.translation-json-entry-preview {
-  margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--el-border-color);
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .translation-json-warning-item,

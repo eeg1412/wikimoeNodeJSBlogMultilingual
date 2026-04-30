@@ -2,7 +2,10 @@
   <div class="translation-entry-meta">
     <div class="translation-entry-meta-main">
       <div class="translation-entry-meta-title">{{ meta.title }}</div>
-      <div v-if="meta.subtitle" class="translation-entry-meta-subtitle">
+      <div
+        v-if="showSubtitle && meta.subtitle"
+        class="translation-entry-meta-subtitle"
+      >
         {{ meta.subtitle }}
       </div>
     </div>
@@ -30,6 +33,10 @@ export default {
     entry: {
       type: Object,
       required: true
+    },
+    showSubtitle: {
+      type: Boolean,
+      default: true
     }
   },
   setup(props) {

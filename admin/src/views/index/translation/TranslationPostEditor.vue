@@ -463,45 +463,12 @@
         {{ exportSliceSummary.totalEntries }} 个翻译单元，来自
         {{ exportSliceSummary.sourceEntries }} 个原始条目。
       </div>
-      <el-checkbox-group
+      <TranslationEntrySelectableGroups
         v-if="!exportLoading"
         v-model="selectedExportIds"
+        :groups="exportEntryGroups"
         class="w_10"
-      >
-        <div
-          v-for="group in exportEntryGroups"
-          :key="group.label"
-          class="translation-json-group"
-        >
-          <div class="translation-json-group-header">
-            <div class="translation-json-group-heading">
-              <div
-                v-if="group.meta.eyebrow"
-                class="translation-json-group-eyebrow"
-              >
-                {{ group.meta.eyebrow }}
-              </div>
-              <div class="translation-json-group-title">
-                {{ group.meta.title || group.label || '未命名分组' }}
-              </div>
-            </div>
-            <div class="translation-json-group-count">
-              {{ group.entries.length }} 项
-            </div>
-          </div>
-          <div class="translation-json-entry-list">
-            <el-checkbox
-              v-for="entry in group.entries"
-              :key="entry.id"
-              :value="entry.id"
-              class="translation-json-entry"
-            >
-              <TranslationEntryMeta :entry="entry" :show-subtitle="false" />
-              <TranslationEntryPreviewRows :entry="entry" />
-            </el-checkbox>
-          </div>
-        </div>
-      </el-checkbox-group>
+      />
       <template #footer>
         <el-button @click="exportDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="downloadTranslationJson">
@@ -816,48 +783,12 @@
               </div>
             </div>
 
-            <el-checkbox-group
+            <TranslationEntrySelectableGroups
               v-model="selectedAiEntryIds"
-              class="w_10"
+              :groups="aiEntryGroups"
               :disabled="isAiBusy"
-            >
-              <div
-                v-for="group in aiEntryGroups"
-                :key="group.label"
-                class="translation-json-group"
-              >
-                <div class="translation-json-group-header">
-                  <div class="translation-json-group-heading">
-                    <div
-                      v-if="group.meta.eyebrow"
-                      class="translation-json-group-eyebrow"
-                    >
-                      {{ group.meta.eyebrow }}
-                    </div>
-                    <div class="translation-json-group-title">
-                      {{ group.meta.title || group.label || '未命名分组' }}
-                    </div>
-                  </div>
-                  <div class="translation-json-group-count">
-                    {{ group.entries.length }} 项
-                  </div>
-                </div>
-                <div class="translation-json-entry-list">
-                  <el-checkbox
-                    v-for="entry in group.entries"
-                    :key="entry.id"
-                    :value="entry.id"
-                    class="translation-json-entry"
-                  >
-                    <TranslationEntryMeta
-                      :entry="entry"
-                      :show-subtitle="false"
-                    />
-                    <TranslationEntryPreviewRows :entry="entry" />
-                  </el-checkbox>
-                </div>
-              </div>
-            </el-checkbox-group>
+              class="w_10"
+            />
 
             <el-form class="ai-translation-prompt-form" label-width="110px">
               <el-form-item label="此次提示词">
@@ -1205,7 +1136,7 @@ import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
-import TranslationEntryPreviewRows from '@/components/TranslationEntryPreviewRows.vue'
+import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
@@ -1500,7 +1431,7 @@ export default {
     RichEditor4,
     RelationBusinessFieldEditor,
     TranslationEntryMeta,
-    TranslationEntryPreviewRows,
+    TranslationEntrySelectableGroups,
     VideoUploader,
     VideoPlay
   },

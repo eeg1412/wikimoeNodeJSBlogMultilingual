@@ -2094,7 +2094,11 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
     ...targetEntry,
     value,
     previewText: buildPreviewText(value, targetEntry.valueType),
-    previewRawValue: buildPreviewRawValue(value, targetEntry.valueType)
+    previewRawValue: buildPreviewRawValue(value, targetEntry.valueType),
+    currentPreviewText: targetEntry.previewText,
+    currentPreviewRawValue: targetEntry.previewRawValue,
+    sourcePreviewText: sourceEntry.previewText,
+    sourcePreviewRawValue: sourceEntry.previewRawValue
   }
 }
 
