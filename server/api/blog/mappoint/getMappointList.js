@@ -1,13 +1,22 @@
 const mappointUtils = require('../../../mongodb/utils/mappoints')
+const cacheDataUtils = require('../../../config/cacheData')
 const utils = require('../../../utils/utils')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 
 module.exports = async function (req, res, next) {
-  const params = {
+  const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+  if (!languageCode) {
+    res
+      .status(400)
+      .json({ errors: [{ message: '必须提供语言代码languageCode' }] })
+    return
+  }
+
+  const params = cacheDataUtils.getTranslationParams(languageCode, {
     // 只获取状态为显示的地图点
     status: 1
-  }
+  })
 
   // 排序：按创建时间降序
   const sort = {
