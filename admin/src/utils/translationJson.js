@@ -75,14 +75,6 @@ const POST_TRANSLATION_FIELDS = [
     }
   },
   {
-    name: 'alias',
-    label: '文章别名',
-    valueType: 'plainText',
-    supportedTypes: [1, 2, 3],
-    defaultSelected: false,
-    optional: true
-  },
-  {
     name: 'code',
     label: '插入 code',
     valueType: 'plainText',
@@ -1460,6 +1452,44 @@ function getParentTranslationFields(parentRelationField) {
   })
 }
 
+function appendParentRelationEntries({
+  entryList,
+  exportedParentIdSet,
+  parentRelationFieldList,
+  record,
+  buildOptions
+}) {
+  parentRelationFieldList.forEach(parentRelationField => {
+    const parentRecord = record[parentRelationField.name]
+    if (
+      !parentRecord ||
+      typeof parentRecord !== 'object' ||
+      !parentRecord._id
+    ) {
+      return
+    }
+
+    getParentTranslationFields(parentRelationField).forEach(
+      parentEditField => {
+        const parentEntryId = `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`
+        if (exportedParentIdSet.has(parentEntryId)) {
+          return
+        }
+        const entry = buildParentRelationEntry(
+          parentRelationField,
+          parentRecord,
+          parentEditField,
+          buildOptions
+        )
+        if (entry) {
+          exportedParentIdSet.add(parentEntryId)
+          entryList.push(entry)
+        }
+      }
+    )
+  })
+}
+
 export function buildTranslationExportEntries({
   form,
   relationFields,
@@ -1523,34 +1553,12 @@ export function buildTranslationExportEntries({
         }
       })
 
-      parentRelationFieldList.forEach(parentRelationField => {
-        const parentRecord = record[parentRelationField.name]
-        if (
-          !parentRecord ||
-          typeof parentRecord !== 'object' ||
-          !parentRecord._id
-        ) {
-          return
-        }
-
-        getParentTranslationFields(parentRelationField).forEach(
-          parentEditField => {
-            const parentEntryId = `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`
-            if (exportedParentIdSet.has(parentEntryId)) {
-              return
-            }
-            const entry = buildParentRelationEntry(
-              parentRelationField,
-              parentRecord,
-              parentEditField,
-              buildOptions
-            )
-            if (entry) {
-              exportedParentIdSet.add(parentEntryId)
-              entryList.push(entry)
-            }
-          }
-        )
+      appendParentRelationEntries({
+        entryList,
+        exportedParentIdSet,
+        parentRelationFieldList,
+        record,
+        buildOptions
       })
     })
   })
@@ -1566,7 +1574,12 @@ export function buildRecordTranslationEntries({
 }) {
   const buildOptions = { includeEmpty }
   const entryList = []
+  const exportedParentIdSet = new Set()
   const translationFieldList = getRelationTranslationFields(collectionName)
+  const relationEditFieldList = getRelationEditFields(collectionName)
+  const parentRelationFieldList = relationEditFieldList.filter(field => {
+    return field.type === 'parentRelation'
+  })
 
   translationFieldList.forEach(editField => {
     if (editField.type === 'voteOptions') {
@@ -1606,6 +1619,14 @@ export function buildRecordTranslationEntries({
       entry.groupTitle = groupLabel
       entryList.push(entry)
     }
+  })
+
+  appendParentRelationEntries({
+    entryList,
+    exportedParentIdSet,
+    parentRelationFieldList,
+    record,
+    buildOptions
   })
 
   return entryList
@@ -2727,11 +2748,13 @@ export function buildTranslationImportPreview({
       return
     }
 
-    const relationUpdateKey = `${entry.collectionName}:${entry.recordId}`
+    const targetCollectionName = currentEntry.collectionName
+    const targetRecordId = currentEntry.recordId
+    const relationUpdateKey = `${targetCollectionName}:${targetRecordId}`
     if (!relationUpdateMap.has(relationUpdateKey)) {
       relationUpdateMap.set(relationUpdateKey, {
-        collectionName: entry.collectionName,
-        id: entry.recordId,
+        collectionName: targetCollectionName,
+        id: targetRecordId,
         payload: {}
       })
     }

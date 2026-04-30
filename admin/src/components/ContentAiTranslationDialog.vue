@@ -464,9 +464,15 @@ export default {
         }
         changeList.push({
           id: entry.id,
+          scope: currentEntry.scope,
           label: currentEntry.label,
           fieldName: currentEntry.fieldName,
+          fieldLabel: currentEntry.fieldLabel,
           valueType: currentEntry.valueType,
+          collectionName: currentEntry.collectionName,
+          recordId: currentEntry.recordId,
+          recordLabel: currentEntry.recordLabel,
+          relationTypeLabel: currentEntry.relationTypeLabel,
           currentValue: stringifyValue(
             currentEntry.valueType,
             currentEntry.value
@@ -604,14 +610,32 @@ export default {
         return
       }
       const payload = {}
+      const relationUpdateMap = new Map()
       preview.value.changeList.forEach(item => {
+        if (item.scope === 'parentRelation') {
+          const relationUpdateKey = `${item.collectionName}:${item.recordId}`
+          if (!relationUpdateMap.has(relationUpdateKey)) {
+            relationUpdateMap.set(relationUpdateKey, {
+              collectionName: item.collectionName,
+              id: item.recordId,
+              payload: {}
+            })
+          }
+          relationUpdateMap.get(relationUpdateKey).payload[item.fieldName] =
+            item.finalValue
+          return
+        }
         payload[item.fieldName] = item.finalValue
       })
+      const applyPlan = {
+        payload,
+        relationUpdates: Array.from(relationUpdateMap.values())
+      }
       applying.value = true
       const finish = () => {
         applying.value = false
       }
-      emit('confirm', payload, finish)
+      emit('confirm', payload, finish, applyPlan)
     }
 
     watch(

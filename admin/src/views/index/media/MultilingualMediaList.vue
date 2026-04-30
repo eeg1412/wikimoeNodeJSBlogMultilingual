@@ -499,7 +499,10 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText
 } from '@/utils/multilingual'
-import { buildRecordTranslationEntries } from '@/utils/translationJson'
+import {
+  buildRecordTranslationEntries,
+  buildSourceToTargetTranslationEntries
+} from '@/utils/translationJson'
 
 export default {
   components: {
@@ -901,23 +904,10 @@ export default {
     }
 
     const mapSourceEntriesToCurrent = (sourceEntries, currentEntries) => {
-      const sourceEntryMap = new Map(
-        sourceEntries.map(entry => [entry.fieldName, entry])
-      )
-      return currentEntries
-        .map(currentEntry => {
-          const sourceEntry = sourceEntryMap.get(currentEntry.fieldName)
-          if (!sourceEntry) {
-            return null
-          }
-          return {
-            ...currentEntry,
-            value: sourceEntry.value,
-            previewText: sourceEntry.previewText,
-            previewRawValue: sourceEntry.previewRawValue
-          }
-        })
-        .filter(Boolean)
+      return buildSourceToTargetTranslationEntries({
+        sourceEntries,
+        targetEntries: currentEntries
+      }).entries
     }
 
     const loadCurrentAiEntries = async () => {
@@ -963,31 +953,42 @@ export default {
       aiDialogVisible.value = true
     }
 
-    const confirmAiTranslation = (payload, done) => {
+    const confirmAiTranslation = async (payload, done, applyPlan = {}) => {
       if (!currentRow.value) {
         done?.()
         return
       }
-      multilingualApi
-        .updateTranslationRelation({
-          collectionName: 'attachments',
-          id: currentRow.value._id,
-          languageCode: currentRow.value.languageCode,
-          payload
-        })
-        .then(response => {
+      const relationUpdates = applyPlan.relationUpdates || []
+      try {
+        await Promise.all(
+          relationUpdates.map(updateItem => {
+            return multilingualApi.updateTranslationRelation({
+              collectionName: updateItem.collectionName,
+              id: updateItem.id,
+              languageCode: currentRow.value.languageCode,
+              payload: updateItem.payload
+            })
+          })
+        )
+
+        if (Object.keys(payload).length > 0) {
+          const response = await multilingualApi.updateTranslationRelation({
+            collectionName: 'attachments',
+            id: currentRow.value._id,
+            languageCode: currentRow.value.languageCode,
+            payload
+          })
           updateMediaListRow(response.data.data)
           Object.assign(editForm, payload)
-          getMediaList(false)
-          aiDialogVisible.value = false
-          ElMessage.success('AI 翻译已写入')
-        })
-        .catch(error => {
-          console.log(error)
-        })
-        .finally(() => {
-          done?.()
-        })
+        }
+        getMediaList(false)
+        aiDialogVisible.value = false
+        ElMessage.success('AI 翻译已写入')
+      } catch (error) {
+        console.log(error)
+      } finally {
+        done?.()
+      }
     }
 
     const restoreSnapshot = row => {

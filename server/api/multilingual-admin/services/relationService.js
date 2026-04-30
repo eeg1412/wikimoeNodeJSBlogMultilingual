@@ -374,6 +374,16 @@ function toRelationListItem(item, collectionName) {
   }
 }
 
+function getRelationListPopulate(collectionName) {
+  if (collectionName === 'sorts') {
+    return {
+      path: 'parent'
+    }
+  }
+
+  return undefined
+}
+
 async function listRelationsAcrossCollections(input) {
   const collectionNameList = input.collectionName
     ? [input.collectionName]
@@ -386,9 +396,12 @@ async function listRelationsAcrossCollections(input) {
   await Promise.all(
     collectionNameList.map(async collectionName => {
       const Model = getMultilingualModel(collectionName)
-      const list = await Model.find(params)
-        .sort({ updatedAt: -1, _id: -1 })
-        .lean()
+      let query = Model.find(params).sort({ updatedAt: -1, _id: -1 })
+      const populate = getRelationListPopulate(collectionName)
+      if (populate) {
+        query = query.populate(populate)
+      }
+      const list = await query.lean()
 
       list.forEach(item => {
         resultList.push(toRelationListItem(item, collectionName))
@@ -418,8 +431,8 @@ async function listRelationsAcrossCollections(input) {
   }
 }
 
-async function listRelations(query = {}) {
-  const input = parseRelationListQuery(query)
+async function listRelations(queryParams = {}) {
+  const input = parseRelationListQuery(queryParams)
 
   if (!input.collectionName) {
     return listRelationsAcrossCollections(input)
@@ -429,11 +442,15 @@ async function listRelations(query = {}) {
   const params = buildRelationListParams(input)
 
   const total = await Model.countDocuments(params)
-  const list = await Model.find(params)
+  let query = Model.find(params)
     .sort({ updatedAt: -1, _id: -1 })
     .skip((input.page - 1) * input.limit)
     .limit(input.limit)
-    .lean()
+  const populate = getRelationListPopulate(input.collectionName)
+  if (populate) {
+    query = query.populate(populate)
+  }
+  const list = await query.lean()
 
   return {
     list: list.map(item => {

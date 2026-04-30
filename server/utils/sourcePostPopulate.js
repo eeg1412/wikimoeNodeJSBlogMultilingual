@@ -15,7 +15,12 @@ function buildSourcePostPopulate() {
         path: 'cover'
       }
     },
-    { path: 'sort' },
+    {
+      path: 'sort',
+      populate: {
+        path: 'parent'
+      }
+    },
     { path: 'tags' },
     {
       path: 'mappointList',

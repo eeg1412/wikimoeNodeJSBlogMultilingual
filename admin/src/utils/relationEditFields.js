@@ -19,9 +19,14 @@ export const RELATION_EDIT_FIELD_MAP = {
     { name: 'sortname', label: '分类名', translationExport: true },
     {
       name: 'alias',
-      label: '别名',
-      translationExport: true,
-      translationOptional: true
+      label: '别名'
+    },
+    {
+      name: 'parent',
+      label: '父级分类',
+      type: 'parentRelation',
+      relationCollectionName: 'sorts',
+      parentEditableFieldNames: ['sortname', 'description']
     },
     { name: 'taxis', label: '排序', type: 'number' },
     {
@@ -169,9 +174,7 @@ export const RELATION_EDIT_FIELD_MAP = {
     },
     {
       name: 'alias',
-      label: '别名',
-      translationExport: true,
-      translationOptional: true
+      label: '别名'
     },
     { name: 'status', label: '状态', type: 'number' },
     { name: 'allowRemark', label: '允许评论', type: 'boolean' },
