@@ -78,6 +78,7 @@ export default {
     screenshot: 'スクリーンショット',
     switchLens: 'レンズモードを切り替え',
     descriptionToggle: '説明を切り替え',
+    enterModeTip: 'クリックして360°パノラマモードに入る',
     panorama360: '360°パノラマ',
     vrMode: 'VRモード',
     vrEnterFailed:

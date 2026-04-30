@@ -114,6 +114,7 @@ export default {
     screenshot: 'Screenshot',
     switchLens: 'Switch lens mode',
     descriptionToggle: 'Toggle description',
+    enterModeTip: 'Click to enter 360 panorama mode',
     panorama360: '360 panorama',
     vrMode: 'VR mode',
     vrEnterFailed:

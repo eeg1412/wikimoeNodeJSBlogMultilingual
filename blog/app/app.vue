@@ -34,6 +34,13 @@ const currentLanguageCode = computed(() => {
   return normalizeLanguageCode(getRouteCode()) || DEFAULT_LANGUAGE_CODE
 })
 
+const panoramaEnterModeTip = computed(() => {
+  return getLanguageText(
+    currentLanguageCode.value,
+    'common.panorama.enterModeTip'
+  )
+})
+
 if (import.meta.client) {
   nuxtApp.hook('app:chunkError', ({ error }) => {
     trackChunkAssetError(error)
@@ -125,6 +132,9 @@ if (siteThemeModeList && siteThemeModeList.includes(siteThemeMode)) {
 useHead(() => {
   const siteDefaultCover = options.value.siteDefaultCover || ''
   const siteFavicon = options.value.siteFavicon || ''
+  const htmlStyle = `--w-panorama-enter-mode-tip: ${JSON.stringify(
+    panoramaEnterModeTip.value
+  )};`
   const meta = [
     { name: 'description', content: options.value.siteDescription },
     // name="keywords"
@@ -195,7 +205,8 @@ useHead(() => {
     },
     title: options.value.siteSubTitle,
     htmlAttrs: {
-      lang: currentLanguageCode.value
+      lang: currentLanguageCode.value,
+      style: htmlStyle
     },
     meta,
     link,

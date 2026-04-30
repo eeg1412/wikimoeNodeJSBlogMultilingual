@@ -76,6 +76,7 @@ export default {
     screenshot: '截图',
     switchLens: '切换镜头模式',
     descriptionToggle: '描述开关',
+    enterModeTip: '点击可进入360°全景模式',
     panorama360: '360°全景',
     vrMode: 'VR模式',
     vrEnterFailed: '进入VR模式失败，请检查权限或设备支持情况',
