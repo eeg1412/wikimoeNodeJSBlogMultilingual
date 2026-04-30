@@ -1,5 +1,7 @@
 const mongoose = require('mongoose')
 const cacheDataUtils = require('../../../config/cacheData')
+const contentRefreshUtils = require('../../../utils/contentRefresh')
+const { normalizeTagName } = require('../../../utils/tagName')
 const { normalizeLanguageCode } = require('../../../utils/language')
 const {
   ApiError,
@@ -522,7 +524,85 @@ function buildRelationUpdateData(collectionName, payload, schema) {
     updateData[field] = payload[field]
   }
 
+  if (collectionName === 'tags' && updateData.tagname !== undefined) {
+    updateData.tagname = normalizeTagName(updateData.tagname)
+    if (!updateData.tagname) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        'tagname is required',
+        'tagname',
+        400
+      )
+    }
+  }
+
   return updateData
+}
+
+function normalizeVoteOptionsForUpdate(inputOptions, existingOptions = []) {
+  if (!Array.isArray(inputOptions)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'options must be an array',
+      'options',
+      400
+    )
+  }
+
+  const submittedOptionMap = new Map()
+  inputOptions.forEach((option, index) => {
+    const optionId = String(option?._id || '').trim()
+    if (!optionId) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        `options[${index}]._id is required`,
+        'options',
+        400
+      )
+    }
+    submittedOptionMap.set(optionId, option)
+  })
+
+  if (submittedOptionMap.size !== existingOptions.length) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'options can only update existing option titles',
+      'options',
+      400
+    )
+  }
+
+  return existingOptions.map((existingOption, index) => {
+    const optionObject =
+      typeof existingOption.toObject === 'function'
+        ? existingOption.toObject()
+        : existingOption
+    const optionId = String(optionObject._id || '').trim()
+    const submittedOption = submittedOptionMap.get(optionId)
+    if (!submittedOption) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        `options[${index}] is missing`,
+        'options',
+        400
+      )
+    }
+
+    const title = String(submittedOption.title || '').trim()
+    if (!title) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        `options[${index}].title is required`,
+        'options',
+        400
+      )
+    }
+
+    return {
+      ...optionObject,
+      title
+    }
+  })
 }
 
 async function updateRelation(body = {}) {
@@ -556,6 +636,15 @@ async function updateRelation(body = {}) {
     input.payload,
     Model.schema
   )
+  if (
+    input.collectionName === 'votes' &&
+    Object.prototype.hasOwnProperty.call(updateData, 'options')
+  ) {
+    updateData.options = normalizeVoteOptionsForUpdate(
+      updateData.options,
+      record.options || []
+    )
+  }
   if (Object.keys(updateData).length === 0) {
     return record.toObject()
   }
@@ -567,6 +656,9 @@ async function updateRelation(body = {}) {
 
   if (input.collectionName === 'sorts') {
     cacheDataUtils.invalidateSortListCache(record.languageCode)
+  }
+  if (input.collectionName === 'posts') {
+    await contentRefreshUtils.refreshArticlePublishing(record.languageCode)
   }
 
   return await Model.findOne({ _id: record._id }).lean()

@@ -406,8 +406,10 @@
           :accept="'image/*'"
           :show-file-list="true"
           :limit="1"
-          :auto-upload="false"
-          :on-change="handleImageFileChange"
+          :auto-upload="true"
+          :http-request="replaceImageUploadRequest"
+          :on-success="handleReplaceImageUploadSuccess"
+          :on-error="handleReplaceImageUploadError"
           :on-remove="clearSelectedFile"
         >
           <el-icon class="el-icon--upload"><Picture /></el-icon>
@@ -478,14 +480,6 @@
       </template>
       <template #footer>
         <el-button @click="replaceDialogVisible = false">取消</el-button>
-        <el-button
-          v-if="currentRow && isImageMedia(currentRow)"
-          type="primary"
-          :loading="replaceSubmitting"
-          @click="replaceImageLocal"
-        >
-          替换
-        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -522,7 +516,6 @@ export default {
     const editDialogVisible = ref(false)
     const aiDialogVisible = ref(false)
     const replaceDialogVisible = ref(false)
-    const selectedFile = ref(null)
     const imageFileList = ref([])
     const replaceSubmitting = ref(false)
     const editSubmitting = ref(false)
@@ -1044,17 +1037,6 @@ export default {
       }).catch(() => {})
     }
 
-    const handleImageFileChange = file => {
-      if (!file.raw || !file.raw.type || !file.raw.type.includes('image')) {
-        ElMessage.error('图片媒体只能选择图片文件')
-        selectedFile.value = null
-        imageFileList.value = []
-        return
-      }
-      selectedFile.value = file
-      imageFileList.value = [file]
-    }
-
     const generateRandomString = length => {
       const characters = 'abcdefghijklmnopqrstuvwxyz0123456789'
       let result = ''
@@ -1088,24 +1070,17 @@ export default {
         const file = new File([blob], `image-${generateRandomString(8)}.png`, {
           type: blob.type
         })
-        selectedFile.value = {
-          name: file.name,
-          raw: file
-        }
-        imageFileList.value = [selectedFile.value]
-        ElMessage.success('已读取粘贴图片')
         event.preventDefault()
+        replaceImageFile(file).catch(handleReplaceImageUploadError)
         return
       }
     }
 
     const clearSelectedFile = () => {
-      selectedFile.value = null
       imageFileList.value = []
     }
 
     const resetReplaceForm = () => {
-      selectedFile.value = null
       imageFileList.value = []
       replaceOptions.noCompress = false
       replaceOptions.noThumbnail = false
@@ -1136,37 +1111,54 @@ export default {
       getMediaList(false)
     }
 
-    const replaceImageLocal = () => {
+    const replaceImageFile = file => {
       if (!currentRow.value) {
-        return
+        return Promise.reject(new Error('媒体不存在'))
       }
       if (!isImageMedia(currentRow.value)) {
-        ElMessage.error('图片媒体只能替换为图片文件')
-        return
+        const error = new Error('图片媒体只能替换为图片文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
       }
-      if (!selectedFile.value?.raw) {
-        ElMessage.error('请选择文件')
-        return
+      if (!file) {
+        const error = new Error('请选择文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
+      }
+      if (!file.type || !file.type.includes('image')) {
+        const error = new Error('图片媒体只能替换为图片文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
       }
 
       const formData = new FormData()
       appendBaseReplaceFormData(formData)
       appendImageReplaceOptions(formData)
-      formData.append('file', selectedFile.value.raw, selectedFile.value.name)
+      formData.append('file', file, file.name)
 
       replaceSubmitting.value = true
-      multilingualApi
+      return multilingualApi
         .replaceLocalMedia(formData)
         .then(() => {
           ElMessage.success('替换成功')
           handleReplaceSuccess()
         })
-        .catch(error => {
-          console.log(error)
-        })
         .finally(() => {
           replaceSubmitting.value = false
         })
+    }
+
+    const replaceImageUploadRequest = uploadRequest => {
+      return replaceImageFile(uploadRequest.file)
+    }
+
+    const handleReplaceImageUploadSuccess = () => {
+      imageFileList.value = []
+    }
+
+    const handleReplaceImageUploadError = error => {
+      console.log(error)
+      imageFileList.value = []
     }
 
     const replaceVideoLocal = formData => {
@@ -1297,11 +1289,12 @@ export default {
       updateMediaInfo,
       openReplace,
       openConvert,
-      handleImageFileChange,
+      replaceImageUploadRequest,
+      handleReplaceImageUploadSuccess,
+      handleReplaceImageUploadError,
       handleReplacePaste,
       clearSelectedFile,
       resetReplaceForm,
-      replaceImageLocal,
       replaceVideoLocal,
       getMediaSettingValues,
       handleReplaceSuccess,

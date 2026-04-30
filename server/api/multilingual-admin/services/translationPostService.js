@@ -1,6 +1,7 @@
 const mongoose = require('mongoose')
 const utils = require('../../../utils/utils')
 const cacheDataUtils = require('../../../config/cacheData')
+const contentRefreshUtils = require('../../../utils/contentRefresh')
 const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
@@ -151,10 +152,37 @@ const POST_EDITABLE_FIELDS = [
   'template',
   'code',
   'editorVersion',
-  'client__v'
+  'client__v',
+  'author',
+  'sort',
+  'tags',
+  'mappointList',
+  'coverImages',
+  'bangumiList',
+  'movieList',
+  'gameList',
+  'bookList',
+  'postList',
+  'tweetList',
+  'eventList',
+  'voteList',
+  'contentBangumiList',
+  'contentMovieList',
+  'contentGameList',
+  'contentBookList',
+  'contentPostList',
+  'contentTweetList',
+  'contentEventList',
+  'contentVoteList'
 ]
 
+const POST_SINGLE_RELATION_EDIT_FIELDS = new Set(['author', 'sort'])
+const POST_ARRAY_RELATION_EDIT_FIELDS = new Set(
+  Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
+)
+
 const SOURCE_POST_LIST_SELECT_FIELDS = [
+  // Required by translation matrix summaries: _id title alias type languageCode translationGroupId status
   '_id',
   'title',
   'excerpt',
@@ -1897,6 +1925,7 @@ async function createTranslationPost(body = {}) {
       )
 
       cacheDataUtils.invalidateSortListCache(input.languageCode)
+      await contentRefreshUtils.refreshArticlePublishing(input.languageCode)
 
       return {
         translationPostId: translationPost._id,
@@ -1962,6 +1991,7 @@ async function createMissingPostRelationTranslation(body = {}) {
       }
     }
   )
+  await contentRefreshUtils.refreshArticlePublishing(post.languageCode)
 
   return {
     post: await getTranslationPostDetail(post._id),
@@ -2277,7 +2307,53 @@ function buildPostUpdateData(body = {}) {
     updateData.alias = normalizeAlias(updateData.alias)
   }
 
+  for (const field of POST_SINGLE_RELATION_EDIT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(updateData, field)) {
+      updateData[field] = normalizeOptionalRelationId(updateData[field], field)
+    }
+  }
+
+  for (const field of POST_ARRAY_RELATION_EDIT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(updateData, field)) {
+      updateData[field] = normalizeRelationIdList(updateData[field], field)
+    }
+  }
+
   return updateData
+}
+
+function normalizeOptionalRelationId(value, fieldName) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const objectId = toObjectId(value)
+  if (!objectId) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${fieldName} is not a valid relation id`,
+      fieldName,
+      400
+    )
+  }
+  return objectId
+}
+
+function normalizeRelationIdList(value, fieldName) {
+  if (value === null || value === undefined || value === '') {
+    return []
+  }
+
+  if (!Array.isArray(value)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${fieldName} must be an array`,
+      fieldName,
+      400
+    )
+  }
+
+  return value.map(item => normalizeOptionalRelationId(item, fieldName))
 }
 
 function assertUpdateLanguageMatched(post, body = {}) {
@@ -2359,6 +2435,7 @@ async function updateTranslationPost(body = {}) {
     { _id: post._id, recordKind: TRANSLATION_RECORD_KIND },
     { $set: updateData }
   )
+  await contentRefreshUtils.refreshArticlePublishing(post.languageCode)
 
   return await getTranslationPostDetail(post._id)
 }
@@ -2613,6 +2690,7 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
   }
 
   if (input.collectionName === 'posts') {
+    await contentRefreshUtils.refreshArticlePublishing(record.languageCode)
     return await getTranslationPostDetail(record._id)
   }
 

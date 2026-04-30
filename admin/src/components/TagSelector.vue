@@ -82,7 +82,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { Sort, Check, Close } from '@element-plus/icons-vue'
 import { authApi } from '@/api'
-import { replaceSpacesWithUnderscores } from '@/utils/utils'
+import { normalizeTagName, normalizeTagRecord } from '@/utils/tagName'
 import DraggableSelector from './DraggableSelector.vue'
 
 export default {
@@ -126,13 +126,13 @@ export default {
     let queryTagsTimer = null
 
     // 使用 computed 来获取标签列表
-    const tagOptions = computed(() => props.tagList)
+    const tagOptions = computed(() => props.tagList.map(normalizeTagRecord))
 
     const getTagList = (tagKeyword = null, options = {}) => {
       if (tagsIsLoading.value) {
         return
       }
-      const formatTagKeyword = replaceSpacesWithUnderscores(tagKeyword || '')
+      const formatTagKeyword = normalizeTagName(tagKeyword || '')
       tagsIsLoading.value = true
       authApi
         .getTagList(
@@ -140,7 +140,7 @@ export default {
           true
         )
         .then(res => {
-          const list = res.data.list
+          const list = res.data.list.map(normalizeTagRecord)
           if (tagKeyword && props.addNew) {
             // 如果tagkeyword没有在list里面，就把tagkeyword push到list里面
             const hasTagKeyword = list.some(
@@ -211,12 +211,12 @@ export default {
     const doAutoInput = text => {
       if (tagSelectorRef.value?.inputRef) {
         tagSelectorRef.value.focus()
-        tagSelectorRef.value.inputRef.value = text
+        tagSelectorRef.value.inputRef.value = normalizeTagName(text)
         const inputEvent = new InputEvent('input', {
           bubbles: true,
           cancelable: true,
           inputType: 'insertText',
-          data: text
+          data: normalizeTagName(text)
         })
         tagSelectorRef.value.inputRef.dispatchEvent(inputEvent)
       }

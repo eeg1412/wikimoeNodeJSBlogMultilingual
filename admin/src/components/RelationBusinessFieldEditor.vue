@@ -25,17 +25,31 @@
           size="small"
           type="primary"
           :icon="EditPen"
-            <el-form-item
-              v-for="field in visibleFields"
-              :key="field.name"
-              :label="field.label"
-            >
           :disabled="!getParentRelationId(field)"
           @click="openParentEditor(field)"
         >
           快捷编辑父级
         </el-button>
       </div>
+    </div>
+    <div v-else-if="field.type === 'voteOptions'" class="vote-options-editor">
+      <div
+        v-for="(option, index) in form[field.name]"
+        :key="option._id || index"
+        class="vote-options-editor-item"
+      >
+        <el-input
+          v-model="option.title"
+          :placeholder="`选项 ${index + 1}`"
+          clearable
+        />
+        <span class="vote-options-editor-meta">
+          {{ option.votes || 0 }} 票
+        </span>
+      </div>
+      <span v-if="!form[field.name]?.length" class="cGray666">
+        未设置选项
+      </span>
     </div>
     <RichEditor5
       v-else-if="field.type === 'richText'"
@@ -48,6 +62,12 @@
       v-model="form[field.name]"
       type="textarea"
       :rows="4"
+    />
+    <el-input
+      v-else-if="field.type === 'tagName'"
+      :model-value="form[field.name]"
+      clearable
+      @update:model-value="value => updateTagNameField(field.name, value)"
     />
     <el-input v-else v-model="form[field.name]" clearable />
   </el-form-item>
@@ -86,6 +106,14 @@
           type="textarea"
           :rows="4"
         />
+        <el-input
+          v-else-if="field.type === 'tagName'"
+          :model-value="parentEditForm[field.name]"
+          clearable
+          @update:model-value="
+            value => updateParentTagNameField(field.name, value)
+          "
+        />
         <el-input v-else v-model="parentEditForm[field.name]" clearable />
       </el-form-item>
     </el-form>
@@ -104,6 +132,7 @@ import { ElMessage } from 'element-plus'
 import { EditPen } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import RichEditor5 from '@/components/RichEditor5'
+import { normalizeTagName } from '@/utils/tagName'
 import {
   getRelationEditFields,
   getRelationFieldInitialValue,
@@ -146,6 +175,14 @@ export default {
     const parentEditField = ref(null)
     const parentEditRecord = ref(null)
     const parentEditForm = reactive({})
+
+    function updateTagNameField(fieldName, value) {
+      props.form[fieldName] = normalizeTagName(value)
+    }
+
+    function updateParentTagNameField(fieldName, value) {
+      parentEditForm[fieldName] = normalizeTagName(value)
+    }
 
     const parentEditFields = computed(() => {
       if (!parentEditField.value) {
@@ -334,7 +371,9 @@ export default {
       parentEditTitle,
       parentEditVisible,
       parentSaving,
-      saveParentEdit
+      saveParentEdit,
+      updateParentTagNameField,
+      updateTagNameField
     }
   }
 }
@@ -368,6 +407,25 @@ export default {
   font-size: 12px;
   line-height: 1.5;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vote-options-editor {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.vote-options-editor-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.vote-options-editor-meta {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
   white-space: nowrap;
 }
 </style>

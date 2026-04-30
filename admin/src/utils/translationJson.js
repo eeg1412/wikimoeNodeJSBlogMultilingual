@@ -6,6 +6,7 @@ import {
   getPostDisplayTitle,
   getRelationDisplayName
 } from '@/utils/multilingual'
+import { normalizeTagName } from '@/utils/tagName'
 
 export const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 export const TRANSLATION_JSON_VERSION = 2
@@ -1290,6 +1291,53 @@ function getRelationScopeMeta(relationField = {}) {
   }
 }
 
+function createVoteOptionRelationEntries(
+  relationField,
+  record,
+  editField,
+  options = {}
+) {
+  const optionList = Array.isArray(record.options) ? record.options : []
+  const recordLabel = getRelationRecordDisplayName(record, relationField)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
+
+  return optionList
+    .map((option, index) => {
+      return buildTextEntry(
+        {
+          id: `relation.${relationField.field}.${record._id}.options.${option._id || index}.title`,
+          scope: 'relation',
+          relationField: relationField.field,
+          collectionName: relationField.collectionName,
+          recordId: record._id,
+          recordKind: record.recordKind,
+          sourceRecordId: normalizeStringValue(record._id),
+          sourceId: normalizeStringValue(record.sourceId),
+          sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
+          relationTypeLabel: relationField.label,
+          recordLabel,
+          fieldName: 'options.title',
+          fieldLabel: `${editField.label} #${index + 1}`,
+          optionId: normalizeStringValue(option._id),
+          optionIndex: index,
+          optionList: cloneSerializableValue(optionList),
+          label: `${recordLabel} / ${editField.label} #${index + 1}`,
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
+          groupTitle: relationField.label,
+          valueType: 'plainText',
+          value: option.title,
+          defaultSelected: !editField.translationOptional,
+          optional: Boolean(editField.translationOptional)
+        },
+        options
+      )
+    })
+    .filter(Boolean)
+}
+
 function createRelationEntry(relationField, record, editField, options = {}) {
   const recordLabel = getRelationRecordDisplayName(record, relationField)
   const relationScopeMeta = getRelationScopeMeta(relationField)
@@ -1452,6 +1500,18 @@ export function buildTranslationExportEntries({
       }
 
       translationFieldList.forEach(editField => {
+        if (editField.type === 'voteOptions') {
+          entryList.push(
+            ...createVoteOptionRelationEntries(
+              relationField,
+              record,
+              editField,
+              buildOptions
+            )
+          )
+          return
+        }
+
         const entry = createRelationEntry(
           relationField,
           record,
@@ -1509,6 +1569,27 @@ export function buildRecordTranslationEntries({
   const translationFieldList = getRelationTranslationFields(collectionName)
 
   translationFieldList.forEach(editField => {
+    if (editField.type === 'voteOptions') {
+      entryList.push(
+        ...createVoteOptionRelationEntries(
+          {
+            field: 'record',
+            label: groupLabel,
+            collectionName
+          },
+          record,
+          editField,
+          buildOptions
+        ).map(entry => ({
+          ...entry,
+          groupLabel,
+          groupCategory: '内容字段',
+          groupTitle: groupLabel
+        }))
+      )
+      return
+    }
+
     const entry = createRelationEntry(
       {
         field: 'record',
@@ -1600,6 +1681,9 @@ function buildExportEntryList(selectedEntries) {
     }
     if (entry.fieldLabel) {
       exportEntry.fieldLabel = entry.fieldLabel
+    }
+    if (entry.optionIndex !== undefined) {
+      exportEntry.optionIndex = entry.optionIndex
     }
     if (entry.groupCategory) {
       exportEntry.groupCategory = entry.groupCategory
@@ -1962,12 +2046,16 @@ function mergeRichTextSegmentImportPayload(parsedData) {
 
 function buildRelationEntryMatchKey(entry, sourceId) {
   if (entry.scope === 'relation') {
+    const fieldName =
+      entry.fieldName === 'options.title'
+        ? `${entry.fieldName}.${entry.optionIndex}`
+        : entry.fieldName || ''
     return [
       'relation',
       entry.relationField || '',
       entry.collectionName || '',
       sourceId,
-      entry.fieldName || ''
+      fieldName
     ].join(':')
   }
 
@@ -2534,14 +2622,20 @@ export function buildTranslationImportPreview({
 
     const nextValue = normalizedImportEntry.value
     const currentValue = currentEntry.value
-    const nextComparableValue = buildComparableEntryValue(
+    let nextComparableValue = buildComparableEntryValue(
       normalizedImportEntry.valueType,
       nextValue
     )
-    const currentComparableValue = buildComparableEntryValue(
+    let currentComparableValue = buildComparableEntryValue(
       currentEntry.valueType,
       currentValue
     )
+    if (
+      currentEntry.collectionName === 'tags' &&
+      currentEntry.fieldName === 'tagname'
+    ) {
+      nextComparableValue = normalizeTagName(nextComparableValue)
+    }
     if (nextComparableValue === currentComparableValue) {
       return
     }
@@ -2610,13 +2704,19 @@ export function buildTranslationImportPreview({
       nextHtml
     })
 
-    const finalValue = isRichTextValueType(currentEntry.valueType)
+    let finalValue = isRichTextValueType(currentEntry.valueType)
       ? buildRichTextHtmlFromEntryValue(
           normalizedImportEntry.valueType,
           nextValue,
           normalizedImportEntry.assets || {}
         )
       : nextValue
+    if (
+      currentEntry.collectionName === 'tags' &&
+      currentEntry.fieldName === 'tagname'
+    ) {
+      finalValue = normalizeTagName(finalValue)
+    }
 
     if (entry.scope === 'post') {
       postPatch[entry.fieldName] = finalValue
@@ -2631,6 +2731,27 @@ export function buildTranslationImportPreview({
         payload: {}
       })
     }
+    if (
+      currentEntry.collectionName === 'votes' &&
+      currentEntry.fieldName === 'options.title'
+    ) {
+      const payload = relationUpdateMap.get(relationUpdateKey).payload
+      const optionList = Array.isArray(payload.options)
+        ? payload.options
+        : cloneSerializableValue(currentEntry.optionList || [])
+      const optionIndex = optionList.findIndex((option, index) => {
+        if (currentEntry.optionId) {
+          return String(option._id || '') === String(currentEntry.optionId)
+        }
+        return index === currentEntry.optionIndex
+      })
+      if (optionIndex >= 0) {
+        optionList[optionIndex].title = finalValue
+        payload.options = optionList
+      }
+      return
+    }
+
     relationUpdateMap.get(relationUpdateKey).payload[entry.fieldName] =
       finalValue
   })

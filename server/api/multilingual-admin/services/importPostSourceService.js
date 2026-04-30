@@ -10,6 +10,7 @@ const {
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 const { buildSourcePostPopulate } = require('../../../utils/sourcePostPopulate')
+const contentRefreshUtils = require('../../../utils/contentRefresh')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -1093,6 +1094,7 @@ async function importOrOverwriteSourcePost(body, forceOverwrite) {
     recordId: sourceSnapshotId,
     copyPostRelations: true
   })
+  await contentRefreshUtils.refreshArticlePublishing(input.sourceLanguageCode)
 
   let sourceChangedTranslations = 0
   if (existingSnapshot && hasSourceHashChanged) {

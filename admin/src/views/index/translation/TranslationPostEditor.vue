@@ -194,6 +194,20 @@
                   "
                 />
               </el-tooltip>
+              <el-tooltip
+                :content="getArticleMediaActionText(element)"
+                placement="top"
+              >
+                <el-button
+                  class="post-cover-image-item-replace"
+                  type="success"
+                  size="small"
+                  :icon="Refresh"
+                  circle
+                  :aria-label="getArticleMediaActionText(element)"
+                  @click.stop.prevent="openArticleMediaReplace(element)"
+                />
+              </el-tooltip>
             </div>
             <span
               v-if="relationRecords.coverImages.length === 0"
@@ -1053,6 +1067,104 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="articleMediaReplaceVisible"
+      title="替换为本地文件"
+      width="760px"
+      align-center
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetArticleMediaReplaceForm"
+      @paste="handleArticleMediaReplacePaste"
+    >
+      <template v-if="articleMediaReplaceRecord">
+        <el-upload
+          v-if="isImageAttachment(articleMediaReplaceRecord)"
+          class="attachments-upload"
+          drag
+          v-model:file-list="articleMediaReplaceFileList"
+          accept="image/*"
+          :show-file-list="true"
+          :limit="1"
+          :auto-upload="true"
+          :http-request="replaceArticleImageUploadRequest"
+          :on-success="handleArticleImageReplaceSuccess"
+          :on-error="handleArticleImageReplaceError"
+          :on-remove="clearArticleMediaReplaceFile"
+        >
+          <el-icon class="el-icon--upload"><Picture /></el-icon>
+          <div class="el-upload__text">拖动文件或点击上传</div>
+          <div class="mt5">
+            <el-popover placement="bottom" :width="200" trigger="click">
+              <div>
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="articleMediaReplaceOptions.noCompress"
+                  label="不压缩图片"
+                />
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="articleMediaReplaceOptions.noThumbnail"
+                  label="不生成缩略图"
+                />
+                <el-checkbox
+                  @click.stop
+                  size="small"
+                  v-model="articleMediaReplaceOptions.is360Panorama"
+                  label="是360°全景图片"
+                />
+                <div class="accactment-options-filed">
+                  <div class="accactment-options-label">最长边:</div>
+                  <div class="accactment-options-value">
+                    <el-input-number
+                      v-model="
+                        articleMediaReplaceOptions.imgSettingCompressMaxSize
+                      "
+                      :step="10"
+                      :precision="0"
+                      :min="1"
+                      size="small"
+                      placeholder="设置最长边"
+                      clearable
+                    />
+                  </div>
+                </div>
+              </div>
+              <template #reference>
+                <el-button
+                  size="small"
+                  :type="articleMediaReplaceOptionsCount > 0 ? 'primary' : ''"
+                  :plain="articleMediaReplaceOptionsCount <= 0"
+                  @click.stop
+                >
+                  <el-icon><Setting /></el-icon>
+                  <span class="pl3">
+                    设置<template v-if="articleMediaReplaceOptionsCount > 0">
+                      （已设置 {{ articleMediaReplaceOptionsCount }} 项）
+                    </template>
+                  </span>
+                </el-button>
+              </template>
+            </el-popover>
+          </div>
+        </el-upload>
+        <VideoUploader
+          v-else-if="isVideoAttachment(articleMediaReplaceRecord)"
+          :requireAlbumId="false"
+          :uploadApi="replaceArticleVideoLocal"
+          :optionApi="getArticleMediaSettingValues"
+          successMessage="替换成功"
+          @onVideoUploaded="handleArticleVideoReplaceSuccess"
+        />
+        <el-empty v-else description="当前媒体类型暂不支持替换" />
+      </template>
+      <template #footer>
+        <el-button @click="articleMediaReplaceVisible = false">取消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1075,12 +1187,20 @@ import {
   ElTag,
   ElTooltip
 } from 'element-plus'
-import { Document, EditPen, VideoPlay } from '@element-plus/icons-vue'
+import {
+  Document,
+  EditPen,
+  Picture,
+  Refresh,
+  Setting,
+  VideoPlay
+} from '@element-plus/icons-vue'
 import RichEditor4 from '@/components/RichEditor4.vue'
 import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
+import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
 import {
@@ -1112,6 +1232,7 @@ import {
   buildSourceToTargetTranslationEntries,
   parseTranslationImportPayload
 } from '@/utils/translationJson'
+import { normalizeTagRecord } from '@/utils/tagName'
 
 const AUTHOR_RELATION_FIELD = {
   label: '作者',
@@ -1364,12 +1485,16 @@ export default {
   components: {
     Document,
     EditPen,
+    Picture,
+    Refresh,
+    Setting,
     EmojiTextarea,
     RelationSelectedList,
     RichEditor5,
     RichEditor4,
     RelationBusinessFieldEditor,
     TranslationEntryMeta,
+    VideoUploader,
     VideoPlay
   },
   setup() {
@@ -1434,6 +1559,16 @@ export default {
     const relationEditField = ref(null)
     const relationEditRecord = ref(null)
     const relationEditForm = reactive({})
+    const articleMediaReplaceVisible = ref(false)
+    const articleMediaReplaceRecord = ref(null)
+    const articleMediaReplaceFileList = ref([])
+    const articleMediaReplaceSubmitting = ref(false)
+    const articleMediaReplaceOptions = reactive({
+      noCompress: false,
+      noThumbnail: false,
+      is360Panorama: false,
+      imgSettingCompressMaxSize: null
+    })
     const exportDialogVisible = ref(false)
     const exportEntryList = ref([])
     const selectedExportIds = ref([])
@@ -1556,6 +1691,22 @@ export default {
     const currentAiSourceLanguageCode = computed(
       () => aiSourceLanguageCode.value
     )
+    const articleMediaReplaceOptionsCount = computed(() => {
+      let count = 0
+      if (articleMediaReplaceOptions.noCompress) {
+        count++
+      }
+      if (articleMediaReplaceOptions.noThumbnail) {
+        count++
+      }
+      if (articleMediaReplaceOptions.is360Panorama) {
+        count++
+      }
+      if (articleMediaReplaceOptions.imgSettingCompressMaxSize) {
+        count++
+      }
+      return count
+    })
 
     function getDefaultAiSourceLanguageCode() {
       return form.sourceLanguageCode || ''
@@ -1822,9 +1973,9 @@ export default {
     }
 
     function setRelationRecordList(fieldName, records) {
-      relationRecords[fieldName] = Array.isArray(records)
-        ? records.filter(Boolean)
-        : []
+      const list = Array.isArray(records) ? records.filter(Boolean) : []
+      relationRecords[fieldName] =
+        fieldName === 'tags' ? list.map(normalizeTagRecord) : list
       syncRelationIds(fieldName)
     }
 
@@ -1910,12 +2061,230 @@ export default {
       relationEditVisible.value = true
     }
 
+    function hasRemoteMediaOrigin(record) {
+      if (record?.remoteSourceId) {
+        return true
+      }
+      if (record?.remoteFilepath) {
+        return true
+      }
+      return (
+        record?.remoteSnapshot && Object.keys(record.remoteSnapshot).length > 0
+      )
+    }
+
+    function isConvertibleLocalArticleMedia(record) {
+      return record?.mediaMode === 'local' && hasRemoteMediaOrigin(record)
+    }
+
+    function getArticleMediaActionText(record) {
+      if (isConvertibleLocalArticleMedia(record)) {
+        return '转回远程快照'
+      }
+      return '替换为本地文件'
+    }
+
+    function resetArticleMediaReplaceForm() {
+      articleMediaReplaceFileList.value = []
+      articleMediaReplaceSubmitting.value = false
+      articleMediaReplaceOptions.noCompress = false
+      articleMediaReplaceOptions.noThumbnail = false
+      articleMediaReplaceOptions.is360Panorama = false
+      articleMediaReplaceOptions.imgSettingCompressMaxSize = null
+      articleMediaReplaceRecord.value = null
+    }
+
+    function openArticleMediaReplaceDialog(record) {
+      articleMediaReplaceRecord.value = record
+      articleMediaReplaceOptions.is360Panorama = record?.is360Panorama === true
+      articleMediaReplaceVisible.value = true
+    }
+
+    async function convertArticleMediaToRemote(record) {
+      await ElMessageBox.confirm(
+        '转回远程快照会删除当前本地替换文件，是否继续？',
+        '转回远程快照',
+        {
+          type: 'warning',
+          confirmButtonText: '转回远程',
+          cancelButtonText: '取消'
+        }
+      )
+      const response = await multilingualApi.convertRemoteMedia({
+        id: record._id,
+        languageCode: record.languageCode,
+        confirmText: 'DELETE_LOCAL_FILE'
+      })
+      replaceRecordInList('coverImages', response.data.data)
+      ElMessage.success('已转回远程快照')
+    }
+
+    function openArticleMediaReplace(record) {
+      if (!record) {
+        return
+      }
+      if (isConvertibleLocalArticleMedia(record)) {
+        convertArticleMediaToRemote(record).catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+        return
+      }
+      openArticleMediaReplaceDialog(record)
+    }
+
+    function clearArticleMediaReplaceFile() {
+      articleMediaReplaceFileList.value = []
+    }
+
+    function appendArticleMediaReplaceBaseFormData(formData) {
+      formData.append('id', articleMediaReplaceRecord.value._id)
+      formData.append(
+        'languageCode',
+        articleMediaReplaceRecord.value.languageCode || form.languageCode
+      )
+    }
+
+    function appendArticleImageReplaceOptions(formData) {
+      formData.append(
+        'noCompress',
+        articleMediaReplaceOptions.noCompress ? '1' : '0'
+      )
+      formData.append(
+        'noThumbnail',
+        articleMediaReplaceOptions.noThumbnail ? '1' : '0'
+      )
+      formData.append(
+        'is360Panorama',
+        articleMediaReplaceOptions.is360Panorama ? '1' : '0'
+      )
+      if (articleMediaReplaceOptions.imgSettingCompressMaxSize) {
+        formData.append(
+          'imgSettingCompressMaxSize',
+          String(articleMediaReplaceOptions.imgSettingCompressMaxSize)
+        )
+      }
+    }
+
+    function handleArticleMediaReplaceSuccess(updatedRecord) {
+      replaceRecordInList('coverImages', updatedRecord)
+      articleMediaReplaceVisible.value = false
+      resetArticleMediaReplaceForm()
+    }
+
+    function replaceArticleImageFile(file) {
+      if (!articleMediaReplaceRecord.value) {
+        return Promise.reject(new Error('媒体不存在'))
+      }
+      if (!isImageAttachment(articleMediaReplaceRecord.value)) {
+        const error = new Error('图片媒体只能替换为图片文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
+      }
+      if (!file) {
+        const error = new Error('请选择文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
+      }
+      if (!file.type || !file.type.includes('image')) {
+        const error = new Error('图片媒体只能替换为图片文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
+      }
+
+      const formData = new FormData()
+      appendArticleMediaReplaceBaseFormData(formData)
+      appendArticleImageReplaceOptions(formData)
+      formData.append('file', file, file.name)
+
+      articleMediaReplaceSubmitting.value = true
+      return multilingualApi
+        .replaceLocalMedia(formData)
+        .then(response => {
+          ElMessage.success('替换成功')
+          handleArticleMediaReplaceSuccess(response.data.data)
+          return response
+        })
+        .finally(() => {
+          articleMediaReplaceSubmitting.value = false
+        })
+    }
+
+    function replaceArticleImageUploadRequest(uploadRequest) {
+      return replaceArticleImageFile(uploadRequest.file)
+    }
+
+    function handleArticleImageReplaceSuccess() {
+      articleMediaReplaceFileList.value = []
+    }
+
+    function handleArticleImageReplaceError(error) {
+      console.log(error)
+      articleMediaReplaceFileList.value = []
+    }
+
+    function handleArticleMediaReplacePaste(event) {
+      if (
+        !articleMediaReplaceRecord.value ||
+        !isImageAttachment(articleMediaReplaceRecord.value)
+      ) {
+        return
+      }
+      const clipboardData =
+        event.clipboardData || event.originalEvent?.clipboardData
+      if (!clipboardData || !clipboardData.items) {
+        return
+      }
+      const items = clipboardData.items
+      for (let index in items) {
+        const item = items[index]
+        if (item.kind !== 'file') {
+          continue
+        }
+        const blob = item.getAsFile()
+        if (!blob.type.startsWith('image/')) {
+          continue
+        }
+        const file = new File([blob], `image-${generateRandomString(8)}.png`, {
+          type: blob.type
+        })
+        event.preventDefault()
+        replaceArticleImageFile(file).catch(handleArticleImageReplaceError)
+        return
+      }
+    }
+
+    function replaceArticleVideoLocal(formData) {
+      if (!articleMediaReplaceRecord.value) {
+        return Promise.reject(new Error('媒体不存在'))
+      }
+      if (!isVideoAttachment(articleMediaReplaceRecord.value)) {
+        const error = new Error('视频媒体只能替换为视频文件')
+        ElMessage.error(error.message)
+        return Promise.reject(error)
+      }
+
+      appendArticleMediaReplaceBaseFormData(formData)
+      return multilingualApi.replaceLocalMedia(formData)
+    }
+
+    function handleArticleVideoReplaceSuccess(response) {
+      handleArticleMediaReplaceSuccess(response?.data?.data || response)
+    }
+
+    function getArticleMediaSettingValues() {
+      return multilingualApi.getMediaSettings({}, true)
+    }
+
     function replaceRecordInList(fieldName, record) {
+      const nextRecord =
+        fieldName === 'tags' ? normalizeTagRecord(record) : record
       const index = relationRecords[fieldName].findIndex(
-        item => item._id === record._id
+        item => item._id === nextRecord._id
       )
       if (index >= 0) {
-        relationRecords[fieldName][index] = record
+        relationRecords[fieldName][index] = nextRecord
       }
     }
 
@@ -1990,6 +2359,27 @@ export default {
         template: form.template,
         code: form.code,
         editorVersion: form.editorVersion,
+        author: form.author,
+        sort: form.sort,
+        tags: form.tags,
+        mappointList: form.mappointList,
+        coverImages: form.coverImages,
+        bangumiList: form.bangumiList,
+        movieList: form.movieList,
+        gameList: form.gameList,
+        bookList: form.bookList,
+        postList: form.postList,
+        tweetList: form.tweetList,
+        eventList: form.eventList,
+        voteList: form.voteList,
+        contentBangumiList: form.contentBangumiList,
+        contentMovieList: form.contentMovieList,
+        contentGameList: form.contentGameList,
+        contentBookList: form.contentBookList,
+        contentPostList: form.contentPostList,
+        contentTweetList: form.contentTweetList,
+        contentEventList: form.contentEventList,
+        contentVoteList: form.contentVoteList,
         confirmReview
       }
     }
@@ -2784,6 +3174,7 @@ export default {
     return {
       Document,
       EditPen,
+      Refresh,
       VideoPlay,
       aiApplying,
       aiBaseMode,
@@ -2838,7 +3229,14 @@ export default {
       isSkippedTranslationCreating,
       isVideoAttachment,
       loading,
+      articleMediaReplaceFileList,
+      articleMediaReplaceOptions,
+      articleMediaReplaceOptionsCount,
+      articleMediaReplaceRecord,
+      articleMediaReplaceSubmitting,
+      articleMediaReplaceVisible,
       onContentTabChange,
+      openArticleMediaReplace,
       openMediaPreview,
       openAiTranslationDialog,
       openRelationEditor,
@@ -2876,6 +3274,16 @@ export default {
       openTranslationJsonImport,
       parseTranslationJsonImport,
       requestAiTranslation,
+      clearArticleMediaReplaceFile,
+      getArticleMediaActionText,
+      getArticleMediaSettingValues,
+      handleArticleImageReplaceError,
+      handleArticleImageReplaceSuccess,
+      handleArticleMediaReplacePaste,
+      handleArticleVideoReplaceSuccess,
+      replaceArticleImageUploadRequest,
+      replaceArticleVideoLocal,
+      resetArticleMediaReplaceForm,
       saveRelationEdit,
       saving,
       selectAllAiEntries,
@@ -2978,6 +3386,17 @@ export default {
   position: absolute;
   right: 3px;
   top: 3px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  z-index: 3;
+}
+
+.post-cover-image-item-replace {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
   width: 24px;
   height: 24px;
   min-height: 24px;

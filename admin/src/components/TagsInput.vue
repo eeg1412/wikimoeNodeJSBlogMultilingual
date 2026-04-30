@@ -34,6 +34,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { normalizeTagName } from '@/utils/tagName'
 
 const props = defineProps({
   // modelValue can be a single string (e.g. "a,b,c") or an array for backward compatibility
@@ -50,7 +51,7 @@ const input = ref('')
 
 const parseStringToTags = s => {
   if (s) {
-    return s.split(props.separator)
+    return s.split(props.separator).map(normalizeTagName).filter(Boolean)
   } else {
     return []
   }
@@ -66,7 +67,7 @@ const tagsValue = computed({
 })
 
 function addTag() {
-  const val = (input.value || '').trim()
+  const val = normalizeTagName(input.value || '')
   if (!val) return
   if (!props.allowDuplicate && tagsValue.value.includes(val)) {
     ElMessage.warning('标签已存在')

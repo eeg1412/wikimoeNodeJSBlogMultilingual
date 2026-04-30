@@ -2,6 +2,7 @@ import {
   getPostDisplayTitle,
   getRelationDisplayName
 } from '@/utils/multilingual'
+import { normalizeTagName } from '@/utils/tagName'
 
 export const RELATION_EDIT_FIELD_MAP = {
   users: [
@@ -31,7 +32,14 @@ export const RELATION_EDIT_FIELD_MAP = {
     },
     { name: 'template', label: '模板' }
   ],
-  tags: [{ name: 'tagname', label: '标签名', translationExport: true }],
+  tags: [
+    {
+      name: 'tagname',
+      label: '标签名',
+      type: 'tagName',
+      translationExport: true
+    }
+  ],
   mappoints: [
     { name: 'title', label: '地点标题', translationExport: true },
     {
@@ -171,6 +179,12 @@ export const RELATION_EDIT_FIELD_MAP = {
     { name: 'sortop', label: '分类置顶', type: 'boolean' }
   ],
   votes: [
+    {
+      name: 'options',
+      label: '选项',
+      type: 'voteOptions',
+      translationExport: true
+    },
     { name: 'title', label: '投票标题', translationExport: true },
     { name: 'maxSelect', label: '最大选择数', type: 'number' },
     { name: 'showResultAfter', label: '投票后显示结果', type: 'boolean' },
@@ -235,6 +249,19 @@ export function getRelationFieldInitialValue(field, record) {
   const value = record?.[field.name]
   if (field.type === 'parentRelation') {
     return getRelationIdValue(value)
+  }
+  if (field.type === 'voteOptions') {
+    return Array.isArray(value)
+      ? value.map(item => ({
+          _id: item._id,
+          title: item.title || '',
+          votes: Number(item.votes || 0),
+          sort: Number(item.sort || 0)
+        }))
+      : []
+  }
+  if (field.type === 'tagName') {
+    return normalizeTagName(value)
   }
 
   return value
