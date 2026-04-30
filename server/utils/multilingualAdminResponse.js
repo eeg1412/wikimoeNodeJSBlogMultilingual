@@ -106,9 +106,9 @@ function buildErrorResponse(status, code, message, field, extra = {}) {
 }
 
 function sendError(res, status, code, message, field, extra = {}) {
-  return res.status(status).json(
-    buildErrorResponse(status, code, message, field, extra)
-  )
+  return res
+    .status(status)
+    .json(buildErrorResponse(status, code, message, field, extra))
 }
 
 function handleApiError(
@@ -134,8 +134,14 @@ function handleApiError(
     errorText = error.message
   }
 
+  // Record stack if available to help locate the source of the error
   const adminApiLog = log4js.getLogger('adminApi')
-  adminApiLog.error(`${logMessage}: ${errorText}`)
+  if (error && error.stack) {
+    adminApiLog.error(`${logMessage}: ${errorText}\n${error.stack}`)
+  } else {
+    adminApiLog.error(`${logMessage}: ${errorText}`)
+  }
+
   return sendError(res, 500, ERROR_CODES.INTERNAL_ERROR)
 }
 
