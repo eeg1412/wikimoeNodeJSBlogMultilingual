@@ -214,11 +214,6 @@ const routes = [
         component: () => import('../views/index/banner/BannerList.vue')
       },
       {
-        path: '/readerlog/list',
-        name: 'ReaderlogList',
-        component: () => import('../views/index/readerlog/ReaderlogList.vue')
-      },
-      {
         path: '/referrer/list',
         name: 'ReferrerList',
         component: () => import('../views/index/referrer/ReferrerList.vue')

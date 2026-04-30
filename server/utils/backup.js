@@ -30,7 +30,6 @@ const navisUtil = require('../mongodb/utils/navis')
 const optionsUtil = require('../mongodb/utils/options')
 const postLikeLogsUtil = require('../mongodb/utils/postLikeLogs')
 const postsUtil = require('../mongodb/utils/posts')
-const readerlogsUtil = require('../mongodb/utils/readerlogs')
 const referrersUtil = require('../mongodb/utils/referrers')
 const rsslogsUtil = require('../mongodb/utils/rsslogs')
 const sidebarsUtil = require('../mongodb/utils/sidebars')
@@ -64,7 +63,6 @@ const modelUtilMap = {
   options: optionsUtil,
   postlikelogs: postLikeLogsUtil,
   posts: postsUtil,
-  readerlogs: readerlogsUtil,
   referrers: referrersUtil,
   rsslogs: rsslogsUtil,
   sidebars: sidebarsUtil,
@@ -78,6 +76,7 @@ const modelUtilMap = {
 }
 
 const noDropCollections = ['backups']
+const excludedCollections = ['readerlogs']
 
 // 导出数据库集合
 exports.dumpCollections = async (pathname, id) => {
@@ -94,6 +93,10 @@ exports.dumpCollections = async (pathname, id) => {
 
   // 遍历每个集合
   for (const collection of collections) {
+    if (excludedCollections.includes(collection.name)) {
+      continue
+    }
+
     // 获取集合中的所有文档
     const cursor = mongoose.connection.db.collection(collection.name).find()
     // 创建写入流，用于将数据写入到文件中
@@ -243,8 +246,11 @@ exports.restoreCollections = async fullPath => {
     if (file.endsWith('.bson')) {
       // 获取集合名称
       const collectionName = file.replace('.bson', '')
-      // 如果集合名称在 noDropCollections 中，跳过
-      if (noDropCollections.includes(collectionName)) {
+      // 如果集合名称在排除列表或 noDropCollections 中，跳过
+      if (
+        excludedCollections.includes(collectionName) ||
+        noDropCollections.includes(collectionName)
+      ) {
         continue
       }
       // 如果集合名称不在 modelUtilMap 中，跳过
@@ -279,14 +285,7 @@ exports.restoreCollections = async fullPath => {
           // 反序列化buffer中的数据，创建一个JavaScript对象
           const doc = bson.deserialize(buffer.subarray(0, size))
           // 插入
-          switch (collectionName) {
-            case 'readerlogs':
-              promiseArray.push(modelUtilMap[collectionName].saveNormal(doc))
-              break
-            default:
-              promiseArray.push(modelUtilMap[collectionName].save(doc))
-              break
-          }
+          promiseArray.push(modelUtilMap[collectionName].save(doc))
 
           // 将buffer中已经被反序列化的数据移除，以便于处理下一个文档
           buffer = buffer.subarray(size)

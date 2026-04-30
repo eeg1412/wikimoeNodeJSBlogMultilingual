@@ -925,8 +925,12 @@ const likeComment = commentId => {
 
 // viewCount
 const putViewCount = () => {
+  if (!sourcePostid) {
+    return
+  }
+
   putViewCountApi({
-    id: postid
+    id: sourcePostid
   })
 }
 

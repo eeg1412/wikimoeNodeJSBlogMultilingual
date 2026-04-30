@@ -261,11 +261,6 @@ const menuGroups = [
         icon: 'fas fa-fw fa-chart-bar pr10'
       },
       {
-        name: 'ReaderlogList',
-        title: '访客统计',
-        icon: 'fas fa-fw fa-user-clock pr10'
-      },
-      {
         name: 'ReferrerList',
         title: '访问来源',
         icon: 'fas fa-fw fa-external-link-alt pr10'

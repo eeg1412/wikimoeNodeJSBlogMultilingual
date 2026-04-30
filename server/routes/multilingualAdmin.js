@@ -242,24 +242,6 @@ const multilingualAdminRouteSetting = [
     controller: localContentController.updateSidebarTaxis
   },
   {
-    path: '/readerlog/list',
-    method: 'get',
-    middleware: [checkAuth],
-    controller: require('../api/admin/readerlog/getReaderlogList')
-  },
-  {
-    path: '/readerlog/stats',
-    method: 'get',
-    middleware: [checkAuth],
-    controller: require('../api/admin/readerlog/getReaderlogStats')
-  },
-  {
-    path: '/readerlog/delete',
-    method: 'delete',
-    middleware: [checkAuth],
-    controller: require('../api/admin/readerlog/deleteReaderlog')
-  },
-  {
     path: '/referrer/list',
     method: 'get',
     middleware: [checkAuth],

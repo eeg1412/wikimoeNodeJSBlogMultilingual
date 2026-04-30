@@ -1,10 +1,183 @@
-const sorts = require('../../../mongodb/models/sorts')
-const readerlogUtils = require('../../../mongodb/utils/readerlogs')
+const { ObjectId } = require('mongodb')
+const postUtils = require('../../../mongodb/utils/posts')
 const utils = require('../../../utils/utils')
 const cacheDataUtils = require('../../../config/cacheData')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
+
+function normalizeSourceId(sourceId) {
+  if (!sourceId) {
+    return ''
+  }
+
+  return String(sourceId)
+}
+
+function toObjectId(value) {
+  if (value instanceof ObjectId) {
+    return value
+  }
+
+  if (!ObjectId.isValid(value)) {
+    return null
+  }
+
+  return new ObjectId(value)
+}
+
+function getPostTarget(post) {
+  switch (post?.type) {
+    case 1:
+      return 'blog'
+    case 2:
+      return 'tweet'
+    case 3:
+      return 'page'
+    default:
+      return 'blog'
+  }
+}
+
+async function getSourceTrendPostList(limit, languageCode) {
+  const sourceReaderlogsRepository =
+    global.$mongodDB?.source?.repositories?.readerlogs
+  if (!sourceReaderlogsRepository) {
+    throw new Error('源站访问日志仓库不可用，无法获取热门文章')
+  }
+
+  const twentyFourHoursAgo = moment().subtract(24, 'hours')
+  const sourceTrendList = await sourceReaderlogsRepository.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: twentyFourHoursAgo.toDate() },
+        action: 'postView',
+        isBot: false
+      }
+    },
+    {
+      $group: {
+        _id: '$data.targetId',
+        target: { $first: '$data.target' },
+        hot: {
+          $sum: 13
+        }
+      }
+    },
+    {
+      $match: {
+        _id: {
+          $ne: null
+        },
+        hot: {
+          $gt: 0
+        }
+      }
+    },
+    {
+      $sort: {
+        hot: -1,
+        _id: -1
+      }
+    },
+    {
+      $limit: limit * 5
+    }
+  ])
+
+  const sourcePostIdList = sourceTrendList
+    .map(item => toObjectId(item?._id))
+    .filter(Boolean)
+  if (sourcePostIdList.length === 0) {
+    return []
+  }
+
+  const translatedPostList = await postUtils.aggregate([
+    {
+      $match: {
+        sourceId: {
+          $in: sourcePostIdList
+        },
+        languageCode,
+        recordKind: 'translation',
+        status: 1
+      }
+    },
+    {
+      $addFields: {
+        coverImage: {
+          $cond: {
+            if: { $eq: [{ $size: '$coverImages' }, 0] },
+            then: [],
+            else: [{ $arrayElemAt: ['$coverImages', 0] }]
+          }
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: 'attachments',
+        localField: 'coverImage',
+        foreignField: '_id',
+        pipeline: [
+          {
+            $project: {
+              _id: 1,
+              filepath: 1,
+              mimetype: 1,
+              thumfor: 1
+            }
+          }
+        ],
+        as: 'coverImage'
+      }
+    },
+    {
+      $unwind: {
+        path: '$coverImage',
+        preserveNullAndEmptyArrays: true
+      }
+    },
+    {
+      $project: {
+        _id: 1,
+        sourceId: 1,
+        title: 1,
+        alias: 1,
+        excerpt: 1,
+        type: 1,
+        coverImage: 1
+      }
+    }
+  ])
+
+  const translatedPostMap = new Map(
+    translatedPostList.map(item => [normalizeSourceId(item.sourceId), item])
+  )
+  const list = []
+  for (const sourceTrendItem of sourceTrendList) {
+    const postDetail = translatedPostMap.get(
+      normalizeSourceId(sourceTrendItem?._id)
+    )
+    if (!postDetail) {
+      continue
+    }
+
+    list.push({
+      _id: postDetail._id,
+      sourceId: sourceTrendItem._id,
+      target: sourceTrendItem.target || getPostTarget(postDetail),
+      hot: sourceTrendItem.hot,
+      postDetail
+    })
+
+    if (list.length >= limit) {
+      break
+    }
+  }
+
+  return list
+}
 
 module.exports = async function (req, res, next) {
   const languageCode = cacheDataUtils.getRequestLanguageCode(req)
@@ -19,188 +192,63 @@ module.exports = async function (req, res, next) {
       const trendSidebar = sidebarList.find(item => {
         return item.type === 12
       })
-      // 不存在type为12的侧边栏
       if (!trendSidebar) {
         res.send({
           list: []
         })
-        // reject
         return
       }
-      // 存在type为3的侧边栏,获取count
+
       const limit = trendSidebar.count || 0
-      // 如果count小于等于0，不获取最新评论列表
       if (limit <= 0) {
         res.send({
           list: []
         })
-        // reject
         return
       }
 
-      // 获取缓存中的trendPostListData
       const trendPostListData = languageCache.trendPostListData || null
-
       let shouldUpdate = true
       if (trendPostListData) {
         res.send({
           list: trendPostListData.list
         })
-        // 确保trendPostListData.date也在相同的时区
-        const trendPostListDate = trendPostListData.date
         const isSameLimit = trendPostListData.limit === limit
-        // 使用带时区的日期进行分钟差异比较
-        const isDiffSeconds = moment().diff(trendPostListDate, 'seconds')
+        const isDiffSeconds = moment().diff(trendPostListData.date, 'seconds')
         const isWithinTimeLimit = isDiffSeconds <= 2 * 60
         if (isWithinTimeLimit && isSameLimit) {
           shouldUpdate = false
-          // reject
           return
         }
       }
 
       if (shouldUpdate) {
-        console.info(`getTrendPostList should update:${languageCode}`)
-        // 查询数据库
-        // 获取24小时前的时间
-        const twentyFourHoursAgo = moment().subtract(24, 'hours')
-
-        const pipe = [
-          {
-            $match: {
-              createdAt: { $gte: twentyFourHoursAgo.toDate() },
-              action: 'postView',
-              languageCode,
-              routeOwnership: 'multilingual-blog',
-              isBot: false
-            }
-          },
-          {
-            $group: {
-              _id: '$data.targetId',
-              target: { $first: '$data.target' },
-              hot: {
-                $sum: 13
-              }
-            }
-          },
-          {
-            $match: {
-              hot: { $gt: 0 }
-            }
-          },
-          {
-            $sort: {
-              hot: -1,
-              _id: -1
-            }
-          },
-          {
-            $limit: limit
-          },
-          {
-            $lookup: {
-              from: 'posts',
-              localField: '_id',
-              foreignField: '_id',
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $and: [{ $eq: ['$status', 1] }]
-                    },
-                    languageCode,
-                    recordKind: 'translation'
-                  }
-                },
-                {
-                  $addFields: {
-                    coverImage: {
-                      $cond: {
-                        if: { $eq: [{ $size: '$coverImages' }, 0] },
-                        then: [],
-                        else: [{ $arrayElemAt: ['$coverImages', 0] }]
-                      }
-                    }
-                  }
-                },
-                {
-                  $lookup: {
-                    from: 'attachments',
-                    localField: 'coverImage',
-                    foreignField: '_id',
-                    pipeline: [
-                      {
-                        $project: {
-                          _id: 1,
-                          filepath: 1,
-                          mimetype: 1,
-                          thumfor: 1
-                        }
-                      }
-                    ],
-                    as: 'coverImage'
-                  }
-                },
-                {
-                  $unwind: {
-                    path: '$coverImage',
-                    preserveNullAndEmptyArrays: true
-                  }
-                },
-
-                {
-                  $project: {
-                    _id: 1,
-                    title: 1,
-                    alias: 1,
-                    excerpt: 1,
-                    coverImage: 1
-                  }
-                }
-              ],
-              as: 'postDetail'
-            }
-          },
-          {
-            $unwind: {
-              path: '$postDetail',
-              preserveNullAndEmptyArrays: true
-            }
-          },
-          {
-            $match: {
-              $or: [{ postDetail: { $exists: true, $ne: null } }]
-            }
-          }
-        ]
-        await readerlogUtils
-          .aggregate(pipe)
-          .then(data => {
-            // 写入缓存
-            languageCache.trendPostListData = {
-              date: moment().toDate(),
-              list: data,
-              limit: limit
-            }
-            if (!trendPostListData) {
-              console.info('getTrendPostList should send new data')
-              res.send({
-                list: data
-              })
-            }
+        const list = await getSourceTrendPostList(limit, languageCode)
+        languageCache.trendPostListData = {
+          date: moment().toDate(),
+          list,
+          limit
+        }
+        if (!trendPostListData) {
+          res.send({
+            list
           })
-          .catch(err => {
-            userApiLog.error(`getTrendPostList error, ${logErrorToText(err)}`)
-          })
+        }
       }
     })
     .then(() => {
-      // 释放锁
       console.info('getTrendPostList unlock')
     })
     .catch(err => {
-      // 释放锁
       userApiLog.error(`getTrendPostList unlock error, ${logErrorToText(err)}`)
+      if (!res.headersSent) {
+        res.status(400).json({
+          errors: [
+            {
+              message: '热门文章获取失败'
+            }
+          ]
+        })
+      }
     })
 }

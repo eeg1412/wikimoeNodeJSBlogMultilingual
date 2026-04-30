@@ -1,21 +1,4 @@
 const readerlogsModel = require('../models/readerlogs')
-const utils = require('../../utils/utils')
-
-exports.save = async function (parmas) {
-  const { isExceedMaxSize } = await utils.getReaderlogsSize()
-  if (isExceedMaxSize) {
-    throw new Error('readerlogs超出最大存储容量')
-  }
-  // document作成
-  const readerlogs = new readerlogsModel(parmas)
-  // document保存
-  return await readerlogs.save()
-}
-
-exports.saveNormal = async function (parmas) {
-  // document保存
-  return await readerlogsModel.insertMany(parmas)
-}
 
 exports.findOne = async function (parmas, projection) {
   // document查询
@@ -45,22 +28,6 @@ exports.findPage = async function (parmas, sort, page, limit, projection) {
     list,
     total
   }
-}
-
-exports.updateOne = async function (filters, parmas) {
-  // document查询
-  parmas.$inc = { __v: 1, ...parmas.$inc }
-  return await readerlogsModel.updateOne(filters, parmas)
-}
-// 删除
-exports.deleteOne = async function (filters) {
-  // document查询
-  return await readerlogsModel.deleteOne(filters)
-}
-// 删除多个
-exports.deleteMany = async function (filters) {
-  // document查询
-  return await readerlogsModel.deleteMany(filters)
 }
 
 // count

@@ -5,6 +5,8 @@ const tagsUtils = require('../../../mongodb/utils/tags')
 const utils = require('../../../utils/utils')
 const cacheDataUtils = require('../../../config/cacheData')
 const {
+  isSourceInteractionSortType,
+  sortPostListBySourceInteractionStats,
   syncSourcePostInteractionStats
 } = require('../../../utils/sourcePostInteractionStats')
 const log4js = require('log4js')
@@ -460,11 +462,86 @@ module.exports = async function (req, res, next) {
   }
   const filter =
     '-voteList -content -bangumiList -movieList -bookList -eventList -gameList -postList -tweetList -seriesSortList -code -editorVersion'
+
+  const findOptions = {
+    voteFliter:
+      '_id endTime maxSelect showResultAfter title options.title options._id'
+  }
+
+  if (isSourceInteractionSortType(sorttype)) {
+    try {
+      const matchedPostList = await postUtils.find(
+        params,
+        {},
+        '_id sourceId views likes shares comnum'
+      )
+      const sourceSortedPostList = matchedPostList.map(item => {
+        return typeof item?.toJSON === 'function' ? item.toJSON() : item
+      })
+      await sortPostListBySourceInteractionStats(sourceSortedPostList, sorttype)
+
+      const total = sourceSortedPostList.length
+      const pageStart = (page - 1) * size
+      const pagePostIdList = sourceSortedPostList
+        .slice(pageStart, pageStart + size)
+        .map(item => item._id)
+
+      if (pagePostIdList.length === 0) {
+        res.send({
+          list: [],
+          total,
+          size
+        })
+        return
+      }
+
+      const sourceSortedPageData = await postUtils.findPage(
+        {
+          ...params,
+          _id: {
+            $in: pagePostIdList
+          }
+        },
+        {
+          _id: -1
+        },
+        1,
+        pagePostIdList.length,
+        filter,
+        findOptions
+      )
+      const pageOrderMap = new Map(
+        pagePostIdList.map((postId, index) => [String(postId), index])
+      )
+      sourceSortedPageData.list.sort((left, right) => {
+        return (
+          pageOrderMap.get(String(left?._id)) -
+          pageOrderMap.get(String(right?._id))
+        )
+      })
+      await syncSourcePostInteractionStats(sourceSortedPageData.list)
+
+      res.send({
+        list: sourceSortedPageData.list,
+        total,
+        size
+      })
+      return
+    } catch (err) {
+      res.status(400).json({
+        errors: [
+          {
+            message: '文章列表获取失败'
+          }
+        ]
+      })
+      userApiLog.error(`post list get fail, ${logErrorToText(err)}`)
+      return
+    }
+  }
+
   postUtils
-    .findPage(params, postSorting, page, size, filter, {
-      voteFliter:
-        '_id endTime maxSelect showResultAfter title options.title options._id'
-    })
+    .findPage(params, postSorting, page, size, filter, findOptions)
     .then(async data => {
       await syncSourcePostInteractionStats(data.list)
 

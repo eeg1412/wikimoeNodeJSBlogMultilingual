@@ -10,7 +10,6 @@ export const MULTILINGUAL_ENDPOINT_PREFIXES = [
   '/post/list',
   '/post/archive',
   '/post/detail',
-  '/post/view/count',
   '/sort/',
   '/tag/',
   '/mappoint/',
@@ -26,9 +25,7 @@ export const MULTILINGUAL_ENDPOINT_PREFIXES = [
   '/navi/',
   '/banner/',
   '/sidebar/',
-  '/trend/',
-  '/log/create',
-  '/log/update/performance'
+  '/trend/'
 ]
 
 function getRouteCode() {

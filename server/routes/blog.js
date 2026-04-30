@@ -83,14 +83,6 @@ const blogRouteSetting = [
     middleware: [],
     controller: require('../api/blog/post/getPostDetail')
   },
-  // put updatePostViewCount
-  // put updatePostViewCount
-  {
-    path: '/post/view/count',
-    method: 'put',
-    middleware: [],
-    controller: require('../api/blog/post/updatePostViewCount')
-  },
   // getBangumiList
   {
     path: '/bangumi/list',
@@ -258,20 +250,6 @@ const blogRouteSetting = [
     method: 'get',
     middleware: [],
     controller: require('../api/blog/event/getEventDetail')
-  },
-  // createLog
-  {
-    path: '/log/create',
-    method: 'post',
-    middleware: [],
-    controller: require('../api/blog/log/createLog')
-  },
-  // updateLogPerformanceNavigationTiming
-  {
-    path: '/log/update/performance',
-    method: 'put',
-    middleware: [],
-    controller: require('../api/blog/log/updateLogPerformanceNavigationTiming')
   },
   // getTrendPostList
   {

@@ -457,26 +457,6 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
-    // get /readerlog/list
-    getReaderlogList(data) {
-      return api.get('/readerlog/list', {
-        params: data,
-        shouldAdminJWT: true
-      })
-    },
-    // get /readerlog/stats
-    getReaderlogStats() {
-      return api.get('/readerlog/stats', {
-        shouldAdminJWT: true
-      })
-    },
-    // delete /readerlog/delete
-    deleteReaderlog(data) {
-      return api.delete('/readerlog/delete', {
-        params: data,
-        shouldAdminJWT: true
-      })
-    },
     // get /userloginlog/list
     getUserLoginLogList(data) {
       return api.get('/userloginlog/list', {

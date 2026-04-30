@@ -586,17 +586,18 @@ function validateMultilingualAdminConsoleSlice() {
     '横幅',
     '侧边栏',
     '多语言站点配置',
-    '备份',
-    '访客统计'
+    '备份'
   ])
   assertFileNotIncludes(indexPath, [
     'CommentList',
+    'ReaderlogList',
     'LinkList',
     'PostLikeLogList',
     'CommentLikeLogList',
     'EmailSendHistoryList',
     'UserList',
     '友链',
+    '访客统计',
     '点赞统计',
     '评论统计',
     '邮件模板',
@@ -944,9 +945,6 @@ function validateMultilingualAdminApi() {
     '/sidebar/update',
     '/sidebar/delete',
     '/sidebar/update/taxis',
-    '/readerlog/list',
-    '/readerlog/stats',
-    '/readerlog/delete',
     '/referrer/list',
     '/backup/create',
     '/backup/list',
@@ -981,6 +979,11 @@ function validateMultilingualAdminApi() {
     '/media/list',
     '/media/replace-local',
     '/media/convert-remote'
+  ])
+  assertFileNotIncludes(routePath, [
+    '/readerlog/list',
+    '/readerlog/stats',
+    '/readerlog/delete'
   ])
   assertFileIncludes(loginPath, [
     'global.$mongodDB.source.repositories.users.findOne',
@@ -1424,11 +1427,14 @@ function validateBlogApiSplit() {
   assertFileIncludes(sourcePath, [
     "'/options'",
     "'/comment/'",
+    "'/post/view/count'",
     "'/post/share/count'",
     "'/post/like/log'",
     "'/post/like/log/list'",
     "'/comment/like/log'",
     "'/comment/like/log/list'",
+    "'/log/create'",
+    "'/log/update/performance'",
     "'/link/list'"
   ])
 
@@ -1436,7 +1442,6 @@ function validateBlogApiSplit() {
     "'/post/list'",
     "'/post/archive'",
     "'/post/detail'",
-    "'/post/view/count'",
     "'/sort/'",
     "'/tag/'",
     "'/mappoint/'",
@@ -1452,9 +1457,7 @@ function validateBlogApiSplit() {
     "'/navi/'",
     "'/banner/'",
     "'/sidebar/'",
-    "'/trend/'",
-    "'/log/create'",
-    "'/log/update/performance'"
+    "'/trend/'"
   ])
 }
 
@@ -1618,27 +1621,6 @@ function validateBlogCacheAndVisitorStats() {
   )
   const mongodbIndexPath = path.join(serverDir, 'mongodb', 'index.js')
   const blogRoutePath = path.join(serverDir, 'routes', 'blog.js')
-  const createLogPath = path.join(
-    serverDir,
-    'api',
-    'blog',
-    'log',
-    'createLog.js'
-  )
-  const updateLogPath = path.join(
-    serverDir,
-    'api',
-    'blog',
-    'log',
-    'updateLogPerformanceNavigationTiming.js'
-  )
-  const updateViewPath = path.join(
-    serverDir,
-    'api',
-    'blog',
-    'post',
-    'updatePostViewCount.js'
-  )
   const trendPath = path.join(
     serverDir,
     'api',
@@ -1667,6 +1649,17 @@ function validateBlogCacheAndVisitorStats() {
     'post',
     'getPostDetail.js'
   )
+  const removedVisitorWriteControllerPaths = [
+    path.join(serverDir, 'api', 'blog', 'log', 'createLog.js'),
+    path.join(
+      serverDir,
+      'api',
+      'blog',
+      'log',
+      'updateLogPerformanceNavigationTiming.js'
+    ),
+    path.join(serverDir, 'api', 'blog', 'post', 'updatePostViewCount.js')
+  ]
 
   assertFileIncludes(cacheDataPath, [
     'SUPPORTED_LANGUAGE_CODES',
@@ -1701,27 +1694,15 @@ function validateBlogCacheAndVisitorStats() {
     'await cacheDataUtils.refreshAllLanguageCache()'
   ])
 
-  assertFileIncludes(createLogPath, [
-    'normalizeLanguageCode(req.body.languageCode)',
-    "const ROUTE_OWNERSHIP = 'multilingual-blog'",
-    'languageCode,',
-    'routeOwnership: ROUTE_OWNERSHIP'
-  ])
-  assertFileIncludes(updateLogPath, [
-    'normalizeLanguageCode(req.body.languageCode)',
-    'languageCode,',
-    'routeOwnership: ROUTE_OWNERSHIP'
-  ])
-  assertFileIncludes(updateViewPath, [
-    'normalizeLanguageCode(req.body.languageCode)',
-    'languageCode,',
-    'routeOwnership: ROUTE_OWNERSHIP',
-    "recordKind: 'translation'"
-  ])
+  for (const removedPath of removedVisitorWriteControllerPaths) {
+    assert(!fs.existsSync(removedPath), `${removedPath} 必须删除`)
+  }
+
   assertFileIncludes(trendPath, [
     'cacheDataUtils.getRequestLanguageCode(req)',
     'languageCache.trendPostListData',
-    "routeOwnership: 'multilingual-blog'",
+    'global.$mongodDB?.source?.repositories?.readerlogs',
+    'sourceId',
     "action: 'postView'",
     "recordKind: 'translation'"
   ])
@@ -1752,9 +1733,12 @@ function validateBlogCacheAndVisitorStats() {
 
   assertFileNotIncludes(blogRoutePath, [
     "path: '/comment/",
+    "path: '/post/view/count'",
     "path: '/post/share/count'",
     "path: '/post/like/log'",
     "path: '/comment/like/log'",
+    "path: '/log/create'",
+    "path: '/log/update/performance'",
     "path: '/link/list'"
   ])
 }
