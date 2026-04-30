@@ -110,7 +110,7 @@ export default {
       poor: '凡作',
       bad: '低評価',
       terrible: '駄作',
-      awful: 'かなり厳しい',
+      awful: '酷評',
       confused: '???',
       none: '未評価'
     }

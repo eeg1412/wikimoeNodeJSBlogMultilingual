@@ -51,10 +51,10 @@ export default {
     frequent: 'Recent'
   },
   rating: {
-    points: '{score} pts',
+    points: '{score}',
     level: {
-      masterpiece: 'Masterpiece',
-      excellent: 'Excellent',
+      masterpiece: 'Superb',
+      excellent: 'Great',
       good: 'Good',
       okay: 'Fair',
       poor: 'Mediocre',
