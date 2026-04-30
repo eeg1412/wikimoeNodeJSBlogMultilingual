@@ -152,10 +152,13 @@
                     class="mr5 post-list-info-bottom-icon"
                     name="i-heroicons-book-open"
                   />
-                  <span>{{
+                  <span class="none xl:!inline">{{
                     t('common.post.views', {
                       count: formatNumberText(item.views)
                     })
+                  }}</span>
+                  <span class="xl:hidden">{{
+                    formatNumberText(item.views)
                   }}</span>
                 </NuxtLink>
               </div>
@@ -175,10 +178,13 @@
                     class="mr5 post-list-info-bottom-icon"
                     name="i-heroicons-chat-bubble-left-ellipsis"
                   />
-                  <span>{{
+                  <span class="none xl:!inline">{{
                     t('common.post.comments', {
                       count: formatNumberText(item.comnum)
                     })
+                  }}</span>
+                  <span class="xl:hidden">{{
+                    formatNumberText(item.comnum)
                   }}</span>
                 </NuxtLink>
               </div>
@@ -201,10 +207,13 @@
                       class="mr5 post-list-info-bottom-icon"
                     />
 
-                    <span>{{
+                    <span class="none xl:!inline">{{
                       t('common.post.shares', {
                         count: formatNumberText(item.shares)
                       })
+                    }}</span>
+                    <span class="xl:hidden">{{
+                      formatNumberText(item.shares)
                     }}</span>
                   </button>
                 </LazySharePopover>
@@ -240,10 +249,13 @@
                   v-else
                 />
 
-                <span>{{
+                <span class="none xl:!inline">{{
                   t('common.post.likes', {
                     count: formatNumberText(item.likes)
                   })
+                }}</span>
+                <span class="xl:hidden">{{
+                  formatNumberText(item.likes)
                 }}</span>
               </div>
               <div class="dflex flexCenter opacity-20" v-else>
@@ -253,10 +265,13 @@
                   name="i-heroicons-heart"
                 />
 
-                <span>{{
+                <span class="none xl:!inline">{{
                   t('common.post.likes', {
                     count: formatNumberText(item.likes)
                   })
+                }}</span>
+                <span class="xl:hidden">{{
+                  formatNumberText(item.likes)
                 }}</span>
               </div>
             </div>
