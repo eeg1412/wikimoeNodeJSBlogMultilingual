@@ -213,13 +213,33 @@ export default defineNitroPlugin(nitroApp => {
   const inflightBackgroundUpdates = new Set()
 
   // 缓存URL列表
+  const supportedLanguageCodes = [
+    'zh-CN',
+    'zh-HK',
+    'zh-TW',
+    'zh-SG',
+    'ja-JP',
+    'en-US'
+  ]
+  const cacheableLanguagePrefixes = Array.from(
+    new Set(
+      supportedLanguageCodes.flatMap(code => [
+        `/${code}`,
+        `/${code.toLowerCase()}`
+      ])
+    )
+  )
   const cachedUrls = new Set([
     // 首页
     '/',
+    ...cacheableLanguagePrefixes,
+    ...cacheableLanguagePrefixes.map(prefix => `${prefix}/`),
     // 文章列/文章详情
     '/post/*',
+    ...cacheableLanguagePrefixes.map(prefix => `${prefix}/post/*`),
     // 页面
-    '/page/*'
+    '/page/*',
+    ...cacheableLanguagePrefixes.map(prefix => `${prefix}/page/*`)
   ])
 
   // 生成32位随机密码
