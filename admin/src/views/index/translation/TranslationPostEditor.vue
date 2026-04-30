@@ -5,6 +5,12 @@
         <el-breadcrumb-item :to="{ name: 'TranslationPostList' }">
           多语言文章
         </el-breadcrumb-item>
+        <el-breadcrumb-item v-if="sourceLanguageListRoute" :to="sourceLanguageListRoute">
+          语言版本
+        </el-breadcrumb-item>
+        <el-breadcrumb-item v-else>
+          语言版本
+        </el-breadcrumb-item>
         <el-breadcrumb-item>编辑{{ typeTitle }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
@@ -490,10 +496,8 @@
               :value="entry.id"
               class="translation-json-entry"
             >
-              <TranslationEntryMeta :entry="entry" />
-              <div class="translation-json-entry-preview">
-                {{ entry.previewText }}
-              </div>
+              <TranslationEntryMeta :entry="entry" :show-subtitle="false" />
+              <TranslationEntryPreviewRows :entry="entry" />
             </el-checkbox>
           </div>
         </div>
@@ -845,10 +849,11 @@
                     :value="entry.id"
                     class="translation-json-entry"
                   >
-                    <TranslationEntryMeta :entry="entry" />
-                    <div class="translation-json-entry-preview">
-                      {{ entry.previewText }}
-                    </div>
+                    <TranslationEntryMeta
+                      :entry="entry"
+                      :show-subtitle="false"
+                    />
+                    <TranslationEntryPreviewRows :entry="entry" />
                   </el-checkbox>
                 </div>
               </div>
@@ -1200,6 +1205,7 @@ import RichEditor5 from '@/components/RichEditor5'
 import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
+import TranslationEntryPreviewRows from '@/components/TranslationEntryPreviewRows.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
@@ -1494,6 +1500,7 @@ export default {
     RichEditor4,
     RelationBusinessFieldEditor,
     TranslationEntryMeta,
+    TranslationEntryPreviewRows,
     VideoUploader,
     VideoPlay
   },
@@ -1548,6 +1555,18 @@ export default {
       code: '',
       editorVersion: 5,
       coverImages: []
+    })
+
+    const sourceLanguageListRoute = computed(() => {
+      const sourceSnapshotId = getSourceSnapshotId()
+      if (!sourceSnapshotId) {
+        return null
+      }
+
+      return {
+        name: 'TranslationPostLanguageList',
+        params: { sourceSnapshotId }
+      }
     })
 
     const postEditorVersion = computed(() => {
@@ -1793,17 +1812,57 @@ export default {
       return mappedResult
     }
 
+    function attachEntryPreviewRows(entries, currentEntries, sourceEntries) {
+      const currentEntryMap = new Map(
+        currentEntries.map(entry => [entry.id, entry])
+      )
+      const sourceEntryMap = new Map(
+        sourceEntries.map(entry => [entry.id, entry])
+      )
+
+      return entries.map(entry => {
+        const currentEntry = currentEntryMap.get(entry.id)
+        const sourceEntry = sourceEntryMap.get(entry.id)
+        return {
+          ...entry,
+          currentPreviewText:
+            currentEntry?.previewText || entry.currentPreviewText || '',
+          currentPreviewRawValue:
+            currentEntry?.previewRawValue || entry.currentPreviewRawValue || '',
+          sourcePreviewText:
+            sourceEntry?.previewText || entry.sourcePreviewText || '',
+          sourcePreviewRawValue:
+            sourceEntry?.previewRawValue || entry.sourcePreviewRawValue || ''
+        }
+      })
+    }
+
     async function loadTranslationEntriesByBaseMode(mode, options = {}) {
+      const currentEntries = buildTranslationEntries(options)
+      const sourceResult = await loadSourceReferenceEntries({
+        force: options.force === true
+      })
+      const sourceEntries = sourceResult.entries || []
+
       if (mode === 'current') {
         return {
-          entries: buildTranslationEntries(options),
-          skippedEntries: []
+          entries: attachEntryPreviewRows(
+            currentEntries,
+            currentEntries,
+            sourceEntries
+          ),
+          skippedEntries: sourceResult.skippedEntries || []
         }
       }
 
-      return await loadSourceReferenceEntries({
-        force: options.force === true
-      })
+      return {
+        ...sourceResult,
+        entries: attachEntryPreviewRows(
+          sourceEntries,
+          currentEntries,
+          sourceEntries
+        )
+      }
     }
 
     function isVideoAttachment(record) {
@@ -2445,7 +2504,16 @@ export default {
     }
 
     function goList() {
-      router.push({ name: 'TranslationPostList' })
+      const sourceSnapshotId = getSourceSnapshotId()
+      if (!sourceSnapshotId) {
+        ElMessage.error('当前文章缺少源快照 ID，无法返回语言版本页')
+        return
+      }
+
+      router.push({
+        name: 'TranslationPostLanguageList',
+        params: { sourceSnapshotId }
+      })
     }
 
     async function refreshExportEntries() {
@@ -2905,7 +2973,7 @@ export default {
     }
 
     function getSourceSnapshotId() {
-      return form.sourceSnapshotId || detailData.value?.post?.sourceSnapshotId
+      return form.sourceSnapshotId
     }
 
     function openAiTranslationDialog() {
@@ -3225,6 +3293,7 @@ export default {
       getVideoCoverUrl,
       getVideoPreviewUrl,
       goList,
+      sourceLanguageListRoute,
       isImageAttachment,
       isSkippedTranslationCreating,
       isVideoAttachment,
@@ -3602,17 +3671,6 @@ export default {
 
 .translation-json-entry :deep(.el-checkbox__input) {
   margin-top: 4px;
-}
-
-.translation-json-entry-preview {
-  margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--el-border-color);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .translation-json-warning-item {
