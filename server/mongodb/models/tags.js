@@ -19,11 +19,10 @@ var tags = new Schema(
   { timestamps: true }
 )
 
-tags.pre('validate', function (next) {
+tags.pre('validate', function () {
   if (this.tagname !== undefined) {
     this.tagname = normalizeTagName(this.tagname)
   }
-  next()
 })
 
 multilingualSchema.addSourceIdentityFields(tags, 'tags')
