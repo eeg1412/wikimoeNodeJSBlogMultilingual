@@ -609,9 +609,7 @@
                   <div class="translation-dialog-intro-title">选择采纳字段</div>
                   <div class="translation-dialog-intro-text">
                     已采纳
-                    {{
-                      getSelectedAiResultEntryCount(resultItem)
-                    }}
+                    {{ getSelectedAiResultEntryCount(resultItem) }}
                     项。采纳粒度和文章 AI 翻译前字段选择一致。
                   </div>
                 </div>
@@ -643,9 +641,7 @@
                   </div>
                   <div class="translation-dialog-intro-text">
                     共
-                    {{
-                      (resultItem.relatedResults || []).length
-                    }}
+                    {{ (resultItem.relatedResults || []).length }}
                     篇，保存主文章时将一并保存。
                   </div>
                 </div>
@@ -656,9 +652,10 @@
                   class="translation-related-preview-card"
                 >
                   <div class="translation-related-preview-header">
+                    {{ getRelatedPostTypeLabel(relatedItem.sourcePost) }}：
                     {{ getAiResultPostTitle(relatedItem.sourcePost) }}
                   </div>
-                  <el-descriptions :column="3" border class="mb12">
+                  <el-descriptions :column="3" border class="mb10">
                     <el-descriptions-item label="变更字段">
                       {{ relatedItem.preview.changeCount }}
                     </el-descriptions-item>
@@ -672,65 +669,76 @@
 
                   <div
                     v-if="relatedItem.preview.changeCount > 0"
-                    class="translation-related-entry-list"
+                    class="translation-json-toolbar"
                   >
-                    <div
-                      v-for="entry in relatedItem.preview.changeList"
-                      :key="entry.id"
-                      class="translation-related-entry-card"
-                    >
-                      <div class="translation-import-preview-item-title">
-                        <TranslationEntryMeta :entry="entry" />
+                    <div class="translation-dialog-intro">
+                      <div class="translation-dialog-intro-title">
+                        选择关联内容采纳字段
                       </div>
-                      <div class="translation-skip-preview-columns">
-                        <div class="translation-skip-preview-panel">
-                          <div class="translation-import-preview-panel-title">
-                            源文
-                          </div>
-                          <div
-                            v-if="entry.sourceHtml"
-                            class="translation-import-preview-html"
-                            v-html="entry.sourceHtml"
-                          />
-                          <pre
-                            v-if="!entry.sourceHtml"
-                            class="translation-import-preview-raw"
-                            >{{ entry.sourceValue }}</pre
-                          >
-                        </div>
-                        <div class="translation-skip-preview-panel">
-                          <div class="translation-import-preview-panel-title">
-                            当前
-                          </div>
-                          <div
-                            v-if="entry.currentHtml"
-                            class="translation-import-preview-html"
-                            v-html="entry.currentHtml"
-                          />
-                          <pre
-                            v-if="!entry.currentHtml"
-                            class="translation-import-preview-raw"
-                            >{{ entry.currentValue }}</pre
-                          >
-                        </div>
-                        <div class="translation-skip-preview-panel">
-                          <div class="translation-import-preview-panel-title">
-                            AI 翻译后
-                          </div>
-                          <div
-                            v-if="entry.nextHtml"
-                            class="translation-import-preview-html"
-                            v-html="entry.nextHtml"
-                          />
-                          <pre
-                            v-if="!entry.nextHtml"
-                            class="translation-import-preview-raw"
-                            >{{ entry.nextValue }}</pre
-                          >
-                        </div>
+                      <div class="translation-dialog-intro-text">
+                        已采纳
+                        {{
+                          getSelectedAiRelatedEntryCount(
+                            resultItem,
+                            relatedItem
+                          )
+                        }}
+                        项。
                       </div>
                     </div>
+                    <div class="translation-json-toolbar-actions">
+                      <el-button
+                        size="small"
+                        :disabled="isAiImportBusy"
+                        @click="
+                          setAllAiRelatedEntriesSelected(
+                            resultItem,
+                            relatedItem,
+                            true
+                          )
+                        "
+                      >
+                        全选
+                      </el-button>
+                      <el-button
+                        size="small"
+                        :disabled="isAiImportBusy"
+                        @click="
+                          setAllAiRelatedEntriesSelected(
+                            resultItem,
+                            relatedItem,
+                            false
+                          )
+                        "
+                      >
+                        清空
+                      </el-button>
+                    </div>
                   </div>
+
+                  <TranslationEntrySelectableGroups
+                    v-if="relatedItem.preview.changeCount > 0"
+                    :model-value="
+                      getSelectedAiRelatedEntryIds(
+                        resultItem.languageCode,
+                        relatedItem.sourceId
+                      )
+                    "
+                    :groups="relatedItem.previewGroups"
+                    :disabled="isAiImportBusy"
+                    current-preview-label="写入前"
+                    source-preview-label="源文"
+                    next-preview-label="AI 翻译后"
+                    class="w_10"
+                    @update:model-value="
+                      entryIds =>
+                        setSelectedAiRelatedEntryIds(
+                          resultItem.languageCode,
+                          relatedItem.sourceId,
+                          entryIds
+                        )
+                    "
+                  />
                 </div>
               </div>
 
@@ -863,6 +871,7 @@ import {
   buildPreviewPostFromSource,
   buildPostTranslationEntries,
   buildSourceMappedTranslationEntries,
+  buildTranslationEntryDeduplicationKey,
   buildTranslationPostForm
 } from '@/utils/translationPostAiWorkflow'
 
@@ -902,6 +911,7 @@ export default {
     const aiResultList = ref([])
     const selectedAiResultLanguageCodes = ref([])
     const selectedAiResultEntryIdsMap = ref({})
+    const selectedAiRelatedEntryIdsMap = ref({})
     const aiPublishLanguageCodes = ref([])
     const activeAiPreviewLanguageCode = ref('')
     const aiProgressList = ref([])
@@ -1131,6 +1141,7 @@ export default {
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
+      selectedAiRelatedEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1146,6 +1157,7 @@ export default {
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
+      selectedAiRelatedEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1218,6 +1230,7 @@ export default {
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
+      selectedAiRelatedEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1251,13 +1264,44 @@ export default {
       }
     }
 
+    const getAiRelatedSelectionKey = (languageCode, sourceId) => {
+      return `${languageCode}:${sourceId}`
+    }
+
+    const getAiRelatedSelectableEntryIds = relatedItem => {
+      const changeList = relatedItem?.preview?.changeList || []
+      return changeList.map(item => item.id).filter(Boolean)
+    }
+
+    const getSelectedAiRelatedEntryIds = (languageCode, sourceId) => {
+      const key = getAiRelatedSelectionKey(languageCode, sourceId)
+      return selectedAiRelatedEntryIdsMap.value[key] || []
+    }
+
+    const setSelectedAiRelatedEntryIds = (languageCode, sourceId, entryIds) => {
+      const key = getAiRelatedSelectionKey(languageCode, sourceId)
+      selectedAiRelatedEntryIdsMap.value = {
+        ...selectedAiRelatedEntryIdsMap.value,
+        [key]: Array.from(new Set(entryIds.filter(Boolean)))
+      }
+    }
+
     const initSelectedAiResultEntryIds = resultList => {
       const nextMap = {}
+      const nextRelatedMap = {}
       resultList.forEach(resultItem => {
         nextMap[resultItem.languageCode] =
           getAiResultSelectableEntryIds(resultItem)
+        ;(resultItem.relatedResults || []).forEach(relatedItem => {
+          const key = getAiRelatedSelectionKey(
+            resultItem.languageCode,
+            relatedItem.sourceId
+          )
+          nextRelatedMap[key] = getAiRelatedSelectableEntryIds(relatedItem)
+        })
       })
       selectedAiResultEntryIdsMap.value = nextMap
+      selectedAiRelatedEntryIdsMap.value = nextRelatedMap
     }
 
     const getSelectedAiResultEntryCount = resultItem => {
@@ -1274,6 +1318,30 @@ export default {
       )
     }
 
+    const getSelectedAiRelatedEntryCount = (resultItem, relatedItem) => {
+      const selectableIdSet = new Set(
+        getAiRelatedSelectableEntryIds(relatedItem)
+      )
+      return getSelectedAiRelatedEntryIds(
+        resultItem.languageCode,
+        relatedItem.sourceId
+      ).filter(id => {
+        return selectableIdSet.has(id)
+      }).length
+    }
+
+    const setAllAiRelatedEntriesSelected = (
+      resultItem,
+      relatedItem,
+      checked
+    ) => {
+      setSelectedAiRelatedEntryIds(
+        resultItem.languageCode,
+        relatedItem.sourceId,
+        checked ? getAiRelatedSelectableEntryIds(relatedItem) : []
+      )
+    }
+
     const buildSelectedAiImportPayload = resultItem => {
       const selectedIdSet = new Set(
         getSelectedAiResultEntryIds(resultItem.languageCode)
@@ -1287,11 +1355,56 @@ export default {
       }
     }
 
+    const buildSelectedAiRelatedImportPayload = (resultItem, relatedItem) => {
+      const selectedIdSet = new Set(
+        getSelectedAiRelatedEntryIds(
+          resultItem.languageCode,
+          relatedItem.sourceId
+        )
+      )
+      const selectableIdSet = new Set(
+        getAiRelatedSelectableEntryIds(relatedItem)
+      )
+      return {
+        ...relatedItem.payload,
+        entries: (relatedItem.payload?.entries || []).filter(entry => {
+          return selectableIdSet.has(entry.id) && selectedIdSet.has(entry.id)
+        })
+      }
+    }
+
     const normalizePreviewText = value => {
       if (value === null || typeof value === 'undefined') {
         return ''
       }
       return String(value).trim()
+    }
+
+    const isPreviewSnapshotId = snapshotId => {
+      const normalizedSnapshotId = normalizePreviewText(snapshotId)
+      if (!normalizedSnapshotId) {
+        return false
+      }
+      return normalizedSnapshotId.startsWith('preview-source-')
+    }
+
+    const hasCurrentSnapshotVersion = post => {
+      const snapshotId = normalizePreviewText(post?.sourceSnapshotId)
+      if (!snapshotId) {
+        return false
+      }
+      return !isPreviewSnapshotId(snapshotId)
+    }
+
+    const getRelatedPostTypeLabel = post => {
+      const postType = Number(post?.type)
+      if (postType === 1) {
+        return '关联博文'
+      }
+      if (postType === 2) {
+        return '关联推文'
+      }
+      return '关联内容'
     }
 
     const htmlToPreviewText = html => {
@@ -1312,7 +1425,8 @@ export default {
       return normalizePreviewText(entry?.[rawFieldName])
     }
 
-    const buildAiResultPreviewGroups = preview => {
+    const buildAiResultPreviewGroupsWithContext = (preview, targetPost) => {
+      const hideCurrentPreview = !hasCurrentSnapshotVersion(targetPost)
       return groupTranslationEntryList(preview.changeList || []).map(group => {
         return {
           ...group,
@@ -1337,7 +1451,10 @@ export default {
             const nextPreviewHtml = normalizePreviewText(entry.nextHtml)
             let finalCurrentPreviewText = currentPreviewText
             let finalCurrentPreviewHtml = currentPreviewHtml
-            if (
+            if (hideCurrentPreview) {
+              finalCurrentPreviewText = ''
+              finalCurrentPreviewHtml = ''
+            } else if (
               currentPreviewText &&
               sourcePreviewText &&
               currentPreviewText === sourcePreviewText
@@ -1377,9 +1494,9 @@ export default {
       }
       const sourceId = getRecordSourceId(post)
       if (sourceId) {
-        return `关联内容 ${sourceId}`
+        return `${getRelatedPostTypeLabel(post)} ${sourceId}`
       }
-      return '关联内容'
+      return getRelatedPostTypeLabel(post)
     }
 
     const getRelatedSourceIdsForTranslate = (sourcePost, targetPost) => {
@@ -1548,14 +1665,20 @@ export default {
       languageCode,
       targetPost,
       referenceEntries,
-      currentEntries
+      currentEntries,
+      progressContextLabel = ''
     ) => {
       if (!eventData) {
         return null
       }
       const data = eventData.data || {}
       if (eventData.eventName === 'status') {
-        pushAiProgress(`${getLanguageText(languageCode)}：${data.message}`)
+        const contextPrefix = progressContextLabel
+          ? `${progressContextLabel}：`
+          : ''
+        pushAiProgress(
+          `${getLanguageText(languageCode)}：${contextPrefix}${data.message}`
+        )
       }
       if (eventData.eventName === 'chunk') {
         if (data.contentDelta) {
@@ -1588,7 +1711,8 @@ export default {
       languageCode,
       targetPost,
       referenceEntries,
-      currentEntries
+      currentEntries,
+      progressContextLabel = ''
     }) => {
       if (!response.body) {
         throw new Error('当前浏览器无法读取翻译进度')
@@ -1610,7 +1734,8 @@ export default {
             languageCode,
             targetPost,
             referenceEntries,
-            currentEntries
+            currentEntries,
+            progressContextLabel
           )
           if (result?.preview) {
             preview = result.preview
@@ -1636,7 +1761,8 @@ export default {
           languageCode,
           targetPost,
           referenceEntries,
-          currentEntries
+          currentEntries,
+          progressContextLabel
         )
         if (result?.preview) {
           preview = result.preview
@@ -1668,6 +1794,38 @@ export default {
       return ''
     }
 
+    const buildAiSkippedEntryPreview = ({ entry, reason, message, id }) => {
+      return {
+        id,
+        scope: entry.scope,
+        label: entry.label || entry.recordLabel || entry.id,
+        groupLabel: entry.groupLabel,
+        groupCategory: entry.groupCategory,
+        groupTitle: entry.groupTitle,
+        valueType: entry.valueType,
+        fieldName: entry.fieldName,
+        fieldLabel: entry.fieldLabel,
+        recordLabel: entry.recordLabel,
+        relationTypeLabel: entry.relationTypeLabel,
+        collectionName: entry.collectionName,
+        postType: entry.postType,
+        optional: entry.optional,
+        entryKind: entry.entryKind,
+        segmentIndex: entry.segmentIndex,
+        segmentTotal: entry.segmentTotal,
+        hasSourceValue: true,
+        hasCurrentValue: true,
+        sourceRecordLabel: entry.recordLabel || '',
+        sourceValue: entry.sourcePreviewRawValue,
+        sourceHtml: buildEntryPreviewHtml(entry.valueType, entry.value),
+        targetRecordLabel: entry.recordLabel || '',
+        targetValue: entry.currentPreviewRawValue,
+        targetHtml: buildEntryPreviewHtml(entry.valueType, entry.currentValue),
+        reason,
+        message
+      }
+    }
+
     const buildAiTranslationSkipEntries = entries => {
       const skippedEntryMap = new Map()
       entries.forEach(entry => {
@@ -1684,40 +1842,100 @@ export default {
           return
         }
         const label = entry.label || entry.recordLabel || entry.id
-        skippedEntryMap.set(key, {
-          id: `aiTranslationSkip:${key}`,
-          scope: entry.scope,
-          label,
-          groupLabel: entry.groupLabel,
-          groupCategory: entry.groupCategory,
-          groupTitle: entry.groupTitle,
-          valueType: entry.valueType,
-          fieldName: entry.fieldName,
-          fieldLabel: entry.fieldLabel,
-          recordLabel: entry.recordLabel,
-          relationTypeLabel: entry.relationTypeLabel,
-          collectionName: entry.collectionName,
-          postType: entry.postType,
-          optional: entry.optional,
-          entryKind: entry.entryKind,
-          segmentIndex: entry.segmentIndex,
-          segmentTotal: entry.segmentTotal,
-          hasSourceValue: true,
-          hasCurrentValue: true,
-          sourceRecordLabel: entry.recordLabel || '',
-          sourceValue: entry.sourcePreviewRawValue,
-          sourceHtml: buildEntryPreviewHtml(entry.valueType, entry.value),
-          targetRecordLabel: entry.recordLabel || '',
-          targetValue: entry.currentPreviewRawValue,
-          targetHtml: buildEntryPreviewHtml(
-            entry.valueType,
-            entry.currentValue
-          ),
-          reason: 'AI翻译时跳过',
-          message: `${label}：已标记为 AI 翻译时跳过`
-        })
+        skippedEntryMap.set(
+          key,
+          buildAiSkippedEntryPreview({
+            entry,
+            id: `aiTranslationSkip:${key}`,
+            reason: 'AI翻译时跳过',
+            message: `${label}：已标记为 AI 翻译时跳过`
+          })
+        )
       })
       return Array.from(skippedEntryMap.values())
+    }
+
+    const getEntrySourceId = entry => {
+      return normalizePreviewText(entry?.sourceId)
+    }
+
+    const shouldSkipRelatedPostRelationEntry = (
+      entry,
+      relatedSourceIdSet
+    ) => {
+      if (entry.scope !== 'relation' || entry.collectionName !== 'posts') {
+        return false
+      }
+      const sourceId = getEntrySourceId(entry)
+      return Boolean(sourceId && relatedSourceIdSet.has(sourceId))
+    }
+
+    const deduplicateAiImportEntries = ({
+      entries,
+      sourcePostId,
+      relatedSourceIds,
+      translatedEntryKeySet
+    }) => {
+      const relatedSourceIdSet = new Set(
+        relatedSourceIds.map(sourceId => String(sourceId))
+      )
+      const nextEntries = []
+      const skippedEntries = []
+      const skippedEntryKeySet = new Set()
+
+      entries.forEach(entry => {
+        const entryKey = buildTranslationEntryDeduplicationKey(entry, {
+          sourcePostId
+        })
+        if (
+          shouldSkipRelatedPostRelationEntry(entry, relatedSourceIdSet) === true
+        ) {
+          const skipKey = `relatedPost:${entryKey || entry.id}`
+          if (!skippedEntryKeySet.has(skipKey)) {
+            skippedEntryKeySet.add(skipKey)
+            const label = entry.label || entry.recordLabel || entry.id
+            skippedEntries.push(
+              buildAiSkippedEntryPreview({
+                entry,
+                id: `aiRelatedPostDuplicate:${skipKey}`,
+                reason: '关联文章独立翻译',
+                message: `${label}：关联文章会作为独立文章翻译，已跳过当前关联字段`
+              })
+            )
+          }
+          return
+        }
+
+        if (!entryKey) {
+          nextEntries.push(entry)
+          return
+        }
+
+        if (translatedEntryKeySet.has(entryKey)) {
+          const skipKey = `duplicate:${entryKey}`
+          if (!skippedEntryKeySet.has(skipKey)) {
+            skippedEntryKeySet.add(skipKey)
+            const label = entry.label || entry.recordLabel || entry.id
+            skippedEntries.push(
+              buildAiSkippedEntryPreview({
+                entry,
+                id: `aiDuplicate:${skipKey}`,
+                reason: '本次已处理',
+                message: `${label}：本次翻译已处理相同内容，已跳过重复请求`
+              })
+            )
+          }
+          return
+        }
+
+        translatedEntryKeySet.add(entryKey)
+        nextEntries.push(entry)
+      })
+
+      return {
+        entries: nextEntries,
+        skippedEntries
+      }
     }
 
     const loadAiImportPreviewContext = async ({ sourcePost, languageCode }) => {
@@ -1740,7 +1958,9 @@ export default {
     const translateOnePostForLanguage = async ({
       sourcePost,
       languageCode,
-      abortSignal
+      abortSignal,
+      progressContextLabel,
+      translatedEntryKeySet
     }) => {
       throwAiAbortIfNeeded(abortSignal)
       const previewContext = await loadAiImportPreviewContext({
@@ -1773,8 +1993,13 @@ export default {
       const aiTranslationSkippedEntries = buildAiTranslationSkipEntries(
         mappedResult.entries
       )
-      const entries = mappedResult.entries
-        .filter(shouldSubmitAiImportEntry)
+      const deduplicationResult = deduplicateAiImportEntries({
+        entries: mappedResult.entries.filter(shouldSubmitAiImportEntry),
+        sourcePostId,
+        relatedSourceIds,
+        translatedEntryKeySet
+      })
+      const entries = deduplicationResult.entries
         .map(entry => {
           const aiEntry = { ...entry }
           if (canAiKeepOriginalEntry(entry)) {
@@ -1806,10 +2031,14 @@ export default {
           languageCode,
           payload,
           preview,
-          previewGroups: buildAiResultPreviewGroups(preview),
+          previewGroups: buildAiResultPreviewGroupsWithContext(
+            preview,
+            targetPreviewPost
+          ),
           skippedEntries: [
             ...(mappedResult.skippedEntries || []),
-            ...aiTranslationSkippedEntries
+            ...aiTranslationSkippedEntries,
+            ...deduplicationResult.skippedEntries
           ],
           relatedSourceIds,
           entryCount: 0
@@ -1820,8 +2049,9 @@ export default {
       const postTitle = getPostDisplayTitle(previewContext.sourcePost)
       const postLabel =
         postTitle && postTitle !== '-' ? postTitle : sourcePostId
+      const progressContextWithPost = `${progressContextLabel}「${postLabel}」`
       pushAiProgress(
-        `${getLanguageText(languageCode)}：正在翻译「${postLabel}」`
+        `${getLanguageText(languageCode)}：正在翻译${progressContextWithPost}`
       )
       const response = await fetch(
         '/api/multilingual-admin/translation/ai/translate-stream',
@@ -1855,7 +2085,8 @@ export default {
         referenceEntries: entries,
         currentEntries: buildPostTranslationEntries(targetPreviewPost, {
           includeEmpty: true
-        })
+        }),
+        progressContextLabel: progressContextWithPost
       })
 
       return {
@@ -1865,10 +2096,14 @@ export default {
         languageCode,
         payload: streamResult.payload,
         preview: streamResult.preview,
-        previewGroups: buildAiResultPreviewGroups(streamResult.preview),
+        previewGroups: buildAiResultPreviewGroupsWithContext(
+          streamResult.preview,
+          targetPreviewPost
+        ),
         skippedEntries: [
           ...(mappedResult.skippedEntries || []),
-          ...aiTranslationSkippedEntries
+          ...aiTranslationSkippedEntries,
+          ...deduplicationResult.skippedEntries
         ],
         relatedSourceIds,
         entryCount: entries.length
@@ -1890,6 +2125,7 @@ export default {
       ]
       const visited = new Set()
       const postResultList = []
+      const translatedEntryKeySet = new Set()
 
       while (queue.length > 0) {
         throwAiAbortIfNeeded(abortSignal)
@@ -1911,10 +2147,17 @@ export default {
         }
         throwAiAbortIfNeeded(abortSignal)
 
+        let progressContextLabel = '主文章'
+        if (currentTask.isRoot !== true) {
+          progressContextLabel = getRelatedPostTypeLabel(currentSourcePost)
+        }
+
         const postResult = await translateOnePostForLanguage({
           sourcePost: currentSourcePost,
           languageCode,
-          abortSignal
+          abortSignal,
+          progressContextLabel,
+          translatedEntryKeySet
         })
         postResult.isRoot = currentTask.isRoot === true
         postResultList.push(postResult)
@@ -1964,6 +2207,7 @@ export default {
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
+      selectedAiRelatedEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -2079,7 +2323,10 @@ export default {
                   relatedItem => {
                     return {
                       sourceId: relatedItem.sourceId,
-                      payload: relatedItem.payload,
+                      payload: buildSelectedAiRelatedImportPayload(
+                        resultItem,
+                        relatedItem
+                      ),
                       publish: shouldPublish
                     }
                   }
@@ -2227,6 +2474,7 @@ export default {
       activeAiPreviewLanguageCode,
       selectedAiResultLanguageCodes,
       selectedAiResultEntryIdsMap,
+      selectedAiRelatedEntryIdsMap,
       languageDialogVisible,
       languageDialogTitle,
       languageForm,
@@ -2241,10 +2489,15 @@ export default {
       getPostStatusTagType,
       getPostDisplayTitle,
       getAiResultPostTitle,
+      getRelatedPostTypeLabel,
       getSelectedAiResultEntryIds,
       getSelectedAiResultEntryCount,
+      getSelectedAiRelatedEntryIds,
+      getSelectedAiRelatedEntryCount,
       setSelectedAiResultEntryIds,
+      setSelectedAiRelatedEntryIds,
       setAllAiResultEntriesSelected,
+      setAllAiRelatedEntriesSelected,
       getSourceDatabasePostList,
       confirmLanguageAction,
       backToAiSetup,
@@ -2507,18 +2760,6 @@ export default {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
-}
-
-.translation-related-entry-list {
-  display: grid;
-  gap: 10px;
-}
-
-.translation-related-entry-card {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--el-bg-color);
 }
 
 .translation-import-preview-html,

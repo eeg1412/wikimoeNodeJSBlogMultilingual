@@ -3251,6 +3251,59 @@ function normalizeAiEntryValue(entry) {
   return entry.value
 }
 
+function normalizeAiEntryIdentityValue(value) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value).trim()
+}
+
+function buildAiEntryFieldDedupeKey(entry) {
+  const fieldName = normalizeAiEntryIdentityValue(entry?.fieldName)
+  if (!fieldName) {
+    return ''
+  }
+  if (entry.collectionName === 'votes' && fieldName === 'options.title') {
+    const optionIndex = Number(entry.optionIndex)
+    if (!Number.isInteger(optionIndex)) {
+      return ''
+    }
+    return `${fieldName}.${optionIndex}`
+  }
+  return fieldName
+}
+
+function buildAiEntryDedupeKey(entry, translationPost) {
+  if (!entry || typeof entry !== 'object') {
+    return ''
+  }
+
+  const fieldKey = buildAiEntryFieldDedupeKey(entry)
+  if (!fieldKey) {
+    return ''
+  }
+
+  if (entry.scope === 'post') {
+    const sourceId = normalizeAiEntryIdentityValue(translationPost?.sourceId)
+    if (!sourceId) {
+      return ''
+    }
+    return ['posts', sourceId, fieldKey].join(':')
+  }
+
+  if (entry.scope !== 'relation' && entry.scope !== 'parentRelation') {
+    return ''
+  }
+
+  const collectionName = normalizeAiEntryIdentityValue(entry.collectionName)
+  const sourceId = normalizeAiEntryIdentityValue(entry.sourceId)
+  if (!collectionName || !sourceId) {
+    return ''
+  }
+
+  return [collectionName, sourceId, fieldKey].join(':')
+}
+
 function buildSourceIdCandidates(sourceId) {
   const text = String(sourceId || '').trim()
   if (!text) {
@@ -3370,18 +3423,29 @@ async function buildRelationUpdatePayload(entry, languageCode) {
 async function applyAiTranslationPayload({
   payload,
   translationPost,
-  publish
+  publish,
+  appliedEntryKeySet = new Set()
 }) {
   const relationUpdateMap = new Map()
   const postPatch = {}
+  let duplicateEntrySkippedCount = 0
 
   for (const entry of payload.entries) {
     if (!entry || typeof entry !== 'object' || entry.aiSkipReason) {
       continue
     }
+    const entryDedupeKey = buildAiEntryDedupeKey(entry, translationPost)
+    if (entryDedupeKey && appliedEntryKeySet.has(entryDedupeKey)) {
+      duplicateEntrySkippedCount += 1
+      continue
+    }
+
     if (entry.scope === 'post') {
       postPatch[entry.fieldName] = normalizeAiEntryValue(entry)
       postPatch.aiTranslationSkip = true
+      if (entryDedupeKey) {
+        appliedEntryKeySet.add(entryDedupeKey)
+      }
       continue
     }
     const updateItem = await buildRelationUpdatePayload(
@@ -3392,6 +3456,9 @@ async function applyAiTranslationPayload({
     const updateKey = [updateItem.collectionName, String(updateItem.id)].join(
       ':'
     )
+    if (entryDedupeKey) {
+      appliedEntryKeySet.add(entryDedupeKey)
+    }
     if (!relationUpdateMap.has(updateKey)) {
       if (updateItem.optionTitlePatch) {
         updateItem.payload.options = updateItem.optionList
@@ -3440,7 +3507,8 @@ async function applyAiTranslationPayload({
 
   return {
     relationUpdateCount: relationUpdateMap.size,
-    postUpdated: Object.keys(postPatch).length > 0 || publish
+    postUpdated: Object.keys(postPatch).length > 0 || publish,
+    duplicateEntrySkippedCount
   }
 }
 
@@ -3547,13 +3615,15 @@ async function applySourcePostAiImport(body = {}) {
       importResult.sourceSnapshotId,
       item.languageCode
     )
+    const appliedEntryKeySet = new Set()
     const translationPostDetail = await getTranslationPostDetail(
       createResult.translationPostId
     )
     const applyResult = await applyAiTranslationPayload({
       payload: item.payload,
       translationPost: translationPostDetail.post,
-      publish: item.publish
+      publish: item.publish,
+      appliedEntryKeySet
     })
 
     const relatedPostResults = []
@@ -3593,7 +3663,8 @@ async function applySourcePostAiImport(body = {}) {
       const relatedApplyResult = await applyAiTranslationPayload({
         payload: relatedItem.payload,
         translationPost: relatedTranslationPostDetail.post,
-        publish: relatedPublish
+        publish: relatedPublish,
+        appliedEntryKeySet
       })
 
       relatedPostResults.push({

@@ -1995,6 +1995,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const url = buildChatCompletionUrl(settings)
   const aiInput = prepareAiInput(input)
   const inputChunks = splitAiInput(aiInput)
+  const chunkTotal = inputChunks.length
   const chunkResponses = []
   const resultMap = new Map()
   let combinedUsage = {}
@@ -2003,7 +2004,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 
   if (handlers.onStatus) {
     handlers.onStatus({
-      message: `正在准备 ${inputChunks.length} 个翻译批次`
+      message: `正在准备 ${chunkTotal} 个翻译批次`
     })
   }
 
@@ -2013,7 +2014,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       const chunkInput = inputChunks[index]
       if (handlers.onStatus) {
         handlers.onStatus({
-          message: `正在翻译第 ${index + 1}/${inputChunks.length} 批`
+          message: `正在翻译第 ${index + 1}/${chunkTotal} 批`
         })
       }
 
@@ -2059,7 +2060,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 
       if (handlers.onStatus) {
         handlers.onStatus({
-          message: `已完成第 ${index + 1}/${inputChunks.length} 批`
+          message: `已完成第 ${index + 1}/${chunkTotal} 批`
         })
       }
 

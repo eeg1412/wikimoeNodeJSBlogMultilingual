@@ -245,6 +245,58 @@ function cloneValue(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function normalizeEntryIdentityValue(value) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value).trim()
+}
+
+function getEntryDeduplicationFieldKey(entry = {}) {
+  const fieldName = normalizeEntryIdentityValue(entry.fieldName)
+  if (!fieldName) {
+    return ''
+  }
+  if (entry.collectionName === 'votes' && fieldName === 'options.title') {
+    const optionIndex = Number(entry.optionIndex)
+    if (!Number.isInteger(optionIndex)) {
+      return ''
+    }
+    return `${fieldName}.${optionIndex}`
+  }
+  return fieldName
+}
+
+export function buildTranslationEntryDeduplicationKey(
+  entry = {},
+  context = {}
+) {
+  const fieldKey = getEntryDeduplicationFieldKey(entry)
+  if (!fieldKey) {
+    return ''
+  }
+
+  if (entry.scope === 'post') {
+    const sourcePostId = normalizeEntryIdentityValue(context.sourcePostId)
+    if (!sourcePostId) {
+      return ''
+    }
+    return ['posts', sourcePostId, fieldKey].join(':')
+  }
+
+  if (entry.scope !== 'relation' && entry.scope !== 'parentRelation') {
+    return ''
+  }
+
+  const collectionName = normalizeEntryIdentityValue(entry.collectionName)
+  const sourceId = normalizeEntryIdentityValue(entry.sourceId)
+  if (!collectionName || !sourceId) {
+    return ''
+  }
+
+  return [collectionName, sourceId, fieldKey].join(':')
+}
+
 function normalizePreviewRecord(value, context, seen = new Map()) {
   if (!value || typeof value !== 'object') {
     return value
