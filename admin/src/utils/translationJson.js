@@ -2113,6 +2113,7 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
   const value = cloneSerializableValue(sourceEntry.value)
   return {
     ...targetEntry,
+    currentValue: cloneSerializableValue(targetEntry.value),
     value,
     previewText: buildPreviewText(value, targetEntry.valueType),
     previewRawValue: buildPreviewRawValue(value, targetEntry.valueType),

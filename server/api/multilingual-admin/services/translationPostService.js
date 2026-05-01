@@ -109,6 +109,19 @@ const POST_RELATION_FIELDS = [
   ...Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
 ]
 
+const POST_RELATION_FIELD_CONFIGS = [
+  ...Object.keys(POST_SINGLE_RELATION_COLLECTIONS).map(field => ({
+    field,
+    collectionName: POST_SINGLE_RELATION_COLLECTIONS[field],
+    multiple: false
+  })),
+  ...Object.keys(POST_ARRAY_RELATION_COLLECTIONS).map(field => ({
+    field,
+    collectionName: POST_ARRAY_RELATION_COLLECTIONS[field],
+    multiple: true
+  }))
+]
+
 const RESTORABLE_COLLECTION_NAMES = new Set([
   'users',
   'sorts',
@@ -181,6 +194,15 @@ const POST_SINGLE_RELATION_EDIT_FIELDS = new Set(['author', 'sort'])
 const POST_ARRAY_RELATION_EDIT_FIELDS = new Set(
   Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
 )
+
+const PREVIEW_RELATION_DEPENDENCY_FIELDS = {
+  sorts: [{ field: 'parent', collectionName: 'sorts', multiple: false }],
+  games: [
+    { field: 'gamePlatform', collectionName: 'gamePlatforms', multiple: false }
+  ],
+  books: [{ field: 'booktype', collectionName: 'booktypes', multiple: false }],
+  events: [{ field: 'eventtype', collectionName: 'eventtypes', multiple: false }]
+}
 
 const SOURCE_POST_LIST_SELECT_FIELDS = [
   // Required by translation matrix summaries: _id title alias type languageCode translationGroupId status
@@ -2774,6 +2796,261 @@ function normalizeAiBatchInput(body = {}) {
   }
 }
 
+function parseSourcePostAiImportPreviewInput(query = {}) {
+  const sourceId = String(query.sourceId || query.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+    throw new ApiError(ERROR_CODES.SOURCE_ID_INVALID, undefined, 'sourceId', 400)
+  }
+
+  const sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
+  if (!sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'sourceLanguageCode',
+      400
+    )
+  }
+
+  const targetLanguageCode = normalizeLanguageCode(query.targetLanguageCode)
+  if (!targetLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'targetLanguageCode',
+      400
+    )
+  }
+
+  return {
+    sourceId,
+    sourceLanguageCode,
+    targetLanguageCode
+  }
+}
+
+function addPreviewRelationSourceId(sourceIdMap, collectionName, record) {
+  const sourceId = getSourceIdentityId(record)
+  if (!sourceId) {
+    return
+  }
+  if (!sourceIdMap.has(collectionName)) {
+    sourceIdMap.set(collectionName, new Set())
+  }
+  sourceIdMap.get(collectionName).add(String(sourceId))
+}
+
+function collectPreviewRelationSources(
+  sourceIdMap,
+  collectionName,
+  value,
+  seen = new Set()
+) {
+  if (!value) {
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach(item => {
+      collectPreviewRelationSources(sourceIdMap, collectionName, item, seen)
+    })
+    return
+  }
+  if (!isDocumentObject(value)) {
+    return
+  }
+
+  const sourceId = getSourceIdentityId(value)
+  const seenKey = [collectionName, sourceId ? String(sourceId) : value._id].join(
+    ':'
+  )
+  if (seen.has(seenKey)) {
+    return
+  }
+  seen.add(seenKey)
+  addPreviewRelationSourceId(sourceIdMap, collectionName, value)
+
+  const dependencyFields =
+    PREVIEW_RELATION_DEPENDENCY_FIELDS[collectionName] || []
+  dependencyFields.forEach(dependency => {
+    collectPreviewRelationSources(
+      sourceIdMap,
+      dependency.collectionName,
+      value[dependency.field],
+      seen
+    )
+  })
+}
+
+function collectPostPreviewRelationSources(sourcePost) {
+  const sourceIdMap = new Map()
+  const seen = new Set()
+  POST_RELATION_FIELD_CONFIGS.forEach(config => {
+    collectPreviewRelationSources(
+      sourceIdMap,
+      config.collectionName,
+      sourcePost[config.field],
+      seen
+    )
+  })
+  return sourceIdMap
+}
+
+async function buildTranslationPreviewRecordMap(sourceIdMap, languageCode) {
+  const recordMap = new Map()
+
+  await Promise.all(
+    Array.from(sourceIdMap.entries()).map(
+      async ([collectionName, sourceIdSet]) => {
+        const sourceIds = Array.from(sourceIdSet)
+          .filter(id => mongoose.Types.ObjectId.isValid(id))
+          .map(id => new mongoose.Types.ObjectId(id))
+        if (sourceIds.length === 0) {
+          return
+        }
+
+        const Model = getMultilingualModel(collectionName)
+        let query = Model.find({
+          sourceId: { $in: sourceIds },
+          languageCode,
+          recordKind: TRANSLATION_RECORD_KIND
+        })
+        const populate = getSnapshotPopulateForCollection(collectionName)
+        if (populate) {
+          query = query.populate(populate)
+        }
+        const records = await query.lean()
+        records.forEach(record => {
+          if (!record.sourceId) {
+            return
+          }
+          recordMap.set(
+            [collectionName, String(record.sourceId)].join(':'),
+            record
+          )
+        })
+      }
+    )
+  )
+
+  return recordMap
+}
+
+function normalizeAiImportPreviewRecord(record, context, seen = new Map()) {
+  if (!record || typeof record !== 'object') {
+    return record
+  }
+  if (Array.isArray(record)) {
+    return record.map(item => {
+      return normalizeAiImportPreviewRecord(item, context, seen)
+    })
+  }
+
+  const sourceId = getSourceIdentityId(record)
+  const seenKey = sourceId
+    ? [context.collectionName, String(sourceId)].join(':')
+    : ''
+  if (seenKey && seen.has(seenKey)) {
+    return seen.get(seenKey)
+  }
+
+  const translationRecord = sourceId
+    ? context.translationRecordMap.get(
+        [context.collectionName, String(sourceId)].join(':')
+      )
+    : null
+  const normalizedRecord = cloneValue(translationRecord || record)
+
+  if (seenKey) {
+    seen.set(seenKey, normalizedRecord)
+  }
+
+  if (!translationRecord) {
+    if (sourceId) {
+      normalizedRecord.sourceId = sourceId
+    }
+    normalizedRecord.languageCode = context.targetLanguageCode
+    normalizedRecord.sourceLanguageCode = context.sourceLanguageCode
+    normalizedRecord.recordKind = TRANSLATION_RECORD_KIND
+  }
+
+  const dependencyFields =
+    PREVIEW_RELATION_DEPENDENCY_FIELDS[context.collectionName] || []
+  dependencyFields.forEach(dependency => {
+    normalizedRecord[dependency.field] = normalizeAiImportPreviewRecord(
+      normalizedRecord[dependency.field],
+      {
+        ...context,
+        collectionName: dependency.collectionName
+      },
+      seen
+    )
+  })
+
+  return normalizedRecord
+}
+
+function buildAiImportPreviewTargetPost(sourcePost, context) {
+  const targetPost = cloneValue(sourcePost)
+  const sourceId = getSourceIdentityId(sourcePost)
+  targetPost._id = `preview-${context.targetLanguageCode}-${String(sourceId)}`
+  targetPost.id = targetPost._id
+  targetPost.sourceId = sourceId
+  targetPost.languageCode = context.targetLanguageCode
+  targetPost.sourceLanguageCode = context.sourceLanguageCode
+  targetPost.recordKind = TRANSLATION_RECORD_KIND
+
+  const seen = new Map()
+  POST_RELATION_FIELD_CONFIGS.forEach(config => {
+    targetPost[config.field] = normalizeAiImportPreviewRecord(
+      targetPost[config.field],
+      {
+        ...context,
+        collectionName: config.collectionName
+      },
+      seen
+    )
+  })
+
+  return targetPost
+}
+
+async function getSourcePostAiImportPreviewContext(query = {}) {
+  const input = parseSourcePostAiImportPreviewInput(query)
+  const sourceDetail = await importPostSourceService.getSourceDatabasePostDetail(
+    {
+      id: input.sourceId,
+      sourceLanguageCode: input.sourceLanguageCode
+    }
+  )
+  const sourcePost = sourceDetail.post
+  if (!sourcePost) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_POST_NOT_FOUND,
+      '源文章不存在',
+      'sourceId',
+      404
+    )
+  }
+
+  const sourceIdMap = collectPostPreviewRelationSources(sourcePost)
+  const translationRecordMap = await buildTranslationPreviewRecordMap(
+    sourceIdMap,
+    input.targetLanguageCode
+  )
+  const targetPost = buildAiImportPreviewTargetPost(sourcePost, {
+    sourceLanguageCode: input.sourceLanguageCode,
+    targetLanguageCode: input.targetLanguageCode,
+    translationRecordMap
+  })
+
+  return {
+    sourcePost,
+    targetPost,
+    targetLanguageCode: input.targetLanguageCode,
+    translatedRelationCount: translationRecordMap.size
+  }
+}
+
 function escapeRichTextAttribute(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -3122,6 +3399,7 @@ module.exports = {
   applySourcePostAiImport,
   createMissingPostRelationTranslation,
   createTranslationPost,
+  getSourcePostAiImportPreviewContext,
   getTranslationPostListBySource,
   getTranslationPostDetail,
   restoreTranslationRecordFromSnapshot,

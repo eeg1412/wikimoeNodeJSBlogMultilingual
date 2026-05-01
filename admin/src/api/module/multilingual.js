@@ -38,6 +38,13 @@ export default function (api) {
         noLoading
       })
     },
+    getSourcePostAiImportPreviewContext(data, noLoading = false) {
+      return api.get('/source/post/ai-import-preview-context', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getSourcePostList(data, noLoading = false) {
       return api.get('/source/post/list', {
         params: data,

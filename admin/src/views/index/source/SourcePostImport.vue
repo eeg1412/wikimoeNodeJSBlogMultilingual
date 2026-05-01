@@ -1254,26 +1254,42 @@ export default {
       return entry.scope !== 'post' && entry.valueType !== 'richTextDocument'
     }
 
+    const loadAiImportPreviewContext = async ({ sourcePost, languageCode }) => {
+      const response = await multilingualApi.getSourcePostAiImportPreviewContext(
+        {
+          sourceId: String(sourcePost.sourceId || sourcePost._id),
+          sourceLanguageCode: aiForm.sourceLanguageCode,
+          targetLanguageCode: languageCode
+        },
+        true
+      )
+      const data = response.data.data || {}
+      if (!data.sourcePost || !data.targetPost) {
+        throw new Error(`${getLanguageText(languageCode)} 预览上下文缺失`)
+      }
+      return data
+    }
+
     const translateOneLanguage = async ({ sourcePost, languageCode }) => {
-      const sourcePreviewPost = buildPreviewPostFromSource({
+      const previewContext = await loadAiImportPreviewContext({
         sourcePost,
+        languageCode
+      })
+      const sourcePreviewPost = buildPreviewPostFromSource({
+        sourcePost: previewContext.sourcePost,
         sourceLanguageCode: aiForm.sourceLanguageCode,
         languageCode: aiForm.sourceLanguageCode,
-        previewId: `preview-source-${sourcePost.sourceId || sourcePost._id}`
+        previewId: `preview-source-${
+          previewContext.sourcePost.sourceId || previewContext.sourcePost._id
+        }`
       })
-      const targetPreviewPost = buildPreviewPostFromSource({
-        sourcePost,
-        sourceLanguageCode: aiForm.sourceLanguageCode,
-        languageCode,
-        previewId: `preview-${languageCode}-${sourcePost.sourceId || sourcePost._id}`
-      })
+      const targetPreviewPost = previewContext.targetPost
       const mappedResult = buildSourceMappedTranslationEntries(
         sourcePreviewPost,
         targetPreviewPost
       )
       const entries = mappedResult.entries.map(entry => {
         const aiEntry = { ...entry }
-        delete aiEntry.currentValue
         if (canAiKeepOriginalEntry(entry)) {
           aiEntry.skipAllowed = true
         }

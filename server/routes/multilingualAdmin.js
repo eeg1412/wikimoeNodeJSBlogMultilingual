@@ -356,6 +356,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/post/getSourceDatabasePostDetail')
   },
   {
+    path: '/source/post/ai-import-preview-context',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/post/getAiImportPreviewContext')
+  },
+  {
     path: '/source/post/list',
     method: 'get',
     middleware: [checkAuth],
