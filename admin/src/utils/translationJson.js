@@ -2605,6 +2605,71 @@ function normalizeImportedEntryForCurrentEntry(entry, currentEntry) {
   return null
 }
 
+function buildSkippedPreviewItem({
+  entry,
+  currentEntry,
+  normalizedImportEntry,
+  currentValue,
+  referenceEntry,
+  reason
+}) {
+  let sourceHtml = ''
+  let sourceValue = ''
+  let targetHtml = ''
+  const nextValue = normalizedImportEntry.value
+  const hasSourceValue = Boolean(referenceEntry)
+
+  if (referenceEntry) {
+    sourceValue = buildPreviewRawValue(
+      referenceEntry.value,
+      referenceEntry.valueType
+    )
+    if (isRichTextValueType(referenceEntry.valueType)) {
+      sourceHtml = buildRichTextHtmlFromEntryValue(
+        referenceEntry.valueType,
+        referenceEntry.value,
+        referenceEntry.assets || {}
+      )
+    }
+  }
+
+  if (isRichTextValueType(currentEntry.valueType)) {
+    targetHtml = buildRichTextHtmlFromEntryValue(
+      normalizedImportEntry.valueType,
+      nextValue,
+      normalizedImportEntry.assets || {}
+    )
+  }
+
+  return {
+    id: `${entry.id}:ai-skip`,
+    scope: currentEntry.scope,
+    label: currentEntry.label,
+    groupLabel: currentEntry.groupLabel,
+    groupCategory: currentEntry.groupCategory,
+    groupTitle: currentEntry.groupTitle,
+    valueType: currentEntry.valueType,
+    fieldName: currentEntry.fieldName,
+    fieldLabel: currentEntry.fieldLabel,
+    recordLabel: currentEntry.recordLabel,
+    relationTypeLabel: currentEntry.relationTypeLabel,
+    collectionName: currentEntry.collectionName,
+    postType: currentEntry.postType,
+    optional: currentEntry.optional,
+    entryKind: currentEntry.entryKind,
+    segmentIndex: currentEntry.segmentIndex,
+    segmentTotal: currentEntry.segmentTotal,
+    hasSourceValue,
+    sourceRecordLabel: referenceEntry?.recordLabel || '',
+    sourceValue,
+    sourceHtml,
+    targetValue: buildPreviewRawValue(nextValue, normalizedImportEntry.valueType),
+    targetHtml,
+    reason,
+    previousValue: buildPreviewRawValue(currentValue, currentEntry.valueType)
+  }
+}
+
 export function buildTranslationImportPreview({
   parsedPayload,
   currentEntries,
@@ -2624,13 +2689,29 @@ export function buildTranslationImportPreview({
   const referenceEntryMap = new Map(
     referenceEntries.map(entry => [entry.id, entry])
   )
+  const currentEntryMatchMap = new Map()
+  currentEntries.forEach(entry => {
+    buildTranslationEntryMatchKeys(entry).forEach(key => {
+      currentEntryMatchMap.set(key, entry)
+    })
+  })
+  const referenceEntryMatchMap = new Map()
+  referenceEntries.forEach(entry => {
+    buildTranslationEntryMatchKeys(entry).forEach(key => {
+      referenceEntryMatchMap.set(key, entry)
+    })
+  })
   const relationUpdateMap = new Map()
   const postPatch = {}
   const warningList = []
+  const aiSkipList = []
   const changeList = []
 
   parsedPayload.entries.forEach(entry => {
-    const currentEntry = currentEntryMap.get(entry.id)
+    const entryMatchKeys = buildTranslationEntryMatchKeys(entry)
+    const currentEntry =
+      currentEntryMap.get(entry.id) ||
+      entryMatchKeys.map(key => currentEntryMatchMap.get(key)).find(Boolean)
     if (!currentEntry) {
       warningList.push(`已跳过未知条目：${entry.label || entry.id}`)
       return
@@ -2647,6 +2728,9 @@ export function buildTranslationImportPreview({
 
     const nextValue = normalizedImportEntry.value
     const currentValue = currentEntry.value
+    const referenceEntry =
+      referenceEntryMap.get(entry.id) ||
+      entryMatchKeys.map(key => referenceEntryMatchMap.get(key)).find(Boolean)
     let nextComparableValue = buildComparableEntryValue(
       normalizedImportEntry.valueType,
       nextValue
@@ -2662,6 +2746,19 @@ export function buildTranslationImportPreview({
       nextComparableValue = normalizeTagName(nextComparableValue)
     }
     if (nextComparableValue === currentComparableValue) {
+      const aiSkipReason = normalizeStringValue(entry.aiSkipReason)
+      if (aiSkipReason) {
+        aiSkipList.push(
+          buildSkippedPreviewItem({
+            entry,
+            currentEntry,
+            normalizedImportEntry,
+            currentValue,
+            referenceEntry,
+            reason: aiSkipReason
+          })
+        )
+      }
       return
     }
 
@@ -2670,7 +2767,6 @@ export function buildTranslationImportPreview({
     let sourceHtml = ''
     let sourceValue = ''
     let hasSourceValue = false
-    const referenceEntry = referenceEntryMap.get(entry.id)
     if (isRichTextValueType(currentEntry.valueType)) {
       currentHtml = buildRichTextHtmlFromEntryValue(
         currentEntry.valueType,
@@ -2786,7 +2882,8 @@ export function buildTranslationImportPreview({
   return {
     changeList,
     warningList,
-    skippedCount: warningList.length,
+    aiSkipList,
+    skippedCount: warningList.length + aiSkipList.length,
     changeCount: changeList.length,
     applyPlan: {
       postPatch,

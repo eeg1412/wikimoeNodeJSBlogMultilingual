@@ -7,9 +7,16 @@ export default function (api) {
         noLoading
       })
     },
-    importSourcePost(data) {
+    importSourcePost(data, noLoading = false) {
       return api.post('/source/post/import', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    applySourcePostAiImport(data, noLoading = false) {
+      return api.post('/source/post/apply-ai-import', data, {
+        shouldAdminJWT: true,
+        noLoading
       })
     },
     overwriteSourcePost(data) {
@@ -19,6 +26,13 @@ export default function (api) {
     },
     getSourceDatabasePostList(data, noLoading = false) {
       return api.get('/source/post/source-list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getSourceDatabasePostDetail(data, noLoading = false) {
+      return api.get('/source/post/source-detail', {
         params: data,
         shouldAdminJWT: true,
         noLoading
@@ -38,10 +52,11 @@ export default function (api) {
         noLoading
       })
     },
-    getSourcePostDetail(data) {
+    getSourcePostDetail(data, noLoading = false) {
       return api.get('/source/post/detail', {
         params: data,
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
     getLanguageSettings(data, noLoading = false) {
@@ -87,14 +102,16 @@ export default function (api) {
         noLoading
       })
     },
-    createTranslationPost(data) {
+    createTranslationPost(data, noLoading = false) {
       return api.post('/translation/post/create', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
-    createMissingPostRelationTranslation(data) {
+    createMissingPostRelationTranslation(data, noLoading = false) {
       return api.post('/translation/post/create-relation-translation', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
     getTranslationPostListBySource(data, noLoading = false) {
@@ -104,15 +121,17 @@ export default function (api) {
         noLoading
       })
     },
-    getTranslationPostDetail(data) {
+    getTranslationPostDetail(data, noLoading = false) {
       return api.get('/translation/post/detail', {
         params: data,
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
-    updateTranslationPost(data) {
+    updateTranslationPost(data, noLoading = false) {
       return api.put('/translation/post/update', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
     restoreTranslationPostSnapshot(data) {
@@ -120,9 +139,10 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
-    updateTranslationRelation(data) {
+    updateTranslationRelation(data, noLoading = false) {
       return api.put('/translation/relation/update', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        noLoading
       })
     },
     restoreTranslationRelationSnapshot(data) {

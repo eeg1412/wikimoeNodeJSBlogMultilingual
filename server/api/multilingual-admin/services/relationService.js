@@ -622,7 +622,7 @@ function normalizeVoteOptionsForUpdate(inputOptions, existingOptions = []) {
   })
 }
 
-async function updateRelation(body = {}) {
+async function updateRelation(body = {}, options = {}) {
   const input = parseRelationInput(body)
   const Model = getMultilingualModel(input.collectionName)
   const record = await Model.findOne({
@@ -674,7 +674,10 @@ async function updateRelation(body = {}) {
   if (input.collectionName === 'sorts') {
     cacheDataUtils.invalidateSortListCache(record.languageCode)
   }
-  if (input.collectionName === 'posts') {
+  if (
+    input.collectionName === 'posts' &&
+    options.skipContentRefresh !== true
+  ) {
     await contentRefreshUtils.refreshArticlePublishing(record.languageCode)
   }
 

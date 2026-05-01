@@ -11,6 +11,7 @@ const {
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 const importPostSourceService = require('./importPostSourceService')
+const relationService = require('./relationService')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -1875,7 +1876,7 @@ function getTranslationPostCreateLockKey(translationGroupId, languageCode) {
   ].join(':')
 }
 
-async function createTranslationPost(body = {}) {
+async function createTranslationPost(body = {}, options = {}) {
   const input = parseCreateInput(body)
   const sourcePostSummary = await findSourcePostSnapshotSummary(
     input.sourceSnapshotId
@@ -1930,7 +1931,9 @@ async function createTranslationPost(body = {}) {
       )
 
       cacheDataUtils.invalidateSortListCache(input.languageCode)
-      await contentRefreshUtils.refreshArticlePublishing(input.languageCode)
+      if (options.skipContentRefresh !== true) {
+        await contentRefreshUtils.refreshArticlePublishing(input.languageCode)
+      }
 
       return {
         translationPostId: translationPost._id,
@@ -2377,7 +2380,7 @@ function assertUpdateLanguageMatched(post, body = {}) {
   }
 }
 
-async function updateTranslationPost(body = {}) {
+async function updateTranslationPost(body = {}, options = {}) {
   const id = String(body.id || '').trim()
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ApiError(
@@ -2440,7 +2443,9 @@ async function updateTranslationPost(body = {}) {
     { _id: post._id, recordKind: TRANSLATION_RECORD_KIND },
     { $set: updateData }
   )
-  await contentRefreshUtils.refreshArticlePublishing(post.languageCode)
+  if (options.skipContentRefresh !== true) {
+    await contentRefreshUtils.refreshArticlePublishing(post.languageCode)
+  }
 
   return await getTranslationPostDetail(post._id)
 }
@@ -2702,7 +2707,419 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
   return await Model.findOne({ _id: record._id }).lean()
 }
 
+function normalizeAiImportResultList(body = {}) {
+  if (!Array.isArray(body.results) || body.results.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '请选择要保存的语言',
+      'results',
+      400
+    )
+  }
+
+  return body.results.map((item, index) => {
+    const languageCode = normalizeLanguageCode(item?.languageCode)
+    if (!languageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        `第 ${index + 1} 个语言不支持`,
+        `results[${index}].languageCode`,
+        400
+      )
+    }
+    if (!item.payload || typeof item.payload !== 'object') {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        'AI 翻译结果缺失',
+        `results[${index}].payload`,
+        400
+      )
+    }
+    if (!Array.isArray(item.payload.entries)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        'AI 翻译条目缺失',
+        `results[${index}].payload.entries`,
+        400
+      )
+    }
+    return {
+      languageCode,
+      payload: item.payload,
+      publish: item.publish === true
+    }
+  })
+}
+
+function normalizeAiBatchInput(body = {}) {
+  const sourceId = String(body.sourceId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+    throw new ApiError(ERROR_CODES.SOURCE_ID_INVALID, undefined, 'sourceId', 400)
+  }
+
+  const sourceLanguageCode = normalizeLanguageCode(body.sourceLanguageCode)
+  if (!sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'sourceLanguageCode',
+      400
+    )
+  }
+
+  return {
+    sourceId,
+    sourceLanguageCode,
+    results: normalizeAiImportResultList(body)
+  }
+}
+
+function escapeRichTextAttribute(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function escapeRichTextText(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function renderRichTextDocumentNode(node) {
+  if (!node || typeof node !== 'object') {
+    return ''
+  }
+  if (node.type === 'root') {
+    return Array.isArray(node.children)
+      ? node.children.map(renderRichTextDocumentNode).join('')
+      : ''
+  }
+  if (node.type === 'text') {
+    return escapeRichTextText(node.text || '')
+  }
+  if (node.type !== 'element' || !node.tag) {
+    return ''
+  }
+
+  const attrs = {
+    ...(node.attrs || {}),
+    ...(node.translatableAttrs || {})
+  }
+  const attrText = Object.keys(attrs)
+    .filter(key => attrs[key] !== null && typeof attrs[key] !== 'undefined')
+    .map(key => ` ${key}="${escapeRichTextAttribute(attrs[key])}"`)
+    .join('')
+  const childrenText = Array.isArray(node.children)
+    ? node.children.map(renderRichTextDocumentNode).join('')
+    : ''
+  return `<${node.tag}${attrText}>${childrenText}</${node.tag}>`
+}
+
+function normalizeAiEntryValue(entry) {
+  if (entry.valueType === 'richTextDocument') {
+    return renderRichTextDocumentNode(entry.value)
+  }
+  return entry.value
+}
+
+function buildSourceIdCandidates(sourceId) {
+  const text = String(sourceId || '').trim()
+  if (!text) {
+    return []
+  }
+  const candidates = [text]
+  if (mongoose.Types.ObjectId.isValid(text)) {
+    candidates.push(new mongoose.Types.ObjectId(text))
+  }
+  return candidates
+}
+
+function getRelationRecordModel(collectionName) {
+  if (!relationService.ALLOWED_COLLECTION_NAMES.has(collectionName)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'collectionName is not supported',
+      'collectionName',
+      400
+    )
+  }
+  const repository = global.$mongodDB.multilingual.repositories[collectionName]
+  if (!repository || !repository.model) {
+    throw new Error(`multilingual repository not found: ${collectionName}`)
+  }
+  return repository.model
+}
+
+async function findTranslationRecordBySourceEntry(entry, languageCode) {
+  const sourceIdCandidates = buildSourceIdCandidates(entry.sourceId)
+  if (sourceIdCandidates.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '翻译条目缺少源内容身份',
+      'sourceId',
+      400
+    )
+  }
+  const Model = getRelationRecordModel(entry.collectionName)
+  const record = await Model.findOne({
+    sourceId: { $in: sourceIdCandidates },
+    languageCode,
+    recordKind: TRANSLATION_RECORD_KIND
+  }).lean()
+
+  if (!record) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      '目标语言关联内容不存在',
+      'sourceId',
+      404
+    )
+  }
+  return record
+}
+
+function applyVoteOptionTitlePatch(optionList, optionPatch) {
+  const optionId = String(optionPatch.optionId || '').trim()
+  let optionIndex = -1
+  if (optionId) {
+    optionIndex = optionList.findIndex(option => {
+      return String(option._id || '') === optionId
+    })
+  }
+  if (
+    optionIndex < 0 &&
+    Number.isInteger(Number(optionPatch.optionIndex))
+  ) {
+    optionIndex = Number(optionPatch.optionIndex)
+  }
+  if (optionIndex < 0 || !optionList[optionIndex]) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      '目标语言投票选项不存在',
+      'options',
+      404
+    )
+  }
+  optionList[optionIndex].title = optionPatch.title
+}
+
+async function buildRelationUpdatePayload(entry, languageCode) {
+  const record = await findTranslationRecordBySourceEntry(entry, languageCode)
+  const value = normalizeAiEntryValue(entry)
+  if (
+    entry.collectionName === 'votes' &&
+    entry.fieldName === 'options.title'
+  ) {
+    return {
+      collectionName: entry.collectionName,
+      id: record._id,
+      languageCode,
+      payload: {},
+      optionList: Array.isArray(record.options)
+        ? JSON.parse(JSON.stringify(record.options))
+        : [],
+      optionTitlePatch: {
+        optionId: entry.optionId,
+        optionIndex: entry.optionIndex,
+        title: value
+      }
+    }
+  }
+
+  if (!entry.fieldName) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '翻译条目缺少字段名',
+      'fieldName',
+      400
+    )
+  }
+  return {
+    collectionName: entry.collectionName,
+    id: record._id,
+    languageCode,
+    payload: {
+      [entry.fieldName]: value
+    }
+  }
+}
+
+async function applyAiTranslationPayload({
+  payload,
+  translationPost,
+  publish
+}) {
+  const relationUpdateMap = new Map()
+  const postPatch = {}
+
+  for (const entry of payload.entries) {
+    if (!entry || typeof entry !== 'object' || entry.aiSkipReason) {
+      continue
+    }
+    if (entry.scope === 'post') {
+      postPatch[entry.fieldName] = normalizeAiEntryValue(entry)
+      continue
+    }
+    const updateItem = await buildRelationUpdatePayload(
+      entry,
+      translationPost.languageCode
+    )
+    const updateKey = [
+      updateItem.collectionName,
+      String(updateItem.id)
+    ].join(':')
+    if (!relationUpdateMap.has(updateKey)) {
+      if (updateItem.optionTitlePatch) {
+        updateItem.payload.options = updateItem.optionList
+        applyVoteOptionTitlePatch(
+          updateItem.payload.options,
+          updateItem.optionTitlePatch
+        )
+        delete updateItem.optionList
+        delete updateItem.optionTitlePatch
+      }
+      relationUpdateMap.set(updateKey, updateItem)
+      continue
+    }
+    const existingUpdateItem = relationUpdateMap.get(updateKey)
+    if (updateItem.optionTitlePatch) {
+      if (!Array.isArray(existingUpdateItem.payload.options)) {
+        existingUpdateItem.payload.options = updateItem.optionList
+      }
+      applyVoteOptionTitlePatch(
+        existingUpdateItem.payload.options,
+        updateItem.optionTitlePatch
+      )
+      continue
+    }
+    Object.assign(existingUpdateItem.payload, updateItem.payload)
+  }
+
+  for (const updateItem of relationUpdateMap.values()) {
+    await relationService.updateRelation(updateItem, {
+      skipContentRefresh: true
+    })
+  }
+
+  if (Object.keys(postPatch).length > 0 || publish) {
+    const postUpdateBody = {
+      ...postPatch,
+      id: translationPost._id,
+      languageCode: translationPost.languageCode,
+      confirmReview: true
+    }
+    if (publish) {
+      postUpdateBody.status = 1
+    }
+    await updateTranslationPost(
+      postUpdateBody,
+      { skipContentRefresh: true }
+    )
+  }
+
+  return {
+    relationUpdateCount: relationUpdateMap.size,
+    postUpdated: Object.keys(postPatch).length > 0 || publish
+  }
+}
+
+async function createOrGetTranslationPostForAiImport(
+  sourceSnapshotId,
+  languageCode
+) {
+  try {
+    const createResult = await createTranslationPost(
+      {
+        sourceSnapshotId,
+        languageCode,
+        copyMode: 'source'
+      },
+      { skipContentRefresh: true }
+    )
+    return {
+      translationPostId: createResult.translationPostId,
+      created: true
+    }
+  } catch (error) {
+    if (
+      error?.name !== 'ApiError' ||
+      error.code !== ERROR_CODES.TRANSLATION_EXISTS ||
+      !error.extra?.translationPostId
+    ) {
+      throw error
+    }
+    return {
+      translationPostId: error.extra.translationPostId,
+      created: false
+    }
+  }
+}
+
+async function applySourcePostAiImport(body = {}) {
+  const input = normalizeAiBatchInput(body)
+  const refreshLanguageSet = new Set([input.sourceLanguageCode])
+  const importResult = await importPostSourceService.importOrOverwriteSourcePost(
+    {
+      sourceId: input.sourceId,
+      sourceLanguageCode: input.sourceLanguageCode,
+      overwrite: false
+    },
+    false,
+    { skipContentRefresh: true }
+  )
+
+  const results = []
+  for (const item of input.results) {
+    if (item.payload?.meta?.languageCode !== item.languageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        'AI 翻译结果语言不匹配',
+        'languageCode',
+        400
+      )
+    }
+
+    const createResult = await createOrGetTranslationPostForAiImport(
+      importResult.sourceSnapshotId,
+      item.languageCode
+    )
+    const translationPostDetail = await getTranslationPostDetail(
+      createResult.translationPostId
+    )
+    const applyResult = await applyAiTranslationPayload({
+      payload: item.payload,
+      translationPost: translationPostDetail.post,
+      publish: item.publish
+    })
+    refreshLanguageSet.add(item.languageCode)
+    results.push({
+      languageCode: item.languageCode,
+      translationPostId: createResult.translationPostId,
+      created: createResult.created,
+      ...applyResult
+    })
+  }
+
+  for (const languageCode of refreshLanguageSet) {
+    await contentRefreshUtils.refreshArticlePublishing(languageCode)
+  }
+
+  return {
+    snapshot: {
+      ...importResult,
+      sourceLanguageCode: input.sourceLanguageCode
+    },
+    results,
+    refreshedLanguages: Array.from(refreshLanguageSet)
+  }
+}
+
 module.exports = {
+  applySourcePostAiImport,
   createMissingPostRelationTranslation,
   createTranslationPost,
   getTranslationPostListBySource,

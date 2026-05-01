@@ -74,6 +74,28 @@
                 type="textarea"
                 :rows="5"
               />
+              <div
+                v-else-if="field.type === 'languagePromptMap'"
+                class="language-prompt-list"
+              >
+                <div
+                  v-for="language in languageOptions"
+                  :key="language.value"
+                  class="language-prompt-item"
+                >
+                  <div class="language-prompt-title">
+                    {{ language.label }}
+                    <span class="language-prompt-code">
+                      {{ language.value }}
+                    </span>
+                  </div>
+                  <el-input
+                    v-model="settingsForm[field.name][language.value]"
+                    type="textarea"
+                    :rows="4"
+                  />
+                </div>
+              </div>
               <el-input
                 v-else-if="field.type === 'password'"
                 v-model="settingsForm[field.name]"
@@ -101,6 +123,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
+import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 
 const FIELD_GROUP_OPTIONS = [
   { label: '服务商', value: 'provider' },
@@ -118,10 +141,19 @@ export default {
     const fieldList = ref([])
     const settingsForm = reactive({})
     const fieldGroupOptions = FIELD_GROUP_OPTIONS
+    const languageOptions = SUPPORTED_LANGUAGE_OPTIONS
 
     function getDefaultValue(field) {
       if (field.type === 'boolean') {
         return Boolean(field.defaultValue)
+      }
+      if (field.type === 'languagePromptMap') {
+        const promptMap = {}
+        languageOptions.forEach(language => {
+          promptMap[language.value] =
+            field.defaultValue?.[language.value] || ''
+        })
+        return promptMap
       }
       if (typeof field.defaultValue === 'undefined') {
         return ''
@@ -143,6 +175,13 @@ export default {
       const values = data.values || {}
       fieldList.value.forEach(field => {
         if (typeof values[field.name] !== 'undefined') {
+          if (field.type === 'languagePromptMap') {
+            settingsForm[field.name] = {
+              ...getDefaultValue(field),
+              ...(values[field.name] || {})
+            }
+            return
+          }
           settingsForm[field.name] = values[field.name]
         }
       })
@@ -153,7 +192,7 @@ export default {
     }
 
     function getColumnSpan(field) {
-      if (field.type === 'textarea') {
+      if (field.type === 'textarea' || field.type === 'languagePromptMap') {
         return 24
       }
       return 12
@@ -226,6 +265,7 @@ export default {
       getNumberPrecision,
       getNumberStep,
       isSelectField,
+      languageOptions,
       loading,
       saving,
       settingsForm,
@@ -255,9 +295,39 @@ export default {
   font-size: 12px;
 }
 
+.language-prompt-list {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.language-prompt-item {
+  min-width: 0;
+}
+
+.language-prompt-title {
+  margin-bottom: 6px;
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.language-prompt-code {
+  margin-left: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 @media (max-width: 767px) {
   .multilingual-ai-settings-page {
     max-width: none;
+  }
+
+  .language-prompt-list {
+    grid-template-columns: 1fr;
   }
 
   :deep(.el-form-item) {

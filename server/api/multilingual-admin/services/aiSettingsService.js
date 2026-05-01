@@ -1,4 +1,8 @@
-const { DEFAULT_LANGUAGE_CODE } = require('../../../utils/language')
+const {
+  DEFAULT_LANGUAGE_CODE,
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('../../../utils/language')
 const {
   ApiError,
   ERROR_CODES
@@ -134,6 +138,13 @@ const AI_SETTING_FIELDS = [
     group: 'prompt',
     defaultValue:
       '请保持原文语气与专有名词一致，翻译成目标语言。不要增删事实，不要解释，不要改写 HTML 结构字段。'
+  },
+  {
+    name: 'deepSeekLanguagePrompts',
+    label: '按目标语言默认提示词',
+    type: 'languagePromptMap',
+    group: 'prompt',
+    defaultValue: buildDefaultLanguagePromptMap()
   }
 ]
 
@@ -205,7 +216,42 @@ function normalizeSelectValue(field, value) {
   return text
 }
 
+function buildDefaultLanguagePromptMap() {
+  return SUPPORTED_LANGUAGE_CODES.reduce((map, languageCode) => {
+    map[languageCode] = ''
+    return map
+  }, {})
+}
+
+function normalizeLanguagePromptMap(value) {
+  let inputValue = value
+  if (typeof inputValue === 'string') {
+    try {
+      inputValue = inputValue.trim() ? JSON.parse(inputValue) : {}
+    } catch (error) {
+      inputValue = {}
+    }
+  }
+
+  if (!inputValue || typeof inputValue !== 'object' || Array.isArray(inputValue)) {
+    inputValue = {}
+  }
+
+  const promptMap = buildDefaultLanguagePromptMap()
+  Object.keys(inputValue).forEach(key => {
+    const languageCode = normalizeLanguageCode(key)
+    if (!languageCode) {
+      return
+    }
+    promptMap[languageCode] = String(inputValue[key] || '').trim().slice(0, 6000)
+  })
+  return promptMap
+}
+
 function normalizeValue(field, value) {
+  if (field.type === 'languagePromptMap') {
+    return normalizeLanguagePromptMap(value)
+  }
   if (field.type === 'boolean') {
     return normalizeBooleanValue(value)
   }
@@ -229,12 +275,23 @@ function normalizeValue(field, value) {
 }
 
 function serializeValue(field, value) {
+  if (field.type === 'languagePromptMap') {
+    return JSON.stringify(normalizeValue(field, value))
+  }
   return String(normalizeValue(field, value))
 }
 
 function buildDefaultValues() {
   const values = {}
   for (const field of AI_SETTING_FIELDS) {
+    if (
+      field.defaultValue &&
+      typeof field.defaultValue === 'object' &&
+      !Array.isArray(field.defaultValue)
+    ) {
+      values[field.name] = { ...field.defaultValue }
+      continue
+    }
     values[field.name] = field.defaultValue
   }
   return values

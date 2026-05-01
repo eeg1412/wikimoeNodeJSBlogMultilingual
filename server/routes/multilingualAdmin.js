@@ -338,10 +338,22 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/post/overwritePost')
   },
   {
+    path: '/source/post/apply-ai-import',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/post/applyAiImport')
+  },
+  {
     path: '/source/post/source-list',
     method: 'get',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/source/post/getSourcePostList')
+  },
+  {
+    path: '/source/post/source-detail',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/post/getSourceDatabasePostDetail')
   },
   {
     path: '/source/post/list',

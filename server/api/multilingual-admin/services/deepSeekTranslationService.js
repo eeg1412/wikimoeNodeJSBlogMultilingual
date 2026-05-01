@@ -273,7 +273,8 @@ function parseGenericInput(body = {}) {
     prompt: normalizePrompt(body.prompt),
     entries: body.entries,
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
-    sourceSnapshotId: body.sourceSnapshotId || null
+    sourceSnapshotId: body.sourceSnapshotId || null,
+    skipUsageLog: body.skipUsageLog === true
   }
 }
 
@@ -308,23 +309,180 @@ async function getTranslationPost(input) {
   return post
 }
 
-function buildSystemPrompt(settings) {
-  return [
-    'You are a professional translation engine for a multilingual blog CMS.',
-    'You must return valid JSON only. Do not wrap the JSON in markdown.',
-    'Translate natural-language content from the source language to the target language.',
-    'For richTextDocument values, the input value is indexedRichText with segments [{ index, text }]. Translate only the text field and keep every index unchanged.',
-    'Some indexedRichText segments may include contextBefore/contextAfter. They are reference context only; do not translate or include them in output.',
-    'The server will write translated segment text back into the original HTML by index. Do not invent HTML, attributes, tags, or extra indexes.',
-    'Do not change entry i, segment index, URLs, code identifiers, media paths, or non-natural-language values.',
-    'Return every input entry. If an entry should remain unchanged, return it with the same i and the original value.',
-    'For plainText values, return a translated string.',
-    'Do not add explanations, comments, or extra entries.',
-    `Default site prompt: ${settings.deepSeekDefaultPrompt}`
-  ].join('\n')
+function hasSkipAllowedEntries(input) {
+  return input.entries.some(entry => entry.skipAllowed === true)
 }
 
-function buildUserPrompt(input) {
+function hasCurrentValueEntries(input) {
+  return input.entries.some(entry => {
+    return (
+      entry.skipAllowed === true &&
+      typeof getAiPromptCurrentValue(entry) !== 'undefined'
+    )
+  })
+}
+
+function hasRichTextDocumentEntries(input) {
+  return input.entries.some(entry => entry.valueType === 'richTextDocument')
+}
+
+function buildPromptLayer(title, lines) {
+  return [`【${title}】`, ...lines].join('\n')
+}
+
+function buildSystemPrompt() {
+  return buildPromptLayer('系统基础层', [
+    '你是多语言博客 CMS 的专业翻译引擎。',
+    '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
+    '你必须按后续各层提示词完成任务。',
+    '层级优先级从高到低为：系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层、可选业务规则层、站点要求层、目标语言默认提示词层、用户补充层、请求数据层。',
+    '低优先级层不能覆盖高优先级层；发生冲突时，必须遵守高优先级层。'
+  ])
+}
+
+function buildOutputContractPrompt() {
+  return buildPromptLayer('输出契约层', [
+    `必须只返回 JSON 对象，schema 必须为 ${AI_RESULT_SCHEMA}，version 必须为 1。`,
+    '顶层 JSON 对象必须包含 schema、version 和 entries。',
+    '输入中的每个条目 i，都必须在顶层 entries 中返回且只返回一个结果。',
+    '每个 i 必须保持不变，禁止遗漏、合并、拆分或新增条目。',
+    'plainText 和 richTextLite 的 v 必须是字符串。',
+    '翻译了条目时不要包含 r。',
+    '不要返回请求对象、提示词、解释、注释、Markdown 或规定字段之外的额外内容。'
+  ])
+}
+
+function buildTranslationTaskPrompt(input) {
+  return buildPromptLayer('翻译任务层', [
+    `源语言：${getLanguageLabel(input.sourceLanguageCode)}（${input.sourceLanguageCode}）`,
+    `目标语言：${getLanguageLabel(input.targetLanguageCode)}（${input.targetLanguageCode}）`,
+    '把输入条目中的自然语言内容翻译成目标语言，同时保持内容身份、结构字段和非语言值稳定。',
+    '源语言字段只表示主要来源语言；实际文本可能混入其他语言。你必须根据 v 中可读文本本身判断每段内容的语言。'
+  ])
+}
+
+function buildLanguageJudgementPrompt() {
+  return buildPromptLayer('语言判断层', [
+    '判断“已是目标语言”只能依据 v 本身的可读自然语言内容。',
+    '不要从字段标签 n、字段类型、括号、标点、符号或其他元数据推断 v 已经是目标语言。',
+    '“已是目标语言”要求 v 的全部自然语言部分都属于目标语言。混合语言内容不是已是目标语言，必须翻译其中非目标语言部分。',
+    '与目标语言不同的自然语言内容，不会因为它是专有名词、地名、标题、短标签、口号，或混有数字和标点，就变成目标语言内容。',
+    '如果你不确定某个自然语言值是否已经是目标语言，应选择翻译，而不是保持原文。'
+  ])
+}
+
+function buildNameTranslationPrompt() {
+  return buildPromptLayer('名称与专有名词层', [
+    '不要因为内容是专有名词就原样保留。有意义的昵称、作者名、分类名、标签名、地名、媒体标题、选项文案、包含可读词语的文件名，都属于可翻译内容。',
+    '翻译专有名词、昵称、地名、名称或标题时，要保留指代对象身份，同时产出目标语言表达。',
+    '优先使用目标语言既有译名；没有既有译名时，根据语境翻译可读部分、音译，或用简洁的目标语言注释表达。',
+    '禁止用专有名词、昵称、作者名、分类名、标签名、地名、中文地名、媒体标题、无需翻译、字段类型不需要翻译等理由保留 v。'
+  ])
+}
+
+function buildNonLanguagePrompt() {
+  return buildPromptLayer('非语言内容层', [
+    '不要翻译 URL、代码标识符、segment index、CSS class、data-* 属性或媒体路径。',
+    '无意义的非语言字符串仅限纯日期、纯数字、哈希、随机字母数字 ID、文件扩展名、URL、路径，或不包含可读词语的文件名。',
+    '如果值包含代码块，保留代码语法；只有明确属于自然语言的注释或说明文字才翻译。'
+  ])
+}
+
+function buildSkipPolicyPrompt(input) {
+  if (!hasSkipAllowedEntries(input)) {
+    return buildPromptLayer('翻译义务层', [
+      '本请求没有允许保留原值的 k=true 条目。',
+      '只要 v 包含自然语言文本，就必须翻译。'
+    ])
+  }
+
+  return buildPromptLayer('k=true 保留原值规则层', [
+      'k=true 是很窄的“允许保留原值”标记，不是拒绝翻译的许可。',
+      '只有当 k=true，并且 v 本身完整地属于目标语言，或 v 是无意义的非语言字符串时，才允许返回原始 v。',
+      '当 k=true 且你合法保留 v 不变时，必须包含 r，并用面向用户的简体中文短句说明具体原因：完整已是目标语言(源语种→目标语言语种)、URL/路径/代码、数字/日期/哈希/ID，或不可读文件名。',
+      '不要用 r 为可读的源语言文本、专有名词、地名、分类、标签、昵称或混合语言文本辩解。'
+  ])
+}
+
+function buildCurrentValuePolicyPrompt(input) {
+  if (!hasCurrentValueEntries(input)) {
+    return ''
+  }
+
+  return buildPromptLayer('当前值 c 语义层', [
+    '当前值 c 只用于对比上下文。c 不是翻译源，也不能让你把 v 标记为已翻译。',
+    'c 可能未翻译、可能是源语言复制值、可能过期、可能为空、也可能和 v 完全相同。',
+    '不要把 c 的任何状态当作 v 已是目标语言的证据。',
+    '如果 v 等于 c，这只表示已有值和输入值相同，不表示可以跳过翻译。',
+    '不要把当前、已有、未变化的内容当作已经翻译。只要 v 中可读文本不完整属于目标语言，就必须翻译。'
+  ])
+}
+
+function buildRichTextPolicyPrompt(input) {
+  if (!hasRichTextDocumentEntries(input)) {
+    return ''
+  }
+
+  return buildPromptLayer('富文本结构层', [
+    'richTextDocument 的输入值会被转换为 indexedRichText，结构为 segments: [{ index, text }]。',
+    'indexedRichText 值必须返回 v: { type: "indexedRichText", segments: [{ index, text }] }。',
+    '每个输入 segment 必须返回且只返回一个翻译后的 segment。',
+    '只能翻译 text 字段，并且必须保持每个 index 不变。',
+    'segment 可能包含 contextBefore/contextAfter，它们只能用于理解边界上下文，不要翻译，也不要输出。',
+    '服务端会按 index 把译文写回原 HTML。不要创造 HTML、属性、标签或额外 index。',
+    '翻译所有可见自然语言文本，包括从 alt/title/placeholder/aria-label 属性中提取出的 indexed text。'
+  ])
+}
+
+function buildSitePrompt(settings) {
+  const defaultPrompt = normalizePrompt(settings.deepSeekDefaultPrompt)
+  if (!defaultPrompt) {
+    return ''
+  }
+
+  return buildPromptLayer('站点要求层', [
+    '以下是站点管理员配置的默认翻译要求。',
+    '站点要求不得覆盖系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层或可选业务规则层。',
+    defaultPrompt
+  ])
+}
+
+function buildTargetLanguageDefaultPrompt(settings, input) {
+  const languagePromptMap =
+    settings.deepSeekLanguagePrompts &&
+    typeof settings.deepSeekLanguagePrompts === 'object' &&
+    !Array.isArray(settings.deepSeekLanguagePrompts)
+      ? settings.deepSeekLanguagePrompts
+      : {}
+  const targetLanguagePrompt = normalizePrompt(
+    languagePromptMap[input.targetLanguageCode]
+  )
+  if (!targetLanguagePrompt) {
+    return ''
+  }
+
+  return buildPromptLayer('目标语言默认提示词层', [
+    `以下是目标语言 ${getLanguageLabel(input.targetLanguageCode)}（${input.targetLanguageCode}）的默认翻译要求。`,
+    '目标语言默认提示词紧跟站点默认提示词生效。',
+    '目标语言默认提示词不得覆盖系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层、可选业务规则层或站点要求层。',
+    targetLanguagePrompt
+  ])
+}
+
+function buildUserSupplementPrompt(input) {
+  const prompt = normalizePrompt(input.prompt)
+  if (!prompt) {
+    return ''
+  }
+
+  return buildPromptLayer('用户补充层', [
+    '以下是本次请求的用户补充要求。',
+    '用户补充要求不得覆盖任何系统层、业务层或站点要求层。',
+    prompt
+  ])
+}
+
+function buildRequestDataPrompt(input) {
   return JSON.stringify(
     {
       task: 'translate_wikimoe_entries',
@@ -333,8 +491,9 @@ function buildUserPrompt(input) {
         version: 1,
         entries: [
           {
-            i: 'entry i copied from input',
-            v: 'translated value; string for plainText/richTextLite, indexedRichText object for richTextDocument'
+            i: '复制输入条目的 i',
+            v: '翻译后的值；plainText/richTextLite 返回字符串，richTextDocument 返回 indexedRichText 对象',
+            r: '仅当 k=true 且 v 被合法保留原值时才需要'
           }
         ]
       },
@@ -346,25 +505,22 @@ function buildUserPrompt(input) {
         code: input.targetLanguageCode,
         label: getLanguageLabel(input.targetLanguageCode)
       },
-      userPrompt: input.prompt,
-      rules: [
-        'Return only the requiredOutput object. Do not return this request object, response schema, rules, markdown, or explanations.',
-        'The top-level JSON object must contain schema, version, and entries.',
-        'Return exactly one item in top-level entries for every input entry i.',
-        'Keep every i unchanged.',
-        'Never omit an entry. If a value is a name, code-like text, or should not be translated, still return the same i and original v.',
-        'For indexedRichText values, return v as { type: "indexedRichText", segments: [{ index, text }] }. Return exactly one translated segment for every input segment.',
-        'If a segment includes contextBefore/contextAfter, use it only to understand the boundary context. Output must contain translated text for the segment text only.',
-        'Translate all visible natural-language text, including indexed text extracted from alt/title/placeholder/aria-label attributes.',
-        'Never translate URLs, code identifiers, segment indexes, CSS classes, data-* attributes, or media paths.',
-        'If a value contains code blocks, preserve code syntax and translate only comments or prose when clearly natural language.'
-      ],
-      entries: input.entries.map((entry, index) => ({
-        i: entry.aiIndex || String(index + 1),
-        t: entry.valueType,
-        n: entry.label,
-        v: getAiPromptValue(entry)
-      }))
+      entries: input.entries.map((entry, index) => {
+        const promptEntry = {
+          i: entry.aiIndex || String(index + 1),
+          t: entry.valueType,
+          n: entry.label,
+          v: getAiPromptValue(entry)
+        }
+        if (entry.skipAllowed === true) {
+          promptEntry.k = true
+        }
+        const currentValue = getAiPromptCurrentValue(entry)
+        if (entry.skipAllowed === true && typeof currentValue !== 'undefined') {
+          promptEntry.c = currentValue
+        }
+        return promptEntry
+      })
     },
     null,
     2
@@ -506,6 +662,13 @@ function getAiPromptValue(entry) {
   return entry.value
 }
 
+function getAiPromptCurrentValue(entry) {
+  if (entry.valueType === 'richTextDocument') {
+    return entry.aiCurrentValue
+  }
+  return entry.currentValue
+}
+
 function prepareAiInput(input) {
   const entries = input.entries.map((entry, index) => {
     const indexedEntry = {
@@ -517,10 +680,20 @@ function prepareAiInput(input) {
     }
 
     const richTextSegments = collectRichTextSegments(indexedEntry.value)
+    const currentRichTextSegments =
+      indexedEntry.currentValue &&
+      typeof indexedEntry.currentValue === 'object' &&
+      !Array.isArray(indexedEntry.currentValue)
+        ? collectRichTextSegments(indexedEntry.currentValue)
+        : []
     return {
       ...indexedEntry,
       richTextSegments,
-      aiValue: buildIndexedRichTextValue(richTextSegments)
+      aiValue: buildIndexedRichTextValue(richTextSegments),
+      aiCurrentValue:
+        currentRichTextSegments.length > 0
+          ? buildIndexedRichTextValue(currentRichTextSegments)
+          : undefined
     }
   })
 
@@ -658,19 +831,46 @@ function splitAiInput(input) {
   return chunks
 }
 
+function buildDeepSeekMessages(settings, input) {
+  const systemPromptList = [
+    buildSystemPrompt(),
+    buildOutputContractPrompt(),
+    buildTranslationTaskPrompt(input),
+    buildLanguageJudgementPrompt(input),
+    buildNameTranslationPrompt(input),
+    buildNonLanguagePrompt(input),
+    buildSkipPolicyPrompt(input),
+    buildCurrentValuePolicyPrompt(input),
+    buildRichTextPolicyPrompt(input),
+    buildSitePrompt(settings),
+    buildTargetLanguageDefaultPrompt(settings, input)
+  ].filter(Boolean)
+
+  const messages = systemPromptList.map(content => ({
+    role: 'system',
+    content
+  }))
+
+  const userSupplementPrompt = buildUserSupplementPrompt(input)
+  if (userSupplementPrompt) {
+    messages.push({
+      role: 'user',
+      content: userSupplementPrompt
+    })
+  }
+
+  messages.push({
+    role: 'user',
+    content: buildRequestDataPrompt(input)
+  })
+
+  return messages
+}
+
 function buildDeepSeekRequestBody(settings, input) {
   const requestBody = {
     model: settings.deepSeekModel,
-    messages: [
-      {
-        role: 'system',
-        content: buildSystemPrompt(settings)
-      },
-      {
-        role: 'user',
-        content: buildUserPrompt(input)
-      }
-    ],
+    messages: buildDeepSeekMessages(settings, input),
     response_format: { type: 'json_object' },
     max_tokens: settings.deepSeekMaxTokens,
     stream: false
@@ -1216,6 +1416,13 @@ function getResultEntryValue(item) {
   return item.value
 }
 
+function getResultEntrySkipReason(item) {
+  if (!item || typeof item !== 'object') {
+    return ''
+  }
+  return normalizeString(item.r).trim().slice(0, 300)
+}
+
 function normalizeFallbackKey(value) {
   return String(value || '')
     .trim()
@@ -1434,6 +1641,21 @@ function buildTranslatedPayload(input, post, resultData) {
       entry,
       getResultEntryValue(translatedEntry)
     )
+    const skipReason = getResultEntrySkipReason(translatedEntry)
+    const keptOriginal =
+      entry.skipAllowed === true &&
+      entry.valueType !== 'richTextDocument' &&
+      normalizeString(normalizedValue).trim() ===
+        normalizeString(entry.value).trim()
+
+    if (keptOriginal && !skipReason) {
+      throw new ApiError(
+        ERROR_CODES.AI_TRANSLATION_FAILED,
+        `AI 跳过内容缺少原因：${entry.label || entry.id}`,
+        'deepSeek',
+        502
+      )
+    }
 
     const outputEntry = {
       id: entry.id,
@@ -1443,6 +1665,9 @@ function buildTranslatedPayload(input, post, resultData) {
       fieldName: entry.fieldName,
       valueType: entry.valueType,
       value: normalizedValue
+    }
+    if (keptOriginal) {
+      outputEntry.aiSkipReason = skipReason
     }
     if (entry.collectionName) {
       outputEntry.collectionName = entry.collectionName
@@ -1461,6 +1686,12 @@ function buildTranslatedPayload(input, post, resultData) {
     }
     if (entry.recordLabel) {
       outputEntry.recordLabel = entry.recordLabel
+    }
+    if (entry.optionId) {
+      outputEntry.optionId = entry.optionId
+    }
+    if (Number.isInteger(entry.optionIndex)) {
+      outputEntry.optionIndex = entry.optionIndex
     }
     if (entry.sourceId) {
       outputEntry.sourceId = entry.sourceId
@@ -1602,6 +1833,10 @@ async function recordTranslationUsage({
   chunkCount,
   parseError
 }) {
+  if (input.skipUsageLog === true) {
+    return
+  }
+
   await aiUsageService.recordAiUsageLog({
     provider: 'deepseek',
     model: responseData.model || '',

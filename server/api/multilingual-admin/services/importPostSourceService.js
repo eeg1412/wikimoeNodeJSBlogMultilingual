@@ -1023,7 +1023,7 @@ async function findExistingSourceSnapshot(sourceId, sourceLanguageCode) {
     .lean()
 }
 
-async function importOrOverwriteSourcePost(body, forceOverwrite) {
+async function importOrOverwriteSourcePost(body, forceOverwrite, options = {}) {
   const input = parseSourcePostInput(body || {}, forceOverwrite)
   let existingSnapshot = null
 
@@ -1094,7 +1094,9 @@ async function importOrOverwriteSourcePost(body, forceOverwrite) {
     recordId: sourceSnapshotId,
     copyPostRelations: true
   })
-  await contentRefreshUtils.refreshArticlePublishing(input.sourceLanguageCode)
+  if (options.skipContentRefresh !== true) {
+    await contentRefreshUtils.refreshArticlePublishing(input.sourceLanguageCode)
+  }
 
   let sourceChangedTranslations = 0
   if (existingSnapshot && hasSourceHashChanged) {
@@ -1545,6 +1547,56 @@ async function getSourceDatabasePostList(query = {}) {
   }
 }
 
+async function getSourceDatabasePostDetail(query = {}) {
+  const sourceId = String(query.id || query.sourceId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_ID_INVALID,
+      undefined,
+      'sourceId',
+      400
+    )
+  }
+
+  let sourceLanguageCode = ''
+  if (query.sourceLanguageCode) {
+    sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
+    if (!sourceLanguageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        undefined,
+        'sourceLanguageCode',
+        400
+      )
+    }
+  }
+
+  const post = await findSourcePost({ sourceId })
+  const PostModel = getPostModel()
+  const snapshotParams = {
+    sourceCollection: SOURCE_POST_COLLECTION,
+    sourceId: new mongoose.Types.ObjectId(sourceId),
+    recordKind: SOURCE_RECORD_KIND
+  }
+  if (sourceLanguageCode) {
+    snapshotParams.sourceLanguageCode = sourceLanguageCode
+  }
+  const snapshotSummary = await PostModel.find(snapshotParams)
+    .select(
+      '_id sourceId sourceLanguageCode translationGroupId snapshotVersion sourceSnapshotAt updatedAt sourceHash'
+    )
+    .lean()
+
+  return {
+    post: {
+      ...post,
+      sourceId: post._id,
+      hasSnapshot: snapshotSummary.length > 0,
+      snapshotSummary
+    }
+  }
+}
+
 function pickRelationGroup(post, fields) {
   const result = {}
   for (const field of fields) {
@@ -1614,6 +1666,7 @@ module.exports = {
   repairSourcePostSnapshotRelations,
   importOrOverwriteSourcePost,
   getSourceDatabasePostList,
+  getSourceDatabasePostDetail,
   getSourcePostList,
   getSourcePostDetail
 }
