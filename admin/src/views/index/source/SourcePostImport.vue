@@ -532,89 +532,55 @@
               </div>
 
               <div
-                v-for="group in resultItem.previewGroups"
-                :key="group.label"
-                class="translation-import-preview-group"
+                v-if="resultItem.preview.changeCount > 0"
+                class="translation-json-toolbar"
               >
-                <div class="translation-json-group-header">
-                  <div class="translation-json-group-heading">
-                    <div
-                      v-if="group.meta.eyebrow"
-                      class="translation-json-group-eyebrow"
-                    >
-                      {{ group.meta.eyebrow }}
-                    </div>
-                    <div class="translation-json-group-title">
-                      {{ group.meta.title || group.label || '未命名分组' }}
-                    </div>
+                <div class="translation-dialog-intro">
+                  <div class="translation-dialog-intro-title">
+                    选择采纳字段
                   </div>
-                  <div class="translation-json-group-count">
-                    {{ group.entries.length }} 项
+                  <div class="translation-dialog-intro-text">
+                    已采纳
+                    {{ getSelectedAiResultEntryCount(resultItem) }} 项。采纳粒度和文章 AI 翻译前字段选择一致。
                   </div>
                 </div>
-                <div
-                  v-for="item in group.entries"
-                  :key="item.id"
-                  class="translation-import-preview-item"
-                >
-                  <div class="translation-import-preview-item-title">
-                    <TranslationEntryMeta :entry="item" />
-                  </div>
-                  <div class="translation-import-preview-columns">
-                    <div
-                      v-if="item.hasSourceValue"
-                      class="translation-import-preview-panel"
-                    >
-                      <div class="translation-import-preview-panel-title">
-                        源文
-                        <div
-                          v-if="
-                            item.sourceRecordLabel &&
-                            item.sourceRecordLabel !== item.recordLabel
-                          "
-                          class="translation-import-preview-panel-context"
-                        >
-                          {{ item.sourceRecordLabel }}
-                        </div>
-                      </div>
-                      <div
-                        v-if="item.sourceHtml"
-                        class="translation-import-preview-html"
-                        v-html="item.sourceHtml"
-                      />
-                      <pre class="translation-import-preview-raw">{{
-                        item.sourceValue
-                      }}</pre>
-                    </div>
-                    <div class="translation-import-preview-panel">
-                      <div class="translation-import-preview-panel-title">
-                        写入前
-                      </div>
-                      <div
-                        v-if="item.currentHtml"
-                        class="translation-import-preview-html"
-                        v-html="item.currentHtml"
-                      />
-                      <pre class="translation-import-preview-raw">{{
-                        item.currentValue
-                      }}</pre>
-                    </div>
-                    <div class="translation-import-preview-panel">
-                      <div class="translation-import-preview-panel-title">
-                        AI 翻译后
-                      </div>
-                      <div
-                        v-if="item.nextHtml"
-                        class="translation-import-preview-html"
-                        v-html="item.nextHtml"
-                      />
-                      <pre class="translation-import-preview-raw">{{
-                        item.nextValue
-                      }}</pre>
-                    </div>
-                  </div>
+                <div class="translation-json-toolbar-actions">
+                  <el-button
+                    size="small"
+                    :disabled="isAiImportBusy"
+                    @click="setAllAiResultEntriesSelected(resultItem, true)"
+                  >
+                    全选
+                  </el-button>
+                  <el-button
+                    size="small"
+                    :disabled="isAiImportBusy"
+                    @click="setAllAiResultEntriesSelected(resultItem, false)"
+                  >
+                    清空
+                  </el-button>
                 </div>
               </div>
+
+              <TranslationEntrySelectableGroups
+                v-if="resultItem.preview.changeCount > 0"
+                :model-value="
+                  getSelectedAiResultEntryIds(resultItem.languageCode)
+                "
+                :groups="resultItem.previewGroups"
+                :disabled="isAiImportBusy"
+                current-preview-label="写入前"
+                source-preview-label="源文"
+                next-preview-label="AI 翻译后"
+                class="w_10"
+                @update:model-value="
+                  entryIds =>
+                    setSelectedAiResultEntryIds(
+                      resultItem.languageCode,
+                      entryIds
+                    )
+                "
+              />
             </el-tab-pane>
           </el-tabs>
         </template>
@@ -689,6 +655,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import ls from '@/utils/ls'
 import store from '@/store'
@@ -725,6 +692,7 @@ const AI_IMPORT_TARGET_LANGUAGES_STORAGE_KEY =
 export default {
   components: {
     PostRelationSummary,
+    TranslationEntrySelectableGroups,
     TranslationEntryMeta
   },
   setup() {
@@ -744,6 +712,7 @@ export default {
     const aiApplying = ref(false)
     const aiResultList = ref([])
     const selectedAiResultLanguageCodes = ref([])
+    const selectedAiResultEntryIdsMap = ref({})
     const aiPublishLanguageCodes = ref([])
     const activeAiPreviewLanguageCode = ref('')
     const aiProgressList = ref([])
@@ -940,6 +909,7 @@ export default {
       aiApplying.value = false
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
+      selectedAiResultEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -954,6 +924,7 @@ export default {
       aiApplying.value = false
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
+      selectedAiResultEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1025,10 +996,79 @@ export default {
       aiStep.value = 'setup'
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
+      selectedAiResultEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
       aiStreamContent.value = ''
+    }
+
+    const getAiResultSelectableEntryIds = resultItem => {
+      const changeList = resultItem?.preview?.changeList || []
+      return changeList.map(item => item.id).filter(Boolean)
+    }
+
+    const getSelectedAiResultEntryIds = languageCode => {
+      return selectedAiResultEntryIdsMap.value[languageCode] || []
+    }
+
+    const setSelectedAiResultEntryIds = (languageCode, entryIds) => {
+      selectedAiResultEntryIdsMap.value = {
+        ...selectedAiResultEntryIdsMap.value,
+        [languageCode]: Array.from(new Set(entryIds.filter(Boolean)))
+      }
+    }
+
+    const initSelectedAiResultEntryIds = resultList => {
+      const nextMap = {}
+      resultList.forEach(resultItem => {
+        nextMap[resultItem.languageCode] =
+          getAiResultSelectableEntryIds(resultItem)
+      })
+      selectedAiResultEntryIdsMap.value = nextMap
+    }
+
+    const getSelectedAiResultEntryCount = resultItem => {
+      const selectableIdSet = new Set(getAiResultSelectableEntryIds(resultItem))
+      return getSelectedAiResultEntryIds(resultItem.languageCode).filter(id => {
+        return selectableIdSet.has(id)
+      }).length
+    }
+
+    const setAllAiResultEntriesSelected = (resultItem, checked) => {
+      setSelectedAiResultEntryIds(
+        resultItem.languageCode,
+        checked ? getAiResultSelectableEntryIds(resultItem) : []
+      )
+    }
+
+    const buildSelectedAiImportPayload = resultItem => {
+      const selectedIdSet = new Set(
+        getSelectedAiResultEntryIds(resultItem.languageCode)
+      )
+      const selectableIdSet = new Set(getAiResultSelectableEntryIds(resultItem))
+      return {
+        ...resultItem.payload,
+        entries: (resultItem.payload?.entries || []).filter(entry => {
+          return selectableIdSet.has(entry.id) && selectedIdSet.has(entry.id)
+        })
+      }
+    }
+
+    const buildAiResultPreviewGroups = preview => {
+      return groupTranslationEntryList(preview.changeList || []).map(group => {
+        return {
+          ...group,
+          entries: group.entries.map(entry => {
+            return {
+              ...entry,
+              currentPreviewText: entry.currentValue,
+              sourcePreviewText: entry.sourceValue,
+              nextPreviewText: entry.nextValue
+            }
+          })
+        }
+      })
     }
 
     const confirmLanguageAction = () => {
@@ -1338,9 +1378,7 @@ export default {
         languageCode,
         payload: streamResult.payload,
         preview: streamResult.preview,
-        previewGroups: groupTranslationEntryList(
-          streamResult.preview.changeList || []
-        ),
+        previewGroups: buildAiResultPreviewGroups(streamResult.preview),
         skippedEntries: mappedResult.skippedEntries || [],
         entryCount: entries.length
       }
@@ -1365,6 +1403,7 @@ export default {
       aiStep.value = 'running'
       aiResultList.value = []
       selectedAiResultLanguageCodes.value = []
+      selectedAiResultEntryIdsMap.value = {}
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1383,6 +1422,7 @@ export default {
           )
         }
         aiResultList.value = resultList
+        initSelectedAiResultEntryIds(resultList)
         selectedAiResultLanguageCodes.value = resultList.map(
           item => item.languageCode
         )
@@ -1431,6 +1471,21 @@ export default {
       const selectedResults = aiResultList.value.filter(item => {
         return selectedLanguageSet.has(item.languageCode)
       })
+      const emptySelectedResult = selectedResults.find(item => {
+        return (
+          item.preview.changeCount > 0 &&
+          getSelectedAiResultEntryCount(item) === 0
+        )
+      })
+      if (emptySelectedResult) {
+        ElMessage.warning(
+          `请至少采纳 ${getLanguageText(
+            emptySelectedResult.languageCode
+          )} 的一个翻译条目，或取消选择该语言`
+        )
+        activeAiPreviewLanguageCode.value = emptySelectedResult.languageCode
+        return
+      }
       aiApplying.value = true
       try {
         const response = await multilingualApi.applySourcePostAiImport(
@@ -1440,7 +1495,7 @@ export default {
             results: selectedResults.map(resultItem => {
               return {
                 languageCode: resultItem.languageCode,
-                payload: resultItem.payload,
+                payload: buildSelectedAiImportPayload(resultItem),
                 publish: publishLanguageSet.has(resultItem.languageCode)
               }
             })
@@ -1584,6 +1639,7 @@ export default {
       aiStreamFeedbackRef,
       activeAiPreviewLanguageCode,
       selectedAiResultLanguageCodes,
+      selectedAiResultEntryIdsMap,
       languageDialogVisible,
       languageDialogTitle,
       languageForm,
@@ -1597,6 +1653,10 @@ export default {
       getPostStatusText,
       getPostStatusTagType,
       getPostDisplayTitle,
+      getSelectedAiResultEntryIds,
+      getSelectedAiResultEntryCount,
+      setSelectedAiResultEntryIds,
+      setAllAiResultEntriesSelected,
       getSourceDatabasePostList,
       confirmLanguageAction,
       backToAiSetup,
@@ -1771,72 +1831,51 @@ export default {
   white-space: pre-wrap;
 }
 
-.translation-json-group-header {
+.translation-json-toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.translation-json-group-heading {
-  flex: 1;
+.translation-dialog-intro {
   min-width: 0;
 }
 
-.translation-json-group-eyebrow {
-  margin-bottom: 4px;
-  font-size: 12px;
+.translation-dialog-intro-title {
+  color: var(--el-text-color-primary);
+  font-size: 15px;
   font-weight: 600;
-  line-height: 1.4;
-  color: var(--el-color-primary);
+  line-height: 1.5;
 }
 
-.translation-json-group-title,
+.translation-json-group-title {
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.translation-dialog-intro-text {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.translation-json-toolbar-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .translation-import-preview-item-title {
   color: var(--el-text-color-primary);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
-}
-
-.translation-json-group-count {
-  flex-shrink: 0;
-  color: var(--el-color-primary-dark-2);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.translation-import-preview-group {
-  margin-bottom: 18px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 16px;
-  background: var(--el-bg-color);
-}
-
-.translation-import-preview-item + .translation-import-preview-item {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-}
-
-.translation-import-preview-columns {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.translation-import-preview-panel {
-  min-width: 0;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--el-fill-color-blank);
 }
 
 .translation-import-preview-panel-title {
@@ -1891,15 +1930,12 @@ export default {
     float: none;
   }
 
-  .translation-import-preview-columns {
-    grid-template-columns: 1fr;
-  }
-
   .translation-skip-preview-columns {
     grid-template-columns: 1fr;
   }
 
-  .translation-json-group-header {
+  .translation-json-toolbar {
+    align-items: flex-start;
     flex-direction: column;
   }
 }

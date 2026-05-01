@@ -41,7 +41,12 @@
           @change="checked => setEntrySelected(entry, checked)"
         >
           <TranslationEntryMeta :entry="entry" :show-subtitle="false" />
-          <TranslationEntryPreviewRows :entry="entry" />
+          <TranslationEntryPreviewRows
+            :entry="entry"
+            :current-label="currentPreviewLabel"
+            :source-label="sourcePreviewLabel"
+            :next-label="nextPreviewLabel"
+          />
         </el-checkbox>
       </div>
     </div>
@@ -79,6 +84,18 @@ export default {
     disabled: {
       type: Boolean,
       default: false
+    },
+    currentPreviewLabel: {
+      type: String,
+      default: '当前语言下的内容'
+    },
+    sourcePreviewLabel: {
+      type: String,
+      default: '源内容'
+    },
+    nextPreviewLabel: {
+      type: String,
+      default: '新内容'
     }
   },
   emits: ['update:modelValue'],
@@ -181,11 +198,14 @@ export default {
       getGroupEntryIds,
       getGroupSelectionState,
       getGroupTitle,
+      currentPreviewLabel: props.currentPreviewLabel,
       isEntrySelected,
       isGroupAllSelected,
       isGroupIndeterminate,
+      nextPreviewLabel: props.nextPreviewLabel,
       setEntrySelected,
-      setGroupSelected
+      setGroupSelected,
+      sourcePreviewLabel: props.sourcePreviewLabel
     }
   }
 }

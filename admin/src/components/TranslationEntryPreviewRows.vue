@@ -1,12 +1,16 @@
 <template>
   <div class="translation-entry-preview-rows">
     <div v-if="hasCurrentContent" class="translation-entry-preview-row">
-      <div class="translation-entry-preview-label">当前语言下的内容</div>
+      <div class="translation-entry-preview-label">{{ currentLabel }}</div>
       <div class="translation-entry-preview-value">{{ currentText }}</div>
     </div>
     <div v-if="hasSourceContent" class="translation-entry-preview-row">
-      <div class="translation-entry-preview-label">源内容</div>
+      <div class="translation-entry-preview-label">{{ sourceLabel }}</div>
       <div class="translation-entry-preview-value">{{ sourceText }}</div>
+    </div>
+    <div v-if="hasNextContent" class="translation-entry-preview-row">
+      <div class="translation-entry-preview-label">{{ nextLabel }}</div>
+      <div class="translation-entry-preview-value">{{ nextText }}</div>
     </div>
   </div>
 </template>
@@ -28,6 +32,18 @@ export default {
     entry: {
       type: Object,
       required: true
+    },
+    currentLabel: {
+      type: String,
+      default: '当前语言下的内容'
+    },
+    sourceLabel: {
+      type: String,
+      default: '源内容'
+    },
+    nextLabel: {
+      type: String,
+      default: '新内容'
     }
   },
   setup(props) {
@@ -37,13 +53,22 @@ export default {
     const sourceText = computed(() => {
       return normalizePreviewText(props.entry.sourcePreviewText)
     })
+    const nextText = computed(() => {
+      return normalizePreviewText(props.entry.nextPreviewText)
+    })
     const hasCurrentContent = computed(() => currentText.value !== '')
     const hasSourceContent = computed(() => sourceText.value !== '')
+    const hasNextContent = computed(() => nextText.value !== '')
 
     return {
+      currentLabel: props.currentLabel,
       currentText,
       hasCurrentContent,
+      hasNextContent,
       hasSourceContent,
+      nextLabel: props.nextLabel,
+      nextText,
+      sourceLabel: props.sourceLabel,
       sourceText
     }
   }
