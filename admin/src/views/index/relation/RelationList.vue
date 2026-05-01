@@ -212,21 +212,19 @@
         show-icon
         title="这里只开放可翻译的业务字段；系统字段、源快照字段和语言字段由服务端保护。"
       />
-      <el-form
-        v-if="currentEditFields.length > 0"
-        :model="editForm"
-        label-width="110px"
-        @submit.prevent
-      >
+      <el-form :model="editForm" label-width="110px" @submit.prevent>
         <RelationBusinessFieldEditor
+          v-if="currentEditFields.length > 0"
           :fields="currentEditFields"
           :form="editForm"
           :language-code="editLanguageCode"
           :record="currentRow"
           @parent-updated="handleParentRelationUpdated"
         />
+        <el-form-item label="AI翻译跳过">
+          <el-switch v-model="editForm.aiTranslationSkip" />
+        </el-form-item>
       </el-form>
-      <el-empty v-else description="当前类型暂无可编辑业务字段" />
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
         <el-button type="success" @click="openAiTranslation(currentRow)">
@@ -531,6 +529,7 @@ export default {
       currentEditFields.value.forEach(field => {
         editForm[field.name] = getRelationFieldInitialValue(field, row)
       })
+      editForm.aiTranslationSkip = Boolean(row.aiTranslationSkip)
       editDialogVisible.value = true
     }
 
@@ -639,7 +638,10 @@ export default {
               collectionName: updateItem.collectionName,
               id: updateItem.id,
               languageCode: aiRecord.value.languageCode,
-              payload: updateItem.payload
+              payload: {
+                ...updateItem.payload,
+                aiTranslationSkip: true
+              }
             })
           })
         )
@@ -649,7 +651,10 @@ export default {
             collectionName,
             id: aiRecord.value._id,
             languageCode: aiRecord.value.languageCode,
-            payload
+            payload: {
+              ...payload,
+              aiTranslationSkip: true
+            }
           })
           updateRelationListRow(response.data.data)
           Object.keys(payload).forEach(key => {
@@ -702,6 +707,7 @@ export default {
         }
         payload[field.name] = editForm[field.name]
       })
+      payload.aiTranslationSkip = editForm.aiTranslationSkip === true
       return payload
     }
 

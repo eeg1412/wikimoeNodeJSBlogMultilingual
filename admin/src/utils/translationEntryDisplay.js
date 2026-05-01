@@ -205,6 +205,9 @@ export function getTranslationEntryDisplayMeta(entry = {}) {
   if (entry.optional) {
     pushBadge(badgeList, '可选', 'warning')
   }
+  if (entry.aiTranslationSkip === true) {
+    pushBadge(badgeList, 'AI翻译时跳过', 'danger')
+  }
   if (entry.entryKind === 'richTextTemplate') {
     pushBadge(badgeList, '结构模板', 'danger')
   }

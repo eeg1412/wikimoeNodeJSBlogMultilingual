@@ -336,6 +336,12 @@
         <el-form-item label="允许评论">
           <el-switch v-model="form.allowRemark" />
         </el-form-item>
+        <el-form-item label="AI翻译跳过">
+          <el-switch v-model="form.aiTranslationSkip" />
+          <div class="w_10 cGray666">
+            开启后，文章 AI 翻译默认不勾选当前文章字段。
+          </div>
+        </el-form-item>
         <el-form-item label="是否置顶" v-if="form.type !== 3">
           <el-switch v-model="form.top" />
         </el-form-item>
@@ -991,6 +997,9 @@
           :record="relationEditRecord"
           @parent-updated="handleRelationParentUpdated"
         />
+        <el-form-item label="AI翻译跳过">
+          <el-switch v-model="relationEditForm.aiTranslationSkip" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="relationEditVisible = false">取消</el-button>
@@ -1482,6 +1491,7 @@ export default {
       sortop: false,
       status: 0,
       allowRemark: false,
+      aiTranslationSkip: false,
       template: '',
       code: '',
       editorVersion: 5,
@@ -1988,6 +1998,7 @@ export default {
       form.sortop = Boolean(post.sortop)
       form.status = Number(post.status || 0)
       form.allowRemark = Boolean(post.allowRemark)
+      form.aiTranslationSkip = Boolean(post.aiTranslationSkip)
       form.template = post.template || ''
       form.code = post.code || ''
       originalEditorVersion.value = undefined
@@ -2039,6 +2050,7 @@ export default {
       relationEditFields.value.forEach(item => {
         relationEditForm[item.name] = getRelationFieldInitialValue(item, record)
       })
+      relationEditForm.aiTranslationSkip = Boolean(record.aiTranslationSkip)
     }
 
     function openRelationEditor(field, record) {
@@ -2291,6 +2303,7 @@ export default {
         }
         payload[item.name] = relationEditForm[item.name]
       })
+      payload.aiTranslationSkip = relationEditForm.aiTranslationSkip === true
       relationSaving.value = true
       multilingualApi
         .updateTranslationRelation({
@@ -2346,6 +2359,7 @@ export default {
         sortop: form.sortop,
         status: form.status,
         allowRemark: form.allowRemark,
+        aiTranslationSkip: form.aiTranslationSkip,
         template: form.template,
         code: form.code,
         editorVersion: form.editorVersion,
@@ -2681,7 +2695,8 @@ export default {
       }
     }
 
-    async function applyTranslationImportPreview(preview) {
+    async function applyTranslationImportPreview(preview, options = {}) {
+      const markAiTranslationSkip = options.markAiTranslationSkip === true
       const relationUpdates = preview.applyPlan.relationUpdates
       if (relationUpdates.length > 0) {
         await Promise.all(
@@ -2690,13 +2705,21 @@ export default {
               collectionName: updateItem.collectionName,
               id: updateItem.id,
               languageCode: form.languageCode,
-              payload: updateItem.payload
+              payload: {
+                ...updateItem.payload,
+                ...(markAiTranslationSkip
+                  ? { aiTranslationSkip: true }
+                  : {})
+              }
             })
           })
         )
       }
 
-      const postPatch = preview.applyPlan.postPatch
+      const postPatch = { ...preview.applyPlan.postPatch }
+      if (markAiTranslationSkip && Object.keys(postPatch).length > 0) {
+        postPatch.aiTranslationSkip = true
+      }
       if (Object.keys(postPatch).length > 0) {
         await multilingualApi.updateTranslationPost(
           buildImportSubmitData(postPatch)
@@ -3150,7 +3173,9 @@ export default {
 
       aiApplying.value = true
       try {
-        await applyTranslationImportPreview(aiImportPreview.value)
+        await applyTranslationImportPreview(aiImportPreview.value, {
+          markAiTranslationSkip: true
+        })
         aiDialogVisible.value = false
         resetAiTranslationState()
         ElMessage.success('AI 翻译已写入')

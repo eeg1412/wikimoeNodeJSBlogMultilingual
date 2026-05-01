@@ -99,6 +99,11 @@ function addSourceIdentityFields(schema, collectionName) {
       type: String,
       default: '',
       index: true
+    },
+    aiTranslationSkip: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   })
 }

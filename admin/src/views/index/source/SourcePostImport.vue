@@ -1294,6 +1294,36 @@ export default {
       return entry.scope !== 'post' && entry.valueType !== 'richTextDocument'
     }
 
+    const shouldSubmitAiImportEntry = entry => {
+      return entry.aiTranslationSkip !== true
+    }
+
+    const buildAiTranslationSkipEntries = entries => {
+      const skippedEntryMap = new Map()
+      entries.forEach(entry => {
+        if (entry.aiTranslationSkip !== true) {
+          return
+        }
+        const key = [
+          entry.scope || '',
+          entry.collectionName || '',
+          entry.recordId || '',
+          entry.fieldName || entry.id || ''
+        ].join(':')
+        if (skippedEntryMap.has(key)) {
+          return
+        }
+        const label = entry.label || entry.recordLabel || entry.id
+        skippedEntryMap.set(key, {
+          id: `aiTranslationSkip:${key}`,
+          label,
+          reason: 'AI翻译时跳过',
+          message: `${label}：已标记为 AI 翻译时跳过`
+        })
+      })
+      return Array.from(skippedEntryMap.values())
+    }
+
     const loadAiImportPreviewContext = async ({ sourcePost, languageCode }) => {
       const response = await multilingualApi.getSourcePostAiImportPreviewContext(
         {
@@ -1328,15 +1358,46 @@ export default {
         sourcePreviewPost,
         targetPreviewPost
       )
-      const entries = mappedResult.entries.map(entry => {
-        const aiEntry = { ...entry }
-        if (canAiKeepOriginalEntry(entry)) {
-          aiEntry.skipAllowed = true
-        }
-        return aiEntry
-      })
+      const aiTranslationSkippedEntries = buildAiTranslationSkipEntries(
+        mappedResult.entries
+      )
+      const entries = mappedResult.entries
+        .filter(shouldSubmitAiImportEntry)
+        .map(entry => {
+          const aiEntry = { ...entry }
+          if (canAiKeepOriginalEntry(entry)) {
+            aiEntry.skipAllowed = true
+          }
+          return aiEntry
+        })
       if (entries.length === 0) {
-        throw new Error(`${getLanguageText(languageCode)} 没有可翻译内容`)
+        const payload = buildPreviewPayloadForPost(
+          {
+            meta: {},
+            entries: []
+          },
+          targetPreviewPost,
+          languageCode
+        )
+        const preview = buildTranslationImportPreview({
+          parsedPayload: payload,
+          currentEntries: buildPostTranslationEntries(targetPreviewPost, {
+            includeEmpty: true
+          }),
+          form: buildTranslationPostForm(targetPreviewPost),
+          referenceEntries: []
+        })
+        return {
+          languageCode,
+          payload,
+          preview,
+          previewGroups: buildAiResultPreviewGroups(preview),
+          skippedEntries: [
+            ...(mappedResult.skippedEntries || []),
+            ...aiTranslationSkippedEntries
+          ],
+          entryCount: 0
+        }
       }
 
       pushAiProgress(`正在提交 ${getLanguageText(languageCode)} 翻译`)
@@ -1379,7 +1440,10 @@ export default {
         payload: streamResult.payload,
         preview: streamResult.preview,
         previewGroups: buildAiResultPreviewGroups(streamResult.preview),
-        skippedEntries: mappedResult.skippedEntries || [],
+        skippedEntries: [
+          ...(mappedResult.skippedEntries || []),
+          ...aiTranslationSkippedEntries
+        ],
         entryCount: entries.length
       }
     }

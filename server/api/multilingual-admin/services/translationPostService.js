@@ -36,6 +36,7 @@ const SYSTEM_FIELDS = new Set([
   'sourceSnapshotAt',
   'sourceUpdatedAt',
   'sourceHash',
+  'aiTranslationSkip',
   'sourceChanged',
   'pendingReview',
   'sourceChangedAt',
@@ -163,6 +164,7 @@ const POST_EDITABLE_FIELDS = [
   'sortop',
   'status',
   'allowRemark',
+  'aiTranslationSkip',
   'template',
   'code',
   'editorVersion',
@@ -2570,6 +2572,7 @@ function removeImmutableRestoreFields(data) {
   delete updateData.sourceSnapshotId
   delete updateData.translationGroupId
   delete updateData.recordKind
+  delete updateData.aiTranslationSkip
   return updateData
 }
 
@@ -3239,12 +3242,14 @@ async function applyAiTranslationPayload({
     }
     if (entry.scope === 'post') {
       postPatch[entry.fieldName] = normalizeAiEntryValue(entry)
+      postPatch.aiTranslationSkip = true
       continue
     }
     const updateItem = await buildRelationUpdatePayload(
       entry,
       translationPost.languageCode
     )
+    updateItem.payload.aiTranslationSkip = true
     const updateKey = [
       updateItem.collectionName,
       String(updateItem.id)

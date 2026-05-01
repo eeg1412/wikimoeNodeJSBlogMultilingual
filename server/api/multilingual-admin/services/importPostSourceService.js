@@ -35,6 +35,7 @@ const SYSTEM_FIELDS = new Set([
   'sourceSnapshotAt',
   'sourceUpdatedAt',
   'sourceHash',
+  'aiTranslationSkip',
   'sourceChanged',
   'pendingReview',
   'sourceChangedAt',

@@ -52,6 +52,7 @@ const SYSTEM_FIELDS = new Set([
   'sourceSnapshotAt',
   'sourceUpdatedAt',
   'sourceHash',
+  'aiTranslationSkip',
   'sourceChanged',
   'pendingReview',
   'sourceChangedAt',
@@ -520,6 +521,13 @@ function isSafePayloadField(field) {
 function buildRelationUpdateData(collectionName, payload, schema) {
   const updateData = {}
   const businessFields = BUSINESS_FIELDS[collectionName] || new Set()
+
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'aiTranslationSkip') &&
+    schema.path('aiTranslationSkip')
+  ) {
+    updateData.aiTranslationSkip = payload.aiTranslationSkip === true
+  }
 
   for (const field of Object.keys(payload)) {
     if (!isSafePayloadField(field)) {

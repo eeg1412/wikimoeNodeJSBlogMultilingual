@@ -358,6 +358,9 @@
         >
           <el-switch v-model="editForm.is360Panorama" />
         </el-form-item>
+        <el-form-item label="AI翻译跳过">
+          <el-switch v-model="editForm.aiTranslationSkip" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
@@ -525,7 +528,8 @@ export default {
     const editForm = reactive({
       name: '',
       description: '',
-      is360Panorama: false
+      is360Panorama: false,
+      aiTranslationSkip: false
     })
 
     const currentAiRecordId = computed(() => currentRow.value?._id || '')
@@ -846,6 +850,7 @@ export default {
       editForm.name = row.name || ''
       editForm.description = row.description || ''
       editForm.is360Panorama = Boolean(row.is360Panorama)
+      editForm.aiTranslationSkip = Boolean(row.aiTranslationSkip)
       editDialogVisible.value = true
     }
 
@@ -867,7 +872,8 @@ export default {
       }
       const payload = {
         name: editForm.name || '',
-        description: editForm.description || ''
+        description: editForm.description || '',
+        aiTranslationSkip: editForm.aiTranslationSkip === true
       }
       if (isImageMedia(currentRow.value)) {
         payload.is360Panorama = editForm.is360Panorama
@@ -966,7 +972,10 @@ export default {
               collectionName: updateItem.collectionName,
               id: updateItem.id,
               languageCode: currentRow.value.languageCode,
-              payload: updateItem.payload
+              payload: {
+                ...updateItem.payload,
+                aiTranslationSkip: true
+              }
             })
           })
         )
@@ -976,7 +985,10 @@ export default {
             collectionName: 'attachments',
             id: currentRow.value._id,
             languageCode: currentRow.value.languageCode,
-            payload
+            payload: {
+              ...payload,
+              aiTranslationSkip: true
+            }
           })
           updateMediaListRow(response.data.data)
           Object.assign(editForm, payload)

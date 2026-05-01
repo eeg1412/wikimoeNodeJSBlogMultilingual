@@ -369,6 +369,10 @@ function buildTextEntry(baseData, options = {}) {
 
   return {
     ...baseData,
+    defaultSelected:
+      baseData.aiTranslationSkip === true
+        ? false
+        : baseData.defaultSelected !== false,
     value,
     previewText: buildPreviewText(value, valueType),
     previewRawValue: buildPreviewRawValue(value, valueType)
@@ -1198,6 +1202,7 @@ function createPostEntry(form, fieldConfig, options = {}) {
         valueType: fieldConfig.valueType,
         value: richTextResult.document,
         defaultSelected: fieldConfig.defaultSelected,
+        aiTranslationSkip: form.aiTranslationSkip === true,
         optional: Boolean(fieldConfig.optional)
       },
       options
@@ -1217,6 +1222,7 @@ function createPostEntry(form, fieldConfig, options = {}) {
       valueType: fieldConfig.valueType,
       value: form[fieldConfig.name],
       defaultSelected: fieldConfig.defaultSelected,
+      aiTranslationSkip: form.aiTranslationSkip === true,
       optional: Boolean(fieldConfig.optional)
     },
     options
@@ -1322,6 +1328,7 @@ function createVoteOptionRelationEntries(
           valueType: 'plainText',
           value: option.title,
           defaultSelected: !editField.translationOptional,
+          aiTranslationSkip: record.aiTranslationSkip === true,
           optional: Boolean(editField.translationOptional)
         },
         options
@@ -1366,6 +1373,7 @@ function createRelationEntry(relationField, record, editField, options = {}) {
         valueType,
         value: richTextResult.document,
         defaultSelected: !editField.translationOptional,
+        aiTranslationSkip: record.aiTranslationSkip === true,
         optional: Boolean(editField.translationOptional)
       },
       options
@@ -1397,6 +1405,7 @@ function createRelationEntry(relationField, record, editField, options = {}) {
       valueType,
       value: record[editField.name],
       defaultSelected: !editField.translationOptional,
+      aiTranslationSkip: record.aiTranslationSkip === true,
       optional: Boolean(editField.translationOptional)
     },
     options
@@ -1433,6 +1442,7 @@ function buildParentRelationEntry(
       valueType: 'plainText',
       value: parentRecord[parentEditField.name],
       defaultSelected: !parentEditField.translationOptional,
+      aiTranslationSkip: parentRecord.aiTranslationSkip === true,
       optional: Boolean(parentEditField.translationOptional)
     },
     options
