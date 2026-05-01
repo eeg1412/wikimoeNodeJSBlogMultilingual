@@ -45,6 +45,19 @@ function splitLabelParts(value) {
     .filter(Boolean)
 }
 
+function prependLabelPrefix(prefix, value, fallback) {
+  const text = normalizeText(value, normalizeText(fallback))
+  if (!text) {
+    return ''
+  }
+
+  if (text.startsWith(prefix)) {
+    return text
+  }
+
+  return `${prefix}${text}`
+}
+
 function getEntryFieldLabel(entry = {}) {
   if (entry.fieldLabel) {
     return normalizeText(entry.fieldLabel)
@@ -82,20 +95,20 @@ function getContextTagLabel(entry = {}) {
   if (entry.scope === 'relation') {
     if (relationScopeLabel) {
       if (groupTitle) {
-        return `${relationScopeLabel}${groupTitle}`
+        return prependLabelPrefix(relationScopeLabel, groupTitle)
       }
       return relationScopeLabel
     }
 
     if (groupTitle) {
-      return `关联${groupTitle}`
+      return prependLabelPrefix('关联', groupTitle)
     }
     return '关联内容'
   }
 
   if (entry.scope === 'parentRelation') {
     if (groupTitle) {
-      return `父级${groupTitle}`
+      return prependLabelPrefix('父级', groupTitle)
     }
     return '父级内容'
   }

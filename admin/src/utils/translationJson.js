@@ -1479,24 +1479,22 @@ function appendParentRelationEntries({
       return
     }
 
-    getParentTranslationFields(parentRelationField).forEach(
-      parentEditField => {
-        const parentEntryId = `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`
-        if (exportedParentIdSet.has(parentEntryId)) {
-          return
-        }
-        const entry = buildParentRelationEntry(
-          parentRelationField,
-          parentRecord,
-          parentEditField,
-          buildOptions
-        )
-        if (entry) {
-          exportedParentIdSet.add(parentEntryId)
-          entryList.push(entry)
-        }
+    getParentTranslationFields(parentRelationField).forEach(parentEditField => {
+      const parentEntryId = `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${parentEditField.name}`
+      if (exportedParentIdSet.has(parentEntryId)) {
+        return
       }
-    )
+      const entry = buildParentRelationEntry(
+        parentRelationField,
+        parentRecord,
+        parentEditField,
+        buildOptions
+      )
+      if (entry) {
+        exportedParentIdSet.add(parentEntryId)
+        entryList.push(entry)
+      }
+    })
   })
 }
 
@@ -2253,7 +2251,68 @@ function buildSkippedEntryAction(entry, reasonType) {
   return {}
 }
 
-function addSkippedEntry(skippedEntries, skippedEntryMap, entry, reasonType) {
+function buildSkippedEntryPreview(sourceEntry, targetEntry = null) {
+  const sourceValue = buildPreviewRawValue(
+    sourceEntry.value,
+    sourceEntry.valueType
+  )
+  let sourceHtml = ''
+  if (isRichTextValueType(sourceEntry.valueType)) {
+    sourceHtml = buildRichTextHtmlFromEntryValue(
+      sourceEntry.valueType,
+      sourceEntry.value,
+      sourceEntry.assets || {}
+    )
+  }
+
+  let targetValue = ''
+  let targetHtml = ''
+  if (targetEntry) {
+    targetValue = buildPreviewRawValue(targetEntry.value, targetEntry.valueType)
+    if (isRichTextValueType(targetEntry.valueType)) {
+      targetHtml = buildRichTextHtmlFromEntryValue(
+        targetEntry.valueType,
+        targetEntry.value,
+        targetEntry.assets || {}
+      )
+    }
+  }
+
+  return {
+    scope: sourceEntry.scope,
+    label: sourceEntry.label,
+    groupLabel: sourceEntry.groupLabel,
+    groupCategory: sourceEntry.groupCategory,
+    groupTitle: sourceEntry.groupTitle,
+    valueType: sourceEntry.valueType,
+    fieldName: sourceEntry.fieldName,
+    fieldLabel: sourceEntry.fieldLabel,
+    recordLabel: sourceEntry.recordLabel,
+    relationTypeLabel: sourceEntry.relationTypeLabel,
+    collectionName: sourceEntry.collectionName,
+    postType: sourceEntry.postType,
+    optional: sourceEntry.optional,
+    entryKind: sourceEntry.entryKind,
+    segmentIndex: sourceEntry.segmentIndex,
+    segmentTotal: sourceEntry.segmentTotal,
+    hasSourceValue: true,
+    hasCurrentValue: Boolean(targetEntry),
+    sourceRecordLabel: sourceEntry.recordLabel || '',
+    sourceValue,
+    sourceHtml,
+    targetRecordLabel: targetEntry?.recordLabel || '',
+    targetValue,
+    targetHtml
+  }
+}
+
+function addSkippedEntry(
+  skippedEntries,
+  skippedEntryMap,
+  entry,
+  reasonType,
+  targetEntry = null
+) {
   const key = buildSkippedEntryGroupKey(entry, reasonType)
   if (skippedEntryMap.has(key)) {
     return
@@ -2276,6 +2335,7 @@ function addSkippedEntry(skippedEntries, skippedEntryMap, entry, reasonType) {
     label: getSkippedEntryDisplayName(entry),
     reason,
     message,
+    ...buildSkippedEntryPreview(entry, targetEntry),
     ...buildSkippedEntryAction(entry, reasonType)
   })
 }
@@ -2325,7 +2385,8 @@ export function buildSourceToTargetTranslationEntries({
         skippedEntries,
         skippedEntryMap,
         sourceEntry,
-        'typeMismatch'
+        'typeMismatch',
+        targetEntry
       )
       return
     }
@@ -2674,7 +2735,10 @@ function buildSkippedPreviewItem({
     sourceRecordLabel: referenceEntry?.recordLabel || '',
     sourceValue,
     sourceHtml,
-    targetValue: buildPreviewRawValue(nextValue, normalizedImportEntry.valueType),
+    targetValue: buildPreviewRawValue(
+      nextValue,
+      normalizedImportEntry.valueType
+    ),
     targetHtml,
     reason,
     previousValue: buildPreviewRawValue(currentValue, currentEntry.valueType)

@@ -2857,10 +2857,53 @@ function normalizeAiImportResultList(body = {}) {
         400
       )
     }
+
+    let relatedPostResults = []
+    if (Array.isArray(item.relatedPostResults)) {
+      relatedPostResults = item.relatedPostResults.map(
+        (relatedItem, relatedIndex) => {
+          const sourceId = String(relatedItem?.sourceId || '').trim()
+          if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+            throw new ApiError(
+              ERROR_CODES.SOURCE_ID_INVALID,
+              `第 ${index + 1} 个语言的第 ${relatedIndex + 1} 个关联文章 sourceId 不合法`,
+              `results[${index}].relatedPostResults[${relatedIndex}].sourceId`,
+              400
+            )
+          }
+          if (
+            !relatedItem?.payload ||
+            typeof relatedItem.payload !== 'object'
+          ) {
+            throw new ApiError(
+              ERROR_CODES.CONTENT_FIELD_INVALID,
+              '关联文章 AI 翻译结果缺失',
+              `results[${index}].relatedPostResults[${relatedIndex}].payload`,
+              400
+            )
+          }
+          if (!Array.isArray(relatedItem.payload.entries)) {
+            throw new ApiError(
+              ERROR_CODES.CONTENT_FIELD_INVALID,
+              '关联文章 AI 翻译条目缺失',
+              `results[${index}].relatedPostResults[${relatedIndex}].payload.entries`,
+              400
+            )
+          }
+          return {
+            sourceId,
+            payload: relatedItem.payload,
+            publish: relatedItem.publish === true
+          }
+        }
+      )
+    }
+
     return {
       languageCode,
       payload: item.payload,
-      publish: item.publish === true
+      publish: item.publish === true,
+      relatedPostResults
     }
   })
 }
@@ -3074,6 +3117,9 @@ function normalizeAiImportPreviewRecord(record, context, seen = new Map()) {
     normalizedRecord.languageCode = context.targetLanguageCode
     normalizedRecord.sourceLanguageCode = context.sourceLanguageCode
     normalizedRecord.recordKind = TRANSLATION_RECORD_KIND
+    normalizedRecord.__previewMissingTranslation = true
+  } else {
+    normalizedRecord.__previewMissingTranslation = false
   }
 
   const dependencyFields =
@@ -3430,6 +3476,43 @@ async function createOrGetTranslationPostForAiImport(
   }
 }
 
+async function ensureSourceSnapshotForAiImport(
+  sourceId,
+  sourceLanguageCode,
+  sourceSnapshotIdCache
+) {
+  const cacheKey = String(sourceId)
+  if (sourceSnapshotIdCache.has(cacheKey)) {
+    return sourceSnapshotIdCache.get(cacheKey)
+  }
+
+  try {
+    const importResult =
+      await importPostSourceService.importOrOverwriteSourcePost(
+        {
+          sourceId: cacheKey,
+          sourceLanguageCode,
+          overwrite: false
+        },
+        false,
+        { skipContentRefresh: true }
+      )
+    sourceSnapshotIdCache.set(cacheKey, importResult.sourceSnapshotId)
+    return importResult.sourceSnapshotId
+  } catch (error) {
+    if (
+      error?.name !== 'ApiError' ||
+      error.code !== ERROR_CODES.SOURCE_EXISTS ||
+      !error.extra?.sourceSnapshotId
+    ) {
+      throw error
+    }
+    const snapshotId = String(error.extra.sourceSnapshotId)
+    sourceSnapshotIdCache.set(cacheKey, snapshotId)
+    return snapshotId
+  }
+}
+
 async function applySourcePostAiImport(body = {}) {
   const input = normalizeAiBatchInput(body)
   const refreshLanguageSet = new Set([input.sourceLanguageCode])
@@ -3443,6 +3526,11 @@ async function applySourcePostAiImport(body = {}) {
       false,
       { skipContentRefresh: true }
     )
+  const sourceSnapshotIdCache = new Map()
+  sourceSnapshotIdCache.set(
+    String(input.sourceId),
+    importResult.sourceSnapshotId
+  )
 
   const results = []
   for (const item of input.results) {
@@ -3467,12 +3555,63 @@ async function applySourcePostAiImport(body = {}) {
       translationPost: translationPostDetail.post,
       publish: item.publish
     })
+
+    const relatedPostResults = []
+    const relatedSourceSet = new Set()
+    for (const relatedItem of item.relatedPostResults || []) {
+      const relatedSourceId = String(relatedItem.sourceId || '').trim()
+      if (!relatedSourceId || relatedSourceSet.has(relatedSourceId)) {
+        continue
+      }
+      relatedSourceSet.add(relatedSourceId)
+
+      if (
+        relatedItem.payload?.meta?.languageCode &&
+        relatedItem.payload.meta.languageCode !== item.languageCode
+      ) {
+        throw new ApiError(
+          ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+          '关联文章 AI 翻译结果语言不匹配',
+          'languageCode',
+          400
+        )
+      }
+
+      const relatedSourceSnapshotId = await ensureSourceSnapshotForAiImport(
+        relatedSourceId,
+        input.sourceLanguageCode,
+        sourceSnapshotIdCache
+      )
+      const relatedCreateResult = await createOrGetTranslationPostForAiImport(
+        relatedSourceSnapshotId,
+        item.languageCode
+      )
+      const relatedTranslationPostDetail = await getTranslationPostDetail(
+        relatedCreateResult.translationPostId
+      )
+      const relatedPublish = item.publish || relatedItem.publish
+      const relatedApplyResult = await applyAiTranslationPayload({
+        payload: relatedItem.payload,
+        translationPost: relatedTranslationPostDetail.post,
+        publish: relatedPublish
+      })
+
+      relatedPostResults.push({
+        sourceId: relatedSourceId,
+        languageCode: item.languageCode,
+        translationPostId: relatedCreateResult.translationPostId,
+        created: relatedCreateResult.created,
+        ...relatedApplyResult
+      })
+    }
+
     refreshLanguageSet.add(item.languageCode)
     results.push({
       languageCode: item.languageCode,
       translationPostId: createResult.translationPostId,
       created: createResult.created,
-      ...applyResult
+      ...applyResult,
+      relatedPostResults
     })
   }
 
