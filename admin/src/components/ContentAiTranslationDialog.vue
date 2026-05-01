@@ -170,6 +170,9 @@
 
     <template #footer>
       <el-button :disabled="isBusy" @click="visible = false">取消</el-button>
+      <el-button v-if="translating" type="warning" @click="stopTranslation">
+        停止翻译
+      </el-button>
       <el-button v-if="preview" :disabled="isBusy" @click="resetPreview">
         返回调整
       </el-button>
@@ -264,6 +267,7 @@ export default {
     const preview = ref(null)
     const streamStatusList = ref([])
     const streamContent = ref('')
+    const activeAbortController = ref(null)
     let entryLoadRequestId = 0
 
     const visible = computed({
@@ -292,6 +296,10 @@ export default {
     }
 
     function resetState() {
+      if (activeAbortController.value) {
+        activeAbortController.value.abort()
+        activeAbortController.value = null
+      }
       baseMode.value = 'source'
       selectedSourceLanguageCode.value = getDefaultSourceLanguageCode()
       entryList.value = []
@@ -401,6 +409,27 @@ export default {
         id: `${Date.now()}-${streamStatusList.value.length}`,
         message
       })
+    }
+
+    function isAbortError(error) {
+      if (!error) {
+        return false
+      }
+      if (error.name === 'AbortError') {
+        return true
+      }
+      if (error.code === 'ABORT_ERR') {
+        return true
+      }
+      return false
+    }
+
+    function stopTranslation() {
+      if (!activeAbortController.value) {
+        return
+      }
+      activeAbortController.value.abort()
+      pushStatus('已停止翻译请求')
     }
 
     function parseSseBlock(block) {
@@ -570,12 +599,15 @@ export default {
       })
       resetPreview()
       translating.value = true
+      const abortController = new AbortController()
+      activeAbortController.value = abortController
       try {
         pushStatus('正在开始翻译')
         const response = await fetch(
           '/api/multilingual-admin/translation/ai/translate-stream',
           {
             method: 'POST',
+            signal: abortController.signal,
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${store.getters.adminToken}`
@@ -596,10 +628,15 @@ export default {
         }
         await readStream(response)
       } catch (error) {
+        if (isAbortError(error)) {
+          ElMessage.info('已停止 AI 翻译')
+          return
+        }
         extractApiErrorMessages(error).forEach(message => {
           ElMessage.error(message)
         })
       } finally {
+        activeAbortController.value = null
         translating.value = false
       }
     }
@@ -666,6 +703,7 @@ export default {
       reloadEntries,
       requestSourceLanguageCode,
       requestTranslation,
+      stopTranslation,
       resetPreview,
       selectAll,
       selectedEntryIds,

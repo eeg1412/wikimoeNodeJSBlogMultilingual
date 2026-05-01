@@ -195,6 +195,28 @@
             </div>
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="AI翻译跳过" min-width="320">
+          <template #default="{ row }">
+            <div class="language-skip-list">
+              <div
+                v-for="item in getTranslationRows(row)"
+                :key="`skip-${item.languageCode}`"
+                class="language-skip-item"
+              >
+                <span class="language-skip-code">{{ item.languageCode }}</span>
+                <el-switch
+                  v-if="item.translation"
+                  :model-value="item.translation.aiTranslationSkip === true"
+                  :loading="isAiSkipUpdating(item.translation)"
+                  @change="
+                    value => updateTranslationAiSkip(item.translation, value)
+                  "
+                />
+                <span v-else class="table-empty-text">-</span>
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="导入时间" width="180">
           <template #default="{ row }">
             {{ $formatDate(row.sourcePost.sourceSnapshotAt) }}
@@ -354,6 +376,7 @@ export default {
     const detailLoading = ref(false)
     const detailSaving = ref(false)
     const detailData = ref(null)
+    const rowActionLoadingMap = reactive({})
     const editForm = reactive({
       title: '',
       alias: '',
@@ -434,6 +457,61 @@ export default {
       }
 
       return row.sourcePost?.translationGroupId || ''
+    }
+
+    const getAiSkipActionKey = translation => {
+      if (!translation || !translation._id) {
+        return ''
+      }
+      return `aiSkip:${translation._id}`
+    }
+
+    const isAiSkipUpdating = translation => {
+      const actionKey = getAiSkipActionKey(translation)
+      if (!actionKey) {
+        return false
+      }
+      return rowActionLoadingMap[actionKey] === true
+    }
+
+    const setAiSkipUpdating = (translation, value) => {
+      const actionKey = getAiSkipActionKey(translation)
+      if (!actionKey) {
+        return
+      }
+      rowActionLoadingMap[actionKey] = value === true
+    }
+
+    const updateTranslationAiSkip = (translation, value) => {
+      if (!translation) {
+        return
+      }
+      if (isAiSkipUpdating(translation)) {
+        return
+      }
+
+      setAiSkipUpdating(translation, true)
+      multilingualApi
+        .updateTranslationAiSkip(
+          {
+            contentType: 'post',
+            id: translation._id,
+            languageCode: translation.languageCode,
+            aiTranslationSkip: value === true
+          },
+          true
+        )
+        .then(response => {
+          const updatedData = response.data.data || {}
+          translation.aiTranslationSkip = updatedData.aiTranslationSkip === true
+          ElMessage.success('AI 翻译跳过状态已更新')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          setAiSkipUpdating(translation, false)
+        })
     }
 
     const getTranslationTagType = translation => {
@@ -605,9 +683,11 @@ export default {
       getPostTypeText,
       getSourceGroupRowKey,
       getTranslationRows,
+      isAiSkipUpdating,
       getTranslationTagType,
       getPostDisplayTitle,
       getTranslationPostList,
+      updateTranslationAiSkip,
       createTranslation,
       openTranslationDetail,
       goLanguageList,
@@ -661,6 +741,24 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.language-skip-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px 10px;
+}
+
+.language-skip-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.language-skip-code {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .detail-actions {

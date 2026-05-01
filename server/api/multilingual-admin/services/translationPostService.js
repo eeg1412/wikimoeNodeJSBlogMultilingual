@@ -203,7 +203,9 @@ const PREVIEW_RELATION_DEPENDENCY_FIELDS = {
     { field: 'gamePlatform', collectionName: 'gamePlatforms', multiple: false }
   ],
   books: [{ field: 'booktype', collectionName: 'booktypes', multiple: false }],
-  events: [{ field: 'eventtype', collectionName: 'eventtypes', multiple: false }]
+  events: [
+    { field: 'eventtype', collectionName: 'eventtypes', multiple: false }
+  ]
 }
 
 const SOURCE_POST_LIST_SELECT_FIELDS = [
@@ -252,6 +254,7 @@ const TRANSLATION_POST_LIST_SELECT_FIELDS = [
   'excerpt',
   'alias',
   'type',
+  'aiTranslationSkip',
   'languageCode',
   'translationGroupId',
   'status',
@@ -2474,6 +2477,92 @@ async function updateTranslationPost(body = {}, options = {}) {
   return await getTranslationPostDetail(post._id)
 }
 
+async function updateTranslationPostAiSkip(body = {}) {
+  const id = String(body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(body, 'aiTranslationSkip')) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'aiTranslationSkip is required',
+      'aiTranslationSkip',
+      400
+    )
+  }
+
+  if (typeof body.aiTranslationSkip !== 'boolean') {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'aiTranslationSkip must be boolean',
+      'aiTranslationSkip',
+      400
+    )
+  }
+
+  const PostModel = getPostModel()
+  const post = await PostModel.findOne({
+    _id: new mongoose.Types.ObjectId(id),
+    recordKind: TRANSLATION_RECORD_KIND
+  }).select('_id languageCode aiTranslationSkip')
+
+  if (!post) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  assertUpdateLanguageMatched(post, body)
+
+  if (post.aiTranslationSkip === body.aiTranslationSkip) {
+    return {
+      _id: post._id,
+      languageCode: post.languageCode,
+      aiTranslationSkip: post.aiTranslationSkip === true
+    }
+  }
+
+  const updatedPost = await PostModel.findOneAndUpdate(
+    { _id: post._id, recordKind: TRANSLATION_RECORD_KIND },
+    {
+      $set: {
+        aiTranslationSkip: body.aiTranslationSkip,
+        lastChangDate: new Date()
+      }
+    },
+    {
+      new: true,
+      projection: {
+        _id: 1,
+        languageCode: 1,
+        aiTranslationSkip: 1,
+        updatedAt: 1,
+        lastChangDate: 1
+      }
+    }
+  ).lean()
+
+  if (!updatedPost) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  return updatedPost
+}
+
 function parseRestoreRecordInput(body = {}) {
   const collectionName = String(body.collectionName || 'posts').trim()
   if (!RESTORABLE_COLLECTION_NAMES.has(collectionName)) {
@@ -2779,7 +2868,12 @@ function normalizeAiImportResultList(body = {}) {
 function normalizeAiBatchInput(body = {}) {
   const sourceId = String(body.sourceId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
-    throw new ApiError(ERROR_CODES.SOURCE_ID_INVALID, undefined, 'sourceId', 400)
+    throw new ApiError(
+      ERROR_CODES.SOURCE_ID_INVALID,
+      undefined,
+      'sourceId',
+      400
+    )
   }
 
   const sourceLanguageCode = normalizeLanguageCode(body.sourceLanguageCode)
@@ -2802,7 +2896,12 @@ function normalizeAiBatchInput(body = {}) {
 function parseSourcePostAiImportPreviewInput(query = {}) {
   const sourceId = String(query.sourceId || query.id || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
-    throw new ApiError(ERROR_CODES.SOURCE_ID_INVALID, undefined, 'sourceId', 400)
+    throw new ApiError(
+      ERROR_CODES.SOURCE_ID_INVALID,
+      undefined,
+      'sourceId',
+      400
+    )
   }
 
   const sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
@@ -2863,9 +2962,10 @@ function collectPreviewRelationSources(
   }
 
   const sourceId = getSourceIdentityId(value)
-  const seenKey = [collectionName, sourceId ? String(sourceId) : value._id].join(
-    ':'
-  )
+  const seenKey = [
+    collectionName,
+    sourceId ? String(sourceId) : value._id
+  ].join(':')
   if (seen.has(seenKey)) {
     return
   }
@@ -3019,12 +3119,11 @@ function buildAiImportPreviewTargetPost(sourcePost, context) {
 
 async function getSourcePostAiImportPreviewContext(query = {}) {
   const input = parseSourcePostAiImportPreviewInput(query)
-  const sourceDetail = await importPostSourceService.getSourceDatabasePostDetail(
-    {
+  const sourceDetail =
+    await importPostSourceService.getSourceDatabasePostDetail({
       id: input.sourceId,
       sourceLanguageCode: input.sourceLanguageCode
-    }
-  )
+    })
   const sourcePost = sourceDetail.post
   if (!sourcePost) {
     throw new ApiError(
@@ -3170,10 +3269,7 @@ function applyVoteOptionTitlePatch(optionList, optionPatch) {
       return String(option._id || '') === optionId
     })
   }
-  if (
-    optionIndex < 0 &&
-    Number.isInteger(Number(optionPatch.optionIndex))
-  ) {
+  if (optionIndex < 0 && Number.isInteger(Number(optionPatch.optionIndex))) {
     optionIndex = Number(optionPatch.optionIndex)
   }
   if (optionIndex < 0 || !optionList[optionIndex]) {
@@ -3190,10 +3286,7 @@ function applyVoteOptionTitlePatch(optionList, optionPatch) {
 async function buildRelationUpdatePayload(entry, languageCode) {
   const record = await findTranslationRecordBySourceEntry(entry, languageCode)
   const value = normalizeAiEntryValue(entry)
-  if (
-    entry.collectionName === 'votes' &&
-    entry.fieldName === 'options.title'
-  ) {
+  if (entry.collectionName === 'votes' && entry.fieldName === 'options.title') {
     return {
       collectionName: entry.collectionName,
       id: record._id,
@@ -3250,10 +3343,9 @@ async function applyAiTranslationPayload({
       translationPost.languageCode
     )
     updateItem.payload.aiTranslationSkip = true
-    const updateKey = [
-      updateItem.collectionName,
-      String(updateItem.id)
-    ].join(':')
+    const updateKey = [updateItem.collectionName, String(updateItem.id)].join(
+      ':'
+    )
     if (!relationUpdateMap.has(updateKey)) {
       if (updateItem.optionTitlePatch) {
         updateItem.payload.options = updateItem.optionList
@@ -3297,10 +3389,7 @@ async function applyAiTranslationPayload({
     if (publish) {
       postUpdateBody.status = 1
     }
-    await updateTranslationPost(
-      postUpdateBody,
-      { skipContentRefresh: true }
-    )
+    await updateTranslationPost(postUpdateBody, { skipContentRefresh: true })
   }
 
   return {
@@ -3344,15 +3433,16 @@ async function createOrGetTranslationPostForAiImport(
 async function applySourcePostAiImport(body = {}) {
   const input = normalizeAiBatchInput(body)
   const refreshLanguageSet = new Set([input.sourceLanguageCode])
-  const importResult = await importPostSourceService.importOrOverwriteSourcePost(
-    {
-      sourceId: input.sourceId,
-      sourceLanguageCode: input.sourceLanguageCode,
-      overwrite: false
-    },
-    false,
-    { skipContentRefresh: true }
-  )
+  const importResult =
+    await importPostSourceService.importOrOverwriteSourcePost(
+      {
+        sourceId: input.sourceId,
+        sourceLanguageCode: input.sourceLanguageCode,
+        overwrite: false
+      },
+      false,
+      { skipContentRefresh: true }
+    )
 
   const results = []
   for (const item of input.results) {
@@ -3408,5 +3498,6 @@ module.exports = {
   getTranslationPostListBySource,
   getTranslationPostDetail,
   restoreTranslationRecordFromSnapshot,
+  updateTranslationPostAiSkip,
   updateTranslationPost
 }

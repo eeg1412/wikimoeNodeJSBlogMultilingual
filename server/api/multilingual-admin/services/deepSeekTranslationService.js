@@ -397,10 +397,10 @@ function buildSkipPolicyPrompt(input) {
   }
 
   return buildPromptLayer('k=true 保留原值规则层', [
-      'k=true 是很窄的“允许保留原值”标记，不是拒绝翻译的许可。',
-      '只有当 k=true，并且 v 本身完整地属于目标语言，或 v 是无意义的非语言字符串时，才允许返回原始 v。',
-      '当 k=true 且你合法保留 v 不变时，必须包含 r，并用面向用户的简体中文短句说明具体原因：完整已是目标语言(源语种→目标语言语种)、URL/路径/代码、数字/日期/哈希/ID，或不可读文件名。',
-      '不要用 r 为可读的源语言文本、专有名词、地名、分类、标签、昵称或混合语言文本辩解。'
+    'k=true 是很窄的“允许保留原值”标记，不是拒绝翻译的许可。',
+    '只有当 k=true，并且 v 本身完整地属于目标语言，或 v 是无意义的非语言字符串时，才允许返回原始 v。',
+    '当 k=true 且你合法保留 v 不变时，必须包含 r，并用面向用户的简体中文短句说明具体原因：完整已是目标语言(源语种→目标语言语种)、URL/路径/代码、数字/日期/哈希/ID，或不可读文件名。',
+    '不要用 r 为可读的源语言文本、专有名词、地名、分类、标签、昵称或混合语言文本辩解。'
   ])
 }
 
@@ -921,12 +921,46 @@ function buildChatCompletionUrl(settings) {
   }
 }
 
-function requestJson(url, requestBody, settings) {
+function createTranslationCancelledError(reason) {
+  const message = String(reason || '').trim() || 'AI 翻译已停止'
+  return new ApiError(
+    ERROR_CODES.AI_TRANSLATION_CANCELLED,
+    message,
+    'translation',
+    499
+  )
+}
+
+function isCancellationRequested(options = {}) {
+  return options.cancellation?.isCancelled === true
+}
+
+function throwIfCancellationRequested(options = {}) {
+  if (!isCancellationRequested(options)) {
+    return
+  }
+  throw createTranslationCancelledError(options.cancellation?.reason)
+}
+
+function bindCancellation(request, options = {}) {
+  const cancellation = options.cancellation
+  if (!cancellation || typeof cancellation.onCancel !== 'function') {
+    return () => {}
+  }
+
+  return cancellation.onCancel(reason => {
+    request.destroy(createTranslationCancelledError(reason))
+  })
+}
+
+function requestJson(url, requestBody, settings, options = {}) {
+  throwIfCancellationRequested(options)
   const requestText = JSON.stringify(requestBody)
   const client = url.protocol === 'http:' ? http : https
   const timeout = Number(settings.deepSeekTimeoutSeconds || 120) * 1000
 
   return new Promise((resolve, reject) => {
+    let unbindCancellation = () => {}
     const request = client.request(
       url,
       {
@@ -944,6 +978,7 @@ function requestJson(url, requestBody, settings) {
           chunks.push(chunk)
         })
         response.on('end', () => {
+          unbindCancellation()
           const responseText = Buffer.concat(chunks).toString('utf8')
           let responseData = null
           try {
@@ -967,6 +1002,14 @@ function requestJson(url, requestBody, settings) {
       }
     )
 
+    unbindCancellation = bindCancellation(request, options)
+    if (isCancellationRequested(options)) {
+      request.destroy(
+        createTranslationCancelledError(options.cancellation?.reason)
+      )
+      return
+    }
+
     request.on('timeout', () => {
       request.destroy(
         new ApiError(
@@ -978,6 +1021,7 @@ function requestJson(url, requestBody, settings) {
       )
     })
     request.on('error', error => {
+      unbindCancellation()
       if (error && error.name === 'ApiError') {
         reject(error)
         return
@@ -1025,12 +1069,20 @@ function findSseBoundary(buffer) {
   return { index: crlfIndex, length: 4 }
 }
 
-function requestStream(url, requestBody, settings, handlers = {}) {
+function requestStream(
+  url,
+  requestBody,
+  settings,
+  handlers = {},
+  options = {}
+) {
+  throwIfCancellationRequested(options)
   const requestText = JSON.stringify(requestBody)
   const client = url.protocol === 'http:' ? http : https
   const timeout = Number(settings.deepSeekTimeoutSeconds || 300) * 1000
 
   return new Promise((resolve, reject) => {
+    let unbindCancellation = () => {}
     const request = client.request(
       url,
       {
@@ -1125,6 +1177,7 @@ function requestStream(url, requestBody, settings, handlers = {}) {
         })
         response.on('end', () => {
           try {
+            unbindCancellation()
             if (buffer.trim()) {
               const dataText = parseSseBlock(buffer)
               handleDataText(dataText)
@@ -1154,6 +1207,14 @@ function requestStream(url, requestBody, settings, handlers = {}) {
       }
     )
 
+    unbindCancellation = bindCancellation(request, options)
+    if (isCancellationRequested(options)) {
+      request.destroy(
+        createTranslationCancelledError(options.cancellation?.reason)
+      )
+      return
+    }
+
     request.on('timeout', () => {
       request.destroy(
         new ApiError(
@@ -1165,6 +1226,7 @@ function requestStream(url, requestBody, settings, handlers = {}) {
       )
     })
     request.on('error', error => {
+      unbindCancellation()
       if (error && error.name === 'ApiError') {
         reject(error)
         return
@@ -1947,6 +2009,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 
   try {
     for (let index = 0; index < inputChunks.length; index += 1) {
+      throwIfCancellationRequested(handlers)
       const chunkInput = inputChunks[index]
       if (handlers.onStatus) {
         handlers.onStatus({
@@ -1955,10 +2018,16 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       }
 
       const requestBody = buildDeepSeekStreamRequestBody(settings, chunkInput)
-      const deepSeekResponse = await requestStream(url, requestBody, settings, {
-        onStatus: handlers.onStatus,
-        onChunk: handlers.onChunk
-      })
+      const deepSeekResponse = await requestStream(
+        url,
+        requestBody,
+        settings,
+        {
+          onStatus: handlers.onStatus,
+          onChunk: handlers.onChunk
+        },
+        handlers
+      )
       chunkResponses.push(deepSeekResponse)
 
       const responseData = deepSeekResponse.data
@@ -1993,6 +2062,8 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
           message: `已完成第 ${index + 1}/${inputChunks.length} 批`
         })
       }
+
+      throwIfCancellationRequested(handlers)
     }
 
     const responseData = buildAggregateRawResponse({
@@ -2025,6 +2096,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     }
     return data
   } catch (error) {
+    const isCancelled = error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
     const responseData = buildAggregateRawResponse({
       chunkResponses,
       usage: combinedUsage,
@@ -2036,8 +2108,8 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       post,
       input,
       responseData,
-      status: 'error',
-      httpStatusCode: error?.statusCode || 502,
+      status: isCancelled ? 'cancelled' : 'error',
+      httpStatusCode: isCancelled ? 499 : error?.statusCode || 502,
       stream: true,
       chunkCount: inputChunks.length
     })

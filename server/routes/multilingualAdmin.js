@@ -428,6 +428,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/ai/streamTranslateContent')
   },
   {
+    path: '/translation/ai/skip',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/ai/updateSkip')
+  },
+  {
     path: '/translation/relation/update',
     method: 'put',
     middleware: [checkAuth],

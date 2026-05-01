@@ -12,6 +12,45 @@ function getErrorMessage(error) {
   return 'AI 翻译失败'
 }
 
+function createCancellationContext() {
+  let cancelled = false
+  let reason = ''
+  const listeners = new Set()
+
+  return {
+    get isCancelled() {
+      return cancelled
+    },
+    get reason() {
+      return reason
+    },
+    cancel(nextReason) {
+      if (cancelled) {
+        return
+      }
+      cancelled = true
+      reason = String(nextReason || '').trim() || '客户端已断开连接'
+      listeners.forEach(listener => {
+        listener(reason)
+      })
+      listeners.clear()
+    },
+    onCancel(listener) {
+      if (typeof listener !== 'function') {
+        return () => {}
+      }
+      if (cancelled) {
+        listener(reason)
+        return () => {}
+      }
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    }
+  }
+}
+
 module.exports = async function streamTranslateContent(req, res) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -22,11 +61,14 @@ module.exports = async function streamTranslateContent(req, res) {
   }
 
   let closed = false
+  const cancellation = createCancellationContext()
   req.on('aborted', () => {
     closed = true
+    cancellation.cancel('客户端中止了请求')
   })
   res.on('close', () => {
     closed = true
+    cancellation.cancel('连接已关闭')
   })
 
   function send(eventName, data) {
@@ -48,7 +90,8 @@ module.exports = async function streamTranslateContent(req, res) {
         },
         onResult(result) {
           send('result', result)
-        }
+        },
+        cancellation
       }
     )
     send('done', {

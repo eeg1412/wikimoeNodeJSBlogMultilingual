@@ -182,6 +182,19 @@
             {{ $formatDate(row.updatedAt || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn
+          v-if="!isSourceScope"
+          label="AI翻译跳过"
+          width="130"
+        >
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.aiTranslationSkip === true"
+              :loading="isAiSkipUpdating(row)"
+              @change="value => toggleAiSkip(row, value)"
+            />
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="操作" width="400" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">详情</el-button>
@@ -525,6 +538,7 @@ export default {
     const imageFileList = ref([])
     const replaceSubmitting = ref(false)
     const editSubmitting = ref(false)
+    const aiSkipLoadingMap = reactive({})
     const editForm = reactive({
       name: '',
       description: '',
@@ -864,6 +878,63 @@ export default {
       if (currentRow.value && currentRow.value._id === record._id) {
         currentRow.value = record
       }
+    }
+
+    const getAiSkipActionKey = row => {
+      if (!row || !row._id) {
+        return ''
+      }
+      return `aiSkip:${row._id}`
+    }
+
+    const isAiSkipUpdating = row => {
+      const actionKey = getAiSkipActionKey(row)
+      if (!actionKey) {
+        return false
+      }
+      return aiSkipLoadingMap[actionKey] === true
+    }
+
+    const toggleAiSkip = (row, value) => {
+      if (!row) {
+        return
+      }
+      if (isAiSkipUpdating(row)) {
+        return
+      }
+
+      const actionKey = getAiSkipActionKey(row)
+      if (!actionKey) {
+        return
+      }
+
+      aiSkipLoadingMap[actionKey] = true
+      multilingualApi
+        .updateTranslationAiSkip(
+          {
+            contentType: 'relation',
+            collectionName: 'attachments',
+            id: row._id,
+            languageCode: row.languageCode,
+            aiTranslationSkip: value === true
+          },
+          true
+        )
+        .then(response => {
+          const data = response.data.data || {}
+          updateMediaListRow({
+            ...row,
+            ...data,
+            aiTranslationSkip: data.aiTranslationSkip === true
+          })
+          ElMessage.success('AI 翻译跳过状态已更新')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          aiSkipLoadingMap[actionKey] = false
+        })
     }
 
     const updateMediaInfo = () => {
@@ -1270,6 +1341,7 @@ export default {
       editSubmitting,
       editForm,
       currentAiRecordId,
+      isAiSkipUpdating,
       currentAiSnapshotVersion,
       currentAiSourceLanguageCode,
       currentAiTargetLanguageCode,
@@ -1293,6 +1365,7 @@ export default {
       openMediaPreview,
       getMediaList,
       openDetail,
+      toggleAiSkip,
       openEdit,
       openAiTranslation,
       confirmAiTranslation,

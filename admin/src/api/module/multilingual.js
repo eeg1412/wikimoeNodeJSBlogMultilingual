@@ -135,6 +135,12 @@ export default function (api) {
         noLoading
       })
     },
+    updateTranslationAiSkip(data, noLoading = false) {
+      return api.put('/translation/ai/skip', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     updateTranslationPost(data, noLoading = false) {
       return api.put('/translation/post/update', data, {
         shouldAdminJWT: true,

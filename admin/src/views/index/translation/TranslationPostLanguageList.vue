@@ -128,6 +128,17 @@
               </el-tag>
             </template>
           </ResponsiveTableColumn>
+          <ResponsiveTableColumn label="AI翻译跳过" width="130">
+            <template #default="{ row }">
+              <el-switch
+                v-if="row.translation"
+                :model-value="row.translation.aiTranslationSkip === true"
+                :loading="isAiSkipUpdating(row.translation)"
+                @change="value => updateAiSkip(row.translation, value)"
+              />
+              <span v-else class="table-empty-text">-</span>
+            </template>
+          </ResponsiveTableColumn>
           <ResponsiveTableColumn label="更新时间" width="180">
             <template #default="{ row }">
               <span v-if="row.translation">
@@ -223,6 +234,54 @@ export default {
 
     function getCreateActionKey(languageCode) {
       return `create:${languageCode}`
+    }
+
+    function getAiSkipActionKey(translation) {
+      if (!translation || !translation._id) {
+        return ''
+      }
+      return `aiSkip:${translation._id}`
+    }
+
+    function isAiSkipUpdating(translation) {
+      const actionKey = getAiSkipActionKey(translation)
+      if (!actionKey) {
+        return false
+      }
+      return rowActionLoadingMap[actionKey] === true
+    }
+
+    function updateAiSkip(translation, value) {
+      if (!translation) {
+        return
+      }
+      const actionKey = getAiSkipActionKey(translation)
+      if (!actionKey || rowActionLoadingMap[actionKey]) {
+        return
+      }
+
+      setRowLoading(actionKey, true)
+      multilingualApi
+        .updateTranslationAiSkip(
+          {
+            contentType: 'post',
+            id: translation._id,
+            languageCode: translation.languageCode,
+            aiTranslationSkip: value === true
+          },
+          true
+        )
+        .then(response => {
+          const updatedData = response.data.data || {}
+          translation.aiTranslationSkip = updatedData.aiTranslationSkip === true
+          ElMessage.success('AI 翻译跳过状态已更新')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          setRowLoading(actionKey, false)
+        })
     }
 
     function getLanguageList() {
@@ -345,6 +404,8 @@ export default {
       getCreateActionKey,
       sourcePost,
       translationRows,
+      isAiSkipUpdating,
+      updateAiSkip,
       createTranslation,
       getLanguageText,
       getPostDisplayTitle,

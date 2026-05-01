@@ -5,12 +5,13 @@
         <el-breadcrumb-item :to="{ name: 'TranslationPostList' }">
           多语言文章
         </el-breadcrumb-item>
-        <el-breadcrumb-item v-if="sourceLanguageListRoute" :to="sourceLanguageListRoute">
+        <el-breadcrumb-item
+          v-if="sourceLanguageListRoute"
+          :to="sourceLanguageListRoute"
+        >
           语言版本
         </el-breadcrumb-item>
-        <el-breadcrumb-item v-else>
-          语言版本
-        </el-breadcrumb-item>
+        <el-breadcrumb-item v-else> 语言版本 </el-breadcrumb-item>
         <el-breadcrumb-item>编辑{{ typeTitle }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
@@ -954,6 +955,13 @@
           取消
         </el-button>
         <el-button
+          v-if="aiTranslating"
+          type="warning"
+          @click="stopAiTranslation"
+        >
+          停止翻译
+        </el-button>
+        <el-button
           v-if="aiImportPreview"
           :disabled="isAiBusy"
           @click="resetAiTranslationPreview"
@@ -1558,6 +1566,7 @@ export default {
     const aiStreamContent = ref('')
     const aiStreamReasoning = ref('')
     const aiStreamFeedbackRef = ref(null)
+    const aiAbortController = ref(null)
     const skippedTranslationCreatingIds = ref([])
     const creatingAllSkippedTranslations = ref(false)
     let aiEntryLoadRequestId = 0
@@ -2707,9 +2716,7 @@ export default {
               languageCode: form.languageCode,
               payload: {
                 ...updateItem.payload,
-                ...(markAiTranslationSkip
-                  ? { aiTranslationSkip: true }
-                  : {})
+                ...(markAiTranslationSkip ? { aiTranslationSkip: true } : {})
               }
             })
           })
@@ -2762,6 +2769,10 @@ export default {
     }
 
     function resetAiTranslationState() {
+      if (aiAbortController.value) {
+        aiAbortController.value.abort()
+        aiAbortController.value = null
+      }
       aiEntryList.value = []
       aiSkippedEntries.value = []
       selectedAiEntryIds.value = []
@@ -2924,6 +2935,27 @@ export default {
         return
       }
       done()
+    }
+
+    function isAbortError(error) {
+      if (!error) {
+        return false
+      }
+      if (error.name === 'AbortError') {
+        return true
+      }
+      if (error.code === 'ABORT_ERR') {
+        return true
+      }
+      return false
+    }
+
+    function stopAiTranslation() {
+      if (!aiAbortController.value) {
+        return
+      }
+      aiAbortController.value.abort()
+      pushAiStreamStatus('已停止翻译请求')
     }
 
     function getSourceSnapshotId() {
@@ -3117,12 +3149,15 @@ export default {
       resetAiStreamState()
       aiImportPreview.value = null
       aiTranslating.value = true
+      const abortController = new AbortController()
+      aiAbortController.value = abortController
       try {
         pushAiStreamStatus('正在开始翻译')
         const response = await fetch(
           '/api/multilingual-admin/translation/post/ai-translate-stream',
           {
             method: 'POST',
+            signal: abortController.signal,
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${store.getters.adminToken}`
@@ -3143,10 +3178,15 @@ export default {
 
         await readAiTranslationStream(response, selectedEntries)
       } catch (error) {
+        if (isAbortError(error)) {
+          ElMessage.info('已停止 AI 翻译')
+          return
+        }
         extractApiErrorMessages(error).forEach(message => {
           ElMessage.error(message)
         })
       } finally {
+        aiAbortController.value = null
         aiTranslating.value = false
       }
     }
@@ -3299,6 +3339,7 @@ export default {
       openTranslationJsonImport,
       parseTranslationJsonImport,
       requestAiTranslation,
+      stopAiTranslation,
       clearArticleMediaReplaceFile,
       getArticleMediaActionText,
       getArticleMediaSettingValues,
