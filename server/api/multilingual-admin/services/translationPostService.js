@@ -18,6 +18,7 @@ const SOURCE_POST_COLLECTION = 'posts'
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
 const RELATION_COPY_CONCURRENCY = 4
+const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -3270,6 +3271,13 @@ function buildAiEntryFieldDedupeKey(entry) {
     }
     return `${fieldName}.${optionIndex}`
   }
+  if (fieldName === URL_LIST_TEXT_FIELD_NAME) {
+    const urlIndex = Number(entry.urlIndex)
+    if (!Number.isInteger(urlIndex)) {
+      return ''
+    }
+    return `${fieldName}.${urlIndex}`
+  }
   return fieldName
 }
 
@@ -3382,6 +3390,30 @@ function applyVoteOptionTitlePatch(optionList, optionPatch) {
   optionList[optionIndex].title = optionPatch.title
 }
 
+function normalizeUrlListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map(item => ({
+    text: item?.text || '',
+    url: item?.url || ''
+  }))
+}
+
+function applyUrlListTextPatch(urlList, urlListPatch) {
+  const urlIndex = Number(urlListPatch.urlIndex)
+  if (!Number.isInteger(urlIndex) || urlIndex < 0 || !urlList[urlIndex]) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      '目标语言关联内容链接项不存在',
+      'urlList',
+      404
+    )
+  }
+  urlList[urlIndex].text = urlListPatch.text
+}
+
 async function buildRelationUpdatePayload(entry, languageCode) {
   const record = await findTranslationRecordBySourceEntry(entry, languageCode)
   const value = normalizeAiEntryValue(entry)
@@ -3398,6 +3430,20 @@ async function buildRelationUpdatePayload(entry, languageCode) {
         optionId: entry.optionId,
         optionIndex: entry.optionIndex,
         title: value
+      }
+    }
+  }
+
+  if (entry.fieldName === URL_LIST_TEXT_FIELD_NAME) {
+    return {
+      collectionName: entry.collectionName,
+      id: record._id,
+      languageCode,
+      payload: {},
+      urlList: normalizeUrlListValue(record.urlList),
+      urlListPatch: {
+        urlIndex: entry.urlIndex,
+        text: value
       }
     }
   }
@@ -3469,6 +3515,15 @@ async function applyAiTranslationPayload({
         delete updateItem.optionList
         delete updateItem.optionTitlePatch
       }
+      if (updateItem.urlListPatch) {
+        updateItem.payload.urlList = updateItem.urlList
+        applyUrlListTextPatch(
+          updateItem.payload.urlList,
+          updateItem.urlListPatch
+        )
+        delete updateItem.urlList
+        delete updateItem.urlListPatch
+      }
       relationUpdateMap.set(updateKey, updateItem)
       continue
     }
@@ -3480,6 +3535,16 @@ async function applyAiTranslationPayload({
       applyVoteOptionTitlePatch(
         existingUpdateItem.payload.options,
         updateItem.optionTitlePatch
+      )
+      continue
+    }
+    if (updateItem.urlListPatch) {
+      if (!Array.isArray(existingUpdateItem.payload.urlList)) {
+        existingUpdateItem.payload.urlList = updateItem.urlList
+      }
+      applyUrlListTextPatch(
+        existingUpdateItem.payload.urlList,
+        updateItem.urlListPatch
       )
       continue
     }

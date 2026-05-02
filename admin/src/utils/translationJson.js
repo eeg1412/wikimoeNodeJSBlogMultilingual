@@ -45,6 +45,7 @@ const VOID_HTML_TAG_SET = new Set([
 ])
 const BLOCKED_HTML_TAG_SET = new Set(['script', 'style'])
 const URL_ATTRIBUTE_NAME_SET = new Set(['href', 'src', 'poster'])
+const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
 
 const POST_TRANSLATION_FIELDS = [
   {
@@ -113,6 +114,29 @@ function isPlainObject(value) {
 
 function cloneSerializableValue(value) {
   return JSON.parse(JSON.stringify(value))
+}
+
+function normalizeUrlListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map(item => ({
+    text: item?.text || '',
+    url: item?.url || ''
+  }))
+}
+
+function getUrlListEntryIndex(entry = {}) {
+  const index = Number(entry.urlIndex)
+  if (!Number.isInteger(index) || index < 0) {
+    return -1
+  }
+  return index
+}
+
+function isUrlListTextEntry(entry = {}) {
+  return entry.fieldName === URL_LIST_TEXT_FIELD_NAME
 }
 
 function isRichTextValueType(valueType) {
@@ -1337,6 +1361,54 @@ function createVoteOptionRelationEntries(
     .filter(Boolean)
 }
 
+function createUrlListRelationEntries(
+  relationField,
+  record,
+  editField,
+  options = {}
+) {
+  const urlList = normalizeUrlListValue(record[editField.name])
+  const recordLabel = getRelationRecordDisplayName(record, relationField)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
+
+  return urlList
+    .map((item, index) => {
+      return buildTextEntry(
+        {
+          id: `relation.${relationField.field}.${record._id}.urlList.${index}.text`,
+          scope: 'relation',
+          relationField: relationField.field,
+          collectionName: relationField.collectionName,
+          recordId: record._id,
+          recordKind: record.recordKind,
+          postType: Number(record.type || relationField.postType || 0),
+          sourceRecordId: normalizeStringValue(record._id),
+          sourceId: normalizeStringValue(record.sourceId),
+          sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
+          relationTypeLabel: relationField.label,
+          recordLabel,
+          fieldName: URL_LIST_TEXT_FIELD_NAME,
+          fieldLabel: `${editField.label} #${index + 1}`,
+          urlIndex: index,
+          urlList: cloneSerializableValue(urlList),
+          label: `${recordLabel} / ${editField.label} #${index + 1}`,
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
+          groupTitle: relationField.label,
+          valueType: 'plainText',
+          value: item.text,
+          defaultSelected: !editField.translationOptional,
+          aiTranslationSkip: record.aiTranslationSkip === true,
+          optional: Boolean(editField.translationOptional)
+        },
+        options
+      )
+    })
+    .filter(Boolean)
+}
+
 function createRelationEntry(relationField, record, editField, options = {}) {
   const recordLabel = getRelationRecordDisplayName(record, relationField)
   const relationScopeMeta = getRelationScopeMeta(relationField)
@@ -1549,6 +1621,17 @@ export function buildTranslationExportEntries({
           )
           return
         }
+        if (editField.type === 'urlList') {
+          entryList.push(
+            ...createUrlListRelationEntries(
+              relationField,
+              record,
+              editField,
+              buildOptions
+            )
+          )
+          return
+        }
 
         const entry = createRelationEntry(
           relationField,
@@ -1593,6 +1676,26 @@ export function buildRecordTranslationEntries({
     if (editField.type === 'voteOptions') {
       entryList.push(
         ...createVoteOptionRelationEntries(
+          {
+            field: 'record',
+            label: groupLabel,
+            collectionName
+          },
+          record,
+          editField,
+          buildOptions
+        ).map(entry => ({
+          ...entry,
+          groupLabel,
+          groupCategory: '内容字段',
+          groupTitle: groupLabel
+        }))
+      )
+      return
+    }
+    if (editField.type === 'urlList') {
+      entryList.push(
+        ...createUrlListRelationEntries(
           {
             field: 'record',
             label: groupLabel,
@@ -1713,6 +1816,9 @@ function buildExportEntryList(selectedEntries) {
     }
     if (entry.optionIndex !== undefined) {
       exportEntry.optionIndex = entry.optionIndex
+    }
+    if (entry.urlIndex !== undefined) {
+      exportEntry.urlIndex = entry.urlIndex
     }
     if (entry.groupCategory) {
       exportEntry.groupCategory = entry.groupCategory
@@ -2075,10 +2181,12 @@ function mergeRichTextSegmentImportPayload(parsedData) {
 
 function buildRelationEntryMatchKey(entry, sourceId) {
   if (entry.scope === 'relation') {
-    const fieldName =
-      entry.fieldName === 'options.title'
-        ? `${entry.fieldName}.${entry.optionIndex}`
-        : entry.fieldName || ''
+    let fieldName = entry.fieldName || ''
+    if (entry.fieldName === 'options.title') {
+      fieldName = `${entry.fieldName}.${entry.optionIndex}`
+    } else if (isUrlListTextEntry(entry)) {
+      fieldName = `${entry.fieldName}.${getUrlListEntryIndex(entry)}`
+    }
     return [
       'relation',
       entry.relationField || '',
@@ -2946,6 +3054,18 @@ export function buildTranslationImportPreview({
       if (optionIndex >= 0) {
         optionList[optionIndex].title = finalValue
         payload.options = optionList
+      }
+      return
+    }
+    if (isUrlListTextEntry(currentEntry)) {
+      const payload = relationUpdateMap.get(relationUpdateKey).payload
+      const urlList = Array.isArray(payload.urlList)
+        ? payload.urlList
+        : normalizeUrlListValue(currentEntry.urlList || [])
+      const urlIndex = getUrlListEntryIndex(currentEntry)
+      if (urlIndex >= 0 && urlList[urlIndex]) {
+        urlList[urlIndex].text = finalValue
+        payload.urlList = urlList
       }
       return
     }

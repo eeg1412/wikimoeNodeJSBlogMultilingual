@@ -1755,6 +1755,9 @@ function buildTranslatedPayload(input, post, resultData) {
     if (Number.isInteger(entry.optionIndex)) {
       outputEntry.optionIndex = entry.optionIndex
     }
+    if (Number.isInteger(entry.urlIndex)) {
+      outputEntry.urlIndex = entry.urlIndex
+    }
     if (entry.sourceId) {
       outputEntry.sourceId = entry.sourceId
     }

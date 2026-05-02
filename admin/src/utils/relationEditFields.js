@@ -66,6 +66,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       type: 'textarea',
       translationExport: true
     },
+    {
+      name: 'urlList',
+      label: '自定义链接',
+      type: 'urlList',
+      translationExport: true
+    },
     { name: 'rating', label: '评分', type: 'number' },
     { name: 'year', label: '年份', type: 'number' },
     { name: 'season', label: '季度', type: 'number' },
@@ -80,6 +86,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       name: 'summary',
       label: '简介',
       type: 'textarea',
+      translationExport: true
+    },
+    {
+      name: 'urlList',
+      label: '自定义链接',
+      type: 'urlList',
       translationExport: true
     },
     { name: 'rating', label: '评分', type: 'number' },
@@ -103,6 +115,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       name: 'summary',
       label: '简介',
       type: 'textarea',
+      translationExport: true
+    },
+    {
+      name: 'urlList',
+      label: '自定义链接',
+      type: 'urlList',
       translationExport: true
     },
     { name: 'rating', label: '评分', type: 'number' },
@@ -129,6 +147,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       name: 'summary',
       label: '简介',
       type: 'textarea',
+      translationExport: true
+    },
+    {
+      name: 'urlList',
+      label: '自定义链接',
+      type: 'urlList',
       translationExport: true
     },
     { name: 'rating', label: '评分', type: 'number' },
@@ -248,6 +272,17 @@ export function getRelationIdValue(value) {
   return value
 }
 
+function normalizeUrlListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map(item => ({
+    text: item?.text || '',
+    url: item?.url || ''
+  }))
+}
+
 export function getRelationFieldInitialValue(field, record) {
   const value = record?.[field.name]
   if (field.type === 'parentRelation') {
@@ -265,6 +300,9 @@ export function getRelationFieldInitialValue(field, record) {
   }
   if (field.type === 'tagName') {
     return normalizeTagName(value)
+  }
+  if (field.type === 'urlList') {
+    return normalizeUrlListValue(value)
   }
 
   return value

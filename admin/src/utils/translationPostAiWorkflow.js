@@ -4,6 +4,8 @@ import {
 } from '@/utils/translationJson'
 import { normalizeTagRecord } from '@/utils/tagName'
 
+const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
+
 export const AUTHOR_RELATION_FIELD = {
   label: '作者',
   field: 'author',
@@ -263,6 +265,13 @@ function getEntryDeduplicationFieldKey(entry = {}) {
       return ''
     }
     return `${fieldName}.${optionIndex}`
+  }
+  if (fieldName === URL_LIST_TEXT_FIELD_NAME) {
+    const urlIndex = Number(entry.urlIndex)
+    if (!Number.isInteger(urlIndex)) {
+      return ''
+    }
+    return `${fieldName}.${urlIndex}`
   }
   return fieldName
 }

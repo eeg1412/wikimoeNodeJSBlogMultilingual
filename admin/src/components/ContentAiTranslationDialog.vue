@@ -236,6 +236,39 @@ function toFinalValue(valueType, value) {
   return value
 }
 
+const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
+
+function cloneSerializableValue(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function normalizeUrlListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map(item => ({
+    text: item?.text || '',
+    url: item?.url || ''
+  }))
+}
+
+function applyUrlListTextPatch(payload, item) {
+  const urlIndex = Number(item.urlIndex)
+  if (!Number.isInteger(urlIndex) || urlIndex < 0) {
+    return
+  }
+
+  const urlList = Array.isArray(payload.urlList)
+    ? payload.urlList
+    : normalizeUrlListValue(cloneSerializableValue(item.urlList || []))
+  if (!urlList[urlIndex]) {
+    return
+  }
+  urlList[urlIndex].text = item.finalValue
+  payload.urlList = urlList
+}
+
 export default {
   name: 'ContentAiTranslationDialog',
   components: {
@@ -502,6 +535,8 @@ export default {
           recordId: currentEntry.recordId,
           recordLabel: currentEntry.recordLabel,
           relationTypeLabel: currentEntry.relationTypeLabel,
+          urlIndex: currentEntry.urlIndex,
+          urlList: currentEntry.urlList,
           currentValue: stringifyValue(
             currentEntry.valueType,
             currentEntry.value
@@ -658,8 +693,17 @@ export default {
               payload: {}
             })
           }
-          relationUpdateMap.get(relationUpdateKey).payload[item.fieldName] =
-            item.finalValue
+          const relationPayload =
+            relationUpdateMap.get(relationUpdateKey).payload
+          if (item.fieldName === URL_LIST_TEXT_FIELD_NAME) {
+            applyUrlListTextPatch(relationPayload, item)
+            return
+          }
+          relationPayload[item.fieldName] = item.finalValue
+          return
+        }
+        if (item.fieldName === URL_LIST_TEXT_FIELD_NAME) {
+          applyUrlListTextPatch(payload, item)
           return
         }
         payload[item.fieldName] = item.finalValue

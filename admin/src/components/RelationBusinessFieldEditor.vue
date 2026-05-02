@@ -51,6 +51,38 @@
         未设置选项
       </span>
     </div>
+    <div v-else-if="field.type === 'urlList'" class="url-list-editor">
+      <div
+        v-for="(item, index) in getUrlListField(field.name)"
+        :key="index"
+        class="url-list-editor-item"
+      >
+        <el-input
+          v-model="item.text"
+          placeholder="链接文字"
+          clearable
+        />
+        <el-input v-model="item.url" placeholder="URL" clearable />
+        <el-button
+          :icon="Delete"
+          circle
+          @click="removeUrlListItem(field.name, index)"
+        />
+      </div>
+      <div class="url-list-editor-footer">
+        <span v-if="!getUrlListField(field.name).length" class="cGray666">
+          未设置链接
+        </span>
+        <el-button
+          size="small"
+          type="primary"
+          :icon="Plus"
+          @click="addUrlListItem(field.name)"
+        >
+          添加链接
+        </el-button>
+      </div>
+    </div>
     <RichEditor5
       v-else-if="field.type === 'richText'"
       class="relation-rich-editor"
@@ -129,7 +161,7 @@
 <script>
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { EditPen } from '@element-plus/icons-vue'
+import { Delete, EditPen, Plus } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import RichEditor5 from '@/components/RichEditor5'
 import { normalizeTagName } from '@/utils/tagName'
@@ -144,7 +176,9 @@ import {
 export default {
   name: 'RelationBusinessFieldEditor',
   components: {
+    Delete,
     EditPen,
+    Plus,
     RichEditor5
   },
   emits: ['parent-updated'],
@@ -182,6 +216,24 @@ export default {
 
     function updateParentTagNameField(fieldName, value) {
       parentEditForm[fieldName] = normalizeTagName(value)
+    }
+
+    function getUrlListField(fieldName) {
+      if (!Array.isArray(props.form[fieldName])) {
+        props.form[fieldName] = []
+      }
+      return props.form[fieldName]
+    }
+
+    function addUrlListItem(fieldName) {
+      getUrlListField(fieldName).push({
+        text: '',
+        url: ''
+      })
+    }
+
+    function removeUrlListItem(fieldName, index) {
+      getUrlListField(fieldName).splice(index, 1)
     }
 
     const parentEditFields = computed(() => {
@@ -359,18 +411,23 @@ export default {
     )
 
     return {
+      Delete,
       EditPen,
+      Plus,
+      addUrlListItem,
       getRelationOptionLabel,
       getParentRelationId,
       getParentRelationBlockStyle,
       getParentRelationName,
       getParentRelationState,
+      getUrlListField,
       openParentEditor,
       parentEditFields,
       parentEditForm,
       parentEditTitle,
       parentEditVisible,
       parentSaving,
+      removeUrlListItem,
       saveParentEdit,
       updateParentTagNameField,
       updateTagNameField
@@ -427,5 +484,35 @@ export default {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.url-list-editor {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.url-list-editor-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.url-list-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .url-list-editor-item {
+    grid-template-columns: 1fr auto;
+  }
+
+  .url-list-editor-item :deep(.el-input:nth-child(2)) {
+    grid-column: 1 / -1;
+  }
 }
 </style>

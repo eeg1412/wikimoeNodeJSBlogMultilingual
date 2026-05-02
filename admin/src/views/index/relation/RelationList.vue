@@ -300,6 +300,20 @@ function formatFieldValue(value) {
   }
 
   if (Array.isArray(value)) {
+    if (
+      value.some(item => item && typeof item === 'object' && !Array.isArray(item))
+    ) {
+      const text = value
+        .map(item => {
+          if (!item || typeof item !== 'object') {
+            return ''
+          }
+          return item.text || item.url || ''
+        })
+        .filter(Boolean)
+        .join('，')
+      return text || '-'
+    }
     return value.length > 0 ? value.join('，') : '-'
   }
 
