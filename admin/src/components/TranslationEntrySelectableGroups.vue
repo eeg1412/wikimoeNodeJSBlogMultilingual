@@ -45,9 +45,7 @@
             v-if="showAdoptionInfo && entry.isApplied"
             class="translation-json-entry-adoption"
           >
-            <el-tag size="small" type="success" effect="plain">
-              已采纳
-            </el-tag>
+            <el-tag size="small" type="success" effect="plain"> 已采纳 </el-tag>
             <span class="translation-json-entry-adoption-text">
               采纳时间：{{ formatAdoptionTime(entry.appliedAt) }}
             </span>
@@ -202,8 +200,7 @@ export default {
         checked:
           selectedCount === groupIdList.length &&
           groupIdList.every(id => selectedIdSet.value.has(id)),
-        indeterminate:
-          selectedCount > 0 && selectedCount < groupIdList.length
+        indeterminate: selectedCount > 0 && selectedCount < groupIdList.length
       }
     }
 

@@ -313,7 +313,10 @@
                 <div class="translation-dialog-intro-title">选择采纳字段</div>
                 <div class="translation-dialog-intro-text">
                   默认仅勾选未采纳条目，已选择
-                  {{ getSelectedEntryCount(tab.entryKeys) }} 项。重新勾选已采纳条目时会二次确认。
+                  {{
+                    getSelectedEntryCount(tab.entryKeys)
+                  }}
+                  项。重新勾选已采纳条目时会二次确认。
                 </div>
               </div>
               <div
@@ -456,7 +459,9 @@ export default {
 
     const adoptionEntryMap = computed(() => {
       const entryMap = new Map()
-      const adoptionEntryList = Array.isArray(currentJob.value?.adoption?.entries)
+      const adoptionEntryList = Array.isArray(
+        currentJob.value?.adoption?.entries
+      )
         ? currentJob.value.adoption.entries
         : []
       adoptionEntryList.forEach(entry => {
@@ -499,7 +504,9 @@ export default {
 
     const reviewDisplayEntries = computed(() => {
       return selectableReviewEntries.value.map(entry => {
-        const adoptionEntry = adoptionEntryMap.value.get(String(entry.entryKey || ''))
+        const adoptionEntry = adoptionEntryMap.value.get(
+          String(entry.entryKey || '')
+        )
         const requestEntry =
           requestEntryMap.value.get(String(entry.id || '')) ||
           requestEntryMap.value.get(String(entry.originalEntryKey || '')) ||
@@ -912,11 +919,11 @@ export default {
 
     const selectAllReviewEntries = async tab => {
       const entryKeys = tab?.entryKeys || selectableEntryKeys.value
-      const pendingEntryList = (tab?.entries || reviewDisplayEntries.value).filter(
-        entry => {
-          return entry?.id && !selectedEntryKeys.value.includes(entry.id)
-        }
-      )
+      const pendingEntryList = (
+        tab?.entries || reviewDisplayEntries.value
+      ).filter(entry => {
+        return entry?.id && !selectedEntryKeys.value.includes(entry.id)
+      })
       if ((await confirmAppliedEntrySelection(pendingEntryList)) === false) {
         return
       }
