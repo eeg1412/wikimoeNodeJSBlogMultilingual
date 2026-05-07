@@ -41,6 +41,20 @@
           @change="checked => setEntrySelected(entry, checked)"
         >
           <TranslationEntryMeta :entry="entry" :show-subtitle="false" />
+          <div
+            v-if="showAdoptionInfo && entry.isApplied"
+            class="translation-json-entry-adoption"
+          >
+            <el-tag size="small" type="success" effect="plain">
+              已采纳
+            </el-tag>
+            <span class="translation-json-entry-adoption-text">
+              采纳时间：{{ formatAdoptionTime(entry.appliedAt) }}
+            </span>
+            <span class="translation-json-entry-adoption-text">
+              采纳人：{{ getAppliedByText(entry) }}
+            </span>
+          </div>
           <TranslationEntryPreviewRows
             :entry="entry"
             :current-label="currentPreviewLabel"
@@ -96,6 +110,18 @@ export default {
     nextPreviewLabel: {
       type: String,
       default: '新内容'
+    },
+    showAdoptionInfo: {
+      type: Boolean,
+      default: false
+    },
+    beforeEntrySelect: {
+      type: Function,
+      default: null
+    },
+    beforeGroupSelect: {
+      type: Function,
+      default: null
     }
   },
   emits: ['update:modelValue'],
@@ -136,9 +162,16 @@ export default {
       return Boolean(id && selectedIdSet.value.has(id))
     }
 
-    function setEntrySelected(entry, checked) {
+    async function setEntrySelected(entry, checked) {
       const id = getEntryId(entry)
       if (!id) {
+        return
+      }
+      if (
+        checked &&
+        typeof props.beforeEntrySelect === 'function' &&
+        (await props.beforeEntrySelect({ entry, checked })) === false
+      ) {
         return
       }
       const nextIdSet = new Set(selectedIdSet.value)
@@ -182,7 +215,24 @@ export default {
       return getGroupSelectionState(group).indeterminate
     }
 
-    function setGroupSelected(group, checked) {
+    async function setGroupSelected(group, checked) {
+      const pendingEntryList = checked
+        ? (group?.entries || []).filter(entry => {
+            const id = getEntryId(entry)
+            return Boolean(id && !selectedIdSet.value.has(id))
+          })
+        : []
+      if (
+        checked &&
+        typeof props.beforeGroupSelect === 'function' &&
+        (await props.beforeGroupSelect({
+          group,
+          checked,
+          entries: pendingEntryList
+        })) === false
+      ) {
+        return
+      }
       const nextIdSet = new Set(selectedIdSet.value)
       getGroupEntryIds(group).forEach(id => {
         if (checked) {
@@ -194,7 +244,24 @@ export default {
       updateSelectedIds(nextIdSet)
     }
 
+    function formatAdoptionTime(value) {
+      if (!value) {
+        return '-'
+      }
+      return new Date(value).toLocaleString()
+    }
+
+    function getAppliedByText(entry) {
+      if (entry?.appliedByName) {
+        return entry.appliedByName
+      }
+      const appliedBy = entry?.appliedBy || {}
+      return appliedBy.displayName || appliedBy.username || '-'
+    }
+
     return {
+      formatAdoptionTime,
+      getAppliedByText,
       getGroupEntryIds,
       getGroupSelectionState,
       getGroupTitle,
@@ -205,6 +272,7 @@ export default {
       nextPreviewLabel: props.nextPreviewLabel,
       setEntrySelected,
       setGroupSelected,
+      showAdoptionInfo: props.showAdoptionInfo,
       sourcePreviewLabel: props.sourcePreviewLabel
     }
   }
@@ -303,6 +371,21 @@ export default {
 
 .translation-json-entry :deep(.el-checkbox__input) {
   margin-top: 4px;
+}
+
+.translation-json-entry-adoption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.translation-json-entry-adoption-text {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 @media (max-width: 767px) {

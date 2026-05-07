@@ -788,6 +788,15 @@
         <el-button
           v-if="aiStep !== 'preview'"
           type="primary"
+          plain
+          :disabled="isAiImportBusy"
+          @click="createSourcePostAiImportJob"
+        >
+          创建后台任务
+        </el-button>
+        <el-button
+          v-if="aiStep !== 'preview'"
+          type="primary"
           :loading="aiRunning"
           :disabled="isAiImportBusy"
           @click="startAiImportTranslation"
@@ -1859,10 +1868,7 @@ export default {
       return normalizePreviewText(entry?.sourceId)
     }
 
-    const shouldSkipRelatedPostRelationEntry = (
-      entry,
-      relatedSourceIdSet
-    ) => {
+    const shouldSkipRelatedPostRelationEntry = (entry, relatedSourceIdSet) => {
       if (entry.scope !== 'relation' || entry.collectionName !== 'posts') {
         return false
       }
@@ -1999,14 +2005,13 @@ export default {
         relatedSourceIds,
         translatedEntryKeySet
       })
-      const entries = deduplicationResult.entries
-        .map(entry => {
-          const aiEntry = { ...entry }
-          if (canAiKeepOriginalEntry(entry)) {
-            aiEntry.skipAllowed = true
-          }
-          return aiEntry
-        })
+      const entries = deduplicationResult.entries.map(entry => {
+        const aiEntry = { ...entry }
+        if (canAiKeepOriginalEntry(entry)) {
+          aiEntry.skipAllowed = true
+        }
+        return aiEntry
+      })
       if (entries.length === 0) {
         const payload = buildPreviewPayloadForPost(
           {
@@ -2265,6 +2270,48 @@ export default {
       }
     }
 
+    const createSourcePostAiImportJob = async () => {
+      const row = aiRow.value
+      if (!row) {
+        return
+      }
+      if (!aiForm.sourceLanguageCode) {
+        ElMessage.warning('请选择源语言')
+        return
+      }
+      if (aiForm.targetLanguageCodes.length === 0) {
+        ElMessage.warning('请至少选择一个目标语言')
+        return
+      }
+
+      rememberAiImportOptions()
+      try {
+        await multilingualApi.createTranslationJob({
+          jobType: 'source-post-ai-import',
+          source: {
+            postId: row.sourceId,
+            languageCode: aiForm.sourceLanguageCode,
+            title: getPostDisplayTitle(row)
+          },
+          target: {
+            languageCodes: aiForm.targetLanguageCodes,
+            title: getPostDisplayTitle(row)
+          },
+          request: {
+            prompt: aiForm.prompt,
+            targetLanguageCodes: aiForm.targetLanguageCodes,
+            recursion: {
+              maxDepth: aiForm.recursionMaxDepth || 3
+            }
+          }
+        })
+        ElMessage.success('后台任务已创建')
+        router.push({ name: 'TranslationJobList' })
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
     const confirmAiImportApply = async () => {
       if (selectedAiResultLanguageCodes.value.length === 0) {
         ElMessage.warning('请至少选择一个可保存的语言')
@@ -2502,6 +2549,7 @@ export default {
       confirmLanguageAction,
       backToAiSetup,
       confirmAiImportApply,
+      createSourcePostAiImportJob,
       getAiActionKey,
       handleAiDialogBeforeClose,
       handleAiSourceLanguageChange,

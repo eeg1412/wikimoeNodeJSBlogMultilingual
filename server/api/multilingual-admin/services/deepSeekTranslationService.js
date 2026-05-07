@@ -1,7 +1,10 @@
 const http = require('http')
 const https = require('https')
 const mongoose = require('mongoose')
-const { normalizeLanguageCode } = require('../../../utils/language')
+const {
+  normalizeLanguageCode,
+  getLanguageText
+} = require('../../../utils/language')
 const {
   ApiError,
   ERROR_CODES
@@ -21,14 +24,6 @@ const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
 const MAX_AI_REQUEST_TEXT_LENGTH = 12000
 const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 6000
 const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
-const LANGUAGE_LABEL_MAP = {
-  'zh-CN': '简体中文',
-  'zh-HK': '香港繁体中文',
-  'zh-TW': '台湾繁体中文',
-  'zh-SG': '新加坡简体中文',
-  'ja-JP': '日语',
-  'en-US': '英语'
-}
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -59,7 +54,7 @@ function cloneSerializableValue(value) {
 }
 
 function getLanguageLabel(languageCode) {
-  return LANGUAGE_LABEL_MAP[languageCode] || languageCode
+  return getLanguageText(languageCode)
 }
 
 function assertPlainObject(value, fieldName) {
@@ -1763,6 +1758,27 @@ function buildTranslatedPayload(input, post, resultData) {
     }
     if (entry.sourceSnapshotId) {
       outputEntry.sourceSnapshotId = entry.sourceSnapshotId
+    }
+    if (entry.currentPreviewText) {
+      outputEntry.currentPreviewText = entry.currentPreviewText
+    }
+    if (entry.currentPreviewRawValue) {
+      outputEntry.currentPreviewRawValue = entry.currentPreviewRawValue
+    }
+    if (entry.currentPreviewHtml) {
+      outputEntry.currentPreviewHtml = entry.currentPreviewHtml
+    }
+    if (entry.sourcePreviewText) {
+      outputEntry.sourcePreviewText = entry.sourcePreviewText
+    }
+    if (entry.sourcePreviewRawValue) {
+      outputEntry.sourcePreviewRawValue = entry.sourcePreviewRawValue
+    }
+    if (entry.sourcePreviewHtml) {
+      outputEntry.sourcePreviewHtml = entry.sourcePreviewHtml
+    }
+    if (entry.nextPreviewHtml) {
+      outputEntry.nextPreviewHtml = entry.nextPreviewHtml
     }
     if (entry.relationTypeLabel) {
       outputEntry.relationTypeLabel = entry.relationTypeLabel

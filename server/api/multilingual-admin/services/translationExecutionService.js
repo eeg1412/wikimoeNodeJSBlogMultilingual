@@ -1,0 +1,862 @@
+const deepSeekTranslationService = require('./deepSeekTranslationService')
+const { getLanguageText } = require('../../../utils/language')
+const {
+  ApiError,
+  ERROR_CODES
+} = require('../../../utils/multilingualAdminResponse')
+const {
+  TRANSLATION_JOB_TYPES
+} = require('../../../utils/translationJobConstants')
+const translationPayloadApplyService = require('./translationPayloadApplyService')
+const translationEntryBuildService = require('./translationEntryBuildService')
+const translationPostService = require('./translationPostService')
+
+const POST_RELATED_POST_FIELDS = [
+  'postList',
+  'tweetList',
+  'contentPostList',
+  'contentTweetList'
+]
+const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
+const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
+
+function getJobId(job) {
+  return String(job && job._id ? job._id : '')
+}
+
+async function resolveEntries(job, context) {
+  const entries = job && job.request && job.request.entries
+  if (Array.isArray(entries) && entries.length > 0) {
+    return entries
+  }
+
+  await context.updateProgress({
+    currentStage: 'BuildEntries',
+    currentStep: '正在从源快照和目标内容构建翻译条目'
+  })
+
+  const result =
+    await translationEntryBuildService.buildTranslationJobEntries(job)
+  if (!Array.isArray(result.entries) || result.entries.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '后台翻译任务没有可翻译条目',
+      'request.entries',
+      400,
+      { retryable: false }
+    )
+  }
+
+  await context.saveCheckpoint({
+    stage: 'BuildEntries',
+    stateSummary: {
+      entryCount: result.entries.length,
+      skippedEntryCount: result.skippedEntries.length,
+      sourceEntryCount: result.sourceEntryCount,
+      targetEntryCount: result.targetEntryCount
+    }
+  })
+
+  return result.entries
+}
+
+function getPrompt(job) {
+  if (!job || !job.request) {
+    return ''
+  }
+
+  return String(job.request.prompt || '').trim()
+}
+
+function getPayloadEntryCount(payload) {
+  if (!payload || !Array.isArray(payload.entries)) {
+    return 0
+  }
+
+  return payload.entries.length
+}
+
+function createHandlers(context, stage) {
+  function runWithoutAwait(promise) {
+    Promise.resolve(promise).catch(error => {
+      const message = error && error.message ? error.message : String(error)
+      if (
+        context.cancellation &&
+        typeof context.cancellation.cancel === 'function'
+      ) {
+        context.cancellation.cancel(`任务进度写入失败：${message}`)
+      }
+    })
+  }
+
+  return {
+    onStatus(status) {
+      if (!context || typeof context.updateProgress !== 'function') {
+        return
+      }
+      runWithoutAwait(
+        context.updateProgress({
+          currentStage: stage,
+          currentStep:
+            status && status.message ? status.message : 'AI 翻译执行中'
+        })
+      )
+    },
+    onResult(result) {
+      if (!context || typeof context.saveCheckpoint !== 'function') {
+        return
+      }
+      runWithoutAwait(
+        context.saveCheckpoint({
+          stage,
+          stateSummary: {
+            requestId: result && result.requestId ? result.requestId : '',
+            model: result && result.model ? result.model : '',
+            entryCount: getPayloadEntryCount(result && result.payload)
+          }
+        })
+      )
+    },
+    cancellation: context.cancellation
+  }
+}
+
+async function buildResult(job, data) {
+  const payload = data && data.payload ? data.payload : null
+  if (!payload || !Array.isArray(payload.entries)) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      'AI 翻译结果缺少 payload.entries',
+      'payload.entries',
+      502,
+      { retryable: true }
+    )
+  }
+
+  const previewEntries =
+    await translationPayloadApplyService.buildTranslationJobReviewSnapshot(
+      job,
+      payload
+    )
+
+  return {
+    payload,
+    previewEntries,
+    warningList: [],
+    aiSkipList: payload.entries.filter(entry => Boolean(entry.aiSkipReason)),
+    relatedResults: [],
+    aiUsage: data.usage || {},
+    model: data.model || '',
+    requestId: data.requestId || null
+  }
+}
+
+async function executePostAiTranslation(job, context) {
+  const entries = await resolveEntries(job, context)
+  await context.updateProgress({
+    currentStage: 'TranslatePost',
+    currentStep: '正在执行文章 AI 翻译'
+  })
+  const data = await deepSeekTranslationService.translatePostEntriesStream(
+    {
+      postId: String(job.target.postId),
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: job.target.languageCode,
+      prompt: getPrompt(job),
+      entries
+    },
+    createHandlers(context, 'TranslatePost')
+  )
+
+  return await buildResult(job, data)
+}
+
+async function executeContentAiTranslation(job, context) {
+  const entries = await resolveEntries(job, context)
+  const contentId = job.target.contentId || job.target.postId
+  const contentType =
+    job.target.collectionName ||
+    job.source.collectionName ||
+    job.request.options.contentType ||
+    'content'
+  await context.updateProgress({
+    currentStage: 'TranslateContent',
+    currentStep: '正在执行通用内容 AI 翻译'
+  })
+  const data = await deepSeekTranslationService.translateContentEntriesStream(
+    {
+      contentId: String(contentId || ''),
+      contentType,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: job.target.languageCode,
+      prompt: getPrompt(job),
+      entries,
+      snapshotVersion: job.source.snapshotVersion || 1,
+      sourceSnapshotId: job.source.snapshotId || null
+    },
+    createHandlers(context, 'TranslateContent')
+  )
+
+  return await buildResult(job, data)
+}
+
+function getRecordSourceId(record) {
+  if (!record || typeof record !== 'object') {
+    return ''
+  }
+  return String(record.sourceId || record._id || '').trim()
+}
+
+function collectRelatedSourceIds(sourcePost, targetPost) {
+  const sourceIdSet = new Set()
+  POST_RELATED_POST_FIELDS.forEach(fieldName => {
+    const sourceRelationList = Array.isArray(sourcePost?.[fieldName])
+      ? sourcePost[fieldName]
+      : []
+    const targetRelationList = Array.isArray(targetPost?.[fieldName])
+      ? targetPost[fieldName]
+      : []
+    const targetRelationMap = new Map()
+    targetRelationList.forEach(record => {
+      const sourceId = getRecordSourceId(record)
+      if (sourceId) {
+        targetRelationMap.set(sourceId, record)
+      }
+    })
+
+    sourceRelationList.forEach(record => {
+      const sourceId = getRecordSourceId(record)
+      if (!sourceId) {
+        return
+      }
+      const targetRecord = targetRelationMap.get(sourceId)
+      if (!targetRecord || targetRecord.aiTranslationSkip !== true) {
+        sourceIdSet.add(sourceId)
+      }
+    })
+  })
+  return Array.from(sourceIdSet)
+}
+
+function normalizeString(value) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value).trim()
+}
+
+function getSourcePostId(sourcePost) {
+  return normalizeString(sourcePost?.sourceId || sourcePost?._id)
+}
+
+function hasCurrentSnapshotVersion(post) {
+  const snapshotId = normalizeString(post?.sourceSnapshotId)
+  if (!snapshotId) {
+    return false
+  }
+  return !snapshotId.startsWith('preview-source-')
+}
+
+function buildPreviewHtml(valueType, value) {
+  if (valueType === LEGACY_RICH_TEXT_VALUE_TYPE) {
+    return normalizeString(value)
+  }
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return normalizeString(value)
+  }
+  return ''
+}
+
+function buildSourcePostReviewEntryKey(languageCode, sourceId, entry) {
+  const stableEntryKey =
+    translationEntryBuildService.buildStableEntryKey(entry, {
+      sourcePostId: sourceId
+    }) ||
+    entry.id ||
+    entry.entryKey
+  return [languageCode, sourceId, stableEntryKey].map(normalizeString).join(':')
+}
+
+function buildSourcePostSkippedEntryKey(languageCode, sourceId, id) {
+  return ['skip', languageCode, sourceId, id].map(normalizeString).join(':')
+}
+
+function buildAiSkippedEntryPreview({
+  entry,
+  reason,
+  message,
+  id,
+  hideCurrent
+}) {
+  const targetValue = hideCurrent ? '' : entry.currentPreviewRawValue || ''
+  const targetHtml = hideCurrent
+    ? ''
+    : entry.currentPreviewHtml ||
+      buildPreviewHtml(entry.valueType, entry.currentValue)
+  return {
+    id,
+    scope: entry.scope,
+    label: entry.label || entry.recordLabel || entry.id,
+    groupLabel: entry.groupLabel,
+    groupCategory: entry.groupCategory,
+    groupTitle: entry.groupTitle,
+    valueType: entry.valueType,
+    fieldName: entry.fieldName,
+    fieldLabel: entry.fieldLabel,
+    recordLabel: entry.recordLabel,
+    relationTypeLabel: entry.relationTypeLabel,
+    collectionName: entry.collectionName,
+    postType: entry.postType,
+    optional: entry.optional,
+    entryKind: entry.entryKind,
+    segmentIndex: entry.segmentIndex,
+    segmentTotal: entry.segmentTotal,
+    hasSourceValue: true,
+    hasCurrentValue: Boolean(targetValue || targetHtml),
+    sourceRecordLabel: entry.recordLabel || '',
+    sourceValue: entry.sourcePreviewRawValue || entry.previewRawValue || '',
+    sourceHtml:
+      entry.sourcePreviewHtml || buildPreviewHtml(entry.valueType, entry.value),
+    targetRecordLabel: entry.recordLabel || '',
+    targetValue,
+    targetHtml,
+    reason,
+    message,
+    aiSkipReason: reason
+  }
+}
+
+function buildMappedSkippedReviewEntries({
+  skippedEntries,
+  languageCode,
+  sourceId,
+  hideCurrent
+}) {
+  return skippedEntries.map((item, index) => {
+    const entry = item.entry || item
+    const targetEntry = item.targetEntry || null
+    const reasonMap = {
+      missingSourceId: '源快照缺少 sourceId',
+      missingTarget: '缺少当前语言版本',
+      typeMismatch: '数据类型不一致'
+    }
+    const reason = reasonMap[item.reason] || item.reason || 'AI 已跳过'
+    const label = entry.label || entry.recordLabel || entry.id || '未知条目'
+    const id = buildSourcePostSkippedEntryKey(
+      languageCode,
+      sourceId,
+      `${item.reason || 'mapped'}:${entry.id || index}`
+    )
+    return {
+      ...buildAiSkippedEntryPreview({
+        entry: {
+          ...entry,
+          currentPreviewRawValue: targetEntry?.previewRawValue || '',
+          currentPreviewHtml: targetEntry?.previewHtml || ''
+        },
+        id,
+        reason,
+        message: `${label}：${reason}`,
+        hideCurrent
+      }),
+      languageCode,
+      sourceId,
+      entryKey: id
+    }
+  })
+}
+
+function buildAiTranslationSkipEntries({
+  entries,
+  languageCode,
+  sourceId,
+  hideCurrent
+}) {
+  const skippedEntryMap = new Map()
+  entries.forEach(entry => {
+    if (entry.aiTranslationSkip !== true) {
+      return
+    }
+    const key = [
+      entry.scope || '',
+      entry.collectionName || '',
+      entry.recordId || '',
+      entry.fieldName || entry.id || ''
+    ].join(':')
+    if (skippedEntryMap.has(key)) {
+      return
+    }
+    const label = entry.label || entry.recordLabel || entry.id
+    skippedEntryMap.set(key, {
+      ...buildAiSkippedEntryPreview({
+        entry,
+        id: buildSourcePostSkippedEntryKey(
+          languageCode,
+          sourceId,
+          `aiTranslationSkip:${key}`
+        ),
+        reason: 'AI翻译时跳过',
+        message: `${label}：已标记为 AI 翻译时跳过`,
+        hideCurrent
+      }),
+      languageCode,
+      sourceId
+    })
+  })
+  return Array.from(skippedEntryMap.values())
+}
+
+function shouldSubmitAiImportEntry(entry) {
+  return entry.aiTranslationSkip !== true
+}
+
+function shouldSkipRelatedPostRelationEntry(entry, relatedSourceIdSet) {
+  if (entry.scope !== 'relation' || entry.collectionName !== 'posts') {
+    return false
+  }
+  const sourceId = normalizeString(entry.sourceId)
+  return Boolean(sourceId && relatedSourceIdSet.has(sourceId))
+}
+
+function deduplicateAiImportEntries({
+  entries,
+  sourcePostId,
+  relatedSourceIds,
+  translatedEntryKeySet,
+  languageCode,
+  hideCurrent
+}) {
+  const relatedSourceIdSet = new Set(relatedSourceIds.map(String))
+  const nextEntries = []
+  const skippedEntries = []
+  const skippedEntryKeySet = new Set()
+
+  entries.forEach(entry => {
+    const entryKey = translationEntryBuildService.buildStableEntryKey(entry, {
+      sourcePostId
+    })
+    if (shouldSkipRelatedPostRelationEntry(entry, relatedSourceIdSet)) {
+      const skipKey = `relatedPost:${entryKey || entry.id}`
+      if (!skippedEntryKeySet.has(skipKey)) {
+        skippedEntryKeySet.add(skipKey)
+        const label = entry.label || entry.recordLabel || entry.id
+        skippedEntries.push({
+          ...buildAiSkippedEntryPreview({
+            entry,
+            id: buildSourcePostSkippedEntryKey(
+              languageCode,
+              sourcePostId,
+              skipKey
+            ),
+            reason: '关联文章独立翻译',
+            message: `${label}：关联文章会作为独立文章翻译，已跳过当前关联字段`,
+            hideCurrent
+          }),
+          languageCode,
+          sourceId: sourcePostId
+        })
+      }
+      return
+    }
+
+    if (!entryKey) {
+      nextEntries.push(entry)
+      return
+    }
+
+    if (translatedEntryKeySet.has(entryKey)) {
+      const skipKey = `duplicate:${entryKey}`
+      if (!skippedEntryKeySet.has(skipKey)) {
+        skippedEntryKeySet.add(skipKey)
+        const label = entry.label || entry.recordLabel || entry.id
+        skippedEntries.push({
+          ...buildAiSkippedEntryPreview({
+            entry,
+            id: buildSourcePostSkippedEntryKey(
+              languageCode,
+              sourcePostId,
+              skipKey
+            ),
+            reason: '本次已处理',
+            message: `${label}：本次翻译已处理相同内容，已跳过重复请求`,
+            hideCurrent
+          }),
+          languageCode,
+          sourceId: sourcePostId
+        })
+      }
+      return
+    }
+
+    translatedEntryKeySet.add(entryKey)
+    nextEntries.push(entry)
+  })
+
+  return {
+    entries: nextEntries,
+    skippedEntries
+  }
+}
+
+function buildSourcePostPreviewEntries({
+  payload,
+  requestEntries,
+  targetPost,
+  languageCode,
+  sourceId
+}) {
+  const requestEntryMap = new Map()
+  requestEntries.forEach(entry => {
+    if (entry?.id) {
+      requestEntryMap.set(String(entry.id), entry)
+    }
+  })
+  const hideCurrentPreview = !hasCurrentSnapshotVersion(targetPost)
+
+  return payload.entries.map(entry => {
+    const requestEntry = requestEntryMap.get(String(entry.id || '')) || {}
+    const originalEntryKey =
+      translationEntryBuildService.buildStableEntryKey(entry, {
+        sourcePostId: sourceId
+      }) ||
+      entry.id ||
+      ''
+    let currentPreviewText =
+      entry.currentPreviewText || requestEntry.currentPreviewText || ''
+    let currentPreviewRawValue =
+      entry.currentPreviewRawValue || requestEntry.currentPreviewRawValue || ''
+    let currentPreviewHtml =
+      entry.currentPreviewHtml || requestEntry.currentPreviewHtml || ''
+    if (hideCurrentPreview) {
+      currentPreviewText = ''
+      currentPreviewRawValue = ''
+      currentPreviewHtml = ''
+    }
+    const sourcePreviewText =
+      entry.sourcePreviewText || requestEntry.sourcePreviewText || ''
+    const sourcePreviewRawValue =
+      entry.sourcePreviewRawValue || requestEntry.sourcePreviewRawValue || ''
+    const sourcePreviewHtml =
+      entry.sourcePreviewHtml || requestEntry.sourcePreviewHtml || ''
+    const nextPreviewText = entry.nextPreviewText || entry.previewText || ''
+    const nextPreviewRawValue = entry.nextPreviewRawValue || entry.value || ''
+    const nextPreviewHtml =
+      entry.nextPreviewHtml || buildPreviewHtml(entry.valueType, entry.value)
+
+    return {
+      ...entry,
+      languageCode,
+      sourceId,
+      originalEntryKey,
+      entryKey: buildSourcePostReviewEntryKey(languageCode, sourceId, entry),
+      currentPreviewText,
+      currentPreviewRawValue,
+      currentPreviewHtml,
+      sourcePreviewText,
+      sourcePreviewRawValue,
+      sourcePreviewHtml,
+      nextPreviewText,
+      nextPreviewRawValue,
+      nextPreviewHtml,
+      hasCurrentValue: Boolean(currentPreviewRawValue || currentPreviewHtml)
+    }
+  })
+}
+
+async function translateSourcePostForLanguage({
+  job,
+  context,
+  sourceId,
+  languageCode,
+  isRoot,
+  depth,
+  translatedEntryKeySet
+}) {
+  await context.updateProgress({
+    currentStage: 'BuildEntries',
+    currentStep: `正在准备 ${getLanguageText(languageCode)} 预览上下文`
+  })
+  const previewContext =
+    await translationPostService.getSourcePostAiImportPreviewContext({
+      sourceId,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: languageCode
+    })
+  const sourcePostId =
+    getSourcePostId(previewContext.sourcePost) || String(sourceId)
+  const sourceEntries =
+    translationEntryBuildService.buildPostTranslationEntries({
+      post: previewContext.sourcePost
+    })
+  const targetEntries =
+    translationEntryBuildService.buildPostTranslationEntries(
+      { post: previewContext.targetPost },
+      true
+    )
+  const mappedResult = translationEntryBuildService.buildMappedEntries(
+    sourceEntries,
+    targetEntries
+  )
+  const relatedSourceIds = collectRelatedSourceIds(
+    previewContext.sourcePost,
+    previewContext.targetPost
+  )
+  const hideCurrentPreview = !hasCurrentSnapshotVersion(
+    previewContext.targetPost
+  )
+  const aiTranslationSkippedEntries = buildAiTranslationSkipEntries({
+    entries: mappedResult.entries,
+    languageCode,
+    sourceId: sourcePostId,
+    hideCurrent: hideCurrentPreview
+  })
+  const deduplicationResult = deduplicateAiImportEntries({
+    entries: mappedResult.entries.filter(shouldSubmitAiImportEntry),
+    sourcePostId,
+    relatedSourceIds,
+    translatedEntryKeySet,
+    languageCode,
+    hideCurrent: hideCurrentPreview
+  })
+  const entries = deduplicationResult.entries
+  let data = {
+    payload: {
+      schema: 'wikimoe.translation.post',
+      version: 1,
+      meta: {
+        contentId: String(previewContext.targetPost._id),
+        contentType: 'sourcePostImport',
+        languageCode,
+        sourceLanguageCode: job.source.languageCode
+      },
+      entries: []
+    },
+    usage: {},
+    model: '',
+    requestId: null
+  }
+  if (entries.length > 0) {
+    await context.updateProgress({
+      currentStage: 'TranslatePost',
+      currentStep: `正在执行 ${getLanguageText(languageCode)} AI 翻译`
+    })
+    data = await deepSeekTranslationService.translateContentEntriesStream(
+      {
+        contentId: String(previewContext.targetPost._id),
+        contentType: 'sourcePostImport',
+        sourceLanguageCode: job.source.languageCode,
+        targetLanguageCode: languageCode,
+        prompt: getPrompt(job),
+        entries
+      },
+      createHandlers(context, `TranslatePost:${languageCode}`)
+    )
+  }
+  const payload = data.payload || { entries: [] }
+  const translatedPreviewEntries = buildSourcePostPreviewEntries({
+    payload,
+    requestEntries: entries,
+    targetPost: previewContext.targetPost,
+    languageCode,
+    sourceId: sourcePostId
+  })
+  const skippedPreviewEntries = [
+    ...buildMappedSkippedReviewEntries({
+      skippedEntries: mappedResult.skippedEntries || [],
+      languageCode,
+      sourceId: sourcePostId,
+      hideCurrent: hideCurrentPreview
+    }),
+    ...aiTranslationSkippedEntries,
+    ...deduplicationResult.skippedEntries
+  ]
+  const previewEntries = translatedPreviewEntries.concat(skippedPreviewEntries)
+  const result = {
+    payload: {
+      ...payload,
+      entries: translatedPreviewEntries
+    },
+    previewEntries,
+    warningList: [],
+    aiSkipList: previewEntries.filter(entry => Boolean(entry.aiSkipReason)),
+    relatedResults: [],
+    aiUsage: data.usage || {},
+    model: data.model || '',
+    requestId: data.requestId || null
+  }
+  await context.saveCheckpoint({
+    stage: `TranslatePost:${languageCode}`,
+    stateSummary: {
+      sourceId: sourcePostId,
+      entryCount: translatedPreviewEntries.length,
+      skippedEntryCount: skippedPreviewEntries.length,
+      requestId: result.requestId || '',
+      model: result.model || ''
+    }
+  })
+  return {
+    languageCode,
+    sourceId: sourcePostId,
+    isRoot: isRoot === true,
+    depth,
+    relatedSourceIds,
+    result
+  }
+}
+
+async function executeSourcePostLanguageDag({
+  job,
+  context,
+  languageCode,
+  maxDepth
+}) {
+  const queue = [
+    {
+      sourceId: String(job.source.postId),
+      isRoot: true,
+      depth: 1
+    }
+  ]
+  const visited = new Set()
+  const translatedEntryKeySet = new Set()
+  const results = []
+
+  while (queue.length > 0) {
+    const task = queue.shift()
+    const sourceId = String(task.sourceId || '').trim()
+    if (!sourceId || visited.has(sourceId)) {
+      continue
+    }
+    visited.add(sourceId)
+
+    const result = await translateSourcePostForLanguage({
+      job,
+      context,
+      sourceId,
+      languageCode,
+      isRoot: task.isRoot,
+      depth: task.depth,
+      translatedEntryKeySet
+    })
+    results.push(result)
+
+    if (task.depth >= maxDepth) {
+      continue
+    }
+    result.relatedSourceIds.forEach(relatedSourceId => {
+      if (!visited.has(String(relatedSourceId))) {
+        queue.push({
+          sourceId: relatedSourceId,
+          isRoot: false,
+          depth: task.depth + 1
+        })
+      }
+    })
+  }
+
+  return results
+}
+
+async function executeSourcePostAiImport(job, context) {
+  const languageCodes = Array.isArray(job.target.languageCodes)
+    ? job.target.languageCodes
+    : []
+  if (languageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '生成并 AI 翻译任务缺少 target.languageCodes',
+      'target.languageCodes',
+      400,
+      { retryable: false }
+    )
+  }
+
+  const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
+  const languageResults = []
+  for (const languageCode of languageCodes) {
+    languageResults.push(
+      ...(await executeSourcePostLanguageDag({
+        job,
+        context,
+        languageCode,
+        maxDepth
+      }))
+    )
+  }
+
+  const previewEntries = languageResults.flatMap(item => {
+    return item.result.previewEntries || []
+  })
+  return {
+    payload: {
+      schema: 'wikimoe.ai.translation.aggregate',
+      version: 1,
+      entries: previewEntries
+    },
+    previewEntries,
+    warningList: [],
+    aiSkipList: previewEntries.filter(entry => Boolean(entry.aiSkipReason)),
+    relatedResults: languageResults.map(item => ({
+      languageCode: item.languageCode,
+      isRoot: item.isRoot,
+      sourceId: item.sourceId,
+      depth: item.depth,
+      entryCount: item.result.previewEntries.length,
+      requestId: item.result.requestId,
+      model: item.result.model
+    })),
+    languageResults,
+    translationPostMap: {},
+    sourceSnapshotId: null,
+    aiUsage: {
+      languageResults: languageResults.map(item => ({
+        languageCode: item.languageCode,
+        usage: item.result.aiUsage || {}
+      }))
+    }
+  }
+}
+
+async function executeTranslationJob(job, context) {
+  if (!job || !job.jobType) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '后台翻译任务数据不完整',
+      'job',
+      400,
+      { retryable: false }
+    )
+  }
+
+  await context.saveCheckpoint({
+    stage: 'ValidateJob',
+    stateSummary: {
+      jobId: getJobId(job),
+      jobType: job.jobType
+    }
+  })
+
+  if (job.jobType === TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION) {
+    return await executePostAiTranslation(job, context)
+  }
+
+  if (job.jobType === TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION) {
+    return await executeContentAiTranslation(job, context)
+  }
+
+  if (job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT) {
+    return await executeSourcePostAiImport(job, context)
+  }
+
+  throw new ApiError(
+    ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+    `后台翻译任务类型不支持：${job.jobType}`,
+    'jobType',
+    400,
+    { retryable: false }
+  )
+}
+
+module.exports = {
+  executeTranslationJob
+}

@@ -434,6 +434,60 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/ai/updateSkip')
   },
   {
+    path: '/translation/job/create',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/create')
+  },
+  {
+    path: '/translation/job/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/list')
+  },
+  {
+    path: '/translation/job/detail',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/detail')
+  },
+  {
+    path: '/translation/job/defer',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/defer')
+  },
+  {
+    path: '/translation/job/resume',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/resume')
+  },
+  {
+    path: '/translation/job/delete',
+    method: 'delete',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/delete')
+  },
+  {
+    path: '/translation/job/reject',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/reject')
+  },
+  {
+    path: '/translation/job/apply',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/apply')
+  },
+  {
+    path: '/translation/job/retry',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/retry')
+  },
+  {
     path: '/translation/relation/update',
     method: 'put',
     middleware: [checkAuth],

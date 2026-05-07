@@ -4,30 +4,40 @@
       <div class="translation-entry-preview-label">{{ currentLabel }}</div>
       <div
         v-if="currentHtml"
-        class="translation-entry-preview-value translation-entry-preview-html"
+        class="translation-entry-preview-value translation-import-preview-html"
         v-html="currentHtml"
       />
-      <div v-else class="translation-entry-preview-value">
-        {{ currentText }}
-      </div>
+      <pre
+        v-else
+        class="translation-entry-preview-value translation-import-preview-raw"
+        >{{ currentText }}</pre
+      >
     </div>
     <div v-if="hasSourceContent" class="translation-entry-preview-row">
       <div class="translation-entry-preview-label">{{ sourceLabel }}</div>
       <div
         v-if="sourceHtml"
-        class="translation-entry-preview-value translation-entry-preview-html"
+        class="translation-entry-preview-value translation-import-preview-html"
         v-html="sourceHtml"
       />
-      <div v-else class="translation-entry-preview-value">{{ sourceText }}</div>
+      <pre
+        v-else
+        class="translation-entry-preview-value translation-import-preview-raw"
+        >{{ sourceText }}</pre
+      >
     </div>
     <div v-if="hasNextContent" class="translation-entry-preview-row">
       <div class="translation-entry-preview-label">{{ nextLabel }}</div>
       <div
         v-if="nextHtml"
-        class="translation-entry-preview-value translation-entry-preview-html"
+        class="translation-entry-preview-value translation-import-preview-html"
         v-html="nextHtml"
       />
-      <div v-else class="translation-entry-preview-value">{{ nextText }}</div>
+      <pre
+        v-else
+        class="translation-entry-preview-value translation-import-preview-raw"
+        >{{ nextText }}</pre
+      >
     </div>
   </div>
 </template>
@@ -169,12 +179,40 @@ export default {
   color: var(--el-text-color-regular);
   font-size: 12px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
-.translation-entry-preview-html :deep(img),
-.translation-entry-preview-html :deep(video) {
+.translation-import-preview-html,
+.translation-import-preview-raw {
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  overflow: auto;
+  word-break: break-word;
+}
+
+.translation-import-preview-html {
+  margin-bottom: 0;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: normal;
+}
+
+.translation-import-preview-raw {
+  margin: 0;
+  max-height: 220px;
+  white-space: pre-wrap;
+  overflow: auto;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.translation-import-preview-html :deep(:not(.w-e-image-group-img-body) > img),
+.translation-import-preview-html
+  :deep(:not(.w-e-image-group-img-body) > video) {
   max-width: 100%;
   height: auto;
 }

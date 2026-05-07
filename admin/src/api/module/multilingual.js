@@ -109,6 +109,63 @@ export default function (api) {
         noLoading
       })
     },
+    createTranslationJob(data, noLoading = false) {
+      return api.post('/translation/job/create', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getTranslationJobList(data, noLoading = false) {
+      return api.get('/translation/job/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getTranslationJobDetail(data, noLoading = false) {
+      return api.get('/translation/job/detail', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    deferTranslationJob(data, noLoading = false) {
+      return api.put('/translation/job/defer', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    resumeTranslationJob(data, noLoading = false) {
+      return api.put('/translation/job/resume', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    deleteTranslationJob(data, noLoading = false) {
+      return api.delete('/translation/job/delete', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    rejectTranslationJob(data, noLoading = false) {
+      return api.post('/translation/job/reject', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    retryTranslationJob(data, noLoading = false) {
+      return api.post('/translation/job/retry', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    applyTranslationJobResult(data, noLoading = false) {
+      return api.post('/translation/job/apply', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationPost(data, noLoading = false) {
       return api.post('/translation/post/create', data, {
         shouldAdminJWT: true,

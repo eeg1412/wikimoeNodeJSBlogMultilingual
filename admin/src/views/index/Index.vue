@@ -182,6 +182,11 @@ const menuGroups = [
         icon: 'fas fa-fw fa-newspaper pr10'
       },
       {
+        name: 'TranslationJobList',
+        title: 'AI 翻译任务',
+        icon: 'fas fa-fw fa-tasks pr10'
+      },
+      {
         name: 'TranslationAuthorRelationList',
         title: '作者',
         icon: 'fas fa-fw fa-user pr10'

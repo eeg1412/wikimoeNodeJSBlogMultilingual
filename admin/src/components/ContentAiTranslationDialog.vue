@@ -179,6 +179,15 @@
       <el-button
         v-if="!preview"
         type="primary"
+        plain
+        :disabled="isBusy || entryList.length === 0"
+        @click="createBackgroundJob"
+      >
+        创建后台任务
+      </el-button>
+      <el-button
+        v-if="!preview"
+        type="primary"
         :loading="translating"
         :disabled="isBusy || entryList.length === 0"
         @click="requestTranslation"
@@ -200,8 +209,10 @@
 
 <script>
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
+import { multilingualApi } from '@/api'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
@@ -288,6 +299,7 @@ export default {
   },
   emits: ['update:modelValue', 'confirm'],
   setup(props, { emit }) {
+    const router = useRouter()
     const loading = ref(false)
     const translating = ref(false)
     const applying = ref(false)
@@ -676,6 +688,58 @@ export default {
       }
     }
 
+    async function createBackgroundJob() {
+      if (loading.value) {
+        ElMessage.warning('正在加载翻译用内容，请稍候')
+        return
+      }
+      if (selectedEntryIds.value.length === 0) {
+        ElMessage.warning('请至少选择一项翻译内容')
+        return
+      }
+      if (!requestSourceLanguageCode.value) {
+        ElMessage.warning('请选择源语言')
+        return
+      }
+      const selectedIdSet = new Set(selectedEntryIds.value)
+      const selectedEntries = entryList.value.filter(entry => {
+        return selectedIdSet.has(entry.id)
+      })
+      const firstEntry = selectedEntries[0] || {}
+      if (!firstEntry.collectionName || !firstEntry.sourceId) {
+        ElMessage.warning('当前内容缺少源记录身份')
+        return
+      }
+
+      try {
+        await multilingualApi.createTranslationJob({
+          jobType: 'content-ai-translation',
+          source: {
+            contentId: firstEntry.sourceId,
+            collectionName: firstEntry.collectionName,
+            languageCode: requestSourceLanguageCode.value,
+            snapshotVersion: props.snapshotVersion
+          },
+          target: {
+            contentId: props.contentId,
+            collectionName: firstEntry.collectionName,
+            languageCode: props.targetLanguageCode
+          },
+          request: {
+            prompt: prompt.value,
+            baseMode: baseMode.value,
+            entries: selectedEntries,
+            selectedEntryKeys: selectedEntries.map(entry => entry.id)
+          }
+        })
+        ElMessage.success('后台任务已创建')
+        visible.value = false
+        router.push({ name: 'TranslationJobList' })
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
     async function confirmApply() {
       if (!preview.value || preview.value.changeList.length === 0) {
         ElMessage.warning('请先完成 AI 翻译预览')
@@ -735,6 +799,7 @@ export default {
       baseMode,
       clearAll,
       confirmApply,
+      createBackgroundJob,
       entryGroups,
       entryList,
       getLanguageText,

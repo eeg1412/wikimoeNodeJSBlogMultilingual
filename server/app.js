@@ -19,6 +19,8 @@ const {
   handleApiError
 } = require('./utils/multilingualAdminResponse')
 global.$mongodDB = $mongodDB
+const translationJobWorker = require('./api/multilingual-admin/services/translationJobWorker')
+translationJobWorker.startTranslationJobWorker()
 var history = require('connect-history-api-fallback')
 
 var multilingualAdminRouter = require('./routes/multilingualAdmin')

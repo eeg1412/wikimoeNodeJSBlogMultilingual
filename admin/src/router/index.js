@@ -108,6 +108,12 @@ const routes = [
           import('../views/index/translation/TranslationPostEditor.vue')
       },
       {
+        path: '/translation/job/list',
+        name: 'TranslationJobList',
+        component: () =>
+          import('../views/index/translation/TranslationJobList.vue')
+      },
+      {
         path: '/translation/relation/list',
         name: 'RelationList',
         component: () =>

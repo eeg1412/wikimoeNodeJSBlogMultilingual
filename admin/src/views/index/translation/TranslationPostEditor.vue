@@ -971,6 +971,15 @@
         <el-button
           v-if="!aiImportPreview"
           type="primary"
+          plain
+          :disabled="isAiBusy || aiEntryList.length === 0"
+          @click="createAiTranslationJob"
+        >
+          创建后台任务
+        </el-button>
+        <el-button
+          v-if="!aiImportPreview"
+          type="primary"
           :loading="aiTranslating"
           :disabled="isAiBusy || aiEntryList.length === 0"
           @click="requestAiTranslation"
@@ -1466,6 +1475,7 @@ export default {
       id: '',
       languageCode: '',
       sourceLanguageCode: '',
+      sourceId: '',
       sourceSnapshotId: '',
       snapshotVersion: 1,
       pendingReview: false,
@@ -1992,6 +2002,7 @@ export default {
       form.id = post._id
       form.languageCode = post.languageCode
       form.sourceLanguageCode = post.sourceLanguageCode
+      form.sourceId = post.sourceId || ''
       form.sourceSnapshotId = post.sourceSnapshotId || ''
       sourceReferenceEntries.value = []
       form.snapshotVersion = post.snapshotVersion
@@ -3191,6 +3202,54 @@ export default {
       }
     }
 
+    async function createAiTranslationJob() {
+      if (selectedAiEntryIds.value.length === 0) {
+        ElMessage.warning('请至少选择一项翻译内容')
+        return
+      }
+      if (!aiSourceLanguageCode.value) {
+        ElMessage.warning('请选择源语言')
+        return
+      }
+      if (!form.sourceId) {
+        ElMessage.warning('当前文章缺少源文章身份，无法创建后台任务')
+        return
+      }
+
+      const selectedIdSet = new Set(selectedAiEntryIds.value)
+      const selectedEntries = aiEntryList.value.filter(entry => {
+        return selectedIdSet.has(entry.id)
+      })
+
+      try {
+        await multilingualApi.createTranslationJob({
+          jobType: 'post-ai-translation',
+          source: {
+            postId: form.sourceId,
+            snapshotId: form.sourceSnapshotId,
+            snapshotVersion: form.snapshotVersion,
+            languageCode: aiSourceLanguageCode.value,
+            title: form.title
+          },
+          target: {
+            postId: form.id,
+            languageCode: form.languageCode,
+            title: form.title
+          },
+          request: {
+            prompt: aiPrompt.value,
+            baseMode: aiBaseMode.value,
+            entries: selectedEntries,
+            selectedEntryKeys: selectedEntries.map(entry => entry.id)
+          }
+        })
+        ElMessage.success('后台任务已创建')
+        router.push({ name: 'TranslationJobList' })
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
     async function confirmAiTranslationImport() {
       if (!aiImportPreview.value || aiImportPreview.value.changeCount === 0) {
         ElMessage.warning('请先完成 AI 翻译预览')
@@ -3266,6 +3325,7 @@ export default {
       createSkippedTranslation,
       creatingAllSkippedTranslations,
       confirmAiTranslationImport,
+      createAiTranslationJob,
       confirmReview,
       detailData,
       detailRelationFields: DETAIL_RELATION_FIELDS,
