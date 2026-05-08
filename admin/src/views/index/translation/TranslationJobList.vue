@@ -284,7 +284,7 @@
                 effect="plain"
                 size="small"
               >
-                {{ currentJob.failure.errorCode }}
+                {{ getFailureCodeLabel(currentJob.failure) }}
               </el-tag>
               <el-tag
                 :type="
@@ -301,6 +301,12 @@
           </div>
           <div class="job-state-panel-message">
             {{ getFailureReasonText(currentJob.failure) }}
+          </div>
+          <div
+            v-if="getFailureCodeMeaning(currentJob.failure)"
+            class="job-state-panel-code-hint"
+          >
+            错误码说明：{{ getFailureCodeMeaning(currentJob.failure) }}
           </div>
           <div class="job-state-panel-meta">
             <span v-if="currentJob.failure?.lastFailedAt">
@@ -558,6 +564,24 @@ const progressStageTextMap = {
   PrepareTargetPost: '准备目标文章',
   ValidateJob: '校验任务',
   FinalizeReview: '整理审核结果'
+}
+
+const failureCodeMeaningMap = {
+  AI_TRANSLATION_FAILED:
+    'AI 服务返回失败，或生成结果未通过当前翻译任务的处理与校验流程。',
+  AI_TRANSLATION_CANCELLED:
+    '任务执行过程中被后台停止，常见于 worker 租约失效、服务重启或人工中断。',
+  AI_PROVIDER_CONFIG_REQUIRED: 'AI 服务配置不完整，当前任务无法发起翻译请求。',
+  AI_SETTINGS_INVALID: '当前任务的 AI 参数校验失败，无法继续执行。',
+  SERVICE_UNAVAILABLE: '依赖服务暂不可用，请稍后重试。'
+}
+
+const failureCodeLabelMap = {
+  AI_TRANSLATION_FAILED: 'AI 翻译失败',
+  AI_TRANSLATION_CANCELLED: 'AI 翻译已停止',
+  AI_PROVIDER_CONFIG_REQUIRED: 'AI 服务配置不完整',
+  AI_SETTINGS_INVALID: 'AI 设置校验失败',
+  SERVICE_UNAVAILABLE: '服务暂不可用'
 }
 
 function normalizePreviewText(value) {
@@ -1152,10 +1176,27 @@ export default {
 
     const getFailureReasonText = failure => {
       const message = String(failure?.errorMessage || '').trim()
-      if (message) {
+      const errorCode = String(failure?.errorCode || '').trim()
+      if (message && message !== errorCode) {
         return message
       }
-      return String(failure?.errorCode || '').trim()
+      return getFailureCodeLabel(failure)
+    }
+
+    const getFailureCodeLabel = failure => {
+      const errorCode = String(failure?.errorCode || '').trim()
+      if (!errorCode) {
+        return ''
+      }
+      return failureCodeLabelMap[errorCode] || errorCode
+    }
+
+    const getFailureCodeMeaning = failure => {
+      const errorCode = String(failure?.errorCode || '').trim()
+      if (!errorCode) {
+        return ''
+      }
+      return failureCodeMeaningMap[errorCode] || ''
     }
 
     const formatDate = value => {
@@ -1328,6 +1369,8 @@ export default {
       getJobTypeText,
       getCoverImageStatusTagType,
       getCoverImageStatusText,
+      getFailureCodeLabel,
+      getFailureCodeMeaning,
       getFailureReasonText,
       getLanguageText,
       getAppliedEntryCount,
@@ -1462,7 +1505,11 @@ export default {
 }
 
 .job-state-panel-danger {
-  background: linear-gradient(180deg, var(--el-color-danger-light-9), #fff);
+  background: linear-gradient(
+    180deg,
+    var(--el-color-danger-light-9),
+    var(--el-bg-color)
+  );
   border: 1px solid var(--el-color-danger-light-5);
 }
 
@@ -1503,11 +1550,37 @@ export default {
   word-break: break-word;
 }
 
+.job-state-panel-code-hint {
+  color: var(--el-color-danger-dark-2);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
 .job-state-panel-meta {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
   margin-top: 10px;
+}
+
+html.dark .job-state-panel-danger {
+  background: linear-gradient(
+    180deg,
+    rgba(var(--el-color-danger-rgb), 0.2),
+    rgba(var(--el-color-danger-rgb), 0.08)
+  );
+  border-color: rgba(var(--el-color-danger-rgb), 0.4);
+}
+
+html.dark .job-state-panel-title,
+html.dark .job-state-panel-code-hint {
+  color: var(--el-color-danger-light-3);
+}
+
+html.dark .job-state-panel-subtitle,
+html.dark .job-state-panel-meta {
+  color: var(--el-text-color-regular);
 }
 
 .conflict-title {
