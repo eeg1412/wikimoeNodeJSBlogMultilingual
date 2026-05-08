@@ -662,7 +662,7 @@
 
     <el-dialog
       v-model="aiDialogVisible"
-      title="DeepSeek AI 翻译"
+      title="AI 翻译"
       width="min(1100px, 96vw)"
       align-center
       destroy-on-close
@@ -768,8 +768,8 @@
                 </div>
                 <div class="translation-dialog-intro-text">
                   已选择
-                  {{ selectedAiEntryIds.length }} 项。按分组检查本次会提交给
-                  DeepSeek 的字段，关联内容会直接显示所属对象与具体字段。
+                  {{ selectedAiEntryIds.length }} 项。按分组检查本次会提交给 AI
+                  的字段，关联内容会直接显示所属对象与具体字段。
                 </div>
               </div>
               <div class="translation-json-toolbar-actions">
