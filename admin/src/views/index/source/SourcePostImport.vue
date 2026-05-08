@@ -209,7 +209,7 @@
               size="small"
               :loading="rowActionLoadingMap[getAiActionKey(row)]"
               :disabled="rowActionLoadingMap[row.sourceId]"
-              @click="openImportDialog(row)"
+              @click="openAiImportDialog(row)"
             >
               生成并AI翻译
             </el-button>
@@ -1158,7 +1158,7 @@ export default {
       aiForm.prompt = ''
     }
 
-    const openImportDialog = row => {
+    const openAiImportDialog = row => {
       aiRow.value = row
       aiStep.value = 'setup'
       aiRunning.value = false
@@ -2556,7 +2556,7 @@ export default {
       getAiActionKey,
       handleAiDialogBeforeClose,
       handleAiSourceLanguageChange,
-      openImportDialog,
+      openAiImportDialog,
       openLanguageDialog,
       resetAiImportState,
       stopAiImportTranslation,

@@ -20,7 +20,7 @@ const {
   parseImageRecognitionResult
 } = require('../utils/coverImageTranslationUtils')
 
-const coverImageRecognitionResponseSchema = {
+const coverImageRecognitionResponseJsonSchema = {
   type: 'object',
   additionalProperties: false,
   required: [
@@ -199,7 +199,7 @@ function appendErrorDetails(message, detailText) {
 function buildRecognitionRequest(settings, prompt, imageDataUrl) {
   const generationConfig = {
     responseMimeType: 'application/json',
-    responseSchema: coverImageRecognitionResponseSchema
+    responseJsonSchema: coverImageRecognitionResponseJsonSchema
   }
   const mediaResolution = settings.requestOptions?.mediaResolution
   if (mediaResolution) {

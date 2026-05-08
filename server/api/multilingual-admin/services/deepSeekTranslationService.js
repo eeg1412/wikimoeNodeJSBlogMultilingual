@@ -232,6 +232,7 @@ function parseInput(body = {}) {
 
   const entries = Array.isArray(body.entries) ? body.entries : []
   entries.forEach((entry, index) => validateInputEntry(entry, index))
+  const targetTitle = String(body.targetTitle || '').trim()
 
   return {
     postId,
@@ -239,6 +240,7 @@ function parseInput(body = {}) {
     targetLanguageCode,
     prompt: normalizePrompt(body.prompt),
     entries,
+    targetTitle,
     translateCoverImage
   }
 }
@@ -2243,6 +2245,7 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
           previewEntries: Array.isArray(data.payload?.entries)
             ? data.payload.entries
             : [],
+          targetTitle: input.targetTitle,
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: input.targetLanguageCode
         })

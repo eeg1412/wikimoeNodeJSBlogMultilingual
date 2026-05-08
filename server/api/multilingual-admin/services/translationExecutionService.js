@@ -130,6 +130,7 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
       sourcePost,
       targetPost,
       previewEntries: result.previewEntries,
+      targetTitle: job.target?.title,
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode
     })

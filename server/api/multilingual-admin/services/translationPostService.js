@@ -11,7 +11,11 @@ const {
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 const importPostSourceService = require('./importPostSourceService')
+const coverImageAdoptionService = require('./coverImageAdoptionService')
 const relationService = require('./relationService')
+const {
+  COVER_IMAGE_ENTRY_TYPE
+} = require('../utils/coverImageTranslationUtils')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -2833,6 +2837,25 @@ function normalizeAiImportResultList(body = {}) {
   }
 
   return body.results.map((item, index) => {
+    const normalizePreviewObjectList = (value, fieldName) => {
+      if (typeof value === 'undefined') {
+        return []
+      }
+      if (!Array.isArray(value)) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_FIELD_INVALID,
+          `${fieldName} 必须是数组`,
+          fieldName,
+          400
+        )
+      }
+      return value
+        .filter(record => {
+          return record && typeof record === 'object' && !Array.isArray(record)
+        })
+        .map(record => JSON.parse(JSON.stringify(record)))
+    }
+
     const languageCode = normalizeLanguageCode(item?.languageCode)
     if (!languageCode) {
       throw new ApiError(
@@ -2894,7 +2917,15 @@ function normalizeAiImportResultList(body = {}) {
           return {
             sourceId,
             payload: relatedItem.payload,
-            publish: relatedItem.publish === true
+            publish: relatedItem.publish === true,
+            coverImagePreviewEntries: normalizePreviewObjectList(
+              relatedItem.coverImagePreviewEntries,
+              `results[${index}].relatedPostResults[${relatedIndex}].coverImagePreviewEntries`
+            ),
+            coverImageArtifacts: normalizePreviewObjectList(
+              relatedItem.coverImageArtifacts,
+              `results[${index}].relatedPostResults[${relatedIndex}].coverImageArtifacts`
+            )
           }
         }
       )
@@ -2904,6 +2935,14 @@ function normalizeAiImportResultList(body = {}) {
       languageCode,
       payload: item.payload,
       publish: item.publish === true,
+      coverImagePreviewEntries: normalizePreviewObjectList(
+        item.coverImagePreviewEntries,
+        `results[${index}].coverImagePreviewEntries`
+      ),
+      coverImageArtifacts: normalizePreviewObjectList(
+        item.coverImageArtifacts,
+        `results[${index}].coverImageArtifacts`
+      ),
       relatedPostResults
     }
   })
@@ -3646,7 +3685,66 @@ async function ensureSourceSnapshotForAiImport(
   }
 }
 
-async function applySourcePostAiImport(body = {}) {
+async function adoptAiImportPreviewCoverImages(
+  {
+    targetPostId,
+    languageCode,
+    previewEntryList = [],
+    artifactList = [],
+    nameFallback = ''
+  },
+  options = {}
+) {
+  const generatedPreviewEntries = previewEntryList.filter(entry => {
+    return (
+      entry?.entryType === COVER_IMAGE_ENTRY_TYPE &&
+      entry.status === 'generated' &&
+      entry.generatedCoverUrl
+    )
+  })
+  if (generatedPreviewEntries.length === 0) {
+    return 0
+  }
+
+  const artifactMap = new Map(
+    artifactList.map(artifact => {
+      return [String(artifact?.artifactId || '').trim(), artifact]
+    })
+  )
+
+  let adoptedCount = 0
+  for (const previewEntry of generatedPreviewEntries) {
+    const artifactId = String(previewEntry?.artifactId || '').trim()
+    const artifact = artifactMap.get(artifactId)
+    if (!artifact) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        'AI 封面图预览缺少对应产物，不能写入',
+        'coverImageArtifacts',
+        400
+      )
+    }
+    await coverImageAdoptionService.adoptPreviewCoverImage(
+      {
+        artifact,
+        previewEntry,
+        targetPostId,
+        languageCode,
+        name:
+          String(previewEntry.targetTitle || nameFallback || '').trim() ||
+          'ai-cover-image'
+      },
+      {
+        admin: options.admin
+      }
+    )
+    adoptedCount += 1
+  }
+
+  return adoptedCount
+}
+
+async function applySourcePostAiImport(body = {}, options = {}) {
   const input = normalizeAiBatchInput(body)
   const refreshLanguageSet = new Set([input.sourceLanguageCode])
   const importResult =
@@ -3690,6 +3788,18 @@ async function applySourcePostAiImport(body = {}) {
       publish: item.publish,
       appliedEntryKeySet
     })
+    const coverImageAdoptedCount = await adoptAiImportPreviewCoverImages(
+      {
+        targetPostId: translationPostDetail.post._id,
+        languageCode: item.languageCode,
+        previewEntryList: item.coverImagePreviewEntries,
+        artifactList: item.coverImageArtifacts,
+        nameFallback: translationPostDetail.post.title
+      },
+      {
+        admin: options.admin
+      }
+    )
 
     const relatedPostResults = []
     const relatedSourceSet = new Set()
@@ -3731,12 +3841,26 @@ async function applySourcePostAiImport(body = {}) {
         publish: relatedPublish,
         appliedEntryKeySet
       })
+      const relatedCoverImageAdoptedCount =
+        await adoptAiImportPreviewCoverImages(
+          {
+            targetPostId: relatedTranslationPostDetail.post._id,
+            languageCode: item.languageCode,
+            previewEntryList: relatedItem.coverImagePreviewEntries,
+            artifactList: relatedItem.coverImageArtifacts,
+            nameFallback: relatedTranslationPostDetail.post.title
+          },
+          {
+            admin: options.admin
+          }
+        )
 
       relatedPostResults.push({
         sourceId: relatedSourceId,
         languageCode: item.languageCode,
         translationPostId: relatedCreateResult.translationPostId,
         created: relatedCreateResult.created,
+        coverImageAdoptedCount: relatedCoverImageAdoptedCount,
         ...relatedApplyResult
       })
     }
@@ -3746,6 +3870,7 @@ async function applySourcePostAiImport(body = {}) {
       languageCode: item.languageCode,
       translationPostId: createResult.translationPostId,
       created: createResult.created,
+      coverImageAdoptedCount,
       ...applyResult,
       relatedPostResults
     })

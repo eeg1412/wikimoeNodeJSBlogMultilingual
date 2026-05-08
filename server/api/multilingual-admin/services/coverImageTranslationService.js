@@ -927,21 +927,41 @@ async function runGeneration({
   }
 }
 
-function resolveTargetTitle(targetTitle, previewEntries, targetPost) {
-  const normalizedTargetTitle = String(targetTitle || '').trim()
-  if (normalizedTargetTitle) {
-    return normalizedTargetTitle
+function normalizeTitleValue(value) {
+  if (typeof value === 'string') {
+    return value.trim()
   }
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value).trim()
+}
+
+function resolveTargetTitle(targetTitle, previewEntries, targetPost) {
   const titleEntry = (previewEntries || []).find(entry => {
     return entry && entry.scope === 'post' && entry.fieldName === 'title'
   })
-  const previewTitle = String(
-    titleEntry?.nextPreviewRawValue || titleEntry?.nextPreviewText || ''
-  ).trim()
+  const previewTitle = [
+    titleEntry?.nextPreviewRawValue,
+    titleEntry?.nextPreviewText,
+    titleEntry?.value,
+    titleEntry?.previewRawValue,
+    titleEntry?.previewText,
+    titleEntry?.currentPreviewRawValue,
+    titleEntry?.currentPreviewText
+  ]
+    .map(normalizeTitleValue)
+    .find(Boolean)
   if (previewTitle) {
     return previewTitle
   }
-  return String(targetPost?.title || '').trim()
+
+  const normalizedTargetTitle = normalizeTitleValue(targetTitle)
+  if (normalizedTargetTitle) {
+    return normalizedTargetTitle
+  }
+
+  return normalizeTitleValue(targetPost?.title)
 }
 
 async function processCoverImageTranslation(options = {}) {
