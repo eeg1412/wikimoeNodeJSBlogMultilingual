@@ -426,7 +426,7 @@
             >
               <el-descriptions class="mb20" :column="4" border>
                 <el-descriptions-item label="可写入变更">
-                  {{ resultItem.preview.changeCount }}
+                  {{ getPreviewTotalChangeCount(resultItem.preview) }}
                 </el-descriptions-item>
                 <el-descriptions-item label="跳过条目">
                   {{ resultItem.preview.skippedCount }}
@@ -440,7 +440,7 @@
               </el-descriptions>
 
               <el-alert
-                v-if="resultItem.preview.changeCount === 0"
+                v-if="!hasPreviewChanges(resultItem.preview)"
                 class="mb20"
                 type="info"
                 show-icon
@@ -602,7 +602,82 @@
               </div>
 
               <div
-                v-if="resultItem.preview.changeCount > 0"
+                v-if="getAiResultCoverImageEntries(resultItem).length > 0"
+                class="cover-image-review-section"
+              >
+                <div class="translation-json-group-title">封面图</div>
+                <div
+                  v-for="item in getAiResultCoverImageEntries(resultItem)"
+                  :key="item.id"
+                  class="cover-image-review-item"
+                >
+                  <div class="cover-image-review-header">
+                    <div class="cover-image-review-title-row">
+                      <el-checkbox
+                        class="cover-image-review-select"
+                        :model-value="
+                          getSelectedAiResultEntryIds(
+                            resultItem.languageCode
+                          ).includes(item.id)
+                        "
+                        :disabled="!canSelectCoverImage(item)"
+                        :aria-label="`${item.targetTitle || item.sourceTitle || '未命名封面'} 采纳选择`"
+                        @change="
+                          checked =>
+                            setAiResultCoverImageSelected(
+                              resultItem,
+                              item,
+                              checked
+                            )
+                        "
+                      />
+                      <div class="cover-image-review-title">
+                        {{
+                          item.targetTitle || item.sourceTitle || '未命名封面'
+                        }}
+                      </div>
+                    </div>
+                    <el-tag
+                      size="small"
+                      :type="getCoverImageStatusTagType(item)"
+                      effect="plain"
+                    >
+                      {{ getCoverImageStatusText(item) }}
+                    </el-tag>
+                  </div>
+                  <div class="cover-image-review-grid">
+                    <div class="cover-image-preview-panel">
+                      <div class="cover-image-preview-label">源封面</div>
+                      <img
+                        v-if="item.sourceCoverUrl"
+                        class="cover-image-preview-img"
+                        :src="item.sourceCoverUrl"
+                        alt=""
+                      />
+                      <div v-else class="cover-image-preview-empty">-</div>
+                    </div>
+                    <div class="cover-image-preview-panel">
+                      <div class="cover-image-preview-label">AI 封面</div>
+                      <img
+                        v-if="item.generatedCoverUrl"
+                        class="cover-image-preview-img"
+                        :src="item.generatedCoverUrl"
+                        alt=""
+                      />
+                      <div v-else class="cover-image-preview-empty">-</div>
+                    </div>
+                  </div>
+                  <div
+                    v-if="item.warningMessage || item.recognition?.reason"
+                    class="cover-image-review-message"
+                  >
+                    {{ item.warningMessage || item.recognition.reason }}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-if="getAiResultSelectableEntryIds(resultItem).length > 0"
                 class="translation-json-toolbar"
               >
                 <div class="translation-dialog-intro">
@@ -657,7 +732,7 @@
                   </div>
                   <el-descriptions :column="3" border class="mb10">
                     <el-descriptions-item label="变更字段">
-                      {{ relatedItem.preview.changeCount }}
+                      {{ getPreviewTotalChangeCount(relatedItem.preview) }}
                     </el-descriptions-item>
                     <el-descriptions-item label="跳过字段">
                       {{ relatedItem.preview.skippedCount }}
@@ -668,7 +743,88 @@
                   </el-descriptions>
 
                   <div
-                    v-if="relatedItem.preview.changeCount > 0"
+                    v-if="getAiRelatedCoverImageEntries(relatedItem).length > 0"
+                    class="cover-image-review-section"
+                  >
+                    <div class="translation-json-group-title">封面图</div>
+                    <div
+                      v-for="item in getAiRelatedCoverImageEntries(relatedItem)"
+                      :key="item.id"
+                      class="cover-image-review-item"
+                    >
+                      <div class="cover-image-review-header">
+                        <div class="cover-image-review-title-row">
+                          <el-checkbox
+                            class="cover-image-review-select"
+                            :model-value="
+                              getSelectedAiRelatedEntryIds(
+                                resultItem.languageCode,
+                                relatedItem.sourceId
+                              ).includes(item.id)
+                            "
+                            :disabled="!canSelectCoverImage(item)"
+                            :aria-label="`${item.targetTitle || item.sourceTitle || '未命名封面'} 采纳选择`"
+                            @change="
+                              checked =>
+                                setAiRelatedCoverImageSelected(
+                                  resultItem,
+                                  relatedItem,
+                                  item,
+                                  checked
+                                )
+                            "
+                          />
+                          <div class="cover-image-review-title">
+                            {{
+                              item.targetTitle ||
+                              item.sourceTitle ||
+                              '未命名封面'
+                            }}
+                          </div>
+                        </div>
+                        <el-tag
+                          size="small"
+                          :type="getCoverImageStatusTagType(item)"
+                          effect="plain"
+                        >
+                          {{ getCoverImageStatusText(item) }}
+                        </el-tag>
+                      </div>
+                      <div class="cover-image-review-grid">
+                        <div class="cover-image-preview-panel">
+                          <div class="cover-image-preview-label">源封面</div>
+                          <img
+                            v-if="item.sourceCoverUrl"
+                            class="cover-image-preview-img"
+                            :src="item.sourceCoverUrl"
+                            alt=""
+                          />
+                          <div v-else class="cover-image-preview-empty">-</div>
+                        </div>
+                        <div class="cover-image-preview-panel">
+                          <div class="cover-image-preview-label">AI 封面</div>
+                          <img
+                            v-if="item.generatedCoverUrl"
+                            class="cover-image-preview-img"
+                            :src="item.generatedCoverUrl"
+                            alt=""
+                          />
+                          <div v-else class="cover-image-preview-empty">-</div>
+                        </div>
+                      </div>
+                      <div
+                        v-if="item.warningMessage || item.recognition?.reason"
+                        class="cover-image-review-message"
+                      >
+                        {{ item.warningMessage || item.recognition.reason }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="
+                      getAiRelatedSelectableEntryIds(relatedItem).length > 0
+                    "
                     class="translation-json-toolbar"
                   >
                     <div class="translation-dialog-intro">
@@ -717,7 +873,7 @@
                   </div>
 
                   <TranslationEntrySelectableGroups
-                    v-if="relatedItem.preview.changeCount > 0"
+                    v-if="hasPreviewTextChanges(relatedItem.preview)"
                     :model-value="
                       getSelectedAiRelatedEntryIds(
                         resultItem.languageCode,
@@ -743,7 +899,7 @@
               </div>
 
               <TranslationEntrySelectableGroups
-                v-if="resultItem.preview.changeCount > 0"
+                v-if="hasPreviewTextChanges(resultItem.preview)"
                 :model-value="
                   getSelectedAiResultEntryIds(resultItem.languageCode)
                 "
@@ -889,6 +1045,7 @@ const AI_IMPORT_SOURCE_LANGUAGE_STORAGE_KEY =
   'wikimoe-ai-import-source-language'
 const AI_IMPORT_TARGET_LANGUAGES_STORAGE_KEY =
   'wikimoe-ai-import-target-languages'
+const AI_COVER_IMAGE_ENTRY_TYPE = 'coverImageTranslation'
 const POST_RELATION_FIELD_LIST = [
   'postList',
   'tweetList',
@@ -1257,9 +1414,59 @@ export default {
       pushAiProgress('已请求停止翻译，正在中断任务...')
     }
 
+    const getAiImportPreviewCoverEntries = preview => {
+      if (!Array.isArray(preview?.coverImagePreviewEntries)) {
+        return []
+      }
+      return preview.coverImagePreviewEntries.filter(Boolean)
+    }
+
+    const buildCoverImageReviewEntries = preview => {
+      return getAiImportPreviewCoverEntries(preview).map(entry => {
+        return {
+          ...entry,
+          id: String(entry?.entryKey || entry?.artifactId || ''),
+          isApplied: entry?.adopted === true
+        }
+      })
+    }
+
+    const canSelectCoverImage = entry => {
+      if (!entry?.id || !entry?.artifactId) {
+        return false
+      }
+      if (entry.isApplied === true) {
+        return false
+      }
+      if (entry.status !== 'generated') {
+        return false
+      }
+      return Boolean(entry.generatedCoverUrl)
+    }
+
+    const getAiResultCoverImageEntries = resultItem => {
+      return buildCoverImageReviewEntries(resultItem?.preview)
+    }
+
+    const getAiRelatedCoverImageEntries = relatedItem => {
+      return buildCoverImageReviewEntries(relatedItem?.preview)
+    }
+
+    const getSelectableCoverImageIds = preview => {
+      return buildCoverImageReviewEntries(preview)
+        .filter(entry => {
+          return canSelectCoverImage(entry)
+        })
+        .map(entry => entry.id)
+        .filter(Boolean)
+    }
+
     const getAiResultSelectableEntryIds = resultItem => {
       const changeList = resultItem?.preview?.changeList || []
-      return changeList.map(item => item.id).filter(Boolean)
+      return changeList
+        .map(item => item.id)
+        .filter(Boolean)
+        .concat(getSelectableCoverImageIds(resultItem?.preview))
     }
 
     const getSelectedAiResultEntryIds = languageCode => {
@@ -1279,7 +1486,10 @@ export default {
 
     const getAiRelatedSelectableEntryIds = relatedItem => {
       const changeList = relatedItem?.preview?.changeList || []
-      return changeList.map(item => item.id).filter(Boolean)
+      return changeList
+        .map(item => item.id)
+        .filter(Boolean)
+        .concat(getSelectableCoverImageIds(relatedItem?.preview))
     }
 
     const getSelectedAiRelatedEntryIds = (languageCode, sourceId) => {
@@ -1293,6 +1503,53 @@ export default {
         ...selectedAiRelatedEntryIdsMap.value,
         [key]: Array.from(new Set(entryIds.filter(Boolean)))
       }
+    }
+
+    const setAiResultCoverImageSelected = (resultItem, entry, checked) => {
+      const entryKey = String(entry?.id || '')
+      if (!entryKey || !canSelectCoverImage(entry)) {
+        return
+      }
+      const nextSelectedIds = new Set(
+        getSelectedAiResultEntryIds(resultItem.languageCode)
+      )
+      if (checked) {
+        nextSelectedIds.add(entryKey)
+      } else {
+        nextSelectedIds.delete(entryKey)
+      }
+      setSelectedAiResultEntryIds(
+        resultItem.languageCode,
+        Array.from(nextSelectedIds)
+      )
+    }
+
+    const setAiRelatedCoverImageSelected = (
+      resultItem,
+      relatedItem,
+      entry,
+      checked
+    ) => {
+      const entryKey = String(entry?.id || '')
+      if (!entryKey || !canSelectCoverImage(entry)) {
+        return
+      }
+      const nextSelectedIds = new Set(
+        getSelectedAiRelatedEntryIds(
+          resultItem.languageCode,
+          relatedItem.sourceId
+        )
+      )
+      if (checked) {
+        nextSelectedIds.add(entryKey)
+      } else {
+        nextSelectedIds.delete(entryKey)
+      }
+      setSelectedAiRelatedEntryIds(
+        resultItem.languageCode,
+        relatedItem.sourceId,
+        Array.from(nextSelectedIds)
+      )
     }
 
     const initSelectedAiResultEntryIds = resultList => {
@@ -1362,6 +1619,29 @@ export default {
           return selectableIdSet.has(entry.id) && selectedIdSet.has(entry.id)
         })
       }
+    }
+
+    const buildSelectedCoverImagePreviewEntries = (preview, selectedIds) => {
+      const selectedIdSet = new Set(
+        (selectedIds || []).map(item => String(item))
+      )
+      return buildCoverImageReviewEntries(preview).filter(entry => {
+        return selectedIdSet.has(entry.id) && canSelectCoverImage(entry)
+      })
+    }
+
+    const buildSelectedCoverImageArtifacts = (preview, selectedIds) => {
+      const selectedArtifactIdSet = new Set(
+        buildSelectedCoverImagePreviewEntries(preview, selectedIds)
+          .map(entry => String(entry?.artifactId || ''))
+          .filter(Boolean)
+      )
+      const artifactList = Array.isArray(preview?.coverImageArtifacts)
+        ? preview.coverImageArtifacts
+        : []
+      return artifactList.filter(artifact => {
+        return selectedArtifactIdSet.has(String(artifact?.artifactId || ''))
+      })
     }
 
     const buildSelectedAiRelatedImportPayload = (resultItem, relatedItem) => {
@@ -1669,6 +1949,146 @@ export default {
       }
     }
 
+    const normalizeAiCoverWarningList = warningList => {
+      if (!Array.isArray(warningList)) {
+        return []
+      }
+      return warningList
+        .map(item => {
+          if (typeof item === 'string') {
+            return item.trim()
+          }
+          if (item && typeof item.message === 'string') {
+            return item.message.trim()
+          }
+          return ''
+        })
+        .filter(Boolean)
+    }
+
+    const isGeneratedAiCoverPreviewEntry = entry => {
+      return Boolean(
+        entry &&
+        entry.entryType === AI_COVER_IMAGE_ENTRY_TYPE &&
+        entry.status === 'generated' &&
+        entry.generatedCoverUrl
+      )
+    }
+
+    const buildAiImportPreview = ({
+      data,
+      languageCode,
+      targetPost,
+      referenceEntries,
+      currentEntries
+    }) => {
+      const payload = buildPreviewPayloadForPost(
+        data?.payload,
+        targetPost,
+        languageCode
+      )
+      const preview = buildTranslationImportPreview({
+        parsedPayload: payload,
+        currentEntries,
+        form: buildTranslationPostForm(targetPost),
+        referenceEntries
+      })
+      const coverImagePreviewEntries = Array.isArray(
+        data?.coverImagePreviewEntries
+      )
+        ? data.coverImagePreviewEntries.filter(Boolean)
+        : []
+      const coverImageArtifacts = Array.isArray(data?.coverImageArtifacts)
+        ? data.coverImageArtifacts.filter(Boolean)
+        : []
+      const coverImageWarnings = normalizeAiCoverWarningList(
+        data?.coverImageWarnings
+      )
+      const coverImageChangeCount = coverImagePreviewEntries.filter(entry => {
+        return isGeneratedAiCoverPreviewEntry(entry)
+      }).length
+
+      return {
+        ...preview,
+        coverImagePreviewEntries,
+        coverImageArtifacts,
+        coverImageWarnings,
+        coverImageChangeCount,
+        totalChangeCount: preview.changeCount + coverImageChangeCount,
+        warningList: preview.warningList.concat(coverImageWarnings),
+        skippedCount:
+          preview.aiSkipList.length +
+          preview.warningList.length +
+          coverImageWarnings.length
+      }
+    }
+
+    const getPreviewCoverImageChangeCount = preview => {
+      return Number(preview?.coverImageChangeCount || 0)
+    }
+
+    const getPreviewTotalChangeCount = preview => {
+      const totalChangeCount = Number(preview?.totalChangeCount)
+      if (Number.isFinite(totalChangeCount)) {
+        return totalChangeCount
+      }
+
+      return (
+        Number(preview?.changeCount || 0) +
+        getPreviewCoverImageChangeCount(preview)
+      )
+    }
+
+    const hasPreviewTextChanges = preview => {
+      return Number(preview?.changeCount || 0) > 0
+    }
+
+    const hasPreviewChanges = preview => {
+      return getPreviewTotalChangeCount(preview) > 0
+    }
+
+    const getCoverImageStatusText = entry => {
+      if (entry?.adopted || entry?.isApplied) {
+        return '已采纳'
+      }
+      const status = entry?.status || ''
+      if (status === 'generated') {
+        return '已生成'
+      }
+      if (status === 'not-required') {
+        return '无需处理'
+      }
+      if (status === 'recognition-skipped') {
+        return '已跳过'
+      }
+      if (status === 'recognition-failed') {
+        return '识别失败'
+      }
+      if (status === 'generation-failed') {
+        return '生成失败'
+      }
+      if (status === 'cleaned') {
+        return '已清理'
+      }
+      return status || '未知'
+    }
+
+    const getCoverImageStatusTagType = entry => {
+      if (entry?.adopted || entry?.isApplied) {
+        return 'success'
+      }
+      if (entry?.status === 'generated') {
+        return 'primary'
+      }
+      if (entry?.status === 'not-required') {
+        return 'info'
+      }
+      if (entry?.status === 'recognition-skipped') {
+        return 'info'
+      }
+      return 'warning'
+    }
+
     const handleAiStreamEvent = (
       eventData,
       languageCode,
@@ -1696,17 +2116,18 @@ export default {
         }
       }
       if (eventData.eventName === 'result') {
+        const preview = buildAiImportPreview({
+          data,
+          languageCode,
+          targetPost,
+          referenceEntries,
+          currentEntries
+        })
         const payload = buildPreviewPayloadForPost(
           data.payload,
           targetPost,
           languageCode
         )
-        const preview = buildTranslationImportPreview({
-          parsedPayload: payload,
-          currentEntries,
-          form: buildTranslationPostForm(targetPost),
-          referenceEntries
-        })
         return { preview, payload }
       }
       if (eventData.eventName === 'error') {
@@ -2012,43 +2433,6 @@ export default {
         }
         return aiEntry
       })
-      if (entries.length === 0) {
-        const payload = buildPreviewPayloadForPost(
-          {
-            meta: {},
-            entries: []
-          },
-          targetPreviewPost,
-          languageCode
-        )
-        const preview = buildTranslationImportPreview({
-          parsedPayload: payload,
-          currentEntries: buildPostTranslationEntries(targetPreviewPost, {
-            includeEmpty: true
-          }),
-          form: buildTranslationPostForm(targetPreviewPost),
-          referenceEntries: []
-        })
-        return {
-          sourceId: sourcePostId,
-          sourcePost: previewContext.sourcePost,
-          targetPost: targetPreviewPost,
-          languageCode,
-          payload,
-          preview,
-          previewGroups: buildAiResultPreviewGroupsWithContext(
-            preview,
-            targetPreviewPost
-          ),
-          skippedEntries: [
-            ...(mappedResult.skippedEntries || []),
-            ...aiTranslationSkippedEntries,
-            ...deduplicationResult.skippedEntries
-          ],
-          relatedSourceIds,
-          entryCount: 0
-        }
-      }
 
       throwAiAbortIfNeeded(abortSignal)
       const postTitle = getPostDisplayTitle(previewContext.sourcePost)
@@ -2059,7 +2443,7 @@ export default {
         `${getLanguageText(languageCode)}：正在翻译${progressContextWithPost}`
       )
       const response = await fetch(
-        '/api/multilingual-admin/translation/ai/translate-stream',
+        '/api/multilingual-admin/source/post/ai-import-translate-stream',
         {
           method: 'POST',
           headers: {
@@ -2068,12 +2452,12 @@ export default {
           },
           signal: abortSignal,
           body: JSON.stringify({
-            contentId: targetPreviewPost._id,
-            contentType: 'sourcePostImport',
+            sourceId: sourcePostId,
             sourceLanguageCode: aiForm.sourceLanguageCode,
             targetLanguageCode: languageCode,
             prompt: aiForm.prompt,
             skipUsageLog: true,
+            translateCoverImage: true,
             entries
           })
         }
@@ -2101,6 +2485,10 @@ export default {
         languageCode,
         payload: streamResult.payload,
         preview: streamResult.preview,
+        coverImagePreviewEntries:
+          streamResult.preview?.coverImagePreviewEntries || [],
+        coverImageArtifacts: streamResult.preview?.coverImageArtifacts || [],
+        coverImageWarnings: streamResult.preview?.coverImageWarnings || [],
         previewGroups: buildAiResultPreviewGroupsWithContext(
           streamResult.preview,
           targetPreviewPost
@@ -2243,11 +2631,11 @@ export default {
         if (
           resultList.length > 0 &&
           resultList.every(item => {
-            if (item.preview.changeCount > 0) {
+            if (hasPreviewChanges(item.preview)) {
               return false
             }
             return (item.relatedResults || []).every(relatedItem => {
-              return relatedItem.preview.changeCount === 0
+              return !hasPreviewChanges(relatedItem.preview)
             })
           })
         ) {
@@ -2342,7 +2730,7 @@ export default {
       })
       const emptySelectedResult = selectedResults.find(item => {
         return (
-          item.preview.changeCount > 0 &&
+          hasPreviewChanges(item.preview) &&
           getSelectedAiResultEntryCount(item) === 0
         )
       })
@@ -2365,19 +2753,44 @@ export default {
               const shouldPublish = publishLanguageSet.has(
                 resultItem.languageCode
               )
+              const selectedEntryIds = getSelectedAiResultEntryIds(
+                resultItem.languageCode
+              )
               return {
                 languageCode: resultItem.languageCode,
                 payload: buildSelectedAiImportPayload(resultItem),
                 publish: shouldPublish,
+                coverImagePreviewEntries: buildSelectedCoverImagePreviewEntries(
+                  resultItem.preview,
+                  selectedEntryIds
+                ),
+                coverImageArtifacts: buildSelectedCoverImageArtifacts(
+                  resultItem.preview,
+                  selectedEntryIds
+                ),
                 relatedPostResults: (resultItem.relatedResults || []).map(
                   relatedItem => {
+                    const selectedRelatedEntryIds =
+                      getSelectedAiRelatedEntryIds(
+                        resultItem.languageCode,
+                        relatedItem.sourceId
+                      )
                     return {
                       sourceId: relatedItem.sourceId,
                       payload: buildSelectedAiRelatedImportPayload(
                         resultItem,
                         relatedItem
                       ),
-                      publish: shouldPublish
+                      publish: shouldPublish,
+                      coverImagePreviewEntries:
+                        buildSelectedCoverImagePreviewEntries(
+                          relatedItem.preview,
+                          selectedRelatedEntryIds
+                        ),
+                      coverImageArtifacts: buildSelectedCoverImageArtifacts(
+                        relatedItem.preview,
+                        selectedRelatedEntryIds
+                      )
                     }
                   }
                 )
@@ -2538,14 +2951,28 @@ export default {
       getPostStatusText,
       getPostStatusTagType,
       getPostDisplayTitle,
+      getAiRelatedCoverImageEntries,
+      getAiResultCoverImageEntries,
+      getAiRelatedSelectableEntryIds,
+      getAiResultSelectableEntryIds,
+      getCoverImageStatusTagType,
+      getCoverImageStatusText,
+      getAiImportPreviewCoverEntries,
       getAiResultPostTitle,
       getRelatedPostTypeLabel,
       getSelectedAiResultEntryIds,
       getSelectedAiResultEntryCount,
       getSelectedAiRelatedEntryIds,
       getSelectedAiRelatedEntryCount,
+      getPreviewCoverImageChangeCount,
+      getPreviewTotalChangeCount,
+      hasPreviewChanges,
+      hasPreviewTextChanges,
+      canSelectCoverImage,
       setSelectedAiResultEntryIds,
       setSelectedAiRelatedEntryIds,
+      setAiResultCoverImageSelected,
+      setAiRelatedCoverImageSelected,
       setAllAiResultEntriesSelected,
       setAllAiRelatedEntriesSelected,
       getSourceDatabasePostList,
@@ -2779,6 +3206,93 @@ export default {
   line-height: 1.5;
 }
 
+.cover-image-review-section {
+  margin-bottom: 18px;
+}
+
+.cover-image-review-item {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 14px;
+}
+
+.cover-image-review-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.cover-image-review-title-row {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cover-image-review-select {
+  flex-shrink: 0;
+}
+
+.cover-image-review-title {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.cover-image-review-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.cover-image-preview-panel {
+  min-width: 0;
+}
+
+.cover-image-preview-label {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.cover-image-preview-img,
+.cover-image-preview-empty {
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  color: var(--el-text-color-secondary);
+  min-height: 140px;
+  width: 100%;
+}
+
+.cover-image-preview-img {
+  aspect-ratio: 16 / 9;
+  display: block;
+  object-fit: contain;
+}
+
+.cover-image-preview-empty {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.cover-image-review-message {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 10px;
+  word-break: break-word;
+}
+
 .translation-import-preview-panel-context {
   margin-top: 2px;
   color: var(--el-text-color-placeholder);
@@ -2851,6 +3365,7 @@ export default {
     float: none;
   }
 
+  .cover-image-review-grid,
   .translation-skip-preview-columns {
     grid-template-columns: 1fr;
   }

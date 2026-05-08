@@ -634,11 +634,24 @@ function buildListParams(query = {}) {
 
 function getListProjection() {
   return {
-    'result.payload': 0,
-    'result.previewEntries': 0,
-    'result.relatedResults': 0,
-    'request.entries': 0,
-    attempts: 0
+    jobType: 1,
+    status: 1,
+    createdAt: 1,
+    'source.title': 1,
+    'target.title': 1,
+    'target.languageCode': 1,
+    'target.languageCodes': 1,
+    'queueControl.active': 1,
+    'queueControl.deferred': 1,
+    'queueControl.priority': 1,
+    'progress.currentStage': 1,
+    'progress.percent': 1,
+    'runtime.leaseExpiresAt': 1,
+    'runtime.recovering': 1,
+    'failure.errorCode': 1,
+    'failure.errorMessage': 1,
+    'failure.retryable': 1,
+    'storage.deletedAt': 1
   }
 }
 
@@ -659,35 +672,57 @@ async function getQueuePositionMap(list) {
 
   const JobModel = getTranslationJobModel()
   const queuePositionMap = {}
-  await Promise.all(
-    pendingList.map(async item => {
-      const priority = item.queueControl.priority || 0
-      const beforeCount = await JobModel.countDocuments({
+  const queueFacetMap = {}
+  pendingList.forEach(item => {
+    const priority = item.queueControl.priority || 0
+    queueFacetMap[String(item._id)] = [
+      {
+        $match: {
+          $or: [
+            { 'queueControl.priority': { $gt: priority } },
+            {
+              'queueControl.priority': priority,
+              createdAt: { $lt: item.createdAt }
+            },
+            {
+              'queueControl.priority': priority,
+              createdAt: item.createdAt,
+              _id: { $lt: item._id }
+            }
+          ]
+        }
+      },
+      {
+        $count: 'beforeCount'
+      }
+    ]
+  })
+  const [queuePositionResult] = await JobModel.aggregate([
+    {
+      $match: {
         status: TRANSLATION_JOB_STATUS.PENDING,
         'queueControl.active': true,
         'queueControl.deferred': false,
-        'storage.deletedAt': null,
-        $or: [
-          { 'queueControl.priority': { $gt: priority } },
-          {
-            'queueControl.priority': priority,
-            createdAt: { $lt: item.createdAt }
-          },
-          {
-            'queueControl.priority': priority,
-            createdAt: item.createdAt,
-            _id: { $lt: item._id }
-          }
-        ]
-      })
-      queuePositionMap[String(item._id)] = beforeCount + 1
-    })
-  )
+        'storage.deletedAt': null
+      }
+    },
+    {
+      $facet: queueFacetMap
+    }
+  ])
+  pendingList.forEach(item => {
+    const itemResult = queuePositionResult[String(item._id)]
+    let beforeCount = 0
+    if (Array.isArray(itemResult) && itemResult[0]) {
+      beforeCount = itemResult[0].beforeCount || 0
+    }
+    queuePositionMap[String(item._id)] = beforeCount + 1
+  })
 
   return queuePositionMap
 }
 
-function attachRuntimeDisplay(item, queuePositionMap) {
+function getRuntimeState(item) {
   const now = new Date()
   const runtime = item.runtime || {}
   let runtimeState = ''
@@ -701,10 +736,55 @@ function attachRuntimeDisplay(item, queuePositionMap) {
     }
   }
 
+  return runtimeState
+}
+
+function attachRuntimeDisplay(item, queuePositionMap) {
   return {
     ...item,
     queuePosition: queuePositionMap[String(item._id)] || null,
-    runtimeState
+    runtimeState: getRuntimeState(item)
+  }
+}
+
+function buildListItemSummary(item, queuePositionMap) {
+  const source = item.source || {}
+  const target = item.target || {}
+  const queueControl = item.queueControl || {}
+  const progress = item.progress || {}
+  const failure = item.failure || {}
+  let targetLanguageCodes = []
+  if (Array.isArray(target.languageCodes)) {
+    targetLanguageCodes = target.languageCodes
+  }
+
+  return {
+    _id: item._id,
+    jobType: item.jobType,
+    status: item.status,
+    source: {
+      title: source.title || ''
+    },
+    target: {
+      title: target.title || '',
+      languageCode: target.languageCode || '',
+      languageCodes: targetLanguageCodes
+    },
+    queueControl: {
+      deferred: queueControl.deferred === true
+    },
+    progress: {
+      currentStage: progress.currentStage || '',
+      percent: progress.percent || 0
+    },
+    failure: {
+      errorCode: failure.errorCode || '',
+      errorMessage: failure.errorMessage || '',
+      retryable: failure.retryable === true
+    },
+    queuePosition: queuePositionMap[String(item._id)] || null,
+    runtimeState: getRuntimeState(item),
+    createdAt: item.createdAt
   }
 }
 
@@ -722,7 +802,7 @@ async function listTranslationJobs(query = {}) {
   const queuePositionMap = await getQueuePositionMap(list)
 
   return {
-    list: list.map(item => attachRuntimeDisplay(item, queuePositionMap)),
+    list: list.map(item => buildListItemSummary(item, queuePositionMap)),
     total,
     page,
     limit
