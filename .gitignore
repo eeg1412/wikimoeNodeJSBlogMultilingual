@@ -12,6 +12,7 @@ data
 /server/public/upload/gameCover/*
 /server/public/upload/bookCover/*
 /server/public/content/uploadfile/*
+/server/public/content/ai-cover-translations/tmp/
 /server/public/admin/*
 /server/public/up_works/*
 /server/public/web_demo/*

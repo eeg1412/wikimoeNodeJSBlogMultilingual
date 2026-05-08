@@ -1,4 +1,5 @@
 const deepSeekTranslationService = require('./deepSeekTranslationService')
+const mongoose = require('mongoose')
 const { getLanguageText } = require('../../../utils/language')
 const {
   ApiError,
@@ -10,6 +11,7 @@ const {
 const translationPayloadApplyService = require('./translationPayloadApplyService')
 const translationEntryBuildService = require('./translationEntryBuildService')
 const translationPostService = require('./translationPostService')
+const coverImageTranslationService = require('./coverImageTranslationService')
 
 const POST_RELATED_POST_FIELDS = [
   'postList',
@@ -22,6 +24,124 @@ const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 
 function getJobId(job) {
   return String(job && job._id ? job._id : '')
+}
+
+function getPostModel() {
+  const repository = global.$mongodDB?.multilingual?.repositories?.posts
+  if (!repository || !repository.model) {
+    throw new Error('multilingual posts repository not found')
+  }
+  return repository.model
+}
+
+function isValidObjectId(value) {
+  const text = String(value || '').trim()
+  return Boolean(text && mongoose.Types.ObjectId.isValid(text))
+}
+
+function shouldTranslateCoverImage(job, defaultValue) {
+  const options = job?.request?.options || {}
+  if (typeof options.translateCoverImage === 'boolean') {
+    return options.translateCoverImage
+  }
+  return defaultValue === true
+}
+
+async function findPostById(id) {
+  if (!isValidObjectId(id)) {
+    return null
+  }
+  const PostModel = getPostModel()
+  return await PostModel.findOne({
+    _id: new mongoose.Types.ObjectId(String(id))
+  }).lean()
+}
+
+async function findSourcePostForTarget(job, targetPost) {
+  if (targetPost?.sourceSnapshotId) {
+    const sourcePost = await findPostById(targetPost.sourceSnapshotId)
+    if (sourcePost) {
+      return sourcePost
+    }
+  }
+  if (job?.source?.snapshotId) {
+    const sourcePost = await findPostById(job.source.snapshotId)
+    if (sourcePost) {
+      return sourcePost
+    }
+  }
+  if (job?.source?.postId) {
+    return await findPostById(job.source.postId)
+  }
+  return null
+}
+
+function appendCoverImageResult(result, coverResult, registry) {
+  if (!coverResult) {
+    return result
+  }
+  if (coverResult.previewEntry) {
+    result.previewEntries.push(coverResult.previewEntry)
+  }
+  if (Array.isArray(coverResult.warnings)) {
+    result.warningList.push(...coverResult.warnings)
+  }
+  const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
+  result.coverImageArtifacts = snapshot.coverImageArtifacts
+  if (coverResult.artifact) {
+    const hasArtifact = result.coverImageArtifacts.some(artifact => {
+      return artifact.artifactId === coverResult.artifact.artifactId
+    })
+    if (!hasArtifact) {
+      result.coverImageArtifacts.push(coverResult.artifact)
+    }
+  }
+  result.coverImageGenerationMap = snapshot.coverImageGenerationMap
+  result.coverImageRecognitionMap = snapshot.coverImageRecognitionMap
+  return result
+}
+
+async function appendPostTranslationCoverImageResult(job, result, context) {
+  if (!shouldTranslateCoverImage(job, false)) {
+    return result
+  }
+  await context.updateProgress({
+    currentStage: 'TranslateCoverImage',
+    currentStep: '正在处理文章封面图 AI 翻译'
+  })
+  const targetDetail = await translationPostService.getTranslationPostDetail(
+    String(job.target.postId)
+  )
+  const targetPost = targetDetail.post
+  const sourcePost = await findSourcePostForTarget(job, targetPost)
+  if (!sourcePost) {
+    result.warningList.push({
+      code: 'cover-source-post-not-found',
+      scope: 'cover-image-translation',
+      message: '源文章快照不存在，不能处理封面图翻译'
+    })
+    return result
+  }
+  const registry = coverImageTranslationService.createCoverImageRegistry()
+  const coverResult =
+    await coverImageTranslationService.processCoverImageTranslation({
+      job,
+      registry,
+      sourcePost,
+      targetPost,
+      previewEntries: result.previewEntries,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: job.target.languageCode
+    })
+  appendCoverImageResult(result, coverResult, registry)
+  await context.saveCheckpoint({
+    stage: 'TranslateCoverImage',
+    stateSummary: {
+      artifactCount: result.coverImageArtifacts.length,
+      previewEntryCount: result.previewEntries.length
+    }
+  })
+  return result
 }
 
 async function resolveEntries(job, context) {
@@ -168,7 +288,8 @@ async function executePostAiTranslation(job, context) {
     createHandlers(context, 'TranslatePost')
   )
 
-  return await buildResult(job, data)
+  const result = await buildResult(job, data)
+  return await appendPostTranslationCoverImageResult(job, result, context)
 }
 
 async function executeContentAiTranslation(job, context) {
@@ -570,7 +691,8 @@ async function translateSourcePostForLanguage({
   languageCode,
   isRoot,
   depth,
-  translatedEntryKeySet
+  translatedEntryKeySet,
+  coverImageRegistry
 }) {
   await context.updateProgress({
     currentStage: 'BuildEntries',
@@ -684,12 +806,32 @@ async function translateSourcePostForLanguage({
     model: data.model || '',
     requestId: data.requestId || null
   }
+  if (shouldTranslateCoverImage(job, true)) {
+    await context.updateProgress({
+      currentStage: `TranslateCoverImage:${languageCode}`,
+      currentStep: `正在处理 ${getLanguageText(languageCode)} 封面图 AI 翻译`
+    })
+    const coverResult =
+      await coverImageTranslationService.processCoverImageTranslation({
+        job,
+        registry: coverImageRegistry,
+        sourcePost: previewContext.sourcePost,
+        targetPost: previewContext.targetPost,
+        previewEntries: result.previewEntries,
+        sourceLanguageCode: job.source.languageCode,
+        targetLanguageCode: languageCode
+      })
+    appendCoverImageResult(result, coverResult, coverImageRegistry)
+  }
   await context.saveCheckpoint({
     stage: `TranslatePost:${languageCode}`,
     stateSummary: {
       sourceId: sourcePostId,
       entryCount: translatedPreviewEntries.length,
       skippedEntryCount: skippedPreviewEntries.length,
+      coverImageEntryCount: result.previewEntries.filter(entry => {
+        return entry && entry.entryType === 'coverImageTranslation'
+      }).length,
       requestId: result.requestId || '',
       model: result.model || ''
     }
@@ -708,7 +850,8 @@ async function executeSourcePostLanguageDag({
   job,
   context,
   languageCode,
-  maxDepth
+  maxDepth,
+  coverImageRegistry
 }) {
   const queue = [
     {
@@ -736,7 +879,8 @@ async function executeSourcePostLanguageDag({
       languageCode,
       isRoot: task.isRoot,
       depth: task.depth,
-      translatedEntryKeySet
+      translatedEntryKeySet,
+      coverImageRegistry
     })
     results.push(result)
 
@@ -772,6 +916,8 @@ async function executeSourcePostAiImport(job, context) {
   }
 
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
+  const coverImageRegistry =
+    coverImageTranslationService.createCoverImageRegistry()
   const languageResults = []
   for (const languageCode of languageCodes) {
     languageResults.push(
@@ -779,13 +925,19 @@ async function executeSourcePostAiImport(job, context) {
         job,
         context,
         languageCode,
-        maxDepth
+        maxDepth,
+        coverImageRegistry
       }))
     )
   }
 
   const previewEntries = languageResults.flatMap(item => {
     return item.result.previewEntries || []
+  })
+  const coverImageSnapshot =
+    coverImageTranslationService.buildRegistrySnapshot(coverImageRegistry)
+  const warningList = languageResults.flatMap(item => {
+    return item.result.warningList || []
   })
   return {
     payload: {
@@ -794,7 +946,7 @@ async function executeSourcePostAiImport(job, context) {
       entries: previewEntries
     },
     previewEntries,
-    warningList: [],
+    warningList,
     aiSkipList: previewEntries.filter(entry => Boolean(entry.aiSkipReason)),
     relatedResults: languageResults.map(item => ({
       languageCode: item.languageCode,
@@ -807,6 +959,9 @@ async function executeSourcePostAiImport(job, context) {
     })),
     languageResults,
     translationPostMap: {},
+    coverImageArtifacts: coverImageSnapshot.coverImageArtifacts,
+    coverImageGenerationMap: coverImageSnapshot.coverImageGenerationMap,
+    coverImageRecognitionMap: coverImageSnapshot.coverImageRecognitionMap,
     sourceSnapshotId: null,
     aiUsage: {
       languageResults: languageResults.map(item => ({

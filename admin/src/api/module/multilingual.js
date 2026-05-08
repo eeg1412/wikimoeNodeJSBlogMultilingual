@@ -166,6 +166,24 @@ export default function (api) {
         noLoading
       })
     },
+    adoptTranslationJobCoverImage(data, noLoading = false) {
+      return api.post('/translation/job/cover-image/adopt', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    adoptTranslationPreviewCoverImage(data, noLoading = false) {
+      return api.post('/translation/post/ai-cover-image/adopt', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    cleanupTranslationJobCoverImages(data, noLoading = false) {
+      return api.post('/translation/job/cover-image/cleanup', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationPost(data, noLoading = false) {
       return api.post('/translation/post/create', data, {
         shouldAdminJWT: true,

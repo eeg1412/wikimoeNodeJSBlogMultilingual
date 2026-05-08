@@ -2299,6 +2299,9 @@ export default {
           },
           request: {
             prompt: aiForm.prompt,
+            options: {
+              translateCoverImage: true
+            },
             targetLanguageCodes: aiForm.targetLanguageCodes,
             recursion: {
               maxDepth: aiForm.recursionMaxDepth || 3

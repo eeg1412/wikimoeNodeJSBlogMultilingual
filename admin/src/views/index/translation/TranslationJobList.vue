@@ -108,13 +108,27 @@
             <span v-else class="table-empty-text">-</span>
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="状态" width="130">
+        <ResponsiveTableColumn label="状态" min-width="220">
           <template #default="{ row }">
-            <el-tag :type="getStatusTagType(row.status)" effect="plain">
-              {{ row.status }}
-            </el-tag>
-            <div v-if="row.runtimeState" class="source-meta">
-              {{ row.runtimeState }}
+            <div class="job-status-cell">
+              <el-tag :type="getStatusTagType(row.status)" effect="plain">
+                {{ row.status }}
+              </el-tag>
+              <div v-if="row.runtimeState" class="source-meta">
+                {{ row.runtimeState }}
+              </div>
+              <el-tooltip
+                v-if="
+                  row.status === '执行失败' && getFailureReasonText(row.failure)
+                "
+                :content="getFailureReasonText(row.failure)"
+                placement="top-start"
+                :show-after="200"
+              >
+                <div class="job-status-reason">
+                  {{ getFailureReasonText(row.failure) }}
+                </div>
+              </el-tooltip>
             </div>
           </template>
         </ResponsiveTableColumn>
@@ -221,6 +235,13 @@
           <div class="detail-header-actions">
             <el-button @click="refreshDetail"> 刷新 </el-button>
             <el-button
+              v-if="canCleanupCoverImages"
+              :loading="coverImageCleanupLoading"
+              @click="cleanupCoverImages"
+            >
+              清理封面临时文件
+            </el-button>
+            <el-button
               v-if="canApplyCurrentJob"
               type="primary"
               :disabled="selectedEntryKeys.length === 0"
@@ -240,6 +261,58 @@
           <span v-if="currentJob.result?.previewEntries?.length">
             {{ currentJob.result.previewEntries.length }} 项
           </span>
+        </div>
+
+        <div
+          v-if="
+            currentJob.status === '执行失败' &&
+            getFailureReasonText(currentJob.failure)
+          "
+          class="job-state-panel job-state-panel-danger"
+        >
+          <div class="job-state-panel-header">
+            <div>
+              <div class="job-state-panel-title">任务执行失败</div>
+              <div class="job-state-panel-subtitle">
+                任务已停止，请根据下面的错误信息修复后再重新发起或重试。
+              </div>
+            </div>
+            <div class="job-state-panel-tags">
+              <el-tag
+                v-if="currentJob.failure?.errorCode"
+                type="danger"
+                effect="plain"
+                size="small"
+              >
+                {{ currentJob.failure.errorCode }}
+              </el-tag>
+              <el-tag
+                :type="
+                  currentJob.failure?.retryable === true ? 'warning' : 'info'
+                "
+                effect="plain"
+                size="small"
+              >
+                {{
+                  currentJob.failure?.retryable === true ? '可重试' : '不可重试'
+                }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="job-state-panel-message">
+            {{ getFailureReasonText(currentJob.failure) }}
+          </div>
+          <div class="job-state-panel-meta">
+            <span v-if="currentJob.failure?.lastFailedAt">
+              失败时间：{{ formatDate(currentJob.failure.lastFailedAt) }}
+            </span>
+            <span v-if="currentJob.failure?.attempts">
+              失败次数：第 {{ currentJob.failure.attempts }} 次
+            </span>
+            <span v-if="currentJob.failure?.failedStep">
+              失败阶段：{{ currentJob.failure.failedStep }}
+            </span>
+          </div>
         </div>
 
         <div v-if="conflictList.length" class="conflict-panel">
@@ -286,10 +359,13 @@
                 {{ tab.skippedEntries.length }}
               </el-descriptions-item>
               <el-descriptions-item label="已采纳条目">
-                {{ getAppliedEntryCount(tab.entries) }}
+                {{ getAppliedEntryCount(tab.reviewEntries) }}
               </el-descriptions-item>
               <el-descriptions-item label="已选择">
                 {{ getSelectedEntryCount(tab.entryKeys) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="封面图">
+                {{ tab.coverImageEntries.length }}
               </el-descriptions-item>
             </el-descriptions>
 
@@ -306,6 +382,79 @@
             </div>
 
             <div
+              v-if="tab.coverImageEntries.length > 0"
+              class="cover-image-review-section"
+            >
+              <div class="translation-json-group-title">封面图</div>
+              <div
+                v-for="item in tab.coverImageEntries"
+                :key="item.id"
+                class="cover-image-review-item"
+              >
+                <div class="cover-image-review-header">
+                  <div class="cover-image-review-title-row">
+                    <el-checkbox
+                      class="cover-image-review-select"
+                      :model-value="selectedEntryKeys.includes(item.id)"
+                      :disabled="!canSelectCoverImage(item)"
+                      :aria-label="`${item.targetTitle || item.sourceTitle || '未命名封面'} 采纳选择`"
+                      @change="checked => setCoverImageSelected(item, checked)"
+                    />
+                    <div class="cover-image-review-title">
+                      {{ item.targetTitle || item.sourceTitle || '未命名封面' }}
+                    </div>
+                  </div>
+                  <el-tag
+                    size="small"
+                    :type="getCoverImageStatusTagType(item)"
+                    effect="plain"
+                  >
+                    {{ getCoverImageStatusText(item) }}
+                  </el-tag>
+                </div>
+                <div class="cover-image-review-grid">
+                  <div class="cover-image-preview-panel">
+                    <div class="cover-image-preview-label">源封面</div>
+                    <img
+                      v-if="item.sourceCoverUrl"
+                      class="cover-image-preview-img"
+                      :src="item.sourceCoverUrl"
+                      alt=""
+                    />
+                    <div v-else class="cover-image-preview-empty">-</div>
+                  </div>
+                  <div class="cover-image-preview-panel">
+                    <div class="cover-image-preview-label">AI 封面</div>
+                    <img
+                      v-if="item.generatedCoverUrl"
+                      class="cover-image-preview-img"
+                      :src="item.generatedCoverUrl"
+                      alt=""
+                    />
+                    <div v-else class="cover-image-preview-empty">-</div>
+                  </div>
+                </div>
+                <div
+                  v-if="item.warningMessage || item.recognition?.reason"
+                  class="cover-image-review-message"
+                >
+                  {{ item.warningMessage || item.recognition.reason }}
+                </div>
+                <div v-if="item.isApplied" class="cover-image-review-adoption">
+                  <el-tag size="small" type="success" effect="plain">
+                    已采纳
+                  </el-tag>
+                  <span class="cover-image-review-adoption-text">
+                    采纳时间：{{ formatDate(item.appliedAt) }}
+                  </span>
+                  <span class="cover-image-review-adoption-text">
+                    采纳人：{{ item.appliedByName || '-' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div
               v-if="tab.entryKeys.length > 0"
               class="translation-json-toolbar"
             >
@@ -313,9 +462,7 @@
                 <div class="translation-dialog-intro-title">选择采纳字段</div>
                 <div class="translation-dialog-intro-text">
                   默认仅勾选未采纳条目，已选择
-                  {{
-                    getSelectedEntryCount(tab.entryKeys)
-                  }}
+                  {{ getSelectedEntryCount(tab.entryKeys) }}
                   项。重新勾选已采纳条目时会二次确认。
                 </div>
               </div>
@@ -347,7 +494,11 @@
             />
 
             <el-empty
-              v-if="tab.groups.length === 0 && tab.skippedEntries.length === 0"
+              v-if="
+                tab.groups.length === 0 &&
+                tab.skippedEntries.length === 0 &&
+                tab.coverImageEntries.length === 0
+              "
               description="暂无结果"
             />
           </el-tab-pane>
@@ -380,6 +531,7 @@ const jobTypeOptions = [
 const statusOptions = [
   { label: '未开始', value: '未开始' },
   { label: '执行中', value: '执行中' },
+  { label: '执行失败', value: '执行失败' },
   { label: '等待审核', value: '等待审核' },
   { label: '不采纳', value: '不采纳' },
   { label: '部分采纳', value: '部分采纳' },
@@ -387,13 +539,20 @@ const statusOptions = [
 ]
 
 const applyStatusSet = new Set(['等待审核', '不采纳', '部分采纳', '完全采纳'])
-const deleteStatusSet = new Set(['未开始', '不采纳', '部分采纳', '完全采纳'])
+const deleteStatusSet = new Set([
+  '未开始',
+  '执行失败',
+  '不采纳',
+  '部分采纳',
+  '完全采纳'
+])
 
 const progressStageTextMap = {
   pending: '等待领取',
   claimed: '已领取任务',
   BuildEntries: '构建翻译条目',
   TranslatePost: '翻译文章',
+  TranslateCoverImage: '翻译封面图',
   TranslateContent: '翻译内容',
   ImportSourceSnapshot: '导入源快照',
   PrepareTargetPost: '准备目标文章',
@@ -440,6 +599,7 @@ export default {
     const activeReviewLanguageCode = ref('')
     const selectedEntryKeys = ref([])
     const conflictList = ref([])
+    const coverImageCleanupLoading = ref(false)
     const params = reactive({
       keyword: '',
       jobType: '',
@@ -475,15 +635,81 @@ export default {
 
     const selectableReviewEntries = computed(() => {
       return previewEntries.value.filter(entry => {
-        return entry && entry.entryKey && !entry.aiSkipReason
+        if (!entry || entry.entryType === 'coverImageTranslation') {
+          return false
+        }
+        return entry.entryKey && !entry.aiSkipReason
       })
     })
 
     const skippedReviewEntries = computed(() => {
       return previewEntries.value.filter(entry => {
-        return entry && entry.aiSkipReason
+        if (!entry || entry.entryType === 'coverImageTranslation') {
+          return false
+        }
+        return entry.aiSkipReason
       })
     })
+
+    const coverImageReviewEntries = computed(() => {
+      return previewEntries.value
+        .filter(entry => {
+          return entry && entry.entryType === 'coverImageTranslation'
+        })
+        .map(entry => {
+          const adoptionEntry = adoptionEntryMap.value.get(
+            String(entry.entryKey || '')
+          )
+          const appliedBy = adoptionEntry?.appliedBy || null
+          return {
+            ...entry,
+            id: entry.entryKey || entry.artifactId,
+            adoptionEntry,
+            isApplied:
+              entry.adopted === true || adoptionEntry?.applied === true,
+            appliedAt: adoptionEntry?.appliedAt || entry.adoptedAt || '',
+            appliedBy,
+            appliedByName: appliedBy?.displayName || appliedBy?.username || ''
+          }
+        })
+    })
+
+    const canCleanupCoverImages = computed(() => {
+      const artifactList = currentJob.value?.result?.coverImageArtifacts || []
+      return Array.isArray(artifactList) && artifactList.length > 0
+    })
+
+    const canSelectCoverImage = entry => {
+      if (!canApplyCurrentJob.value) {
+        return false
+      }
+      if (!entry?.id || !entry?.artifactId) {
+        return false
+      }
+      if (entry.isApplied === true) {
+        return false
+      }
+      if (entry.status !== 'generated') {
+        return false
+      }
+      return Boolean(entry.generatedCoverUrl)
+    }
+
+    const setCoverImageSelected = (entry, checked) => {
+      const entryKey = String(entry?.id || '')
+      if (!entryKey || !canSelectCoverImage(entry)) {
+        return
+      }
+      if (checked) {
+        if (!selectedEntryKeys.value.includes(entryKey)) {
+          selectedEntryKeys.value = selectedEntryKeys.value.concat(entryKey)
+        }
+        return
+      }
+      selectedEntryKeys.value = selectedEntryKeys.value.filter(item => {
+        return item !== entryKey
+      })
+    }
 
     const requestEntryMap = computed(() => {
       const map = new Map()
@@ -617,11 +843,28 @@ export default {
         ensureTab(getReviewEntryLanguageCode(entry)).skippedEntries.push(entry)
       })
 
+      coverImageReviewEntries.value.forEach(entry => {
+        const tab = ensureTab(getReviewEntryLanguageCode(entry))
+        if (!Array.isArray(tab.coverImageEntries)) {
+          tab.coverImageEntries = []
+        }
+        tab.coverImageEntries.push(entry)
+      })
+
       return Array.from(tabMap.values()).map(tab => {
+        const selectableCoverImageEntries = (
+          tab.coverImageEntries || []
+        ).filter(entry => {
+          return canSelectCoverImage(entry)
+        })
         return {
           ...tab,
-          entryKeys: tab.entries.map(entry => entry.id),
-          groups: buildReviewEntryGroups(tab.entries)
+          entryKeys: tab.entries
+            .map(entry => entry.id)
+            .concat(selectableCoverImageEntries.map(entry => entry.id)),
+          reviewEntries: tab.entries.concat(tab.coverImageEntries || []),
+          groups: buildReviewEntryGroups(tab.entries),
+          coverImageEntries: tab.coverImageEntries || []
         }
       })
     })
@@ -785,6 +1028,15 @@ export default {
           if (!entry?.entryKey || entry.aiSkipReason) {
             return false
           }
+          if (entry.entryType === 'coverImageTranslation') {
+            if (entry.adopted === true) {
+              return false
+            }
+            if (entry.status !== 'generated') {
+              return false
+            }
+            return Boolean(entry.artifactId && entry.generatedCoverUrl)
+          }
           return adoptionMap.get(String(entry.entryKey))?.applied !== true
         })
         .map(entry => String(entry.entryKey))
@@ -883,6 +1135,9 @@ export default {
       if (status === '执行中') {
         return 'warning'
       }
+      if (status === '执行失败') {
+        return 'danger'
+      }
       if (status === '等待审核') {
         return 'primary'
       }
@@ -893,6 +1148,14 @@ export default {
         return 'danger'
       }
       return 'info'
+    }
+
+    const getFailureReasonText = failure => {
+      const message = String(failure?.errorMessage || '').trim()
+      if (message) {
+        return message
+      }
+      return String(failure?.errorCode || '').trim()
     }
 
     const formatDate = value => {
@@ -920,7 +1183,7 @@ export default {
     const selectAllReviewEntries = async tab => {
       const entryKeys = tab?.entryKeys || selectableEntryKeys.value
       const pendingEntryList = (
-        tab?.entries || reviewDisplayEntries.value
+        tab?.reviewEntries || reviewDisplayEntries.value
       ).filter(entry => {
         return entry?.id && !selectedEntryKeys.value.includes(entry.id)
       })
@@ -940,6 +1203,77 @@ export default {
       selectedEntryKeys.value = selectedEntryKeys.value.filter(entryKey => {
         return !clearSet.has(entryKey)
       })
+    }
+
+    const getCoverImageStatusText = entry => {
+      if (entry?.adopted) {
+        return '已采纳'
+      }
+      const status = entry?.status || ''
+      if (status === 'generated') {
+        return '已生成'
+      }
+      if (status === 'not-required') {
+        return '无需处理'
+      }
+      if (status === 'recognition-skipped') {
+        return '已跳过'
+      }
+      if (status === 'recognition-failed') {
+        return '识别失败'
+      }
+      if (status === 'generation-failed') {
+        return '生成失败'
+      }
+      if (status === 'cleaned') {
+        return '已清理'
+      }
+      return status || '未知'
+    }
+
+    const getCoverImageStatusTagType = entry => {
+      if (entry?.adopted) {
+        return 'success'
+      }
+      if (entry?.status === 'generated') {
+        return 'primary'
+      }
+      if (entry?.status === 'not-required') {
+        return 'info'
+      }
+      if (entry?.status === 'recognition-skipped') {
+        return 'info'
+      }
+      return 'warning'
+    }
+
+    const cleanupCoverImages = async () => {
+      if (!currentJob.value?._id || !canCleanupCoverImages.value) {
+        return
+      }
+      try {
+        await ElMessageBox.confirm(
+          '确认清理该任务的封面图临时文件？',
+          '清理临时文件',
+          {
+            type: 'warning',
+            confirmButtonText: '清理',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+      coverImageCleanupLoading.value = true
+      try {
+        await multilingualApi.cleanupTranslationJobCoverImages({
+          jobId: currentJob.value._id
+        })
+        ElMessage.success('封面图临时文件已清理')
+        refreshDetail()
+      } finally {
+        coverImageCleanupLoading.value = false
+      }
     }
 
     watch(
@@ -974,6 +1308,8 @@ export default {
       applyForm,
       activeReviewLanguageCode,
       canApplyCurrentJob,
+      canCleanupCoverImages,
+      canSelectCoverImage,
       canDelete,
       canReject,
       canRetry,
@@ -981,13 +1317,18 @@ export default {
       beforeReviewGroupSelect,
       conflictList,
       currentJob,
+      cleanupCoverImages,
       clearReviewEntries,
+      coverImageCleanupLoading,
       deferJob,
       deleteJob,
       detailDrawerVisible,
       formatDate,
       getJobList,
       getJobTypeText,
+      getCoverImageStatusTagType,
+      getCoverImageStatusText,
+      getFailureReasonText,
       getLanguageText,
       getAppliedEntryCount,
       getProgressStageText,
@@ -1006,6 +1347,7 @@ export default {
       selectAllReviewEntries,
       selectableEntryKeys,
       selectedEntryKeys,
+      setCoverImageSelected,
       skippedReviewEntries,
       statusOptions,
       tableRef,
@@ -1037,6 +1379,22 @@ export default {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
+}
+
+.job-status-cell {
+  min-width: 0;
+}
+
+.job-status-reason {
+  margin-top: 6px;
+  color: var(--el-color-danger);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .table-tag-list {
@@ -1095,6 +1453,61 @@ export default {
   border-radius: 6px;
   margin: 16px 0;
   padding: 12px;
+}
+
+.job-state-panel {
+  border-radius: 10px;
+  margin: 16px 0;
+  padding: 14px 16px;
+}
+
+.job-state-panel-danger {
+  background: linear-gradient(180deg, var(--el-color-danger-light-9), #fff);
+  border: 1px solid var(--el-color-danger-light-5);
+}
+
+.job-state-panel-header,
+.job-state-panel-tags,
+.job-state-panel-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-state-panel-header {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.job-state-panel-title {
+  color: var(--el-color-danger-dark-2);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.job-state-panel-subtitle {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 2px;
+}
+
+.job-state-panel-message {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.job-state-panel-meta {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 10px;
 }
 
 .conflict-title {
@@ -1174,6 +1587,112 @@ export default {
   word-break: break-all;
 }
 
+.cover-image-review-section {
+  margin-bottom: 18px;
+}
+
+.cover-image-review-item {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 14px;
+}
+
+.cover-image-review-header,
+.cover-image-review-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.cover-image-review-title-row {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cover-image-review-select {
+  flex-shrink: 0;
+}
+
+.cover-image-review-title {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.cover-image-review-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.cover-image-preview-panel {
+  min-width: 0;
+}
+
+.cover-image-preview-label {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.cover-image-preview-img,
+.cover-image-preview-empty {
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  color: var(--el-text-color-secondary);
+  min-height: 140px;
+  width: 100%;
+}
+
+.cover-image-preview-img {
+  aspect-ratio: 16 / 9;
+  display: block;
+  object-fit: contain;
+}
+
+.cover-image-preview-empty {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.cover-image-review-message {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 10px;
+  word-break: break-word;
+}
+
+.cover-image-review-adoption {
+  align-items: center;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cover-image-review-adoption-text {
+  font-size: 12px;
+}
+
+.cover-image-review-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .ai-skipped-item {
   display: flex;
   align-items: center;
@@ -1216,6 +1735,14 @@ export default {
   .translation-json-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .job-state-panel-header {
+    flex-direction: column;
+  }
+
+  .cover-image-review-grid {
+    grid-template-columns: 1fr;
   }
 
   .translation-json-toolbar-actions {

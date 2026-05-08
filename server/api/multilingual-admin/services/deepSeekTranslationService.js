@@ -11,6 +11,7 @@ const {
 } = require('../../../utils/multilingualAdminResponse')
 const aiSettingsService = require('./aiSettingsService')
 const aiUsageService = require('./aiUsageService')
+const coverImageTranslationService = require('./coverImageTranslationService')
 
 const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 const TRANSLATION_JSON_VERSION = 2
@@ -32,6 +33,12 @@ function getPostModel() {
   }
 
   return repository.model
+}
+
+function createBrowserRequestContext() {
+  return {
+    id: new mongoose.Types.ObjectId().toString()
+  }
 }
 
 function normalizeString(value) {
@@ -210,7 +217,11 @@ function parseInput(body = {}) {
       400
     )
   }
-  if (!Array.isArray(body.entries) || body.entries.length === 0) {
+  const translateCoverImage = body.translateCoverImage === true
+  if (
+    (!Array.isArray(body.entries) || body.entries.length === 0) &&
+    !translateCoverImage
+  ) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
       '请至少选择一个翻译条目',
@@ -219,14 +230,16 @@ function parseInput(body = {}) {
     )
   }
 
-  body.entries.forEach((entry, index) => validateInputEntry(entry, index))
+  const entries = Array.isArray(body.entries) ? body.entries : []
+  entries.forEach((entry, index) => validateInputEntry(entry, index))
 
   return {
     postId,
     sourceLanguageCode,
     targetLanguageCode,
     prompt: normalizePrompt(body.prompt),
-    entries: body.entries
+    entries,
+    translateCoverImage
   }
 }
 
@@ -280,7 +293,7 @@ async function getTranslationPost(input) {
     recordKind: 'translation'
   })
     .select(
-      '_id languageCode sourceLanguageCode type snapshotVersion sourceSnapshotId translationGroupId'
+      '_id languageCode sourceLanguageCode title type snapshotVersion sourceSnapshotId translationGroupId coverImages sourceId'
     )
     .lean()
 
@@ -302,6 +315,63 @@ async function getTranslationPost(input) {
   }
 
   return post
+}
+
+async function getSourcePostForTranslationPost(post) {
+  const sourceSnapshotId = String(post?.sourceSnapshotId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    return null
+  }
+
+  const PostModel = getPostModel()
+  return await PostModel.findOne({
+    _id: new mongoose.Types.ObjectId(sourceSnapshotId)
+  })
+    .select('_id title type coverImages sourceId sourceSnapshotId languageCode')
+    .lean()
+}
+
+function appendCoverImageResultToStreamData(data, coverResult, registry) {
+  const nextData = {
+    ...data,
+    coverImagePreviewEntries: Array.isArray(data.coverImagePreviewEntries)
+      ? data.coverImagePreviewEntries.slice()
+      : [],
+    coverImageArtifacts: Array.isArray(data.coverImageArtifacts)
+      ? data.coverImageArtifacts.slice()
+      : [],
+    coverImageWarnings: Array.isArray(data.coverImageWarnings)
+      ? data.coverImageWarnings.slice()
+      : []
+  }
+
+  if (coverResult?.previewEntry) {
+    nextData.coverImagePreviewEntries.push(coverResult.previewEntry)
+  }
+  if (Array.isArray(coverResult?.warnings)) {
+    nextData.coverImageWarnings.push(
+      ...coverResult.warnings.map(warning => {
+        return warning?.message || String(warning || '')
+      })
+    )
+  }
+
+  const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
+  nextData.coverImageArtifacts = snapshot.coverImageArtifacts
+  return nextData
+}
+
+function createEmptyTranslatedResult(input, post, requestId) {
+  const aiInput = prepareAiInput(input)
+  return {
+    payload: buildTranslatedPayload(aiInput, post, { entries: [] }),
+    model: '',
+    usage: null,
+    requestId,
+    coverImagePreviewEntries: [],
+    coverImageArtifacts: [],
+    coverImageWarnings: []
+  }
 }
 
 function hasSkipAllowedEntries(input) {
@@ -2109,10 +2179,10 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       payload,
       model: responseModel,
       usage: combinedUsage,
-      requestId: responseId || null
-    }
-    if (handlers.onResult) {
-      handlers.onResult(data)
+      requestId: responseId || null,
+      coverImagePreviewEntries: [],
+      coverImageArtifacts: [],
+      coverImageWarnings: []
     }
     return data
   } catch (error) {
@@ -2140,7 +2210,50 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 async function translatePostEntriesStream(body = {}, handlers = {}) {
   const input = parseInput(body)
   const post = await getTranslationPost(input)
-  return await translatePreparedEntriesStream(input, post, handlers)
+  const requestContext = createBrowserRequestContext()
+  let data = null
+
+  if (input.entries.length > 0) {
+    data = await translatePreparedEntriesStream(input, post, handlers)
+    if (!data.requestId) {
+      data.requestId = requestContext.id
+    }
+  } else {
+    if (handlers.onStatus) {
+      handlers.onStatus({ message: '未选择正文条目，跳过正文直译阶段' })
+    }
+    data = createEmptyTranslatedResult(input, post, requestContext.id)
+  }
+
+  if (input.translateCoverImage === true) {
+    if (handlers.onStatus) {
+      handlers.onStatus({ message: '正在处理封面图 AI 翻译' })
+    }
+    const sourcePost = await getSourcePostForTranslationPost(post)
+    if (!sourcePost) {
+      data.coverImageWarnings = ['源文章快照不存在，不能处理封面图翻译']
+    } else {
+      const registry = coverImageTranslationService.createCoverImageRegistry()
+      const coverResult =
+        await coverImageTranslationService.processCoverImageTranslation({
+          job: requestContext,
+          registry,
+          sourcePost,
+          targetPost: post,
+          previewEntries: Array.isArray(data.payload?.entries)
+            ? data.payload.entries
+            : [],
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCode: input.targetLanguageCode
+        })
+      data = appendCoverImageResultToStreamData(data, coverResult, registry)
+    }
+  }
+
+  if (handlers.onResult) {
+    handlers.onResult(data)
+  }
+  return data
 }
 
 async function translateContentEntriesStream(body = {}, handlers = {}) {
@@ -2148,7 +2261,11 @@ async function translateContentEntriesStream(body = {}, handlers = {}) {
     ...parseGenericInput(body),
     operation: 'translation.content'
   }
-  return await translatePreparedEntriesStream(input, null, handlers)
+  const data = await translatePreparedEntriesStream(input, null, handlers)
+  if (handlers.onResult) {
+    handlers.onResult(data)
+  }
+  return data
 }
 
 module.exports = {

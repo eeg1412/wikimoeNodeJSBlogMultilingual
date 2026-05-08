@@ -11,6 +11,7 @@ const {
 } = require('../../../utils/translationJobConstants')
 const relationService = require('./relationService')
 const translationPostService = require('./translationPostService')
+const coverImageAdoptionService = require('./coverImageAdoptionService')
 
 const TRANSLATION_RECORD_KIND = 'translation'
 const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
@@ -1319,19 +1320,74 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
     }
     return entry
   })
+  const selectedCoverImageEntries = selectedEntries.filter(entry => {
+    return entry?.entryType === 'coverImageTranslation'
+  })
+  const selectedContentEntries = selectedEntries.filter(entry => {
+    return entry?.entryType !== 'coverImageTranslation'
+  })
 
   if (job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT) {
-    return await applySourcePostTranslationJob({
-      job,
-      selectedEntries,
-      selectedEntryKeys,
-      adminSnapshot,
+    const appliedEntries = []
+    if (selectedContentEntries.length > 0) {
+      const contentApplyResult = await applySourcePostTranslationJob({
+        job,
+        selectedEntries: selectedContentEntries,
+        selectedEntryKeys: selectedContentEntries.map(entry => entry.entryKey),
+        adminSnapshot,
+        applyBatchId,
+        publish
+      })
+      appliedEntries.push(
+        ...selectedContentEntries.map(entry => {
+          return {
+            entryKey: entry.entryKey
+          }
+        })
+      )
+      if (selectedCoverImageEntries.length === 0) {
+        return {
+          ...contentApplyResult,
+          appliedEntryKeys: appliedEntries.map(entry => entry.entryKey),
+          appliedCount: appliedEntries.length
+        }
+      }
+    }
+    for (const entry of selectedCoverImageEntries) {
+      if (!entry?.artifactId) {
+        throw new ApiError(
+          ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+          '封面图条目缺少 artifactId，不能采纳',
+          'artifactId',
+          400
+        )
+      }
+      const result = await coverImageAdoptionService.adoptCoverImage(
+        {
+          jobId: job._id,
+          artifactId: entry.artifactId,
+          languageCode: entry.languageCode,
+          applyBatchId
+        },
+        {
+          admin: options.admin
+        }
+      )
+      if (result?.adoptionEntry?.entryKey) {
+        appliedEntries.push({ entryKey: result.adoptionEntry.entryKey })
+      }
+    }
+    const statusResult = await updateJobStatusAfterApply(job._id)
+    return {
+      applied: true,
       applyBatchId,
-      publish
-    })
+      appliedEntryKeys: appliedEntries.map(entry => entry.entryKey),
+      appliedCount: appliedEntries.length,
+      ...statusResult
+    }
   }
 
-  const applyContexts = await buildApplyContexts(job, selectedEntries)
+  const applyContexts = await buildApplyContexts(job, selectedContentEntries)
   const conflicts = []
   for (const context of applyContexts) {
     conflicts.push(
@@ -1381,6 +1437,31 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
     }
     if (context.targetContext.languageCode) {
       refreshedLanguageCodeSet.add(context.targetContext.languageCode)
+    }
+  }
+
+  for (const entry of selectedCoverImageEntries) {
+    if (!entry?.artifactId) {
+      throw new ApiError(
+        ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+        '封面图条目缺少 artifactId，不能采纳',
+        'artifactId',
+        400
+      )
+    }
+    const result = await coverImageAdoptionService.adoptCoverImage(
+      {
+        jobId: job._id,
+        artifactId: entry.artifactId,
+        languageCode: entry.languageCode,
+        applyBatchId
+      },
+      {
+        admin: options.admin
+      }
+    )
+    if (result?.adoptionEntry) {
+      appliedEntries.push(result.adoptionEntry)
     }
   }
 

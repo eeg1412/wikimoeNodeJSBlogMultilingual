@@ -1,5 +1,9 @@
 const mongoose = require('mongoose')
 const {
+  buildCoverImageCleanupUpdate
+} = require('./coverImageCleanupStateService')
+const coverImageTempFileService = require('./coverImageTempFileService')
+const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
 } = require('../../../utils/language')
@@ -438,17 +442,31 @@ function normalizeRequest(requestInput, target) {
 }
 
 function validateExecutableRequest(jobType, request) {
-  if (
-    jobType !== TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION &&
-    jobType !== TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION
-  ) {
+  if (jobType !== TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION) {
+    if (jobType !== TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION) {
+      return
+    }
+
+    if (!Array.isArray(request.entries) || request.entries.length === 0) {
+      throw new ApiError(
+        ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+        '通用内容翻译后台任务必须提供 request.entries',
+        'request.entries',
+        400
+      )
+    }
     return
   }
 
-  if (!Array.isArray(request.entries) || request.entries.length === 0) {
+  const shouldTranslateCoverImage =
+    request.options && request.options.translateCoverImage === true
+  if (
+    (!Array.isArray(request.entries) || request.entries.length === 0) &&
+    !shouldTranslateCoverImage
+  ) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
-      '文章翻译和通用内容翻译后台任务必须提供 request.entries',
+      '文章翻译后台任务必须提供 request.entries，或启用 request.options.translateCoverImage',
       'request.entries',
       400
     )
@@ -538,6 +556,16 @@ function parseBooleanFilter(value) {
   return null
 }
 
+function appendAndCondition(params, condition) {
+  if (!condition || typeof condition !== 'object') {
+    return
+  }
+  if (!Array.isArray(params.$and)) {
+    params.$and = []
+  }
+  params.$and.push(condition)
+}
+
 function buildListParams(query = {}) {
   const params = {}
   const includeDeleted = parseBooleanFilter(query.includeDeleted)
@@ -576,10 +604,12 @@ function buildListParams(query = {}) {
       query.targetLanguageCode,
       'targetLanguageCode'
     )
-    params.$or = [
-      { 'target.languageCode': languageCode },
-      { 'target.languageCodes': languageCode }
-    ]
+    appendAndCondition(params, {
+      $or: [
+        { 'target.languageCode': languageCode },
+        { 'target.languageCodes': languageCode }
+      ]
+    })
   }
 
   if (query.keyword) {
@@ -595,12 +625,7 @@ function buildListParams(query = {}) {
         { 'progress.currentStep': keywordRegExp },
         { 'failure.errorMessage': keywordRegExp }
       ]
-      if (params.$or) {
-        params.$and = [{ $or: params.$or }, { $or: keywordOr }]
-        delete params.$or
-      } else {
-        params.$or = keywordOr
-      }
+      appendAndCondition(params, { $or: keywordOr })
     }
   }
 
@@ -665,15 +690,9 @@ async function getQueuePositionMap(list) {
 function attachRuntimeDisplay(item, queuePositionMap) {
   const now = new Date()
   const runtime = item.runtime || {}
-  const failure = item.failure || {}
   let runtimeState = ''
   if (item.status === TRANSLATION_JOB_STATUS.RUNNING) {
-    if (failure.errorCode && failure.retryable === false) {
-      runtimeState = '执行失败'
-    } else if (
-      runtime.leaseExpiresAt &&
-      new Date(runtime.leaseExpiresAt) > now
-    ) {
+    if (runtime.leaseExpiresAt && new Date(runtime.leaseExpiresAt) > now) {
       runtimeState = '心跳正常'
     } else if (runtime.recovering) {
       runtimeState = '恢复重试中'
@@ -779,6 +798,9 @@ function assertQueueActive(job, actionName) {
 }
 
 function isStoppedFailedJob(job) {
+  if (job.status === TRANSLATION_JOB_STATUS.FAILED) {
+    return true
+  }
   if (job.status !== TRANSLATION_JOB_STATUS.RUNNING) {
     return false
   }
@@ -831,12 +853,45 @@ async function deleteTranslationJob(body = {}, options = {}) {
   job.queueControl.deleteRequested = true
   job.storage.deletedAt = new Date()
   job.storage.deletedBy = normalizeAdminSnapshot(options.admin)
-  job.storage.cleanupRequested = true
-  job.storage.cleanupStatus = 'cleanup-requested'
   job.updatedBy = normalizeAdminSnapshot(options.admin)
-  appendLog(job, '任务已删除并标记为等待清理大字段', 'info', 'delete')
+  let deleteMessage = '任务已删除'
+  let deleteLogLevel = 'info'
+  try {
+    const cleanupResult =
+      await coverImageTempFileService.cleanupJobCoverImageTempFiles(job, {
+        ignoreMissing: true
+      })
+    const cleanupUpdate = buildCoverImageCleanupUpdate(
+      job.result,
+      cleanupResult
+    )
+    job.result = job.result || {}
+    job.result.coverImageArtifacts = cleanupUpdate.coverImageArtifacts
+    job.result.previewEntries = cleanupUpdate.previewEntries
+    job.storage.cleanupStatus = cleanupResult.cleanupStatus
+    job.storage.cleanupRequested = cleanupResult.cleanupStatus !== 'cleaned'
+    if (cleanupResult.cleanupStatus === 'cleaned') {
+      deleteMessage = '任务已删除，并已清理封面图缓存图片'
+    } else if (cleanupResult.cleanupStatus === 'partial-cleaned') {
+      deleteMessage = '任务已删除，但封面图缓存图片仅部分清理'
+      deleteLogLevel = 'warn'
+    } else {
+      deleteMessage = '任务已删除，但封面图缓存图片清理失败'
+      deleteLogLevel = 'warn'
+    }
+  } catch (error) {
+    job.storage.cleanupRequested = true
+    job.storage.cleanupStatus = 'cleanup-failed'
+    deleteMessage = `任务已删除，但封面图缓存图片清理失败：${error.message}`
+    deleteLogLevel = 'warn'
+  }
+  appendLog(job, deleteMessage, deleteLogLevel, 'delete')
   await job.save()
-  return { id: job._id, deletedAt: job.storage.deletedAt }
+  return {
+    id: job._id,
+    deletedAt: job.storage.deletedAt,
+    cleanupStatus: job.storage.cleanupStatus
+  }
 }
 
 async function rejectTranslationJob(body = {}, options = {}) {
@@ -1285,6 +1340,11 @@ async function completeRunningTranslationJobForReview(options = {}) {
         'result.relatedResults': resultData.relatedResults || [],
         'result.languageResults': resultData.languageResults || [],
         'result.translationPostMap': resultData.translationPostMap || {},
+        'result.coverImageArtifacts': resultData.coverImageArtifacts || [],
+        'result.coverImageGenerationMap':
+          resultData.coverImageGenerationMap || {},
+        'result.coverImageRecognitionMap':
+          resultData.coverImageRecognitionMap || {},
         'result.sourceSnapshotId': toObjectId(
           resultData.sourceSnapshotId,
           'result.sourceSnapshotId'
@@ -1354,8 +1414,13 @@ async function failRunningTranslationJob(options = {}) {
     },
     {
       $set: {
+        status: retryable
+          ? TRANSLATION_JOB_STATUS.RUNNING
+          : TRANSLATION_JOB_STATUS.FAILED,
+        'queueControl.active': retryable,
         'runtime.lockedBy': '',
         'runtime.workerId': '',
+        'runtime.finishedAt': retryable ? null : now,
         'runtime.heartbeatAt': now,
         'runtime.leaseExpiresAt': new Date(now.getTime() - 1000),
         'runtime.recovering': retryable,
@@ -1368,6 +1433,10 @@ async function failRunningTranslationJob(options = {}) {
         'failure.retryable': retryable,
         'failure.attempts': currentAttemptNo,
         'failure.lastFailedAt': now,
+        'progress.currentStage': 'Failure',
+        'progress.currentStep': retryable
+          ? `任务执行失败，等待后台自动重试：${errorSummary.message}`
+          : `任务执行失败：${errorSummary.message}`,
         'attempts.$[attempt].status': getAttemptStatus(options.error),
         'attempts.$[attempt].finishedAt': now,
         'attempts.$[attempt].error': errorSummary

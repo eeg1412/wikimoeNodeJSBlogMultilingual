@@ -422,6 +422,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/ai/streamTranslatePost')
   },
   {
+    path: '/translation/post/ai-cover-image/adopt',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/ai/adoptPreviewCoverImage')
+  },
+  {
     path: '/translation/ai/translate-stream',
     method: 'post',
     middleware: [checkAuth],
@@ -480,6 +486,18 @@ const multilingualAdminRouteSetting = [
     method: 'post',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/job/apply')
+  },
+  {
+    path: '/translation/job/cover-image/adopt',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/coverImageAdopt')
+  },
+  {
+    path: '/translation/job/cover-image/cleanup',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/coverImageCleanup')
   },
   {
     path: '/translation/job/retry',

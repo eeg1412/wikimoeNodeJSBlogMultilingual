@@ -9,105 +9,126 @@
 
     <el-skeleton v-if="loading" :rows="8" animated />
     <el-form v-else :model="settingsForm" label-width="180px">
-      <div
-        v-for="group in fieldGroupOptions"
-        :key="group.value"
-        class="config-border-item ai-settings-group"
-      >
-        <div class="config-border-item-title mb10">{{ group.label }}</div>
-        <el-row :gutter="18">
-          <el-col
-            v-for="field in getFieldListByGroup(group.value)"
-            :key="field.name"
-            :xs="24"
-            :md="getColumnSpan(field)"
-          >
-            <el-form-item :label="field.label">
-              <el-switch
-                v-if="field.type === 'boolean'"
-                v-model="settingsForm[field.name]"
-              />
-              <el-input-number
-                v-else-if="field.type === 'number' || field.type === 'float'"
-                v-model="settingsForm[field.name]"
-                controls-position="right"
-                :min="field.min"
-                :max="field.max"
-                :step="getNumberStep(field)"
-                :precision="getNumberPrecision(field)"
-              />
-              <el-radio-group
-                v-else-if="field.type === 'radio'"
-                v-model="settingsForm[field.name]"
-              >
-                <el-radio
-                  v-for="option in field.options || []"
-                  :key="option.value"
-                  :value="option.value"
+      <template v-for="group in fieldGroupOptions" :key="group.value">
+        <el-divider
+          v-if="isImageGenerationSectionStart(group)"
+          content-position="left"
+          class="ai-settings-section-divider"
+        >
+          图像生成
+        </el-divider>
+        <el-divider
+          v-if="isImageRecognitionSectionStart(group)"
+          content-position="left"
+          class="ai-settings-section-divider"
+        >
+          图像识别
+        </el-divider>
+        <div class="config-border-item ai-settings-group">
+          <div class="config-border-item-title mb10">{{ group.label }}</div>
+          <el-row :gutter="18">
+            <el-col
+              v-for="field in getFieldListByGroup(group.value)"
+              :key="field.name"
+              :xs="24"
+              :md="getColumnSpan(field)"
+            >
+              <el-form-item :label="field.label">
+                <el-switch
+                  v-if="field.type === 'boolean'"
+                  v-model="settingsForm[field.name]"
+                />
+                <el-input-number
+                  v-else-if="field.type === 'number' || field.type === 'float'"
+                  v-model="settingsForm[field.name]"
+                  controls-position="right"
+                  :min="field.min"
+                  :max="field.max"
+                  :step="getNumberStep(field)"
+                  :precision="getNumberPrecision(field)"
+                />
+                <el-radio-group
+                  v-else-if="field.type === 'radio'"
+                  v-model="settingsForm[field.name]"
                 >
-                  {{ option.label }}
-                </el-radio>
-              </el-radio-group>
-              <el-select
-                v-else-if="isSelectField(field)"
-                v-model="settingsForm[field.name]"
-                filterable
-                :allow-create="Boolean(field.allowCreate)"
-                default-first-option
-                class="w_10"
-              >
-                <el-option
-                  v-for="option in field.options || []"
-                  :key="option.value"
-                  :label="option.label"
-                  :value="option.value"
+                  <el-radio
+                    v-for="option in field.options || []"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </el-radio>
+                </el-radio-group>
+                <el-select
+                  v-else-if="isSelectField(field)"
+                  v-model="settingsForm[field.name]"
+                  filterable
+                  :allow-create="Boolean(field.allowCreate)"
+                  default-first-option
+                  class="w_10"
                 >
-                  <span>{{ option.label }}</span>
-                  <span v-if="option.deprecatedAt" class="ai-model-deprecated">
-                    将于 {{ option.deprecatedAt }} 弃用
-                  </span>
-                </el-option>
-              </el-select>
-              <el-input
-                v-else-if="field.type === 'textarea'"
-                v-model="settingsForm[field.name]"
-                type="textarea"
-                :rows="5"
-              />
-              <div
-                v-else-if="field.type === 'languagePromptMap'"
-                class="language-prompt-list"
-              >
-                <div
-                  v-for="language in languageOptions"
-                  :key="language.value"
-                  class="language-prompt-item"
-                >
-                  <div class="language-prompt-title">
-                    {{ language.label }}
-                    <span class="language-prompt-code">
-                      {{ language.value }}
+                  <el-option
+                    v-for="option in field.options || []"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  >
+                    <span>{{ option.label }}</span>
+                    <span
+                      v-if="option.deprecatedAt"
+                      class="ai-model-deprecated"
+                    >
+                      将于 {{ option.deprecatedAt }} 弃用
                     </span>
+                    <span v-if="option.tag" class="ai-model-tag">
+                      {{ option.tag }}
+                    </span>
+                  </el-option>
+                </el-select>
+                <el-input
+                  v-else-if="field.type === 'textarea'"
+                  v-model="settingsForm[field.name]"
+                  type="textarea"
+                  :rows="5"
+                />
+                <div
+                  v-else-if="field.type === 'languagePromptMap'"
+                  class="language-prompt-list"
+                >
+                  <div
+                    v-for="language in languageOptions"
+                    :key="language.value"
+                    class="language-prompt-item"
+                  >
+                    <div class="language-prompt-title">
+                      {{ language.label }}
+                      <span class="language-prompt-code">
+                        {{ language.value }}
+                      </span>
+                    </div>
+                    <el-input
+                      v-model="settingsForm[field.name][language.value]"
+                      type="textarea"
+                      :rows="4"
+                    />
                   </div>
-                  <el-input
-                    v-model="settingsForm[field.name][language.value]"
-                    type="textarea"
-                    :rows="4"
-                  />
                 </div>
-              </div>
-              <el-input
-                v-else-if="field.type === 'password'"
-                v-model="settingsForm[field.name]"
-                type="password"
-                show-password
-                autocomplete="off"
-              />
-              <el-input v-else v-model="settingsForm[field.name]" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </div>
+                <el-input
+                  v-else-if="field.type === 'password'"
+                  v-model="settingsForm[field.name]"
+                  type="password"
+                  show-password
+                  autocomplete="off"
+                />
+                <el-input v-else v-model="settingsForm[field.name]" />
+                <div v-if="field.helpText" class="ai-field-help">
+                  {{ field.helpText }}
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+      </template>
 
       <el-form-item class="ai-settings-actions">
         <el-button @click="getAiSettings(false)">刷新</el-button>
@@ -120,7 +141,7 @@
 </template>
 
 <script>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
 import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
@@ -130,8 +151,34 @@ const FIELD_GROUP_OPTIONS = [
   { label: 'DeepSeek 连接', value: 'deepseek' },
   { label: '模型与输出', value: 'model' },
   { label: '请求控制', value: 'request' },
-  { label: '默认提示词', value: 'prompt' }
+  { label: '默认提示词', value: 'prompt' },
+  { label: '图像生成服务', value: 'imageProvider' },
+  { label: 'OpenAI 图像生成', value: 'openaiImage' },
+  { label: 'Nano Banana 图像生成', value: 'nanoBananaImage' },
+  { label: '图像生成请求', value: 'imageRequest' },
+  { label: '图像生成提示词', value: 'imagePrompt' },
+  { label: '图像识别服务', value: 'imageRecognitionProvider' },
+  { label: 'OpenAI 图像识别', value: 'openaiImageRecognition' },
+  { label: 'Gemini 图像识别', value: 'geminiImageRecognition' },
+  { label: '图像识别请求', value: 'imageRecognitionRequest' },
+  { label: '图像识别提示词', value: 'imageRecognitionPrompt' }
 ]
+
+const IMAGE_PROVIDER_GROUP_MAP = {
+  openai: 'openaiImage',
+  'nano-banana': 'nanoBananaImage'
+}
+
+const IMAGE_PROVIDER_GROUPS = Object.values(IMAGE_PROVIDER_GROUP_MAP)
+
+const IMAGE_RECOGNITION_PROVIDER_GROUP_MAP = {
+  openai: 'openaiImageRecognition',
+  gemini: 'geminiImageRecognition'
+}
+
+const IMAGE_RECOGNITION_PROVIDER_GROUPS = Object.values(
+  IMAGE_RECOGNITION_PROVIDER_GROUP_MAP
+)
 
 export default {
   name: 'MultilingualAiSettings',
@@ -140,8 +187,70 @@ export default {
     const saving = ref(false)
     const fieldList = ref([])
     const settingsForm = reactive({})
-    const fieldGroupOptions = FIELD_GROUP_OPTIONS
+    const fieldGroupOptions = computed(() => {
+      return FIELD_GROUP_OPTIONS.filter(group => isVisibleFieldGroup(group))
+    })
     const languageOptions = SUPPORTED_LANGUAGE_OPTIONS
+
+    function getSelectedImageProvider() {
+      const provider = String(settingsForm.imageGenerationProvider || '').trim()
+      if (
+        Object.prototype.hasOwnProperty.call(
+          IMAGE_PROVIDER_GROUP_MAP,
+          provider
+        )
+      ) {
+        return provider
+      }
+      return 'openai'
+    }
+
+    function getSelectedImageRecognitionProvider() {
+      const provider = String(settingsForm.imageRecognitionProvider || '').trim()
+      if (
+        Object.prototype.hasOwnProperty.call(
+          IMAGE_RECOGNITION_PROVIDER_GROUP_MAP,
+          provider
+        )
+      ) {
+        return provider
+      }
+      return 'openai'
+    }
+
+    function isImageProviderGroup(groupValue) {
+      return IMAGE_PROVIDER_GROUPS.includes(groupValue)
+    }
+
+    function isImageRecognitionProviderGroup(groupValue) {
+      return IMAGE_RECOGNITION_PROVIDER_GROUPS.includes(groupValue)
+    }
+
+    function isVisibleFieldGroup(group) {
+      if (!group) {
+        return true
+      }
+
+      if (isImageProviderGroup(group.value)) {
+        const provider = getSelectedImageProvider()
+        return IMAGE_PROVIDER_GROUP_MAP[provider] === group.value
+      }
+
+      if (isImageRecognitionProviderGroup(group.value)) {
+        const provider = getSelectedImageRecognitionProvider()
+        return IMAGE_RECOGNITION_PROVIDER_GROUP_MAP[provider] === group.value
+      }
+
+      return true
+    }
+
+    function isImageGenerationSectionStart(group) {
+      return group && group.value === 'imageProvider'
+    }
+
+    function isImageRecognitionSectionStart(group) {
+      return group && group.value === 'imageRecognitionProvider'
+    }
 
     function getDefaultValue(field) {
       if (field.type === 'boolean') {
@@ -188,7 +297,12 @@ export default {
     }
 
     function getFieldListByGroup(group) {
-      return fieldList.value.filter(field => field.group === group)
+      return fieldList.value.filter(field => {
+        if (field.hiddenInSettings === true) {
+          return false
+        }
+        return field.group === group
+      })
     }
 
     function getColumnSpan(field) {
@@ -262,6 +376,8 @@ export default {
       getAiSettings,
       getColumnSpan,
       getFieldListByGroup,
+      isImageGenerationSectionStart,
+      isImageRecognitionSectionStart,
       getNumberPrecision,
       getNumberStep,
       isSelectField,
@@ -284,6 +400,10 @@ export default {
   margin-bottom: 18px;
 }
 
+.ai-settings-section-divider {
+  margin: 8px 0 22px;
+}
+
 .ai-settings-actions {
   margin-top: 18px;
 }
@@ -293,6 +413,22 @@ export default {
   margin-left: 12px;
   color: var(--el-color-warning);
   font-size: 12px;
+}
+
+.ai-model-tag {
+  float: right;
+  margin-left: 12px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.ai-field-help {
+  width: 100%;
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .language-prompt-list {

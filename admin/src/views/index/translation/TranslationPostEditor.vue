@@ -797,6 +797,203 @@
               class="w_10"
             />
 
+            <div class="translation-json-group ai-cover-translation-group">
+              <div class="translation-json-group-header">
+                <div class="translation-json-group-heading">
+                  <div class="translation-json-group-title">
+                    {{ form.type === 2 ? '封面媒体处理' : '封面图处理' }}
+                  </div>
+                  <div class="translation-dialog-intro-text">
+                    直接对照当前语言内容与源内容的封面图，决定是否识别并翻译图中标题。
+                  </div>
+                </div>
+                <div class="translation-json-group-count">1 项</div>
+              </div>
+
+              <div
+                class="translation-json-entry-list ai-cover-translation-entry-list"
+              >
+                <el-checkbox
+                  v-model="aiTranslateCoverImage"
+                  :disabled="isAiBusy"
+                  class="translation-json-entry"
+                >
+                  <div class="ai-cover-translation-entry-body">
+                    <div class="ai-cover-translation-entry-title">
+                      {{ form.type === 2 ? '封面媒体标题' : '封面图标题' }}
+                    </div>
+                    <div class="translation-entry-preview-rows">
+                      <div class="translation-entry-preview-row">
+                        <div class="translation-entry-preview-label">
+                          当前语言下的内容
+                        </div>
+                        <div
+                          class="translation-entry-preview-value ai-cover-entry-preview-value"
+                        >
+                          <div
+                            class="cover-image-list ai-cover-translation-list"
+                          >
+                            <div
+                              v-for="(
+                                element, index
+                              ) in currentAiCoverImageList"
+                              :key="element._id || element.id || index"
+                              class="post-cover-image-item"
+                            >
+                              <button
+                                v-if="
+                                  isImageAttachment(element) &&
+                                  getImagePreviewUrl(element)
+                                "
+                                type="button"
+                                class="post-cover-image-preview-trigger"
+                                title="打开预览"
+                                @click="openMediaPreview(element)"
+                              >
+                                <el-image
+                                  :src="getImagePreviewUrl(element)"
+                                  fit="contain"
+                                  style="width: 100%; height: 100%"
+                                />
+                              </button>
+                              <button
+                                v-else-if="
+                                  isVideoAttachment(element) &&
+                                  getVideoPreviewUrl(element)
+                                "
+                                type="button"
+                                class="post-cover-image-preview-trigger"
+                                title="播放视频"
+                                @click="openMediaPreview(element)"
+                              >
+                                <el-image
+                                  v-if="getVideoCoverUrl(element)"
+                                  :src="getVideoCoverUrl(element)"
+                                  fit="cover"
+                                  style="width: 100%; height: 100%"
+                                />
+                                <div v-else class="attachment-cover-empty">
+                                  无封面
+                                </div>
+                              </button>
+                              <div v-else class="attachment-file-card">
+                                <el-icon size="28"><Document /></el-icon>
+                                <div>{{ getRelationName(element) }}</div>
+                              </div>
+                              <div
+                                v-if="element.is360Panorama"
+                                class="attachment-360-icon"
+                              >
+                                360°
+                              </div>
+                              <div
+                                v-if="isVideoAttachment(element)"
+                                class="attachment-play-icon"
+                              >
+                                <el-icon><VideoPlay /></el-icon>
+                              </div>
+                            </div>
+                            <span
+                              v-if="currentAiCoverImageList.length === 0"
+                              class="translation-media-empty cGray666"
+                            >
+                              {{
+                                form.type === 2
+                                  ? '未关联媒体内容'
+                                  : '未关联封面图'
+                              }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="translation-entry-preview-row">
+                        <div class="translation-entry-preview-label">
+                          源内容
+                        </div>
+                        <div
+                          class="translation-entry-preview-value ai-cover-entry-preview-value"
+                        >
+                          <div
+                            class="cover-image-list ai-cover-translation-list"
+                          >
+                            <div
+                              v-for="(element, index) in sourceAiCoverImageList"
+                              :key="element._id || element.id || index"
+                              class="post-cover-image-item"
+                            >
+                              <button
+                                v-if="
+                                  isImageAttachment(element) &&
+                                  getImagePreviewUrl(element)
+                                "
+                                type="button"
+                                class="post-cover-image-preview-trigger"
+                                title="打开预览"
+                                @click="openMediaPreview(element)"
+                              >
+                                <el-image
+                                  :src="getImagePreviewUrl(element)"
+                                  fit="contain"
+                                  style="width: 100%; height: 100%"
+                                />
+                              </button>
+                              <button
+                                v-else-if="
+                                  isVideoAttachment(element) &&
+                                  getVideoPreviewUrl(element)
+                                "
+                                type="button"
+                                class="post-cover-image-preview-trigger"
+                                title="播放视频"
+                                @click="openMediaPreview(element)"
+                              >
+                                <el-image
+                                  v-if="getVideoCoverUrl(element)"
+                                  :src="getVideoCoverUrl(element)"
+                                  fit="cover"
+                                  style="width: 100%; height: 100%"
+                                />
+                                <div v-else class="attachment-cover-empty">
+                                  无封面
+                                </div>
+                              </button>
+                              <div v-else class="attachment-file-card">
+                                <el-icon size="28"><Document /></el-icon>
+                                <div>{{ getRelationName(element) }}</div>
+                              </div>
+                              <div
+                                v-if="element.is360Panorama"
+                                class="attachment-360-icon"
+                              >
+                                360°
+                              </div>
+                              <div
+                                v-if="isVideoAttachment(element)"
+                                class="attachment-play-icon"
+                              >
+                                <el-icon><VideoPlay /></el-icon>
+                              </div>
+                            </div>
+                            <span
+                              v-if="sourceAiCoverImageList.length === 0"
+                              class="translation-media-empty cGray666"
+                            >
+                              {{
+                                form.type === 2
+                                  ? '未关联媒体内容'
+                                  : '未关联封面图'
+                              }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </el-checkbox>
+              </div>
+            </div>
+
             <el-form class="ai-translation-prompt-form" label-width="110px">
               <el-form-item label="此次提示词">
                 <el-input
@@ -839,7 +1036,7 @@
 
             <el-descriptions class="mb20" :column="3" border>
               <el-descriptions-item label="可写入变更">
-                {{ aiImportPreview.changeCount }}
+                {{ aiImportPreviewTotalChangeCount }}
               </el-descriptions-item>
               <el-descriptions-item label="跳过条目">
                 {{ aiImportPreview.skippedCount }}
@@ -860,6 +1057,93 @@
                 class="translation-json-warning-item"
               >
                 {{ warning }}
+              </div>
+            </div>
+
+            <div
+              v-if="aiImportPreviewCoverEntries.length > 0"
+              class="translation-import-preview-group"
+            >
+              <div class="translation-json-group-header">
+                <div class="translation-json-group-heading">
+                  <div class="translation-json-group-title">封面图</div>
+                </div>
+                <div class="translation-json-group-count">
+                  {{ aiImportPreviewCoverEntries.length }} 项
+                </div>
+              </div>
+              <div
+                v-for="item in aiImportPreviewCoverEntries"
+                :key="item.entryKey || item.artifactId"
+                class="translation-import-preview-item"
+              >
+                <div class="translation-import-preview-item-title">
+                  <div class="translation-import-preview-cover-header">
+                    <span>封面图翻译</span>
+                    <el-tag
+                      :type="getAiCoverPreviewStatusTagType(item)"
+                      effect="plain"
+                    >
+                      {{ getAiCoverPreviewStatusText(item) }}
+                    </el-tag>
+                  </div>
+                </div>
+                <div
+                  v-if="item.warningMessage"
+                  class="translation-json-warning-item"
+                >
+                  {{ item.warningMessage }}
+                </div>
+                <div class="translation-import-preview-columns">
+                  <div class="translation-import-preview-panel">
+                    <div class="translation-import-preview-panel-title">
+                      源封面图
+                    </div>
+                    <div class="translation-import-preview-cover-card">
+                      <el-image
+                        v-if="item.sourceCoverUrl"
+                        :src="item.sourceCoverUrl"
+                        fit="cover"
+                        :preview-src-list="[item.sourceCoverUrl]"
+                        preview-teleported
+                        class="translation-import-preview-cover-image"
+                      />
+                      <div
+                        v-else
+                        class="translation-import-preview-cover-empty"
+                      >
+                        未找到源封面图
+                      </div>
+                    </div>
+                    <pre class="translation-import-preview-raw">{{
+                      item.sourceTitle || '未提供源标题'
+                    }}</pre>
+                  </div>
+                  <div class="translation-import-preview-panel">
+                    <div class="translation-import-preview-panel-title">
+                      AI 翻译后
+                    </div>
+                    <div class="translation-import-preview-cover-card">
+                      <el-image
+                        v-if="item.generatedCoverUrl"
+                        :src="item.generatedCoverUrl"
+                        fit="cover"
+                        :preview-src-list="[item.generatedCoverUrl]"
+                        preview-teleported
+                        class="translation-import-preview-cover-image"
+                      />
+                      <div
+                        v-else
+                        class="translation-import-preview-cover-empty"
+                      >
+                        {{ item.warningMessage || '未生成封面图' }}
+                      </div>
+                    </div>
+                    <pre class="translation-import-preview-raw">{{
+                      item.targetTitle || form.title || '未提供目标标题'
+                    }}</pre>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -972,7 +1256,7 @@
           v-if="!aiImportPreview"
           type="primary"
           plain
-          :disabled="isAiBusy || aiEntryList.length === 0"
+          :disabled="isAiBusy || !canCreateAiTranslationJob"
           @click="createAiTranslationJob"
         >
           创建后台任务
@@ -981,7 +1265,7 @@
           v-if="!aiImportPreview"
           type="primary"
           :loading="aiTranslating"
-          :disabled="isAiBusy || aiEntryList.length === 0"
+          :disabled="isAiBusy || !canStartAiTranslation"
           @click="requestAiTranslation"
         >
           开始翻译
@@ -990,7 +1274,7 @@
           v-else
           type="primary"
           :loading="aiApplying"
-          :disabled="isAiBusy || aiImportPreview.changeCount === 0"
+          :disabled="isAiBusy || aiImportPreviewTotalChangeCount === 0"
           @click="confirmAiTranslationImport"
         >
           确认写入
@@ -1196,6 +1480,8 @@ import {
   parseTranslationImportPayload
 } from '@/utils/translationJson'
 import { normalizeTagRecord } from '@/utils/tagName'
+
+const AI_COVER_IMAGE_ENTRY_TYPE = 'coverImageTranslation'
 
 const AUTHOR_RELATION_FIELD = {
   label: '作者',
@@ -1570,8 +1856,10 @@ export default {
     const aiPrompt = ref('')
     const aiBaseMode = ref('source')
     const aiSourceLanguageCode = ref('')
+    const aiTranslateCoverImage = ref(false)
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
+    const sourceReferencePost = ref(null)
     const aiStreamStatusList = ref([])
     const aiStreamContent = ref('')
     const aiStreamReasoning = ref('')
@@ -1658,10 +1946,40 @@ export default {
     const aiImportPreviewGroups = computed(() => {
       return groupTranslationEntryList(aiImportPreview.value?.changeList || [])
     })
+    const aiImportPreviewCoverEntries = computed(() => {
+      return getAiImportPreviewCoverEntries(aiImportPreview.value)
+    })
+    const aiImportPreviewTotalChangeCount = computed(() => {
+      return getAiImportPreviewTotalChangeCount(aiImportPreview.value)
+    })
+    const currentAiCoverImageList = computed(() => {
+      if (!Array.isArray(relationRecords.coverImages)) {
+        return []
+      }
+      return relationRecords.coverImages.filter(Boolean)
+    })
+    const sourceAiCoverImageList = computed(() => {
+      if (!Array.isArray(sourceReferencePost.value?.coverImages)) {
+        return []
+      }
+      return sourceReferencePost.value.coverImages.filter(Boolean)
+    })
     const creatableAiSkippedEntries = computed(() => {
       return aiSkippedEntries.value.filter(item => {
         return canCreateSkippedTranslation(item)
       })
+    })
+    const hasSelectedAiEntries = computed(() => {
+      return selectedAiEntryIds.value.length > 0
+    })
+    const hasSelectedAiCoverImage = computed(() => {
+      return aiTranslateCoverImage.value === true
+    })
+    const canCreateAiTranslationJob = computed(() => {
+      return hasSelectedAiEntries.value || hasSelectedAiCoverImage.value
+    })
+    const canStartAiTranslation = computed(() => {
+      return canCreateAiTranslationJob.value
     })
     const isAiBusy = computed(() => {
       return aiLoading.value || aiTranslating.value || aiApplying.value
@@ -1744,6 +2062,7 @@ export default {
 
       const sourceSnapshotId = getSourceSnapshotId()
       if (!sourceSnapshotId) {
+        sourceReferencePost.value = null
         return {
           entries: [],
           skippedEntries: []
@@ -1756,11 +2075,14 @@ export default {
       const sourceDetail = response.data.data || {}
       const sourcePost = sourceDetail.post
       if (!sourcePost) {
+        sourceReferencePost.value = null
         return {
           entries: [],
           skippedEntries: []
         }
       }
+
+      sourceReferencePost.value = sourcePost
 
       const sourceEntries = buildSourceSnapshotEntries(sourcePost)
       const targetEntries = buildTranslationEntries({ includeEmpty: true })
@@ -2744,6 +3066,8 @@ export default {
         )
       }
 
+      await applyAiPreviewCoverImages(preview)
+
       await getPostDetail()
     }
 
@@ -2790,8 +3114,10 @@ export default {
       aiPrompt.value = ''
       aiBaseMode.value = 'source'
       aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
+      aiTranslateCoverImage.value = false
       aiImportPreview.value = null
       sourceReferenceEntries.value = []
+      sourceReferencePost.value = null
       aiStreamStatusList.value = []
       aiStreamContent.value = ''
       aiStreamReasoning.value = ''
@@ -2984,8 +3310,18 @@ export default {
       aiBaseMode.value = 'source'
       aiDialogVisible.value = true
       refreshAiTranslationCandidates().then(() => {
-        if (aiEntryList.value.length === 0) {
+        if (
+          aiEntryList.value.length === 0 &&
+          sourceAiCoverImageList.value.length === 0
+        ) {
           ElMessage.warning('没有找到可提交给 AI 的源内容条目')
+          return
+        }
+        if (
+          aiEntryList.value.length === 0 &&
+          sourceAiCoverImageList.value.length > 0
+        ) {
+          ElMessage.info('当前没有可翻译正文条目，仍可仅翻译封面图')
         }
       })
     }
@@ -3006,6 +3342,103 @@ export default {
 
     function clearAiEntries() {
       selectedAiEntryIds.value = []
+    }
+
+    function getAiImportPreviewCoverEntries(preview) {
+      if (!Array.isArray(preview?.coverImagePreviewEntries)) {
+        return []
+      }
+      return preview.coverImagePreviewEntries.filter(Boolean)
+    }
+
+    function isGeneratedAiCoverPreviewEntry(entry) {
+      return Boolean(
+        entry &&
+        entry.entryType === AI_COVER_IMAGE_ENTRY_TYPE &&
+        entry.status === 'generated' &&
+        entry.generatedCoverUrl
+      )
+    }
+
+    function getAiImportPreviewTotalChangeCount(preview) {
+      const textChangeCount = Number(preview?.changeCount || 0)
+      const coverImageChangeCount = getAiImportPreviewCoverEntries(
+        preview
+      ).filter(entry => {
+        return isGeneratedAiCoverPreviewEntry(entry)
+      }).length
+      return textChangeCount + coverImageChangeCount
+    }
+
+    function normalizeAiCoverWarningList(warningList) {
+      if (!Array.isArray(warningList)) {
+        return []
+      }
+      return warningList
+        .map(item => {
+          if (typeof item === 'string') {
+            return item.trim()
+          }
+          if (item && typeof item.message === 'string') {
+            return item.message.trim()
+          }
+          return ''
+        })
+        .filter(Boolean)
+    }
+
+    function buildAiImportPreview(data, referenceEntries) {
+      const preview = buildTranslationImportPreview({
+        parsedPayload: data.payload,
+        currentEntries: buildTranslationEntries({ includeEmpty: true }),
+        form,
+        referenceEntries
+      })
+      const coverImagePreviewEntries = Array.isArray(
+        data.coverImagePreviewEntries
+      )
+        ? data.coverImagePreviewEntries.filter(Boolean)
+        : []
+      const coverImageArtifacts = Array.isArray(data.coverImageArtifacts)
+        ? data.coverImageArtifacts.filter(Boolean)
+        : []
+      const coverImageWarnings = normalizeAiCoverWarningList(
+        data.coverImageWarnings
+      )
+      const mergedWarningList = preview.warningList.concat(coverImageWarnings)
+      const coverImageChangeCount = coverImagePreviewEntries.filter(entry => {
+        return isGeneratedAiCoverPreviewEntry(entry)
+      }).length
+      return {
+        ...preview,
+        coverImagePreviewEntries,
+        coverImageArtifacts,
+        coverImageWarnings,
+        coverImageChangeCount,
+        totalChangeCount: preview.changeCount + coverImageChangeCount,
+        warningList: mergedWarningList,
+        skippedCount: mergedWarningList.length + preview.aiSkipList.length
+      }
+    }
+
+    function getAiCoverPreviewStatusText(entry) {
+      if (entry?.status === 'generated') {
+        if (entry.reused) {
+          return '已复用'
+        }
+        return '已生成'
+      }
+      if (entry?.warningMessage) {
+        return '未生成'
+      }
+      return '待处理'
+    }
+
+    function getAiCoverPreviewStatusTagType(entry) {
+      if (entry?.status === 'generated') {
+        return 'success'
+      }
+      return 'warning'
     }
 
     function resetAiTranslationPreview() {
@@ -3074,14 +3507,9 @@ export default {
         }
       }
       if (eventData.eventName === 'result') {
-        const preview = buildTranslationImportPreview({
-          parsedPayload: data.payload,
-          currentEntries: buildTranslationEntries({ includeEmpty: true }),
-          form,
-          referenceEntries
-        })
+        const preview = buildAiImportPreview(data, referenceEntries)
         aiImportPreview.value = preview
-        if (preview.changeCount === 0) {
+        if (getAiImportPreviewTotalChangeCount(preview) === 0) {
           ElMessage.info('AI 返回结果中没有可写入的变更')
         }
       }
@@ -3143,7 +3571,10 @@ export default {
         ElMessage.warning('正在加载翻译用文章，请稍候')
         return
       }
-      if (selectedAiEntryIds.value.length === 0) {
+      if (
+        selectedAiEntryIds.value.length === 0 &&
+        !aiTranslateCoverImage.value
+      ) {
         ElMessage.warning('请至少选择一项翻译内容')
         return
       }
@@ -3178,7 +3609,8 @@ export default {
               sourceLanguageCode: aiSourceLanguageCode.value,
               targetLanguageCode: form.languageCode,
               prompt: aiPrompt.value,
-              entries: selectedEntries
+              entries: selectedEntries,
+              translateCoverImage: aiTranslateCoverImage.value
             })
           }
         )
@@ -3203,7 +3635,10 @@ export default {
     }
 
     async function createAiTranslationJob() {
-      if (selectedAiEntryIds.value.length === 0) {
+      if (
+        selectedAiEntryIds.value.length === 0 &&
+        !aiTranslateCoverImage.value
+      ) {
         ElMessage.warning('请至少选择一项翻译内容')
         return
       }
@@ -3239,6 +3674,9 @@ export default {
           request: {
             prompt: aiPrompt.value,
             baseMode: aiBaseMode.value,
+            options: {
+              translateCoverImage: aiTranslateCoverImage.value
+            },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
           }
@@ -3250,8 +3688,47 @@ export default {
       }
     }
 
+    async function applyAiPreviewCoverImages(preview) {
+      const previewEntryList = getAiImportPreviewCoverEntries(preview).filter(
+        entry => {
+          return isGeneratedAiCoverPreviewEntry(entry)
+        }
+      )
+      if (previewEntryList.length === 0) {
+        return
+      }
+
+      const artifactList = Array.isArray(preview?.coverImageArtifacts)
+        ? preview.coverImageArtifacts
+        : []
+      const artifactMap = new Map(
+        artifactList.map(item => {
+          return [String(item?.artifactId || '').trim(), item]
+        })
+      )
+
+      for (const previewEntry of previewEntryList) {
+        const artifact = artifactMap.get(
+          String(previewEntry?.artifactId || '').trim()
+        )
+        if (!artifact) {
+          throw new Error('AI 封面图预览缺少对应产物，不能写入')
+        }
+        await multilingualApi.adoptTranslationPreviewCoverImage({
+          artifact,
+          previewEntry,
+          targetPostId: form.id,
+          languageCode: form.languageCode,
+          name: previewEntry.targetTitle || form.title || 'ai-cover-image'
+        })
+      }
+    }
+
     async function confirmAiTranslationImport() {
-      if (!aiImportPreview.value || aiImportPreview.value.changeCount === 0) {
+      if (
+        !aiImportPreview.value ||
+        getAiImportPreviewTotalChangeCount(aiImportPreview.value) === 0
+      ) {
         ElMessage.warning('请先完成 AI 翻译预览')
         return
       }
@@ -3305,10 +3782,13 @@ export default {
       aiEntryGroups,
       aiEntryList,
       aiImportPreview,
+      aiImportPreviewCoverEntries,
       aiImportPreviewGroups,
+      aiImportPreviewTotalChangeCount,
       aiLoading,
       aiPrompt,
       aiSourceLanguageCode,
+      aiTranslateCoverImage,
       aiSkippedEntries,
       aiStreamFeedbackRef,
       aiStreamContent,
@@ -3321,6 +3801,7 @@ export default {
       contentSource,
       contentTab,
       creatableAiSkippedEntries,
+      currentAiCoverImageList,
       createAllSkippedTranslations,
       createSkippedTranslation,
       creatingAllSkippedTranslations,
@@ -3331,6 +3812,8 @@ export default {
       detailRelationFields: DETAIL_RELATION_FIELDS,
       form,
       currentAiSourceLanguageCode,
+      canCreateAiTranslationJob,
+      canStartAiTranslation,
       languageOptions,
       exportDialogVisible,
       exportBaseMode,
@@ -3340,6 +3823,8 @@ export default {
       exportSliceSummary,
       exportUseSlices,
       getImagePreviewUrl,
+      getAiCoverPreviewStatusTagType,
+      getAiCoverPreviewStatusText,
       getLanguageText,
       getPostStatusText,
       getPostTypeTagType,
@@ -3414,6 +3899,7 @@ export default {
       saving,
       selectAllAiEntries,
       selectAllExportEntries,
+      sourceAiCoverImageList,
       submit,
       syncRelationIds,
       triggerImportFilePicker,
@@ -3762,6 +4248,73 @@ export default {
   margin-top: 18px;
 }
 
+.ai-cover-translation-group {
+  margin-top: 18px;
+}
+
+.ai-cover-translation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  min-height: 180px;
+}
+
+.ai-cover-translation-list .post-cover-image-item {
+  width: 100%;
+  height: 220px;
+}
+
+.ai-cover-translation-list .translation-media-empty {
+  min-height: 180px;
+}
+
+.ai-cover-translation-entry-list {
+  margin: 0 0 14px;
+}
+
+.ai-cover-translation-entry-body {
+  display: block;
+}
+
+.ai-cover-translation-entry-title {
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.translation-entry-preview-rows {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.translation-entry-preview-row {
+  min-width: 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--el-bg-color-page);
+}
+
+.translation-entry-preview-label {
+  margin-bottom: 2px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.translation-entry-preview-value {
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.ai-cover-entry-preview-value {
+  margin-top: 8px;
+}
+
 .ai-translation-dialog-body {
   min-height: 180px;
 }
@@ -3814,6 +4367,37 @@ export default {
 
 .translation-import-preview-panel {
   min-width: 0;
+}
+
+.translation-import-preview-cover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.translation-import-preview-cover-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+}
+
+.translation-import-preview-cover-image {
+  width: 100%;
+  height: 220px;
+}
+
+.translation-import-preview-cover-empty {
+  padding: 20px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
 }
 
 .translation-import-preview-panel-title {
@@ -3924,6 +4508,10 @@ export default {
   .translation-import-preview-columns {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .translation-entry-preview-rows {
+    grid-template-columns: 1fr;
   }
 
   .translation-editor-action-bar {

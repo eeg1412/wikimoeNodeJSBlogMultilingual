@@ -477,6 +477,18 @@ const translationJobs = new Schema(
         type: Schema.Types.Mixed,
         default: {}
       },
+      coverImageArtifacts: {
+        type: [Schema.Types.Mixed],
+        default: []
+      },
+      coverImageGenerationMap: {
+        type: Schema.Types.Mixed,
+        default: {}
+      },
+      coverImageRecognitionMap: {
+        type: Schema.Types.Mixed,
+        default: {}
+      },
       sourceSnapshotId: {
         type: Schema.Types.ObjectId,
         default: null,
