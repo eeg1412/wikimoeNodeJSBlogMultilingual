@@ -209,7 +209,7 @@
               v-if="!isSourceScope"
               type="success"
               size="small"
-              @click="openAiTranslation(row)"
+              @click="openTranslationDialog(row)"
             >
               AI 翻译
             </el-button>
@@ -377,7 +377,7 @@
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="success" @click="openAiTranslation(currentRow)">
+        <el-button type="success" @click="openTranslationDialog(currentRow)">
           AI 翻译
         </el-button>
         <el-button
@@ -1022,7 +1022,7 @@ export default {
       }
     }
 
-    const openAiTranslation = row => {
+    const openTranslationDialog = row => {
       if (!row) {
         return
       }
@@ -1367,7 +1367,7 @@ export default {
       openDetail,
       toggleAiSkip,
       openEdit,
-      openAiTranslation,
+      openTranslationDialog,
       confirmAiTranslation,
       loadCurrentAiEntries,
       loadSourceAiEntries,

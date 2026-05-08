@@ -138,7 +138,7 @@
               v-if="!isSourceScope"
               type="success"
               size="small"
-              @click="openAiTranslation(row)"
+              @click="openTranslationDialog(row)"
             >
               AI 翻译
             </el-button>
@@ -240,7 +240,7 @@
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="success" @click="openAiTranslation(currentRow)">
+        <el-button type="success" @click="openTranslationDialog(currentRow)">
           AI 翻译
         </el-button>
         <el-button type="primary" :loading="submitting" @click="submitUpdate">
@@ -301,7 +301,9 @@ function formatFieldValue(value) {
 
   if (Array.isArray(value)) {
     if (
-      value.some(item => item && typeof item === 'object' && !Array.isArray(item))
+      value.some(
+        item => item && typeof item === 'object' && !Array.isArray(item)
+      )
     ) {
       const text = value
         .map(item => {
@@ -701,7 +703,7 @@ export default {
       }
     }
 
-    const openAiTranslation = row => {
+    const openTranslationDialog = row => {
       if (!row) {
         return
       }
@@ -898,7 +900,7 @@ export default {
       confirmAiTranslation,
       loadCurrentAiEntries,
       loadSourceAiEntries,
-      openAiTranslation,
+      openTranslationDialog,
       openDetail,
       openEdit,
       restoreSnapshot,

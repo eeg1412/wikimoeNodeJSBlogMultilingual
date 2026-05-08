@@ -7,76 +7,46 @@ const COVER_IMAGE_RECOGNITION_SCHEMA =
 const COVER_IMAGE_RECOGNITION_VERSION = 1
 const SUPPORTED_COVER_POST_TYPES = new Set([1, 3])
 
-const OPENAI_IMAGE_RATIO_CANDIDATES = [
-  { provider: 'openai', value: '1024x1024', ratio: 1, pixels: 1024 * 1024 },
-  { provider: 'openai', value: '1536x1024', ratio: 1.5, pixels: 1536 * 1024 },
+const GEMINI_IMAGE_RATIO_CANDIDATES = [
+  { provider: 'gemini', value: '1:1', ratio: 1, pixels: 1024 * 1024 },
   {
-    provider: 'openai',
-    value: '1024x1536',
-    ratio: 1024 / 1536,
-    pixels: 1024 * 1536
-  },
-  { provider: 'openai', value: '2048x2048', ratio: 1, pixels: 2048 * 2048 },
-  {
-    provider: 'openai',
-    value: '2048x1152',
-    ratio: 2048 / 1152,
-    pixels: 2048 * 1152
-  },
-  {
-    provider: 'openai',
-    value: '3840x2160',
-    ratio: 3840 / 2160,
-    pixels: 3840 * 2160
-  },
-  {
-    provider: 'openai',
-    value: '2160x3840',
-    ratio: 2160 / 3840,
-    pixels: 2160 * 3840
-  }
-]
-
-const NANO_BANANA_IMAGE_RATIO_CANDIDATES = [
-  { provider: 'nano-banana', value: '1:1', ratio: 1, pixels: 1024 * 1024 },
-  {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '16:9',
     ratio: 16 / 9,
     pixels: 1376 * 768
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '9:16',
     ratio: 9 / 16,
     pixels: 768 * 1376
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '4:3',
     ratio: 4 / 3,
     pixels: 1200 * 896
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '3:4',
     ratio: 3 / 4,
     pixels: 896 * 1200
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '3:2',
     ratio: 3 / 2,
     pixels: 1264 * 848
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '2:3',
     ratio: 2 / 3,
     pixels: 848 * 1264
   },
   {
-    provider: 'nano-banana',
+    provider: 'gemini',
     value: '21:9',
     ratio: 21 / 9,
     pixels: 1584 * 672
@@ -178,10 +148,10 @@ function getPreferredSourceImageDimensions(attachment) {
 }
 
 function getRatioCandidates(provider) {
-  if (provider === 'nano-banana') {
-    return NANO_BANANA_IMAGE_RATIO_CANDIDATES
+  if (provider === 'gemini') {
+    return GEMINI_IMAGE_RATIO_CANDIDATES
   }
-  return OPENAI_IMAGE_RATIO_CANDIDATES
+  return GEMINI_IMAGE_RATIO_CANDIDATES
 }
 
 function calculateCropLoss(sourceRatio, candidateRatio) {

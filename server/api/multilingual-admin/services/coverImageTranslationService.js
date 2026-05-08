@@ -14,8 +14,8 @@ const coverImagePromptService = require('./coverImagePromptService')
 const coverImageRecognitionInputService = require('./coverImageRecognitionInputService')
 const coverImagePostprocessService = require('./coverImagePostprocessService')
 const coverImageTempFileService = require('./coverImageTempFileService')
-const imageRecognitionOpenAiClientService = require('./imageRecognitionOpenAiClientService')
-const imageGenerationOpenAiClientService = require('./imageGenerationOpenAiClientService')
+const geminiImageRecognitionService = require('./geminiImageRecognitionService')
+const geminiImageGenerationService = require('./geminiImageGenerationService')
 const {
   COVER_IMAGE_ARTIFACT_TYPE,
   COVER_IMAGE_ENTRY_TYPE,
@@ -718,23 +718,20 @@ async function runRecognition({
       targetTitle,
       confidenceThreshold: recognitionSettings.confidenceThreshold
     })
-    const response =
-      await imageRecognitionOpenAiClientService.recognizeCoverTitle({
-        runtimeSettings: recognitionSettings,
-        prompt,
-        imageDataUrl: currentRecognitionInput.dataUrl,
-        confidenceThreshold: recognitionSettings.confidenceThreshold,
-        diagnosticContext: {
-          phase: 'recognition',
-          jobId: getJobId(job),
-          recognitionKey,
-          sourcePostId: normalizeIdValue(
-            sourcePost?._id || sourcePost?.sourceId
-          ),
-          sourceLanguageCode,
-          targetLanguageCode
-        }
-      })
+    const response = await geminiImageRecognitionService.recognizeCoverTitle({
+      runtimeSettings: recognitionSettings,
+      prompt,
+      imageDataUrl: currentRecognitionInput.dataUrl,
+      confidenceThreshold: recognitionSettings.confidenceThreshold,
+      diagnosticContext: {
+        phase: 'recognition',
+        jobId: getJobId(job),
+        recognitionKey,
+        sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+        sourceLanguageCode,
+        targetLanguageCode
+      }
+    })
     if (!response.ok) {
       return {
         status: 'failed',
@@ -840,26 +837,23 @@ async function runGeneration({
     const sourceBuffer = await fs.promises.readFile(coverInfo.sourceFilePath)
     const sourceMimeType = coverInfo.sourceMimeType || 'image/png'
     const sourceImageDataUrl = `data:${sourceMimeType};base64,${sourceBuffer.toString('base64')}`
-    const generated =
-      await imageGenerationOpenAiClientService.generateCoverImage({
-        settings: generationSettings,
-        prompt: generationPrompt.prompt,
-        sourceFilePath: coverInfo.sourceFilePath,
-        sourceImageDataUrl,
-        selectedRatio,
-        diagnosticContext: {
-          phase: 'generation',
-          jobId: getJobId(job),
-          recognitionKey,
-          generationKey,
-          sourcePostId: normalizeIdValue(
-            sourcePost?._id || sourcePost?.sourceId
-          ),
-          targetPostId: normalizeIdValue(targetPost?._id),
-          sourceLanguageCode,
-          targetLanguageCode
-        }
-      })
+    const generated = await geminiImageGenerationService.generateCoverImage({
+      settings: generationSettings,
+      prompt: generationPrompt.prompt,
+      sourceFilePath: coverInfo.sourceFilePath,
+      sourceImageDataUrl,
+      selectedRatio,
+      diagnosticContext: {
+        phase: 'generation',
+        jobId: getJobId(job),
+        recognitionKey,
+        generationKey,
+        sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+        targetPostId: normalizeIdValue(targetPost?._id),
+        sourceLanguageCode,
+        targetLanguageCode
+      }
+    })
     const generatedImage = await coverImagePostprocessService.resizeCoverExact({
       jobId: getJobId(job),
       generationKey,

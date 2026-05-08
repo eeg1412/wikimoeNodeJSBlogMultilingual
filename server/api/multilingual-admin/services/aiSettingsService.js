@@ -12,13 +12,9 @@ const OPTION_SCOPE = 'multilingualAi'
 
 const AI_PROVIDER_OPTIONS = [{ label: 'DeepSeek', value: 'deepseek' }]
 
-const IMAGE_GENERATION_PROVIDER_OPTIONS = [
-  { label: 'OpenAI', value: 'openai' },
-  { label: 'Nano Banana', value: 'nano-banana' }
-]
+const IMAGE_GENERATION_PROVIDER_OPTIONS = [{ label: 'Gemini', value: 'gemini' }]
 
 const IMAGE_RECOGNITION_PROVIDER_OPTIONS = [
-  { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' }
 ]
 
@@ -51,65 +47,20 @@ const DEEPSEEK_MODEL_OPTIONS = [
   }
 ]
 
-const OPENAI_IMAGE_MODEL_OPTIONS = [
+const GEMINI_IMAGE_GENERATION_MODEL_OPTIONS = [
   {
-    label: 'GPT Image 2（最新）',
-    value: 'gpt-image-2',
-    tag: 'latest',
-    supportsCustomSize: true
-  },
-  {
-    label: 'GPT Image 1.5',
-    value: 'gpt-image-1.5'
-  },
-  {
-    label: 'GPT Image 1',
-    value: 'gpt-image-1'
-  },
-  {
-    label: 'GPT Image 1 Mini',
-    value: 'gpt-image-1-mini'
-  },
-  {
-    label: 'ChatGPT Image Latest',
-    value: 'chatgpt-image-latest'
-  }
-]
-
-const NANO_BANANA_IMAGE_MODEL_OPTIONS = [
-  {
-    label: 'Nano Banana 2 / Gemini 3.1 Flash Image Preview（最新）',
+    label: 'Gemini 3.1 Flash Image Preview（最新）',
     value: 'gemini-3.1-flash-image-preview',
     tag: 'preview'
   },
   {
-    label: 'Nano Banana Pro / Gemini 3 Pro Image Preview',
+    label: 'Gemini 3 Pro Image Preview',
     value: 'gemini-3-pro-image-preview',
     tag: 'preview'
   },
   {
-    label: 'Nano Banana / Gemini 2.5 Flash Image',
+    label: 'Gemini 2.5 Flash Image',
     value: 'gemini-2.5-flash-image'
-  }
-]
-
-const OPENAI_IMAGE_RECOGNITION_MODEL_OPTIONS = [
-  {
-    label: 'GPT-5.5（最新）',
-    value: 'gpt-5.5',
-    tag: 'latest'
-  },
-  {
-    label: 'GPT-5.4',
-    value: 'gpt-5.4'
-  },
-  {
-    label: 'GPT-5.4 Mini',
-    value: 'gpt-5.4-mini'
-  },
-  {
-    label: 'GPT-5.2',
-    value: 'gpt-5.2'
   }
 ]
 
@@ -133,18 +84,7 @@ const GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS = [
   }
 ]
 
-const OPENAI_IMAGE_SIZE_OPTIONS = [
-  { label: 'Auto', value: 'auto' },
-  { label: '1024 x 1024', value: '1024x1024' },
-  { label: '1536 x 1024', value: '1536x1024' },
-  { label: '1024 x 1536', value: '1024x1536' },
-  { label: '2048 x 2048', value: '2048x2048' },
-  { label: '2048 x 1152', value: '2048x1152' },
-  { label: '3840 x 2160', value: '3840x2160' },
-  { label: '2160 x 3840', value: '2160x3840' }
-]
-
-const NANO_BANANA_ASPECT_RATIO_OPTIONS = [
+const GEMINI_IMAGE_ASPECT_RATIO_OPTIONS = [
   { label: 'Auto', value: 'auto' },
   { label: '1:1', value: '1:1' },
   { label: '16:9', value: '16:9' },
@@ -156,29 +96,10 @@ const NANO_BANANA_ASPECT_RATIO_OPTIONS = [
   { label: '21:9', value: '21:9' }
 ]
 
-const NANO_BANANA_IMAGE_SIZE_OPTIONS = [
+const GEMINI_IMAGE_SIZE_OPTIONS = [
   { label: '1K', value: '1K' },
   { label: '2K', value: '2K' },
   { label: '4K', value: '4K' }
-]
-
-const IMAGE_QUALITY_OPTIONS = [
-  { label: 'Auto', value: 'auto' },
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' }
-]
-
-const IMAGE_OUTPUT_FORMAT_OPTIONS = [
-  { label: 'PNG', value: 'png' },
-  { label: 'JPEG', value: 'jpeg' },
-  { label: 'WebP', value: 'webp' }
-]
-
-const IMAGE_INPUT_DETAIL_OPTIONS = [
-  { label: 'Auto', value: 'auto' },
-  { label: 'High', value: 'high' },
-  { label: 'Low', value: 'low' }
 ]
 
 const GEMINI_MEDIA_RESOLUTION_OPTIONS = [
@@ -195,6 +116,14 @@ const DEFAULT_IMAGE_RECOGNITION_PROMPT = [
   '如果任务要求结构化输出，必须严格遵守任务附加的 JSON schema。',
   '当证据不足时明确标记不确定，不要用兜底结论替代判断。'
 ].join('\n')
+
+const LEGACY_AI_SETTING_MIGRATIONS = {
+  nanoBananaApiKey: 'geminiImageApiKey',
+  nanoBananaBaseUrl: 'geminiImageBaseUrl',
+  nanoBananaModel: 'geminiImageModel',
+  nanoBananaAspectRatio: 'geminiImageAspectRatio',
+  nanoBananaImageSize: 'geminiImageSize'
+}
 
 const AI_SETTING_FIELDS = [
   {
@@ -307,14 +236,15 @@ const AI_SETTING_FIELDS = [
     type: 'boolean',
     group: 'imageProvider',
     defaultValue: false,
-    helpText: '启用后，后续图像生成能力会读取本模块的 provider、模型和请求参数。'
+    helpText:
+      '启用后，后续图像生成能力会读取本模块的 provider、模型和请求参数。'
   },
   {
     name: 'imageGenerationProvider',
     label: '图像生成服务商',
     type: 'select',
     group: 'imageProvider',
-    defaultValue: 'openai',
+    defaultValue: 'gemini',
     options: IMAGE_GENERATION_PROVIDER_OPTIONS
   },
   {
@@ -333,122 +263,54 @@ const AI_SETTING_FIELDS = [
     type: 'textarea',
     group: 'imagePrompt',
     defaultValue: '',
-    helpText: '会作为业务提示词前置补充，适合配置站点统一风格、版权边界和输出规范。'
+    helpText:
+      '会作为业务提示词前置补充，适合配置站点统一风格、版权边界和输出规范。'
   },
   {
-    name: 'openAiImageApiKey',
-    label: 'OpenAI Image API Key',
+    name: 'geminiImageApiKey',
+    label: 'Gemini API Key',
     type: 'password',
-    group: 'openaiImage',
+    group: 'geminiImage',
     defaultValue: ''
   },
   {
-    name: 'openAiImageBaseUrl',
-    label: 'OpenAI Image Base URL',
+    name: 'geminiImageBaseUrl',
+    label: 'Gemini Base URL',
     type: 'string',
-    group: 'openaiImage',
-    defaultValue: 'https://api.openai.com/v1'
+    group: 'geminiImage',
+    defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
+    helpText:
+      '服务端直接调用 Gemini generateContent API；旧兼容层地址会自动归一化为原生路径。'
   },
   {
-    name: 'openAiImageModel',
-    label: 'OpenAI 图像模型',
+    name: 'geminiImageModel',
+    label: 'Gemini 图像模型',
     type: 'modelSelect',
-    group: 'openaiImage',
-    defaultValue: 'gpt-image-2',
-    allowCreate: true,
-    options: OPENAI_IMAGE_MODEL_OPTIONS,
-    helpText: 'OpenAI 文档当前最新图像生成模型为 gpt-image-2。DALL·E 系列临近停用，未作为默认选项提供。'
-  },
-  {
-    name: 'openAiImageSize',
-    label: 'OpenAI 输出尺寸',
-    type: 'select',
-    group: 'openaiImage',
-    defaultValue: 'auto',
-    options: OPENAI_IMAGE_SIZE_OPTIONS,
-    hiddenInSettings: true
-  },
-  {
-    name: 'openAiImageQuality',
-    label: 'OpenAI 输出质量',
-    type: 'select',
-    group: 'openaiImage',
-    defaultValue: 'auto',
-    options: IMAGE_QUALITY_OPTIONS
-  },
-  {
-    name: 'openAiImageOutputFormat',
-    label: 'OpenAI 输出格式',
-    type: 'select',
-    group: 'openaiImage',
-    defaultValue: 'png',
-    options: IMAGE_OUTPUT_FORMAT_OPTIONS
-  },
-  {
-    name: 'openAiImageCompression',
-    label: 'OpenAI JPEG/WebP 压缩率',
-    type: 'number',
-    group: 'openaiImage',
-    defaultValue: 90,
-    min: 0,
-    max: 100,
-    helpText: '仅在输出格式为 JPEG 或 WebP 时传入 OpenAI Image API。'
-  },
-  {
-    name: 'openAiImageBackground',
-    label: 'OpenAI 背景',
-    type: 'select',
-    group: 'openaiImage',
-    defaultValue: 'auto',
-    options: [
-      { label: 'Auto', value: 'auto' },
-      { label: 'Opaque', value: 'opaque' },
-      { label: 'Transparent', value: 'transparent' }
-    ],
-    helpText: 'gpt-image-2 当前不支持透明背景，选择 transparent 前请确认模型支持。'
-  },
-  {
-    name: 'nanoBananaApiKey',
-    label: 'Nano Banana API Key',
-    type: 'password',
-    group: 'nanoBananaImage',
-    defaultValue: ''
-  },
-  {
-    name: 'nanoBananaBaseUrl',
-    label: 'Nano Banana Base URL',
-    type: 'string',
-    group: 'nanoBananaImage',
-    defaultValue: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    helpText: '当前按 Google Gemini OpenAI compatibility 层配置，服务端统一使用 OpenAI SDK。'
-  },
-  {
-    name: 'nanoBananaModel',
-    label: 'Nano Banana 模型',
-    type: 'modelSelect',
-    group: 'nanoBananaImage',
+    group: 'geminiImage',
     defaultValue: 'gemini-3.1-flash-image-preview',
     allowCreate: true,
-    options: NANO_BANANA_IMAGE_MODEL_OPTIONS,
-    helpText: 'Google 文档当前将 gemini-3.1-flash-image-preview 标为 Nano Banana 2 最新模型。'
+    options: GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
+    helpText:
+      'Gemini 图像生成统一走原生 generateContent；默认使用 gemini-3.1-flash-image-preview。'
   },
   {
-    name: 'nanoBananaAspectRatio',
-    label: 'Nano Banana 画幅比例',
+    name: 'geminiImageAspectRatio',
+    label: 'Gemini 画幅比例',
     type: 'select',
-    group: 'nanoBananaImage',
+    group: 'geminiImage',
     defaultValue: 'auto',
-    options: NANO_BANANA_ASPECT_RATIO_OPTIONS,
+    options: GEMINI_IMAGE_ASPECT_RATIO_OPTIONS,
     hiddenInSettings: true
   },
   {
-    name: 'nanoBananaImageSize',
-    label: 'Nano Banana 输出规格',
+    name: 'geminiImageSize',
+    label: 'Gemini 输出规格',
     type: 'select',
-    group: 'nanoBananaImage',
+    group: 'geminiImage',
     defaultValue: '1K',
-    options: NANO_BANANA_IMAGE_SIZE_OPTIONS,
-    helpText: 'Gemini 3.1 Flash Image Preview 和 Gemini 3 Pro Image Preview 支持 1K、2K、4K；Gemini 2.5 Flash Image 以画幅比例为主。'
+    options: GEMINI_IMAGE_SIZE_OPTIONS,
+    helpText:
+      'Gemini 3.1 Flash Image Preview 和 Gemini 3 Pro Image Preview 支持 1K、2K、4K；系统会按原图比例选择最接近的画幅。'
   },
   {
     name: 'imageRecognitionEnabled',
@@ -456,14 +318,15 @@ const AI_SETTING_FIELDS = [
     type: 'boolean',
     group: 'imageRecognitionProvider',
     defaultValue: false,
-    helpText: '启用后，AI 翻译任务可以用图像识别判断封面图是否包含需要翻译的标题文字。'
+    helpText:
+      '启用后，AI 翻译任务可以用图像识别判断封面图是否包含需要翻译的标题文字。'
   },
   {
     name: 'imageRecognitionProvider',
     label: '图像识别服务商',
     type: 'select',
     group: 'imageRecognitionProvider',
-    defaultValue: 'openai',
+    defaultValue: 'gemini',
     options: IMAGE_RECOGNITION_PROVIDER_OPTIONS
   },
   {
@@ -474,7 +337,8 @@ const AI_SETTING_FIELDS = [
     defaultValue: 120,
     min: 10,
     max: 300,
-    helpText: '封面图识别主要用于判断是否需要生成翻译图，超时会记录任务警告，不应静默改用其他 provider。'
+    helpText:
+      '封面图识别主要用于判断是否需要生成翻译图，超时会记录任务警告，不应静默改用其他 provider。'
   },
   {
     name: 'imageRecognitionConfidenceThreshold',
@@ -494,55 +358,23 @@ const AI_SETTING_FIELDS = [
     type: 'textarea',
     group: 'imageRecognitionPrompt',
     defaultValue: DEFAULT_IMAGE_RECOGNITION_PROMPT,
-    helpText: '只用于约束图像识别通用行为；具体业务场景、输出 schema 和字段要求由服务端任务提示词动态追加。'
-  },
-  {
-    name: 'openAiImageRecognitionApiKey',
-    label: 'OpenAI Vision API Key',
-    type: 'password',
-    group: 'openaiImageRecognition',
-    defaultValue: ''
-  },
-  {
-    name: 'openAiImageRecognitionBaseUrl',
-    label: 'OpenAI Vision Base URL',
-    type: 'string',
-    group: 'openaiImageRecognition',
-    defaultValue: 'https://api.openai.com/v1'
-  },
-  {
-    name: 'openAiImageRecognitionModel',
-    label: 'OpenAI 图像识别模型',
-    type: 'modelSelect',
-    group: 'openaiImageRecognition',
-    defaultValue: 'gpt-5.5',
-    allowCreate: true,
-    options: OPENAI_IMAGE_RECOGNITION_MODEL_OPTIONS,
-    helpText: 'OpenAI 文档中 GPT-5.5 支持文本与图像输入，适合作为高准确率封面标题识别默认模型。'
-  },
-  {
-    name: 'openAiImageRecognitionDetail',
-    label: 'OpenAI 图像细节级别',
-    type: 'select',
-    group: 'openaiImageRecognition',
-    defaultValue: 'high',
-    options: IMAGE_INPUT_DETAIL_OPTIONS,
-    helpText: '标题识别需要读取图片文字，默认使用 high；成本敏感场景可以切换为 auto 或 low。'
+    helpText:
+      '只用于约束图像识别通用行为；具体业务场景、输出 schema 和字段要求由服务端任务提示词动态追加。'
   },
   {
     name: 'geminiImageRecognitionApiKey',
-    label: 'Gemini Vision API Key',
+    label: 'Gemini API Key',
     type: 'password',
     group: 'geminiImageRecognition',
     defaultValue: ''
   },
   {
     name: 'geminiImageRecognitionBaseUrl',
-    label: 'Gemini Vision Base URL',
+    label: 'Gemini Base URL',
     type: 'string',
     group: 'geminiImageRecognition',
-    defaultValue: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    helpText: '通过 Gemini OpenAI compatibility 层使用 OpenAI SDK。'
+    defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
+    helpText: '服务端直接调用 Gemini generateContent 并使用原生结构化输出。'
   },
   {
     name: 'geminiImageRecognitionModel',
@@ -552,7 +384,8 @@ const AI_SETTING_FIELDS = [
     defaultValue: 'gemini-3.1-pro-preview',
     allowCreate: true,
     options: GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
-    helpText: 'Gemini 3.1 Pro Preview 支持图像输入；需要更低延迟时可选择 Gemini 3 Flash Preview。'
+    helpText:
+      'Gemini 3.1 Pro Preview 支持图像输入；需要更低延迟时可选择 Gemini 3 Flash Preview。'
   },
   {
     name: 'geminiImageRecognitionMediaResolution',
@@ -561,7 +394,8 @@ const AI_SETTING_FIELDS = [
     group: 'geminiImageRecognition',
     defaultValue: 'MEDIA_RESOLUTION_HIGH',
     options: GEMINI_MEDIA_RESOLUTION_OPTIONS,
-    helpText: 'Google 文档建议图像分析使用 MEDIA_RESOLUTION_HIGH，以提升读取细小文字的准确率。'
+    helpText:
+      'Google 文档建议图像分析使用 MEDIA_RESOLUTION_HIGH，以提升读取细小文字的准确率。'
   }
 ]
 
@@ -569,6 +403,29 @@ const AI_SETTING_FIELD_MAP = AI_SETTING_FIELDS.reduce((map, item) => {
   map[item.name] = item
   return map
 }, {})
+
+function applyLegacyAiSettingValues(
+  values,
+  configuredNames,
+  legacyValues = {}
+) {
+  Object.entries(LEGACY_AI_SETTING_MIGRATIONS).forEach(
+    ([legacyName, targetName]) => {
+      if (configuredNames.includes(targetName)) {
+        return
+      }
+      if (!Object.prototype.hasOwnProperty.call(legacyValues, legacyName)) {
+        return
+      }
+      const targetField = AI_SETTING_FIELD_MAP[targetName]
+      if (!targetField) {
+        return
+      }
+      values[targetName] = normalizeValue(targetField, legacyValues[legacyName])
+      configuredNames.push(targetName)
+    }
+  )
+}
 
 function getOptionModel() {
   const repository = global.$mongodDB.multilingual.repositories.options
@@ -650,7 +507,11 @@ function normalizeLanguagePromptMap(value) {
     }
   }
 
-  if (!inputValue || typeof inputValue !== 'object' || Array.isArray(inputValue)) {
+  if (
+    !inputValue ||
+    typeof inputValue !== 'object' ||
+    Array.isArray(inputValue)
+  ) {
     inputValue = {}
   }
 
@@ -660,7 +521,9 @@ function normalizeLanguagePromptMap(value) {
     if (!languageCode) {
       return
     }
-    promptMap[languageCode] = String(inputValue[key] || '').trim().slice(0, 6000)
+    promptMap[languageCode] = String(inputValue[key] || '')
+      .trim()
+      .slice(0, 6000)
   })
   return promptMap
 }
@@ -723,7 +586,9 @@ function buildDefaultValues() {
 
 async function getAiSettings() {
   const OptionModel = getOptionModel()
-  const nameList = AI_SETTING_FIELDS.map(item => item.name)
+  const nameList = AI_SETTING_FIELDS.map(item => item.name).concat(
+    Object.keys(LEGACY_AI_SETTING_MIGRATIONS)
+  )
   const optionList = await OptionModel.find({
     scope: OPTION_SCOPE,
     languageCode: DEFAULT_LANGUAGE_CODE,
@@ -734,14 +599,24 @@ async function getAiSettings() {
 
   const values = buildDefaultValues()
   const configuredNames = []
+  const legacyValues = {}
   for (const item of optionList) {
     const field = AI_SETTING_FIELD_MAP[item.name]
     if (!field) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          LEGACY_AI_SETTING_MIGRATIONS,
+          item.name
+        )
+      ) {
+        legacyValues[item.name] = item.value
+      }
       continue
     }
     values[item.name] = normalizeValue(field, item.value)
     configuredNames.push(item.name)
   }
+  applyLegacyAiSettingValues(values, configuredNames, legacyValues)
 
   return {
     fields: AI_SETTING_FIELDS,
@@ -752,26 +627,16 @@ async function getAiSettings() {
       jsonOutputResponseFormat: { type: 'json_object' },
       modelOptions: DEEPSEEK_MODEL_OPTIONS,
       imageGeneration: {
-        openAiBaseUrl: 'https://api.openai.com/v1',
-        nanoBananaOpenAiBaseUrl:
-          'https://generativelanguage.googleapis.com/v1beta/openai/',
-        openAiLatestModel: 'gpt-image-2',
-        nanoBananaLatestModel: 'gemini-3.1-flash-image-preview',
-        openAiModelOptions: OPENAI_IMAGE_MODEL_OPTIONS,
-        nanoBananaModelOptions: NANO_BANANA_IMAGE_MODEL_OPTIONS,
-        openAiSdkPackage: 'openai'
+        geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        geminiDefaultModel: 'gemini-3.1-flash-image-preview',
+        geminiModelOptions: GEMINI_IMAGE_GENERATION_MODEL_OPTIONS
       },
       imageRecognition: {
-        openAiBaseUrl: 'https://api.openai.com/v1',
-        geminiOpenAiBaseUrl:
-          'https://generativelanguage.googleapis.com/v1beta/openai/',
-        openAiLatestModel: 'gpt-5.5',
+        geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         geminiDefaultModel: 'gemini-3.1-pro-preview',
-        openAiModelOptions: OPENAI_IMAGE_RECOGNITION_MODEL_OPTIONS,
         geminiModelOptions: GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
         defaultConfidenceThreshold: 0.75,
-        maxInputImageDimension: 1280,
-        openAiSdkPackage: 'openai'
+        maxInputImageDimension: 1280
       }
     }
   }
@@ -824,6 +689,12 @@ async function updateAiSettings(values = {}) {
     )
   }
 
+  await OptionModel.deleteMany({
+    scope: OPTION_SCOPE,
+    languageCode: DEFAULT_LANGUAGE_CODE,
+    name: { $in: Object.keys(LEGACY_AI_SETTING_MIGRATIONS) }
+  })
+
   const currentSettings = await getAiSettings()
   currentSettings.values = {
     ...currentSettings.values,
@@ -855,54 +726,26 @@ async function getDeepSeekRuntimeSettings() {
   return values
 }
 
-function buildOpenAiImageRuntimeSettings(values) {
-  if (!normalizeTrimmedString(values.openAiImageApiKey)) {
+function buildGeminiImageRuntimeSettings(values) {
+  if (!normalizeTrimmedString(values.geminiImageApiKey)) {
     throw new ApiError(
       ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      '请先配置 OpenAI Image API Key',
-      'openAiImageApiKey',
+      '请先配置 Gemini API Key',
+      'geminiImageApiKey',
       400
     )
   }
 
   return {
-    provider: 'openai',
-    apiKey: normalizeTrimmedString(values.openAiImageApiKey),
-    baseUrl: normalizeTrimmedString(values.openAiImageBaseUrl),
-    model: normalizeTrimmedString(values.openAiImageModel),
+    provider: 'gemini',
+    apiKey: normalizeTrimmedString(values.geminiImageApiKey),
+    baseUrl: normalizeTrimmedString(values.geminiImageBaseUrl),
+    model: normalizeTrimmedString(values.geminiImageModel),
     timeoutSeconds: values.imageGenerationTimeoutSeconds,
     promptPrefix: normalizeTrimmedString(values.imageGenerationPromptPrefix),
     requestOptions: {
-      size: values.openAiImageSize,
-      quality: values.openAiImageQuality,
-      outputFormat: values.openAiImageOutputFormat,
-      outputCompression: values.openAiImageCompression,
-      background: values.openAiImageBackground
-    }
-  }
-}
-
-function buildNanoBananaImageRuntimeSettings(values) {
-  if (!normalizeTrimmedString(values.nanoBananaApiKey)) {
-    throw new ApiError(
-      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      '请先配置 Nano Banana API Key',
-      'nanoBananaApiKey',
-      400
-    )
-  }
-
-  return {
-    provider: 'nano-banana',
-    apiKey: normalizeTrimmedString(values.nanoBananaApiKey),
-    baseUrl: normalizeTrimmedString(values.nanoBananaBaseUrl),
-    model: normalizeTrimmedString(values.nanoBananaModel),
-    timeoutSeconds: values.imageGenerationTimeoutSeconds,
-    promptPrefix: normalizeTrimmedString(values.imageGenerationPromptPrefix),
-    requestOptions: {
-      aspectRatio: values.nanoBananaAspectRatio,
-      imageSize: values.nanoBananaImageSize,
-      responseFormat: 'b64_json'
+      aspectRatio: values.geminiImageAspectRatio,
+      imageSize: values.geminiImageSize
     }
   }
 }
@@ -919,12 +762,8 @@ async function getImageGenerationRuntimeSettings() {
     )
   }
 
-  if (values.imageGenerationProvider === 'openai') {
-    return buildOpenAiImageRuntimeSettings(values)
-  }
-
-  if (values.imageGenerationProvider === 'nano-banana') {
-    return buildNanoBananaImageRuntimeSettings(values)
+  if (values.imageGenerationProvider === 'gemini') {
+    return buildGeminiImageRuntimeSettings(values)
   }
 
   throw new ApiError(
@@ -933,30 +772,6 @@ async function getImageGenerationRuntimeSettings() {
     'imageGenerationProvider',
     400
   )
-}
-
-function buildOpenAiImageRecognitionRuntimeSettings(values) {
-  if (!normalizeTrimmedString(values.openAiImageRecognitionApiKey)) {
-    throw new ApiError(
-      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      '请先配置 OpenAI Vision API Key',
-      'openAiImageRecognitionApiKey',
-      400
-    )
-  }
-
-  return {
-    provider: 'openai',
-    apiKey: normalizeTrimmedString(values.openAiImageRecognitionApiKey),
-    baseUrl: normalizeTrimmedString(values.openAiImageRecognitionBaseUrl),
-    model: normalizeTrimmedString(values.openAiImageRecognitionModel),
-    timeoutSeconds: values.imageRecognitionTimeoutSeconds,
-    confidenceThreshold: values.imageRecognitionConfidenceThreshold,
-    prompt: normalizeTrimmedString(values.imageRecognitionPrompt),
-    requestOptions: {
-      detail: values.openAiImageRecognitionDetail
-    }
-  }
 }
 
 function buildGeminiImageRecognitionRuntimeSettings(values) {
@@ -995,10 +810,6 @@ async function getImageRecognitionRuntimeSettings() {
     )
   }
 
-  if (values.imageRecognitionProvider === 'openai') {
-    return buildOpenAiImageRecognitionRuntimeSettings(values)
-  }
-
   if (values.imageRecognitionProvider === 'gemini') {
     return buildGeminiImageRecognitionRuntimeSettings(values)
   }
@@ -1015,10 +826,8 @@ module.exports = {
   AI_SETTING_FIELDS,
   IMAGE_GENERATION_PROVIDER_OPTIONS,
   IMAGE_RECOGNITION_PROVIDER_OPTIONS,
+  GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
   GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
-  NANO_BANANA_IMAGE_MODEL_OPTIONS,
-  OPENAI_IMAGE_RECOGNITION_MODEL_OPTIONS,
-  OPENAI_IMAGE_MODEL_OPTIONS,
   DEEPSEEK_MODEL_OPTIONS,
   getAiSettings,
   getDeepSeekRuntimeSettings,

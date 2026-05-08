@@ -1,40 +1,93 @@
 const aiSettingsService = require('./aiSettingsService')
-const { createOpenAiClient } = require('./imageGenerationOpenAiClientService')
 const {
   logDiagnostic,
   summarizeError,
-  summarizeRequestBody,
-  summarizeResponse,
   summarizeRuntimeSettings,
   truncateText
 } = require('./coverImageAiDiagnosticService')
-const { zodResponseFormat } = require('openai/helpers/zod')
-const { z } = require('zod')
+const {
+  buildGeminiNativeGenerateContentUrl,
+  buildInlineDataPartFromDataUrl,
+  buildTextPart,
+  extractTextFromGeminiNativeResponse,
+  sendGeminiNativeGenerateContentRequest,
+  summarizeGeminiNativeRequestBody,
+  summarizeGeminiNativeResponse
+} = require('./geminiNativeApiService')
 const {
   COVER_IMAGE_RECOGNITION_SCHEMA,
   COVER_IMAGE_RECOGNITION_VERSION,
   parseImageRecognitionResult
 } = require('../utils/coverImageTranslationUtils')
 
-const coverImageRecognitionResultSchema = z
-  .object({
-    schema: z.string(),
-    version: z.number(),
-    containsTitle: z.boolean(),
-    recognizedTitleText: z.string(),
-    confidence: z.number().min(0).max(1),
-    titleRegion: z
-      .object({
-        x: z.number().min(0).max(1),
-        y: z.number().min(0).max(1),
-        width: z.number().min(0).max(1),
-        height: z.number().min(0).max(1)
-      })
-      .strict(),
-    reason: z.string(),
-    shouldTranslate: z.boolean()
-  })
-  .strict()
+const coverImageRecognitionResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schema',
+    'version',
+    'containsTitle',
+    'recognizedTitleText',
+    'confidence',
+    'titleRegion',
+    'reason',
+    'shouldTranslate'
+  ],
+  properties: {
+    schema: {
+      type: 'string',
+      enum: [COVER_IMAGE_RECOGNITION_SCHEMA]
+    },
+    version: {
+      type: 'integer',
+      enum: [COVER_IMAGE_RECOGNITION_VERSION]
+    },
+    containsTitle: {
+      type: 'boolean'
+    },
+    recognizedTitleText: {
+      type: 'string'
+    },
+    confidence: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1
+    },
+    titleRegion: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['x', 'y', 'width', 'height'],
+      properties: {
+        x: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1
+        },
+        y: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1
+        },
+        width: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1
+        },
+        height: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1
+        }
+      }
+    },
+    reason: {
+      type: 'string'
+    },
+    shouldTranslate: {
+      type: 'boolean'
+    }
+  }
+}
 
 function normalizeErrorText(value) {
   if (value === null || typeof value === 'undefined') {
@@ -79,7 +132,7 @@ function buildRecognitionDiagnostics(options = {}) {
         ? { ...options.diagnosticContext }
         : {},
     runtime: summarizeRuntimeSettings(options.settings),
-    request: summarizeRequestBody(options.requestBody),
+    request: options.requestSummary || null,
     response: options.responseSummary || null,
     parse: options.parseSummary || null,
     result: options.resultSummary || null,
@@ -143,90 +196,28 @@ function appendErrorDetails(message, detailText) {
   return `${normalizedMessage}（${normalizedDetailText}）`
 }
 
-function getMessageText(message) {
-  const content = message?.content
-  if (typeof content === 'string') {
-    return content
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map(item => {
-        if (typeof item === 'string') {
-          return item
-        }
-        if (item && typeof item.text === 'string') {
-          return item.text
-        }
-        return ''
-      })
-      .join('')
-  }
-  return ''
-}
-
-function buildImageContent(settings, imageDataUrl) {
-  const imageUrl = {
-    url: imageDataUrl
-  }
-  if (settings.provider === 'openai') {
-    const detail = settings.requestOptions?.detail || 'high'
-    if (detail) {
-      imageUrl.detail = detail
-    }
-  }
-  return {
-    type: 'image_url',
-    image_url: imageUrl
-  }
-}
-
-function buildOpenAiRecognitionRequest(settings, prompt, imageDataUrl) {
-  return {
-    model: settings.model,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: prompt
-          },
-          buildImageContent(settings, imageDataUrl)
-        ]
-      }
-    ],
-    response_format: { type: 'json_object' }
-  }
-}
-
-function buildGeminiRecognitionRequest(settings, prompt, imageDataUrl) {
-  return {
-    model: settings.model,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: prompt
-          },
-          buildImageContent(settings, imageDataUrl)
-        ]
-      }
-    ],
-    response_format: zodResponseFormat(
-      coverImageRecognitionResultSchema,
-      'cover_image_recognition_result'
-    )
-  }
-}
-
 function buildRecognitionRequest(settings, prompt, imageDataUrl) {
-  if (settings.provider === 'gemini') {
-    return buildGeminiRecognitionRequest(settings, prompt, imageDataUrl)
+  const generationConfig = {
+    responseMimeType: 'application/json',
+    responseSchema: coverImageRecognitionResponseSchema
   }
-
-  return buildOpenAiRecognitionRequest(settings, prompt, imageDataUrl)
+  const mediaResolution = settings.requestOptions?.mediaResolution
+  if (mediaResolution) {
+    generationConfig.mediaResolution = mediaResolution
+  }
+  return {
+    model: settings.model,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          buildTextPart(prompt),
+          buildInlineDataPartFromDataUrl(imageDataUrl, 'image')
+        ]
+      }
+    ],
+    generationConfig
+  }
 }
 
 function createRecognitionFailure(
@@ -266,33 +257,35 @@ async function recognizeCoverTitle(options = {}) {
     )
   }
 
-  const client = createOpenAiClient(settings)
+  const requestUrl = buildGeminiNativeGenerateContentUrl(settings)
   const requestBody = buildRecognitionRequest(
     settings,
     options.prompt,
     options.imageDataUrl
   )
+  const requestSummary = summarizeGeminiNativeRequestBody(
+    requestBody,
+    requestUrl
+  )
 
   try {
-    const completion =
-      settings.provider === 'gemini'
-        ? await client.chat.completions.parse(requestBody)
-        : await client.chat.completions.create(requestBody)
-    const responseSummary = summarizeResponse(completion)
-    const message = completion?.choices?.[0]?.message
-    const parsedMessage = message?.parsed
-    const rawText = getMessageText(message).trim()
-    const rawResult = parsedMessage || rawText
+    const response = await sendGeminiNativeGenerateContentRequest(
+      settings,
+      requestBody,
+      requestUrl
+    )
+    const responseSummary = summarizeGeminiNativeResponse(response)
+    const extractedText = extractTextFromGeminiNativeResponse(response)
+    const rawText = extractedText?.text || ''
     const parseSummary = {
-      parsedPresent: typeof parsedMessage !== 'undefined',
-      rawResultType: parsedMessage ? 'parsed' : 'text',
+      rawResultType: rawText ? 'text' : 'empty',
       rawTextLength: rawText.length,
       rawTextPreview: truncateText(rawText)
     }
-    if (!rawResult) {
+    if (!rawText) {
       const diagnostics = buildRecognitionDiagnostics({
         settings,
-        requestBody,
+        requestSummary,
         responseSummary,
         parseSummary,
         diagnosticContext
@@ -305,17 +298,18 @@ async function recognizeCoverTitle(options = {}) {
         diagnostics
       )
     }
+
     let result = null
     try {
       result = parseImageRecognitionResult(
-        rawResult,
+        rawText,
         options.confidenceThreshold || settings.confidenceThreshold
       )
     } catch (error) {
       const responsePreview = buildResponsePreview(rawText)
       const diagnostics = buildRecognitionDiagnostics({
         settings,
-        requestBody,
+        requestSummary,
         responseSummary,
         parseSummary,
         diagnosticContext,
@@ -361,18 +355,20 @@ async function recognizeCoverTitle(options = {}) {
         diagnostics
       )
     }
+
     logDiagnostic(
       'info',
       'recognition.success',
       buildRecognitionDiagnostics({
         settings,
-        requestBody,
+        requestSummary,
         responseSummary,
         parseSummary,
         diagnosticContext,
         resultSummary: summarizeRecognitionResult(result)
       })
     )
+
     return {
       ok: true,
       provider: settings.provider,
@@ -384,7 +380,7 @@ async function recognizeCoverTitle(options = {}) {
     const providerErrorSummary = extractProviderErrorSummary(error)
     const diagnostics = buildRecognitionDiagnostics({
       settings,
-      requestBody,
+      requestSummary,
       diagnosticContext,
       errorSummary: summarizeError(error)
     })

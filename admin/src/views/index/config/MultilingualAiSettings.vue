@@ -153,26 +153,22 @@ const FIELD_GROUP_OPTIONS = [
   { label: '请求控制', value: 'request' },
   { label: '默认提示词', value: 'prompt' },
   { label: '图像生成服务', value: 'imageProvider' },
-  { label: 'OpenAI 图像生成', value: 'openaiImage' },
-  { label: 'Nano Banana 图像生成', value: 'nanoBananaImage' },
+  { label: 'Gemini 图像生成', value: 'geminiImage' },
   { label: '图像生成请求', value: 'imageRequest' },
   { label: '图像生成提示词', value: 'imagePrompt' },
   { label: '图像识别服务', value: 'imageRecognitionProvider' },
-  { label: 'OpenAI 图像识别', value: 'openaiImageRecognition' },
   { label: 'Gemini 图像识别', value: 'geminiImageRecognition' },
   { label: '图像识别请求', value: 'imageRecognitionRequest' },
   { label: '图像识别提示词', value: 'imageRecognitionPrompt' }
 ]
 
 const IMAGE_PROVIDER_GROUP_MAP = {
-  openai: 'openaiImage',
-  'nano-banana': 'nanoBananaImage'
+  gemini: 'geminiImage'
 }
 
 const IMAGE_PROVIDER_GROUPS = Object.values(IMAGE_PROVIDER_GROUP_MAP)
 
 const IMAGE_RECOGNITION_PROVIDER_GROUP_MAP = {
-  openai: 'openaiImageRecognition',
   gemini: 'geminiImageRecognition'
 }
 
@@ -195,18 +191,17 @@ export default {
     function getSelectedImageProvider() {
       const provider = String(settingsForm.imageGenerationProvider || '').trim()
       if (
-        Object.prototype.hasOwnProperty.call(
-          IMAGE_PROVIDER_GROUP_MAP,
-          provider
-        )
+        Object.prototype.hasOwnProperty.call(IMAGE_PROVIDER_GROUP_MAP, provider)
       ) {
         return provider
       }
-      return 'openai'
+      return 'gemini'
     }
 
     function getSelectedImageRecognitionProvider() {
-      const provider = String(settingsForm.imageRecognitionProvider || '').trim()
+      const provider = String(
+        settingsForm.imageRecognitionProvider || ''
+      ).trim()
       if (
         Object.prototype.hasOwnProperty.call(
           IMAGE_RECOGNITION_PROVIDER_GROUP_MAP,
@@ -215,7 +210,7 @@ export default {
       ) {
         return provider
       }
-      return 'openai'
+      return 'gemini'
     }
 
     function isImageProviderGroup(groupValue) {
@@ -259,8 +254,7 @@ export default {
       if (field.type === 'languagePromptMap') {
         const promptMap = {}
         languageOptions.forEach(language => {
-          promptMap[language.value] =
-            field.defaultValue?.[language.value] || ''
+          promptMap[language.value] = field.defaultValue?.[language.value] || ''
         })
         return promptMap
       }

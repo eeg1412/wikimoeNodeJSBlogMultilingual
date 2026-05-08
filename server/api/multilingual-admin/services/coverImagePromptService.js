@@ -86,13 +86,7 @@ function buildCoverRecognitionPrompt(options = {}) {
 }
 
 function buildProviderGenerationSuffix(provider) {
-  if (provider === 'openai') {
-    return `Use the input image as the strict visual reference.
-Preserve all non-title pixels as much as possible.
-Only edit the detected title text region.
-Return one final edited image.`
-  }
-  if (provider === 'nano-banana') {
+  if (provider === 'gemini') {
     return `The source cover image is the reference image.
 Keep the same composition and visual identity.
 Edit only the title text area.

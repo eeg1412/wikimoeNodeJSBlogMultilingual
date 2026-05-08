@@ -364,7 +364,7 @@
           <div class="translation-editor-action-divider" />
 
           <div class="translation-editor-action-group">
-            <el-button type="success" @click="openAiTranslationDialog">
+            <el-button type="success" @click="openTranslationDialog">
               AI 翻译
             </el-button>
             <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
@@ -3299,7 +3299,7 @@ export default {
       return form.sourceSnapshotId
     }
 
-    function openAiTranslationDialog() {
+    function openTranslationDialog() {
       const sourceSnapshotId = getSourceSnapshotId()
       if (!sourceSnapshotId) {
         ElMessage.warning('当前文章缺少源快照，无法进行 AI 翻译')
@@ -3848,7 +3848,7 @@ export default {
       onContentTabChange,
       openArticleMediaReplace,
       openMediaPreview,
-      openAiTranslationDialog,
+      openTranslationDialog,
       openRelationEditor,
       handleAiBaseModeChange,
       handleAiDialogBeforeClose,
