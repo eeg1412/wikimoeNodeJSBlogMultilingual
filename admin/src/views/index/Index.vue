@@ -182,11 +182,6 @@ const menuGroups = [
         icon: 'fas fa-fw fa-newspaper pr10'
       },
       {
-        name: 'TranslationJobList',
-        title: 'AI 翻译任务',
-        icon: 'fas fa-fw fa-tasks pr10'
-      },
-      {
         name: 'TranslationAuthorRelationList',
         title: '作者',
         icon: 'fas fa-fw fa-user pr10'
@@ -234,6 +229,28 @@ const menuGroups = [
     ]
   },
   {
+    index: 'ai',
+    title: 'AI',
+    icon: 'fas fa-fw fa-robot pr10',
+    children: [
+      {
+        name: 'TranslationJobList',
+        title: 'AI 翻译任务',
+        icon: 'fas fa-fw fa-tasks pr10'
+      },
+      {
+        name: 'MultilingualAiSettings',
+        title: 'AI 设置',
+        icon: 'fas fa-fw fa-sliders-h pr10'
+      },
+      {
+        name: 'AiUsageSummary',
+        title: 'AI 用量统计',
+        icon: 'fas fa-fw fa-chart-bar pr10'
+      }
+    ]
+  },
+  {
     index: 'settings',
     title: '设置',
     icon: 'fas fa-fw fa-cog pr10',
@@ -247,11 +264,6 @@ const menuGroups = [
         name: 'MultilingualMediaSettings',
         title: '媒体设置',
         icon: 'fas fa-fw fa-photo-video pr10'
-      },
-      {
-        name: 'MultilingualAiSettings',
-        title: 'AI 设置',
-        icon: 'fas fa-fw fa-robot pr10'
       }
     ]
   },
@@ -260,11 +272,6 @@ const menuGroups = [
     title: '统计',
     icon: 'fas fa-fw fa-chart-pie pr10',
     children: [
-      {
-        name: 'AiUsageSummary',
-        title: 'AI 用量统计',
-        icon: 'fas fa-fw fa-chart-bar pr10'
-      },
       {
         name: 'ReferrerList',
         title: '访问来源',

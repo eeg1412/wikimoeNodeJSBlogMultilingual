@@ -2,7 +2,7 @@
   <div class="common-right-panel-form multilingual-ai-settings-page">
     <div class="pb20">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item>设置</el-breadcrumb-item>
+        <el-breadcrumb-item>AI</el-breadcrumb-item>
         <el-breadcrumb-item>AI 设置</el-breadcrumb-item>
       </el-breadcrumb>
     </div>

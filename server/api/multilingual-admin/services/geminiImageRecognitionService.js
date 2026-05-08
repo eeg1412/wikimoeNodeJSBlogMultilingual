@@ -14,6 +14,7 @@ const {
   summarizeGeminiNativeRequestBody,
   summarizeGeminiNativeResponse
 } = require('./geminiNativeApiService')
+const { recordGeminiUsageLog } = require('./geminiUsageLogService')
 const {
   COVER_IMAGE_RECOGNITION_SCHEMA,
   COVER_IMAGE_RECOGNITION_VERSION,
@@ -242,6 +243,7 @@ async function recognizeCoverTitle(options = {}) {
     options.diagnosticContext && typeof options.diagnosticContext === 'object'
       ? { ...options.diagnosticContext }
       : {}
+  const operation = 'cover.image.recognition'
   if (!settings || !settings.provider || !settings.apiKey) {
     return createRecognitionFailure(
       settings,
@@ -283,6 +285,19 @@ async function recognizeCoverTitle(options = {}) {
       rawTextPreview: truncateText(rawText)
     }
     if (!rawText) {
+      await recordGeminiUsageLog({
+        settings,
+        operation,
+        status: 'error',
+        response,
+        context: diagnosticContext,
+        meta: {
+          confidenceThreshold:
+            options.confidenceThreshold || settings.confidenceThreshold
+        },
+        failureCode: 'EMPTY_RESPONSE',
+        resultType: 'empty'
+      })
       const diagnostics = buildRecognitionDiagnostics({
         settings,
         requestSummary,
@@ -306,6 +321,31 @@ async function recognizeCoverTitle(options = {}) {
         options.confidenceThreshold || settings.confidenceThreshold
       )
     } catch (error) {
+      let failureCode = 'INVALID_RESPONSE'
+      if (error && error.name === 'SyntaxError') {
+        failureCode = 'INVALID_JSON'
+      } else if (
+        error &&
+        /schema|version|confidence|titleRegion|containsTitle|shouldTranslate/.test(
+          error.message || ''
+        )
+      ) {
+        failureCode = 'INVALID_SCHEMA'
+      }
+      await recordGeminiUsageLog({
+        settings,
+        operation,
+        status: 'error',
+        response,
+        context: diagnosticContext,
+        meta: {
+          confidenceThreshold:
+            options.confidenceThreshold || settings.confidenceThreshold
+        },
+        failureCode,
+        failureReason: error?.message || '',
+        resultType: 'text'
+      })
       const responsePreview = buildResponsePreview(rawText)
       const diagnostics = buildRecognitionDiagnostics({
         settings,
@@ -356,6 +396,21 @@ async function recognizeCoverTitle(options = {}) {
       )
     }
 
+    await recordGeminiUsageLog({
+      settings,
+      operation,
+      status: 'success',
+      response,
+      context: diagnosticContext,
+      meta: {
+        confidenceThreshold:
+          options.confidenceThreshold || settings.confidenceThreshold,
+        containsTitle: result.containsTitle === true,
+        shouldTranslate: result.shouldTranslate === true
+      },
+      resultType: 'text'
+    })
+
     logDiagnostic(
       'info',
       'recognition.success',
@@ -378,6 +433,19 @@ async function recognizeCoverTitle(options = {}) {
     }
   } catch (error) {
     const providerErrorSummary = extractProviderErrorSummary(error)
+    let failureCode = 'REQUEST_FAILED'
+    if (/timeout|timed out/i.test(error.message || '')) {
+      failureCode = 'REQUEST_TIMEOUT'
+    }
+    await recordGeminiUsageLog({
+      settings,
+      operation,
+      status: 'error',
+      error,
+      context: diagnosticContext,
+      failureCode,
+      failureReason: error?.message || ''
+    })
     const diagnostics = buildRecognitionDiagnostics({
       settings,
       requestSummary,

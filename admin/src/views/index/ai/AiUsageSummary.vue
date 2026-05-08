@@ -2,7 +2,7 @@
   <div class="common-right-panel-form ai-usage-summary-page">
     <div class="pb20">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item>统计</el-breadcrumb-item>
+        <el-breadcrumb-item>AI</el-breadcrumb-item>
         <el-breadcrumb-item>AI 用量统计</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
@@ -33,7 +33,12 @@
               clearable
               style="width: 150px"
             >
-              <el-option label="DeepSeek" value="deepseek" />
+              <el-option
+                v-for="item in providerOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -49,9 +54,14 @@
               v-model="params.operation"
               placeholder="调用场景"
               clearable
-              style="width: 170px"
+              style="width: 180px"
             >
-              <el-option label="文章翻译" value="translation.post" />
+              <el-option
+                v-for="item in operationOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -187,7 +197,20 @@ const TOKEN_TYPE_TEXT_MAP = {
   input_cache_hit_tokens: '输入缓存命中 token',
   input_cache_miss_tokens: '输入缓存未命中 token',
   input_tokens: '输入 token',
-  output_tokens: '输出 token'
+  output_tokens: '输出 token',
+  thought_tokens: '思考 token',
+  tool_use_prompt_tokens: '工具调用输入 token'
+}
+
+const PROVIDER_OPTIONS = [
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Gemini', value: 'gemini' }
+]
+
+const OPERATION_TEXT_MAP = {
+  'translation.post': '文章翻译',
+  'cover.image.recognition': '封面图识别',
+  'cover.image.generation': '封面图生成'
 }
 
 function padDateNumber(value) {
@@ -301,10 +324,7 @@ export default {
     }
 
     function getOperationText(value) {
-      if (value === 'translation.post') {
-        return '文章翻译'
-      }
-      return value || '-'
+      return OPERATION_TEXT_MAP[value] || value || '-'
     }
 
     function getStatusText(value) {
@@ -346,7 +366,13 @@ export default {
       getStatusTagType,
       getStatusText,
       getTokenTypeText,
+      operationOptions: Object.entries(OPERATION_TEXT_MAP).map(
+        ([value, label]) => {
+          return { label, value }
+        }
+      ),
       params,
+      providerOptions: PROVIDER_OPTIONS,
       rawTokenRows,
       tokenRows
     }

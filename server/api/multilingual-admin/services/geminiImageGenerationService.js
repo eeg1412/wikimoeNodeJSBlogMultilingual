@@ -14,6 +14,7 @@ const {
   summarizeGeminiNativeRequestBody,
   summarizeGeminiNativeResponse
 } = require('./geminiNativeApiService')
+const { recordGeminiUsageLog } = require('./geminiUsageLogService')
 
 function summarizeExtractedImage(extractedImage) {
   if (!extractedImage || typeof extractedImage !== 'object') {
@@ -98,6 +99,11 @@ function buildGenerationDiagnostics(options = {}) {
 
 async function generateCoverImage(options = {}) {
   const settings = options.settings
+  const diagnosticContext =
+    options.diagnosticContext && typeof options.diagnosticContext === 'object'
+      ? { ...options.diagnosticContext }
+      : {}
+  const operation = 'cover.image.generation'
   if (!settings || settings.provider !== 'gemini') {
     throw new Error('Gemini 图像生成 settings 未配置')
   }
@@ -129,11 +135,20 @@ async function generateCoverImage(options = {}) {
     const responseSummary = summarizeGeminiNativeResponse(response)
     const extractedImage = extractBase64FromGeminiNativeResponse(response)
     if (!extractedImage || !extractedImage.base64) {
+      await recordGeminiUsageLog({
+        settings,
+        operation,
+        status: 'error',
+        response,
+        context: diagnosticContext,
+        failureCode: 'NO_IMAGE',
+        resultType: 'text'
+      })
       const diagnostics = buildGenerationDiagnostics({
         settings,
         requestSummary,
         responseSummary,
-        diagnosticContext: options.diagnosticContext
+        diagnosticContext
       })
       logDiagnostic('error', 'generation.response_without_image', diagnostics)
       throw createDiagnosticError(
@@ -142,6 +157,18 @@ async function generateCoverImage(options = {}) {
       )
     }
 
+    await recordGeminiUsageLog({
+      settings,
+      operation,
+      status: 'success',
+      response,
+      context: diagnosticContext,
+      meta: {
+        outputMimeType: extractedImage.mimeType || 'image/png'
+      },
+      resultType: 'image'
+    })
+
     logDiagnostic(
       'info',
       'generation.success',
@@ -149,7 +176,7 @@ async function generateCoverImage(options = {}) {
         settings,
         requestSummary,
         responseSummary,
-        diagnosticContext: options.diagnosticContext,
+        diagnosticContext,
         extractionSummary: summarizeExtractedImage(extractedImage)
       })
     )
@@ -165,10 +192,23 @@ async function generateCoverImage(options = {}) {
     if (error?.diagnostics) {
       throw error
     }
+    let failureCode = 'REQUEST_FAILED'
+    if (/timeout|timed out/i.test(error.message || '')) {
+      failureCode = 'REQUEST_TIMEOUT'
+    }
+    await recordGeminiUsageLog({
+      settings,
+      operation,
+      status: 'error',
+      error,
+      context: diagnosticContext,
+      failureCode,
+      failureReason: error?.message || ''
+    })
     const diagnostics = buildGenerationDiagnostics({
       settings,
       requestSummary,
-      diagnosticContext: options.diagnosticContext,
+      diagnosticContext,
       errorSummary: summarizeError(error)
     })
     logDiagnostic('error', 'generation.request_failed', diagnostics)

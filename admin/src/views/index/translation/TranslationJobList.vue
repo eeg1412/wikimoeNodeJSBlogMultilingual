@@ -2,7 +2,7 @@
   <div class="common-right-panel-form translation-job-list-page">
     <div class="pb20">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item>多语言数据管理</el-breadcrumb-item>
+        <el-breadcrumb-item>AI</el-breadcrumb-item>
         <el-breadcrumb-item>AI 翻译任务</el-breadcrumb-item>
       </el-breadcrumb>
     </div>

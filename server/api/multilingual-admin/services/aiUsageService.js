@@ -247,19 +247,176 @@ function getBillingTokenType(tokenType, groupHasCacheInputTokens) {
   return ''
 }
 
-function buildBillingTokenRows(rawTokenRows) {
-  const cacheGroupSet = new Set()
+function normalizeNumber(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return 0
+  }
+
+  return numberValue
+}
+
+function getLatestDate(...valueList) {
+  let latestAt = null
+  valueList.forEach(value => {
+    if (!value) {
+      return
+    }
+    if (!latestAt || new Date(value) > new Date(latestAt)) {
+      latestAt = value
+    }
+  })
+  return latestAt
+}
+
+function createBillingRow(baseRow, tokenType, total, requestCount, latestAt) {
+  const normalizedTotal = normalizeNumber(total)
+  if (normalizedTotal <= 0 || !baseRow) {
+    return null
+  }
+
+  return {
+    provider: baseRow.provider,
+    model: baseRow.model,
+    tokenType,
+    total: normalizedTotal,
+    requestCount: normalizeNumber(requestCount),
+    latestAt: latestAt || baseRow.latestAt || null
+  }
+}
+
+function groupRawTokenRows(rawTokenRows = []) {
+  const groupMap = new Map()
+
   rawTokenRows.forEach(row => {
+    const provider = row.provider || ''
+    const model = row.model || ''
+    const key = `${provider}:${model}`
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        provider,
+        model,
+        rows: new Map()
+      })
+    }
+
+    groupMap.get(key).rows.set(row.tokenType, row)
+  })
+
+  return Array.from(groupMap.values())
+}
+
+function hasGeminiUsageRows(rowMap) {
+  return (
+    rowMap.has('promptTokenCount') ||
+    rowMap.has('cachedContentTokenCount') ||
+    rowMap.has('candidatesTokenCount') ||
+    rowMap.has('toolUsePromptTokenCount') ||
+    rowMap.has('thoughtsTokenCount')
+  )
+}
+
+function appendBillingRow(result, row) {
+  if (!row) {
+    return
+  }
+
+  result.push(row)
+}
+
+function buildGeminiBillingRows(group) {
+  const result = []
+  const promptRow = group.rows.get('promptTokenCount')
+  const cachedRow = group.rows.get('cachedContentTokenCount')
+  const candidateRow = group.rows.get('candidatesTokenCount')
+  const toolUsePromptRow = group.rows.get('toolUsePromptTokenCount')
+  const thoughtsRow = group.rows.get('thoughtsTokenCount')
+
+  if (promptRow) {
+    if (cachedRow) {
+      appendBillingRow(
+        result,
+        createBillingRow(
+          cachedRow,
+          'input_cache_hit_tokens',
+          cachedRow.total,
+          cachedRow.requestCount,
+          cachedRow.latestAt
+        )
+      )
+      appendBillingRow(
+        result,
+        createBillingRow(
+          promptRow,
+          'input_cache_miss_tokens',
+          normalizeNumber(promptRow.total) - normalizeNumber(cachedRow.total),
+          promptRow.requestCount,
+          getLatestDate(promptRow.latestAt, cachedRow.latestAt)
+        )
+      )
+    } else {
+      appendBillingRow(
+        result,
+        createBillingRow(
+          promptRow,
+          'input_tokens',
+          promptRow.total,
+          promptRow.requestCount,
+          promptRow.latestAt
+        )
+      )
+    }
+  }
+
+  appendBillingRow(
+    result,
+    createBillingRow(
+      candidateRow,
+      'output_tokens',
+      candidateRow?.total,
+      candidateRow?.requestCount,
+      candidateRow?.latestAt
+    )
+  )
+
+  appendBillingRow(
+    result,
+    createBillingRow(
+      toolUsePromptRow,
+      'tool_use_prompt_tokens',
+      toolUsePromptRow?.total,
+      toolUsePromptRow?.requestCount,
+      toolUsePromptRow?.latestAt
+    )
+  )
+
+  appendBillingRow(
+    result,
+    createBillingRow(
+      thoughtsRow,
+      'thought_tokens',
+      thoughtsRow?.total,
+      thoughtsRow?.requestCount,
+      thoughtsRow?.latestAt
+    )
+  )
+
+  return result
+}
+
+function buildOpenAiBillingRows(group) {
+  const cacheGroupSet = new Set()
+  group.rows.forEach((row, tokenType) => {
     if (
-      row.tokenType === 'prompt_cache_hit_tokens' ||
-      row.tokenType === 'prompt_cache_miss_tokens'
+      tokenType === 'prompt_cache_hit_tokens' ||
+      tokenType === 'prompt_cache_miss_tokens'
     ) {
       cacheGroupSet.add(`${row.provider}:${row.model}`)
     }
   })
 
   const billingMap = new Map()
-  rawTokenRows.forEach(row => {
+  group.rows.forEach(row => {
     const groupKey = `${row.provider}:${row.model}`
     const tokenType = getBillingTokenType(
       row.tokenType,
@@ -289,7 +446,23 @@ function buildBillingTokenRows(rawTokenRows) {
     }
   })
 
-  return Array.from(billingMap.values()).sort((a, b) => {
+  return Array.from(billingMap.values())
+}
+
+function buildBillingTokenRows(rawTokenRows) {
+  const billingRows = []
+
+  groupRawTokenRows(rawTokenRows).forEach(group => {
+    let currentRows = []
+    if (hasGeminiUsageRows(group.rows)) {
+      currentRows = buildGeminiBillingRows(group)
+    } else {
+      currentRows = buildOpenAiBillingRows(group)
+    }
+    billingRows.push(...currentRows)
+  })
+
+  return billingRows.sort((a, b) => {
     const left = `${a.provider}:${a.model}:${a.tokenType}`
     const right = `${b.provider}:${b.model}:${b.tokenType}`
     return left.localeCompare(right)
