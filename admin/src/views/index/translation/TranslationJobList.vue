@@ -251,7 +251,7 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="操作" width="330" fixed="right">
           <template #default="{ row }">
-            <div class="job-row-actions">
+            <div class="job-row-actions" @click.stop>
               <el-button type="primary" size="small" @click="openDetail(row)">
                 详情
               </el-button>
@@ -1964,13 +1964,28 @@ export default {
       openDetail(currentJob.value)
     }
 
-    const runJobAction = (row, action, successText) => {
+    const closeCurrentDetail = () => {
+      detailDrawerVisible.value = false
+      currentJob.value = null
+      selectedEntryKeys.value = []
+      conflictList.value = []
+    }
+
+    const runJobAction = (row, action, successText, options = {}) => {
       action({ id: row._id })
         .then(() => {
           ElMessage.success(successText)
           getJobList(false)
           getJobStorageSummary()
-          if (currentJob.value?._id === row._id) {
+          const isCurrentDetailJob = currentJob.value?._id === row._id
+          if (!isCurrentDetailJob) {
+            return
+          }
+          if (options.closeCurrentDetail === true) {
+            closeCurrentDetail()
+            return
+          }
+          if (detailDrawerVisible.value) {
             refreshDetail()
           }
         })
@@ -2017,7 +2032,9 @@ export default {
       ElMessageBox.confirm('确认永久删除该任务？', '确认操作', {
         type: 'warning'
       }).then(() => {
-        runJobAction(row, multilingualApi.deleteTranslationJob, '已删除')
+        runJobAction(row, multilingualApi.deleteTranslationJob, '已删除', {
+          closeCurrentDetail: true
+        })
       })
     }
 
@@ -2066,6 +2083,9 @@ export default {
         const responseData = response.data.data || {}
         const deletedCount = responseData.deletedCount || ids.length
         ElMessage.success(`已删除 ${deletedCount} 个 AI 翻译任务`)
+        if (ids.includes(currentJob.value?._id)) {
+          closeCurrentDetail()
+        }
         clearJobSelection()
         getJobList(false)
         getJobStorageSummary()

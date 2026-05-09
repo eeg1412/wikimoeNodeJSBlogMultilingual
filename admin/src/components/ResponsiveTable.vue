@@ -141,6 +141,7 @@
           <div
             v-if="actionColumns.length > 0"
             class="responsive-table-card__actions"
+            @click.stop
           >
             <template v-for="col in actionColumns" :key="col.columnId">
               <ResponsiveTableCardCell

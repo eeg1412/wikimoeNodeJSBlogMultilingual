@@ -228,6 +228,28 @@ async function resolveEntries(job, context) {
   return result.entries
 }
 
+async function resolvePostTranslationEntries(job, context) {
+  const entries = job && job.request && job.request.entries
+  if (Array.isArray(entries)) {
+    return entries
+  }
+  return await resolveEntries(job, context)
+}
+
+function createEmptyPostTranslationData() {
+  return {
+    payload: {
+      schema: 'wikimoe.ai.translation.empty',
+      version: 1,
+      entries: []
+    },
+    usage: null,
+    model: '',
+    requestId: null,
+    aiJsonLogs: []
+  }
+}
+
 function getPrompt(job) {
   if (!job || !job.request) {
     return ''
@@ -414,24 +436,44 @@ async function buildResult(job, data) {
 }
 
 async function executePostAiTranslation(job, context) {
-  const entries = await resolveEntries(job, context)
-  await context.updateProgress({
-    currentStage: 'TranslatePost',
-    currentStep: '正在执行文章 AI 翻译',
-    percent: 20
-  })
-  const data = await deepSeekTranslationService.translatePostEntriesStream(
-    {
-      postId: String(job.target.postId),
-      sourceLanguageCode: job.source.languageCode,
-      targetLanguageCode: job.target.languageCode,
-      targetLanguageCodes: getJobTargetLanguageCodes(job),
-      prompt: getPrompt(job),
-      searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
-      entries
-    },
-    createHandlers(context, 'TranslatePost', { start: 20, end: 85 })
-  )
+  const entries = await resolvePostTranslationEntries(job, context)
+  let data = null
+  if (entries.length > 0) {
+    await context.updateProgress({
+      currentStage: 'TranslatePost',
+      currentStep: '正在执行文章 AI 翻译',
+      percent: 20
+    })
+    data = await deepSeekTranslationService.translatePostEntriesStream(
+      {
+        postId: String(job.target.postId),
+        sourceLanguageCode: job.source.languageCode,
+        targetLanguageCode: job.target.languageCode,
+        targetLanguageCodes: getJobTargetLanguageCodes(job),
+        prompt: getPrompt(job),
+        searchOfficialTermTranslations:
+          shouldSearchOfficialTermTranslations(job),
+        entries
+      },
+      createHandlers(context, 'TranslatePost', { start: 20, end: 85 })
+    )
+  } else {
+    if (!shouldTranslateCoverImage(job, false)) {
+      throw new ApiError(
+        ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+        '文章翻译后台任务没有选择正文条目，也未启用封面图翻译',
+        'request.entries',
+        400,
+        { retryable: false }
+      )
+    }
+    await context.updateProgress({
+      currentStage: 'TranslatePost',
+      currentStep: '未选择正文条目，跳过文章正文 AI 翻译',
+      percent: 20
+    })
+    data = createEmptyPostTranslationData()
+  }
 
   const result = await buildResult(job, data)
   return await appendPostTranslationCoverImageResult(job, result, context)
