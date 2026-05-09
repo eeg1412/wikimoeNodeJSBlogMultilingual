@@ -66,7 +66,29 @@ function findArtifact(job, artifactId) {
   })
 }
 
-function assertArtifactAdoptable(artifact) {
+function findPreviewEntryForArtifact(job, artifactId, entryKey = '') {
+  const previewEntries = Array.isArray(job?.result?.previewEntries)
+    ? job.result.previewEntries
+    : []
+  const normalizedEntryKey = String(entryKey || '').trim()
+  if (normalizedEntryKey) {
+    return previewEntries.find(entry => {
+      return (
+        entry?.entryType === COVER_IMAGE_ENTRY_TYPE &&
+        normalizeArtifactId(entry.artifactId) === artifactId &&
+        String(entry.entryKey || '').trim() === normalizedEntryKey
+      )
+    })
+  }
+  return previewEntries.find(entry => {
+    return (
+      entry?.entryType === COVER_IMAGE_ENTRY_TYPE &&
+      normalizeArtifactId(entry.artifactId) === artifactId
+    )
+  })
+}
+
+function assertArtifactAdoptable(artifact, previewEntry = null) {
   if (!artifact) {
     throw new ApiError(
       ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
@@ -83,7 +105,15 @@ function assertArtifactAdoptable(artifact) {
       400
     )
   }
-  if (artifact.adopted === true) {
+  if (previewEntry?.adopted === true) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
+      '该封面图条目已经采纳',
+      'entryKey',
+      409
+    )
+  }
+  if (artifact.adopted === true && !previewEntry) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
       '该封面图产物已经采纳',
@@ -194,11 +224,9 @@ async function resolveTargetPostId({ body, artifact, previewEntry }) {
     return String(explicitTargetPostId)
   }
 
-  const inlineTargetPostId =
-    toOptionalObjectId(artifact?.targetPostId) ||
-    toOptionalObjectId(previewEntry?.targetPostId)
-  if (inlineTargetPostId) {
-    return String(inlineTargetPostId)
+  const previewTargetPostId = toOptionalObjectId(previewEntry?.targetPostId)
+  if (previewTargetPostId) {
+    return String(previewTargetPostId)
   }
 
   const sourcePostId = toObjectId(
@@ -217,6 +245,10 @@ async function resolveTargetPostId({ body, artifact, previewEntry }) {
     .select('_id')
     .lean()
   if (!targetPost?._id) {
+    const artifactTargetPostId = toOptionalObjectId(artifact?.targetPostId)
+    if (artifactTargetPostId) {
+      return String(artifactTargetPostId)
+    }
     throw new ApiError(
       ERROR_CODES.CONTENT_NOT_FOUND,
       '目标翻译文章不存在，不能采纳封面图',
@@ -243,14 +275,21 @@ function updateArtifactList(job, artifactId, updateData) {
   })
 }
 
-function updatePreviewEntries(job, artifactId, attachment) {
+function updatePreviewEntries(job, artifactId, attachment, entryKey = '') {
   const previewEntries = Array.isArray(job.result?.previewEntries)
     ? job.result.previewEntries
     : []
+  const normalizedEntryKey = String(entryKey || '').trim()
   return previewEntries.map(entry => {
     if (
       entry?.entryType !== COVER_IMAGE_ENTRY_TYPE ||
       normalizeArtifactId(entry.artifactId) !== artifactId
+    ) {
+      return entry
+    }
+    if (
+      normalizedEntryKey &&
+      String(entry.entryKey || '') !== normalizedEntryKey
     ) {
       return entry
     }
@@ -329,6 +368,41 @@ function updateAdoptionEntries(job, adoptionEntry, adminSnapshot, now) {
   }
 }
 
+function buildArtifactAdoptedRecords({
+  artifact,
+  previewEntry,
+  targetPostId,
+  attachment,
+  now
+}) {
+  const existingRecords = Array.isArray(artifact?.adoptedRecords)
+    ? artifact.adoptedRecords
+    : []
+  const entryKey = String(previewEntry?.entryKey || '').trim()
+  const languageCode = String(previewEntry?.languageCode || '').trim()
+  const nextRecord = {
+    entryKey,
+    languageCode,
+    targetPostId: String(targetPostId || '').trim(),
+    adoptedAttachmentId: attachment?._id || null,
+    adoptedAt: now
+  }
+
+  const filteredRecords = existingRecords.filter(record => {
+    if (entryKey) {
+      return String(record?.entryKey || '').trim() !== entryKey
+    }
+    if (nextRecord.targetPostId) {
+      return (
+        String(record?.targetPostId || '').trim() !== nextRecord.targetPostId
+      )
+    }
+    return true
+  })
+  filteredRecords.push(nextRecord)
+  return filteredRecords
+}
+
 function resolveNextJobStatus(job, adoptionEntries) {
   const previewEntries = Array.isArray(job?.result?.previewEntries)
     ? job.result.previewEntries
@@ -388,7 +462,20 @@ async function adoptCoverImage(body = {}, options = {}) {
   }
 
   const artifact = findArtifact(job, artifactId)
-  assertArtifactAdoptable(artifact)
+  const previewEntryBeforeAdopt = findPreviewEntryForArtifact(
+    job,
+    artifactId,
+    body.entryKey
+  )
+  if (String(body.entryKey || '').trim() && !previewEntryBeforeAdopt) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '任务结果中不存在对应封面图条目',
+      'entryKey',
+      400
+    )
+  }
+  assertArtifactAdoptable(artifact, previewEntryBeforeAdopt)
   const coverBuffer = await coverImageTempFileService.readGeneratedCoverFile(
     artifact,
     String(jobId)
@@ -401,14 +488,6 @@ async function adoptCoverImage(body = {}, options = {}) {
     buildAttachmentBody(artifact, body),
     buildAttachmentFile(artifact, fileData)
   )
-  const previewEntryBeforeAdopt = Array.isArray(job.result?.previewEntries)
-    ? job.result.previewEntries.find(entry => {
-        return (
-          entry?.entryType === COVER_IMAGE_ENTRY_TYPE &&
-          normalizeArtifactId(entry.artifactId) === artifactId
-        )
-      })
-    : null
   const resolvedTargetPostId = await resolveTargetPostId({
     body,
     artifact,
@@ -431,6 +510,13 @@ async function adoptCoverImage(body = {}, options = {}) {
         }
       : null,
     adoptedAttachmentId: attachment._id,
+    adoptedRecords: buildArtifactAdoptedRecords({
+      artifact,
+      previewEntry: previewEntryBeforeAdopt,
+      targetPostId: resolvedTargetPostId,
+      attachment,
+      now
+    }),
     generatedImage: {
       ...artifact.generatedImage,
       adoptedUrl: attachment.filepath || attachment.localFilepath || ''
@@ -441,13 +527,17 @@ async function adoptCoverImage(body = {}, options = {}) {
     artifactId,
     artifactUpdateData
   )
-  const previewEntries = updatePreviewEntries(job, artifactId, attachment)
-  const previewEntry = previewEntries.find(entry => {
-    return (
-      entry?.entryType === COVER_IMAGE_ENTRY_TYPE &&
-      normalizeArtifactId(entry.artifactId) === artifactId
-    )
-  })
+  const previewEntries = updatePreviewEntries(
+    job,
+    artifactId,
+    attachment,
+    body.entryKey
+  )
+  const previewEntry = findPreviewEntryForArtifact(
+    { result: { previewEntries } },
+    artifactId,
+    body.entryKey
+  )
   if (!previewEntry?.entryKey) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
@@ -517,7 +607,7 @@ async function adoptPreviewCoverImage(body = {}) {
       ? body.previewEntry
       : null
 
-  assertArtifactAdoptable(artifact)
+  assertArtifactAdoptable(artifact, previewEntry)
   const coverBuffer =
     await coverImageTempFileService.readGeneratedCoverFile(artifact)
   const fileData = {

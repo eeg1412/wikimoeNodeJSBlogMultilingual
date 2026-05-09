@@ -104,7 +104,8 @@ function parseInput(body = {}) {
 
   const entries = Array.isArray(body.entries) ? body.entries : []
   const translateCoverImage = body.translateCoverImage !== false
-  if (entries.length === 0 && !translateCoverImage) {
+  const allowEmptyEntries = body.allowEmptyEntries === true
+  if (entries.length === 0 && !translateCoverImage && !allowEmptyEntries) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
       '请至少选择一个翻译条目',
@@ -120,6 +121,7 @@ function parseInput(body = {}) {
     prompt: normalizePrompt(body.prompt),
     entries,
     translateCoverImage,
+    allowEmptyEntries,
     skipUsageLog: body.skipUsageLog === true
   }
 }
@@ -183,6 +185,192 @@ async function translateSourcePostAiImportEntriesStream(
   return data
 }
 
+function normalizeCoverBatchItem(item = {}, index) {
+  const sourceId = String(item.sourceId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_ID_INVALID,
+      undefined,
+      `items[${index}].sourceId`,
+      400
+    )
+  }
+
+  const targetLanguageCode = normalizeLanguageCode(
+    item.targetLanguageCode || item.languageCode
+  )
+  if (!targetLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      `items[${index}].targetLanguageCode`,
+      400
+    )
+  }
+
+  let requestKey = String(item.requestKey || '').trim()
+  if (!requestKey) {
+    requestKey = `${targetLanguageCode}:${sourceId}`
+  }
+
+  const previewEntries = Array.isArray(item.previewEntries)
+    ? item.previewEntries.filter(Boolean)
+    : []
+
+  return {
+    requestKey,
+    sourceId,
+    targetLanguageCode,
+    previewEntries
+  }
+}
+
+function parseCoverBatchInput(body = {}) {
+  const sourceLanguageCode = normalizeLanguageCode(body.sourceLanguageCode)
+  if (!sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'sourceLanguageCode',
+      400
+    )
+  }
+
+  const items = Array.isArray(body.items) ? body.items : []
+  if (items.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '请至少提供一个封面图翻译任务',
+      'items',
+      400
+    )
+  }
+
+  return {
+    sourceLanguageCode,
+    items: items.map((item, index) => {
+      return normalizeCoverBatchItem(item, index)
+    })
+  }
+}
+
+function normalizeCoverWarningMessages(warnings) {
+  if (!Array.isArray(warnings)) {
+    return []
+  }
+  return warnings
+    .map(warning => {
+      if (warning && typeof warning.message === 'string') {
+        return warning.message.trim()
+      }
+      return String(warning || '').trim()
+    })
+    .filter(Boolean)
+}
+
+function buildItemCoverArtifacts(snapshotArtifacts, coverResult) {
+  const artifactIdSet = new Set()
+  if (coverResult?.previewEntry?.artifactId) {
+    artifactIdSet.add(String(coverResult.previewEntry.artifactId))
+  }
+  if (coverResult?.artifact?.artifactId) {
+    artifactIdSet.add(String(coverResult.artifact.artifactId))
+  }
+
+  const artifactList = []
+  snapshotArtifacts.forEach(artifact => {
+    const artifactId = String(artifact?.artifactId || '')
+    if (artifactIdSet.has(artifactId)) {
+      artifactList.push(artifact)
+    }
+  })
+
+  if (coverResult?.artifact?.artifactId) {
+    const artifactId = String(coverResult.artifact.artifactId)
+    const exists = artifactList.some(artifact => {
+      return String(artifact?.artifactId || '') === artifactId
+    })
+    if (!exists) {
+      artifactList.push(coverResult.artifact)
+    }
+  }
+
+  return artifactList
+}
+
+async function buildCoverBatchTasks(input) {
+  const tasks = []
+  for (const item of input.items) {
+    const previewContext =
+      await translationPostService.getSourcePostAiImportPreviewContext({
+        sourceId: item.sourceId,
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCode: item.targetLanguageCode
+      })
+    tasks.push({
+      requestKey: item.requestKey,
+      sourceId: item.sourceId,
+      job: createRequestContext({
+        sourceId: item.sourceId,
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCode: item.targetLanguageCode
+      }),
+      sourcePost: previewContext.sourcePost,
+      targetPost: previewContext.targetPost,
+      previewEntries: item.previewEntries,
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: item.targetLanguageCode
+    })
+  }
+  return tasks
+}
+
+async function translateSourcePostAiImportCoverImages(body = {}) {
+  const input = parseCoverBatchInput(body)
+  const registry = coverImageTranslationService.createCoverImageRegistry()
+  const tasks = await buildCoverBatchTasks(input)
+  const batchResult =
+    await coverImageTranslationService.processCoverImageTranslationBatch({
+      registry,
+      tasks
+    })
+  const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
+  const items = batchResult.results.map(item => {
+    const previewEntries = []
+    if (item.coverResult?.previewEntry) {
+      previewEntries.push(item.coverResult.previewEntry)
+    }
+
+    return {
+      requestKey: item.task.requestKey,
+      sourceId: item.task.sourceId,
+      languageCode: item.task.targetLanguageCode,
+      targetLanguageCode: item.task.targetLanguageCode,
+      coverImagePreviewEntries: previewEntries,
+      coverImageArtifacts: buildItemCoverArtifacts(
+        snapshot.coverImageArtifacts,
+        item.coverResult
+      ),
+      coverImageWarnings: normalizeCoverWarningMessages(
+        item.coverResult?.warnings
+      )
+    }
+  })
+
+  return {
+    items,
+    coverImageArtifacts: snapshot.coverImageArtifacts,
+    coverImageGenerationMap: snapshot.coverImageGenerationMap,
+    coverImageRecognitionMap: snapshot.coverImageRecognitionMap,
+    dedupe: {
+      taskCount: batchResult.taskCount,
+      groupCount: batchResult.groupCount,
+      duplicateTitleCount: batchResult.duplicateTitleCount
+    }
+  }
+}
+
 module.exports = {
+  translateSourcePostAiImportCoverImages,
   translateSourcePostAiImportEntriesStream
 }

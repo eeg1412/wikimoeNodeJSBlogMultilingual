@@ -2457,7 +2457,8 @@ export default {
             targetLanguageCode: languageCode,
             prompt: aiForm.prompt,
             skipUsageLog: true,
-            translateCoverImage: true,
+            translateCoverImage: false,
+            allowEmptyEntries: true,
             entries
           })
         }
@@ -2500,6 +2501,179 @@ export default {
         ],
         relatedSourceIds,
         entryCount: entries.length
+      }
+    }
+
+    const buildAiImportCoverRequestKey = (languageCode, sourceId) => {
+      return [languageCode, sourceId]
+        .map(item => {
+          return String(item || '').trim()
+        })
+        .join(':')
+    }
+
+    const getCoverPreviewEntriesForCoverRequest = resultItem => {
+      const entries = []
+      if (Array.isArray(resultItem?.payload?.entries)) {
+        entries.push(...resultItem.payload.entries.filter(Boolean))
+      }
+      if (Array.isArray(resultItem?.preview?.changeList)) {
+        entries.push(...resultItem.preview.changeList.filter(Boolean))
+      }
+      return entries
+    }
+
+    const collectAiImportCoverRequestItems = resultList => {
+      const items = []
+      resultList.forEach(resultItem => {
+        const sourceId = String(resultItem?.sourceId || '').trim()
+        const languageCode = String(resultItem?.languageCode || '').trim()
+        if (sourceId && languageCode) {
+          items.push({
+            requestKey: buildAiImportCoverRequestKey(languageCode, sourceId),
+            sourceId,
+            targetLanguageCode: languageCode,
+            previewEntries: getCoverPreviewEntriesForCoverRequest(resultItem)
+          })
+        }
+
+        const relatedResults = Array.isArray(resultItem?.relatedResults)
+          ? resultItem.relatedResults
+          : []
+        relatedResults.forEach(relatedItem => {
+          const relatedSourceId = String(relatedItem?.sourceId || '').trim()
+          if (!relatedSourceId || !languageCode) {
+            return
+          }
+          items.push({
+            requestKey: buildAiImportCoverRequestKey(
+              languageCode,
+              relatedSourceId
+            ),
+            sourceId: relatedSourceId,
+            targetLanguageCode: languageCode,
+            previewEntries: getCoverPreviewEntriesForCoverRequest(relatedItem)
+          })
+        })
+      })
+      return items
+    }
+
+    const mergeAiImportCoverResultIntoPreview = (preview, coverItem) => {
+      const coverImagePreviewEntries = Array.isArray(
+        coverItem?.coverImagePreviewEntries
+      )
+        ? coverItem.coverImagePreviewEntries.filter(Boolean)
+        : []
+      const coverImageArtifacts = Array.isArray(coverItem?.coverImageArtifacts)
+        ? coverItem.coverImageArtifacts.filter(Boolean)
+        : []
+      const coverImageWarnings = normalizeAiCoverWarningList(
+        coverItem?.coverImageWarnings
+      )
+      const coverImageChangeCount = coverImagePreviewEntries.filter(entry => {
+        return isGeneratedAiCoverPreviewEntry(entry)
+      }).length
+      const warningList = Array.isArray(preview?.warningList)
+        ? preview.warningList.slice()
+        : []
+      const skippedCount = Number(preview?.skippedCount || 0)
+
+      return {
+        ...preview,
+        coverImagePreviewEntries,
+        coverImageArtifacts,
+        coverImageWarnings,
+        coverImageChangeCount,
+        totalChangeCount:
+          Number(preview?.changeCount || 0) + coverImageChangeCount,
+        warningList: warningList.concat(coverImageWarnings),
+        skippedCount: skippedCount + coverImageWarnings.length
+      }
+    }
+
+    const applyAiImportCoverResultToItem = (resultItem, coverItemMap) => {
+      const sourceId = String(resultItem?.sourceId || '').trim()
+      const languageCode = String(resultItem?.languageCode || '').trim()
+      const requestKey = buildAiImportCoverRequestKey(languageCode, sourceId)
+      const coverItem = coverItemMap.get(requestKey)
+      if (coverItem) {
+        resultItem.preview = mergeAiImportCoverResultIntoPreview(
+          resultItem.preview,
+          coverItem
+        )
+      }
+
+      const relatedResults = Array.isArray(resultItem?.relatedResults)
+        ? resultItem.relatedResults
+        : []
+      relatedResults.forEach(relatedItem => {
+        const relatedSourceId = String(relatedItem?.sourceId || '').trim()
+        const relatedRequestKey = buildAiImportCoverRequestKey(
+          languageCode,
+          relatedSourceId
+        )
+        const relatedCoverItem = coverItemMap.get(relatedRequestKey)
+        if (!relatedCoverItem) {
+          return
+        }
+        relatedItem.preview = mergeAiImportCoverResultIntoPreview(
+          relatedItem.preview,
+          relatedCoverItem
+        )
+      })
+    }
+
+    const applyAiImportCoverBatchResult = (resultList, data) => {
+      const itemList = Array.isArray(data?.items) ? data.items : []
+      const coverItemMap = new Map()
+      itemList.forEach(item => {
+        const requestKey = String(item?.requestKey || '').trim()
+        if (requestKey) {
+          coverItemMap.set(requestKey, item)
+        }
+      })
+      resultList.forEach(resultItem => {
+        applyAiImportCoverResultToItem(resultItem, coverItemMap)
+      })
+    }
+
+    const requestAiImportCoverTranslations = async ({
+      resultList,
+      abortSignal
+    }) => {
+      const items = collectAiImportCoverRequestItems(resultList)
+      if (items.length === 0) {
+        return
+      }
+      pushAiProgress('正在对比所有语言标题并翻译封面图')
+      const response = await fetch(
+        '/api/multilingual-admin/source/post/ai-import-cover-translate',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${store.getters.adminToken}`
+          },
+          signal: abortSignal,
+          body: JSON.stringify({
+            sourceLanguageCode: aiForm.sourceLanguageCode,
+            items
+          })
+        }
+      )
+
+      if (!response.ok) {
+        throw await createApiErrorFromResponse(response, 'AI 封面图翻译失败')
+      }
+
+      const responseBody = await response.json()
+      const data = responseBody?.data || {}
+      applyAiImportCoverBatchResult(resultList, data)
+      if (data?.dedupe?.duplicateTitleCount > 0) {
+        pushAiProgress(
+          `封面图标题去重完成：${data.dedupe.groupCount}/${data.dedupe.taskCount}`
+        )
       }
     }
 
@@ -2620,6 +2794,10 @@ export default {
             })
           )
         }
+        await requestAiImportCoverTranslations({
+          resultList,
+          abortSignal: aiAbortController.value.signal
+        })
         aiResultList.value = resultList
         initSelectedAiResultEntryIds(resultList)
         selectedAiResultLanguageCodes.value = resultList.map(

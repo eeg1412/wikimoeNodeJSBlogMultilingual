@@ -132,7 +132,8 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
       previewEntries: result.previewEntries,
       targetTitle: job.target?.title,
       sourceLanguageCode: job.source.languageCode,
-      targetLanguageCode: job.target.languageCode
+      targetLanguageCode: job.target.languageCode,
+      skipRecognition: true
     })
   appendCoverImageResult(result, coverResult, registry)
   await context.saveCheckpoint({
@@ -693,7 +694,7 @@ async function translateSourcePostForLanguage({
   isRoot,
   depth,
   translatedEntryKeySet,
-  coverImageRegistry
+  coverImageTasks
 }) {
   await context.updateProgress({
     currentStage: 'BuildEntries',
@@ -807,22 +808,16 @@ async function translateSourcePostForLanguage({
     model: data.model || '',
     requestId: data.requestId || null
   }
-  if (shouldTranslateCoverImage(job, true)) {
-    await context.updateProgress({
-      currentStage: `TranslateCoverImage:${languageCode}`,
-      currentStep: `正在处理 ${getLanguageText(languageCode)} 封面图 AI 翻译`
+  if (shouldTranslateCoverImage(job, true) && Array.isArray(coverImageTasks)) {
+    coverImageTasks.push({
+      job,
+      sourcePost: previewContext.sourcePost,
+      targetPost: previewContext.targetPost,
+      previewEntries: result.previewEntries,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: languageCode,
+      result
     })
-    const coverResult =
-      await coverImageTranslationService.processCoverImageTranslation({
-        job,
-        registry: coverImageRegistry,
-        sourcePost: previewContext.sourcePost,
-        targetPost: previewContext.targetPost,
-        previewEntries: result.previewEntries,
-        sourceLanguageCode: job.source.languageCode,
-        targetLanguageCode: languageCode
-      })
-    appendCoverImageResult(result, coverResult, coverImageRegistry)
   }
   await context.saveCheckpoint({
     stage: `TranslatePost:${languageCode}`,
@@ -852,7 +847,7 @@ async function executeSourcePostLanguageDag({
   context,
   languageCode,
   maxDepth,
-  coverImageRegistry
+  coverImageTasks
 }) {
   const queue = [
     {
@@ -881,7 +876,7 @@ async function executeSourcePostLanguageDag({
       isRoot: task.isRoot,
       depth: task.depth,
       translatedEntryKeySet,
-      coverImageRegistry
+      coverImageTasks
     })
     results.push(result)
 
@@ -917,8 +912,7 @@ async function executeSourcePostAiImport(job, context) {
   }
 
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
-  const coverImageRegistry =
-    coverImageTranslationService.createCoverImageRegistry()
+  const coverImageTasks = []
   const languageResults = []
   for (const languageCode of languageCodes) {
     languageResults.push(
@@ -927,9 +921,47 @@ async function executeSourcePostAiImport(job, context) {
         context,
         languageCode,
         maxDepth,
-        coverImageRegistry
+        coverImageTasks
       }))
     )
+  }
+
+  const coverImageRegistry =
+    coverImageTranslationService.createCoverImageRegistry()
+  if (coverImageTasks.length > 0) {
+    await context.updateProgress({
+      currentStage: 'TranslateCoverImage',
+      currentStep: '正在按标题去重处理所有语言的封面图 AI 翻译'
+    })
+    const coverBatchResult =
+      await coverImageTranslationService.processCoverImageTranslationBatch({
+        registry: coverImageRegistry,
+        tasks: coverImageTasks,
+        onTaskStart: async ({ task, taskIndex, taskCount }) => {
+          await context.updateProgress({
+            currentStage: 'TranslateCoverImage',
+            currentStep: `正在处理 ${getLanguageText(
+              task.targetLanguageCode
+            )} 封面图 AI 翻译（${taskIndex + 1}/${taskCount}）`
+          })
+        }
+      })
+    coverBatchResult.results.forEach(item => {
+      appendCoverImageResult(
+        item.task.result,
+        item.coverResult,
+        coverImageRegistry
+      )
+    })
+    await context.saveCheckpoint({
+      stage: 'TranslateCoverImage',
+      stateSummary: {
+        taskCount: coverBatchResult.taskCount,
+        dedupeGroupCount: coverBatchResult.groupCount,
+        duplicateTitleCount: coverBatchResult.duplicateTitleCount,
+        artifactCount: coverImageRegistry.artifacts.size
+      }
+    })
   }
 
   const previewEntries = languageResults.flatMap(item => {

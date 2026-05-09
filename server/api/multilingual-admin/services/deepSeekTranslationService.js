@@ -2247,7 +2247,8 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
             : [],
           targetTitle: input.targetTitle,
           sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: input.targetLanguageCode
+          targetLanguageCode: input.targetLanguageCode,
+          skipRecognition: true
         })
       data = appendCoverImageResultToStreamData(data, coverResult, registry)
     }

@@ -1366,6 +1366,8 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
         {
           jobId: job._id,
           artifactId: entry.artifactId,
+          entryKey: entry.entryKey,
+          targetPostId: entry.targetPostId,
           languageCode: entry.languageCode,
           applyBatchId
         },
@@ -1453,6 +1455,8 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
       {
         jobId: job._id,
         artifactId: entry.artifactId,
+        entryKey: entry.entryKey,
+        targetPostId: entry.targetPostId,
         languageCode: entry.languageCode,
         applyBatchId
       },

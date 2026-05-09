@@ -19,6 +19,8 @@ const geminiImageGenerationService = require('./geminiImageGenerationService')
 const {
   COVER_IMAGE_ARTIFACT_TYPE,
   COVER_IMAGE_ENTRY_TYPE,
+  COVER_IMAGE_RECOGNITION_SCHEMA,
+  COVER_IMAGE_RECOGNITION_VERSION,
   buildBufferHash,
   buildCoverGenerationKey,
   buildCoverRecognitionKey,
@@ -29,6 +31,7 @@ const {
   getPreferredSourceImageDimensions,
   isCoverSupportedPostType,
   normalizeIdValue,
+  normalizeTitleForImageReuse,
   resolveFirstCoverImage,
   selectNearestImageRatio
 } = require('../utils/coverImageTranslationUtils')
@@ -625,6 +628,105 @@ function addLanguageCodeToArtifact(artifact, languageCode) {
   }
 }
 
+function buildManualRecognitionKey(sourceCoverKey, sourceTitle, targetTitle) {
+  return buildStableHash([
+    'cover-recognition-manual-v1',
+    sourceCoverKey,
+    normalizeTitleForImageReuse(sourceTitle),
+    normalizeTitleForImageReuse(targetTitle)
+  ])
+}
+
+function buildManualRecognitionResult(sourceTitle) {
+  return {
+    schema: COVER_IMAGE_RECOGNITION_SCHEMA,
+    version: COVER_IMAGE_RECOGNITION_VERSION,
+    containsTitle: true,
+    recognizedTitleText: String(sourceTitle || '').trim(),
+    confidence: 1,
+    titleRegion: {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    },
+    reason: '用户已手动选择翻译封面图，跳过图像识别判断',
+    shouldTranslate: true
+  }
+}
+
+function buildNoopRecognitionResult(message) {
+  return {
+    schema: COVER_IMAGE_RECOGNITION_SCHEMA,
+    version: COVER_IMAGE_RECOGNITION_VERSION,
+    containsTitle: false,
+    recognizedTitleText: '',
+    confidence: 1,
+    titleRegion: {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    },
+    reason: message,
+    shouldTranslate: false
+  }
+}
+
+function isSameCoverTitle(sourceTitle, targetTitle) {
+  const normalizedSourceTitle = normalizeTitleForImageReuse(sourceTitle)
+  const normalizedTargetTitle = normalizeTitleForImageReuse(targetTitle)
+  if (!normalizedSourceTitle || !normalizedTargetTitle) {
+    return false
+  }
+  return normalizedSourceTitle === normalizedTargetTitle
+}
+
+function buildBatchGroupKey(task) {
+  const sourcePost = task.sourcePost || {}
+  return buildStableHash([
+    'cover-translation-batch-v1',
+    normalizeIdValue(sourcePost._id || sourcePost.sourceId),
+    normalizeTitleForImageReuse(sourcePost.title),
+    normalizeTitleForImageReuse(task.targetTitle)
+  ])
+}
+
+function normalizeBatchTask(task, index) {
+  const targetPost = task?.targetPost || {}
+  const targetTitle = resolveTargetTitle(
+    task?.targetTitle,
+    task?.previewEntries,
+    targetPost
+  )
+  return {
+    ...task,
+    batchIndex: index,
+    targetTitle,
+    batchGroupKey: buildBatchGroupKey({
+      ...task,
+      targetPost,
+      targetTitle
+    })
+  }
+}
+
+function groupBatchTasks(tasks) {
+  const groupMap = new Map()
+  tasks.forEach(task => {
+    const groupKey = task.batchGroupKey
+    if (!groupMap.has(groupKey)) {
+      groupMap.set(groupKey, {
+        key: groupKey,
+        targetTitle: task.targetTitle,
+        tasks: []
+      })
+    }
+    groupMap.get(groupKey).tasks.push(task)
+  })
+  return Array.from(groupMap.values())
+}
+
 function createSkippedResult({
   job,
   sourcePost,
@@ -680,6 +782,59 @@ function createSkippedResult({
         languageCode
       })
     ]
+  }
+}
+
+function createNotRequiredResult({
+  job,
+  sourcePost,
+  targetPost,
+  languageCode,
+  targetTitle,
+  message
+}) {
+  const artifact = {
+    artifactId: createArtifactId(),
+    artifactType: COVER_IMAGE_ARTIFACT_TYPE,
+    jobId: getJobId(job),
+    generationKey: '',
+    recognitionKey: '',
+    sourceCoverKey: '',
+    sourceCoverAttachmentId: '',
+    sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+    sourcePostType: Number(sourcePost?.type || 0),
+    targetPostId: normalizeIdValue(targetPost?._id),
+    sourceTitle: sourcePost?.title || '',
+    targetTitle,
+    targetTitleHash: buildTargetTitleHash(targetTitle),
+    languageCodes: languageCode ? [languageCode] : [],
+    relatedPostSourceIds: [],
+    sourceImage: null,
+    recognition: buildNoopRecognitionResult(message),
+    recognitionInput: null,
+    generatedImage: null,
+    provider: {},
+    promptHash: '',
+    status: 'not-required',
+    reused: false,
+    reusedFromArtifactId: '',
+    adopted: false,
+    adoptedAt: null,
+    adoptedAttachmentId: null,
+    cleanedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }
+  return {
+    artifact,
+    previewEntry: buildCoverImagePreviewEntry({
+      artifact,
+      sourcePost,
+      targetPost,
+      languageCode,
+      warningMessage: message
+    }),
+    warnings: []
   }
 }
 
@@ -944,11 +1099,13 @@ function resolveTargetTitle(targetTitle, previewEntries, targetPost) {
   const previewTitle = [
     titleEntry?.nextPreviewRawValue,
     titleEntry?.nextPreviewText,
+    titleEntry?.nextValue,
     titleEntry?.value,
     titleEntry?.previewRawValue,
     titleEntry?.previewText,
     titleEntry?.currentPreviewRawValue,
-    titleEntry?.currentPreviewText
+    titleEntry?.currentPreviewText,
+    titleEntry?.currentValue
   ]
     .map(normalizeTitleValue)
     .find(Boolean)
@@ -1007,6 +1164,16 @@ async function processCoverImageTranslation(options = {}) {
       message: '目标标题为空，不能生成封面图翻译'
     })
   }
+  if (isSameCoverTitle(sourcePost.title || '', targetTitle)) {
+    return createNotRequiredResult({
+      job: options.job,
+      sourcePost,
+      targetPost,
+      languageCode,
+      targetTitle,
+      message: '目标标题与源文章标题一致，无需生成封面图翻译'
+    })
+  }
 
   const coverInfo = await resolveSourceCover(options.job, sourcePost)
   if (!coverInfo.ok) {
@@ -1042,39 +1209,64 @@ async function processCoverImageTranslation(options = {}) {
     })
   }
 
+  const skipRecognition = options.skipRecognition === true
   let recognitionSettings = null
   let generationSettings = null
   try {
-    recognitionSettings =
-      await aiSettingsService.getImageRecognitionRuntimeSettings()
+    if (!skipRecognition) {
+      recognitionSettings =
+        await aiSettingsService.getImageRecognitionRuntimeSettings()
+    }
     generationSettings =
       await aiSettingsService.getImageGenerationRuntimeSettings()
   } catch (error) {
+    let message = error?.message || '图像生成配置不可用'
+    if (!skipRecognition) {
+      message = error?.message || '图像识别或图像生成配置不可用'
+    }
     return createSkippedResult({
       job: options.job,
       sourcePost,
       targetPost,
       languageCode,
       status: 'recognition-failed',
-      message: error?.message || '图像识别或图像生成配置不可用'
+      message
     })
   }
 
-  const recognitionKey = buildCoverRecognitionKey(
+  let recognitionKey = buildCoverRecognitionKey(
     coverInfo.sourceCoverKey,
     sourcePost.title || ''
   )
-  const recognitionResult = await runRecognition({
-    job: options.job,
-    registry,
-    coverInfo,
-    sourcePost,
-    targetTitle,
-    sourceLanguageCode: options.sourceLanguageCode,
-    targetLanguageCode: languageCode,
-    recognitionKey,
-    recognitionSettings
-  })
+  let recognitionResult = null
+  if (skipRecognition) {
+    recognitionKey = buildManualRecognitionKey(
+      coverInfo.sourceCoverKey,
+      sourcePost.title || '',
+      targetTitle
+    )
+    recognitionResult = {
+      status: 'success',
+      recognitionInput: null,
+      result: buildManualRecognitionResult(sourcePost.title || ''),
+      provider: {
+        recognitionProvider: 'manual',
+        recognitionModel: 'user-selected-cover-translation'
+      }
+    }
+  } else {
+    recognitionResult = await runRecognition({
+      job: options.job,
+      registry,
+      coverInfo,
+      sourcePost,
+      targetTitle,
+      sourceLanguageCode: options.sourceLanguageCode,
+      targetLanguageCode: languageCode,
+      recognitionKey,
+      recognitionSettings
+    })
+  }
 
   if (recognitionResult.status !== 'success') {
     const artifact = buildBaseArtifact({
@@ -1090,8 +1282,8 @@ async function processCoverImageTranslation(options = {}) {
       recognitionKey,
       status: 'recognition-failed',
       provider: {
-        recognitionProvider: recognitionSettings.provider,
-        recognitionModel: recognitionSettings.model
+        recognitionProvider: recognitionSettings?.provider || '',
+        recognitionModel: recognitionSettings?.model || ''
       }
     })
     artifact.recognitionInput = recognitionResult.recognitionInput || null
@@ -1233,6 +1425,47 @@ async function processCoverImageTranslation(options = {}) {
   }
 }
 
+async function processCoverImageTranslationBatch(options = {}) {
+  const registry = options.registry || createCoverImageRegistry()
+  const rawTasks = Array.isArray(options.tasks) ? options.tasks : []
+  const tasks = rawTasks.map((task, index) => {
+    return normalizeBatchTask(task, index)
+  })
+  const groups = groupBatchTasks(tasks)
+  const results = []
+
+  for (const group of groups) {
+    for (const task of group.tasks) {
+      if (typeof options.onTaskStart === 'function') {
+        await options.onTaskStart({
+          group,
+          task,
+          taskIndex: results.length,
+          taskCount: tasks.length
+        })
+      }
+      const coverResult = await processCoverImageTranslation({
+        ...task,
+        registry,
+        targetTitle: task.targetTitle
+      })
+      results.push({
+        groupKey: group.key,
+        task,
+        coverResult
+      })
+    }
+  }
+
+  return {
+    registry,
+    results,
+    taskCount: tasks.length,
+    groupCount: groups.length,
+    duplicateTitleCount: tasks.length - groups.length
+  }
+}
+
 function buildRegistrySnapshot(registry) {
   const coverImageGenerationMap = {}
   registry.generationMap.forEach((value, key) => {
@@ -1261,6 +1494,7 @@ module.exports = {
   buildCoverImagePreviewEntry,
   buildRegistrySnapshot,
   createCoverImageRegistry,
+  processCoverImageTranslationBatch,
   processCoverImageTranslation,
   resolveSourceCover,
   resolveTargetTitle

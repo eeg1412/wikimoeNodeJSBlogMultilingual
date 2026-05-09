@@ -368,6 +368,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/post/streamAiImportTranslation')
   },
   {
+    path: '/source/post/ai-import-cover-translate',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/post/translateAiImportCoverImages')
+  },
+  {
     path: '/source/post/list',
     method: 'get',
     middleware: [checkAuth],
