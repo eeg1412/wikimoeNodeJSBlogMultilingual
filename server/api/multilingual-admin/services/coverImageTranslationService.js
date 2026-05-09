@@ -291,18 +291,50 @@ function buildAbsoluteSourceAssetUrl(assetPath, sourceAssetDomain) {
   return new URL(relativePath, baseUrl).toString()
 }
 
-function buildSourceCoverPreviewUrl(attachment, sourceAssetDomainConfig) {
-  const assetPath = getSourceCoverPreviewPath(attachment)
-  if (!assetPath) {
+function normalizeSourceCoverPreviewPath(assetPath) {
+  const normalizedAssetPath = String(assetPath || '')
+    .trim()
+    .replace(/\\/g, '/')
+  if (!normalizedAssetPath) {
     return ''
   }
-  if (/^https?:\/\//i.test(assetPath)) {
-    return assetPath
+  if (
+    normalizedAssetPath.startsWith('data:') ||
+    normalizedAssetPath.startsWith('blob:') ||
+    /^[a-zA-Z]:\//.test(normalizedAssetPath)
+  ) {
+    return ''
   }
-  if (!sourceAssetDomainConfig.enabled) {
-    return assetPath
+
+  if (/^https?:\/\//i.test(normalizedAssetPath)) {
+    try {
+      const parsedUrl = new URL(normalizedAssetPath)
+      return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`
+    } catch (error) {
+      return ''
+    }
   }
-  return buildAbsoluteSourceAssetUrl(assetPath, sourceAssetDomainConfig.value)
+
+  if (normalizedAssetPath.startsWith('//')) {
+    try {
+      const parsedUrl = new URL(`https:${normalizedAssetPath}`)
+      return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`
+    } catch (error) {
+      return ''
+    }
+  }
+
+  if (normalizedAssetPath.startsWith('./')) {
+    return normalizeSourceCoverPreviewPath(normalizedAssetPath.slice(2))
+  }
+  if (normalizedAssetPath.startsWith('/')) {
+    return normalizedAssetPath
+  }
+  return `/${normalizedAssetPath.replace(/^\.?\//, '')}`
+}
+
+function buildSourceCoverPreviewUrl(attachment) {
+  return normalizeSourceCoverPreviewPath(getSourceCoverPreviewPath(attachment))
 }
 
 function normalizeSourceMimeType(mimeType, fallbackMimeType = '') {
@@ -449,7 +481,7 @@ async function downloadSourceCoverToTempFile({ job, attachment, sourceUrl }) {
     sourceFilePath: writeResult.filePath,
     sourceImageContentHash: buildBufferHash(downloadResult.buffer),
     sourceMimeType,
-    sourcePreviewUrl: downloadResult.finalUrl
+    sourceDownloadUrl: downloadResult.finalUrl
   }
 }
 
@@ -478,10 +510,8 @@ async function resolveSourceCover(job, post) {
   let sourceFilePath = ''
   let sourceImageContentHash = ''
   let sourceMimeType = normalizeSourceMimeType(attachment?.mimetype || '')
-  let sourcePreviewUrl = buildSourceCoverPreviewUrl(
-    attachment,
-    sourceAssetDomainConfig
-  )
+  let sourceDownloadUrl = ''
+  const sourcePreviewUrl = buildSourceCoverPreviewUrl(attachment)
 
   if (sourceAssetDomainConfig.enabled) {
     const remoteAssetPath = getSourceCoverDownloadPath(attachment)
@@ -507,7 +537,7 @@ async function resolveSourceCover(job, post) {
       sourceFilePath = remoteSource.sourceFilePath
       sourceImageContentHash = remoteSource.sourceImageContentHash
       sourceMimeType = remoteSource.sourceMimeType
-      sourcePreviewUrl = remoteSource.sourcePreviewUrl || sourcePreviewUrl
+      sourceDownloadUrl = remoteSource.sourceDownloadUrl || remoteSourceUrl
     } catch (error) {
       return {
         ok: false,
@@ -560,6 +590,7 @@ async function resolveSourceCover(job, post) {
     sourceFilePath,
     sourceMimeType,
     sourcePreviewUrl,
+    sourceDownloadUrl,
     sourceImageContentHash,
     sourceCoverKey,
     dimensions
@@ -570,6 +601,7 @@ function buildSourceImageInfo(coverInfo, dimensions) {
   const attachment = coverInfo.attachment
   return {
     filepath: coverInfo.sourcePreviewUrl || getAttachmentPreviewUrl(attachment),
+    downloadUrl: coverInfo.sourceDownloadUrl || '',
     localPath: coverInfo.sourceFilePath,
     width: dimensions.width,
     height: dimensions.height,
