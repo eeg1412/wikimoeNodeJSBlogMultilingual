@@ -772,6 +772,7 @@ async function applySourcePostTranslationJob({
   selectedEntries,
   selectedEntryKeys,
   adminSnapshot,
+  admin,
   applyBatchId,
   publish
 }) {
@@ -796,11 +797,16 @@ async function applySourcePostTranslationJob({
     )
   }
 
-  const applyResult = await translationPostService.applySourcePostAiImport({
-    sourceId: job.source?.postId,
-    sourceLanguageCode: job.source?.languageCode,
-    results
-  })
+  const applyResult = await translationPostService.applySourcePostAiImport(
+    {
+      sourceId: job.source?.postId,
+      sourceLanguageCode: job.source?.languageCode,
+      results
+    },
+    {
+      admin
+    }
+  )
   const statusResult = await updateSourcePostJobAdoption({
     job,
     selectedEntries,
@@ -1271,6 +1277,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
         selectedEntries: selectedContentEntries,
         selectedEntryKeys: selectedContentEntries.map(entry => entry.entryKey),
         adminSnapshot,
+        admin: options.admin,
         applyBatchId,
         publish
       })

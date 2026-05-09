@@ -3641,6 +3641,34 @@ async function ensureSourceSnapshotForAiImport(
   }
 }
 
+async function syncTranslationPostRelationsForAiImport(translationPost) {
+  if (!translationPost || !translationPost.sourceSnapshotId) {
+    return translationPost
+  }
+
+  let sourcePost = await findSourcePostSnapshot(
+    translationPost.sourceSnapshotId
+  )
+  sourcePost = await ensureSourcePostSnapshotRelations(sourcePost)
+
+  const now = new Date()
+  const context = buildCopyContext(
+    sourcePost,
+    translationPost.languageCode,
+    now
+  )
+  const updateData = await buildPostRelationIndexUpdateData(sourcePost, context)
+  updateData.lastChangDate = now
+
+  const PostModel = getPostModel()
+  await PostModel.updateOne(
+    { _id: translationPost._id, recordKind: TRANSLATION_RECORD_KIND },
+    { $set: updateData }
+  )
+
+  return await findTranslationPostDetailById(translationPost._id)
+}
+
 async function adoptAiImportPreviewCoverImages(
   {
     targetPostId,
@@ -3703,20 +3731,11 @@ async function adoptAiImportPreviewCoverImages(
 async function applySourcePostAiImport(body = {}, options = {}) {
   const input = normalizeAiBatchInput(body)
   const refreshLanguageSet = new Set([input.sourceLanguageCode])
-  const importResult =
-    await importPostSourceService.importOrOverwriteSourcePost(
-      {
-        sourceId: input.sourceId,
-        sourceLanguageCode: input.sourceLanguageCode,
-        overwrite: false
-      },
-      false,
-      { skipContentRefresh: true }
-    )
   const sourceSnapshotIdCache = new Map()
-  sourceSnapshotIdCache.set(
-    String(input.sourceId),
-    importResult.sourceSnapshotId
+  const sourceSnapshotId = await ensureSourceSnapshotForAiImport(
+    input.sourceId,
+    input.sourceLanguageCode,
+    sourceSnapshotIdCache
   )
 
   const results = []
@@ -3731,26 +3750,29 @@ async function applySourcePostAiImport(body = {}, options = {}) {
     }
 
     const createResult = await createOrGetTranslationPostForAiImport(
-      importResult.sourceSnapshotId,
+      sourceSnapshotId,
       item.languageCode
     )
     const appliedEntryKeySet = new Set()
     const translationPostDetail = await getTranslationPostDetail(
       createResult.translationPostId
     )
+    const translationPost = await syncTranslationPostRelationsForAiImport(
+      translationPostDetail.post
+    )
     const applyResult = await applyAiTranslationPayload({
       payload: item.payload,
-      translationPost: translationPostDetail.post,
+      translationPost,
       publish: item.publish,
       appliedEntryKeySet
     })
     const coverImageAdoptedCount = await adoptAiImportPreviewCoverImages(
       {
-        targetPostId: translationPostDetail.post._id,
+        targetPostId: translationPost._id,
         languageCode: item.languageCode,
         previewEntryList: item.coverImagePreviewEntries,
         artifactList: item.coverImageArtifacts,
-        nameFallback: translationPostDetail.post.title
+        nameFallback: translationPost.title
       },
       {
         admin: options.admin
@@ -3790,21 +3812,25 @@ async function applySourcePostAiImport(body = {}, options = {}) {
       const relatedTranslationPostDetail = await getTranslationPostDetail(
         relatedCreateResult.translationPostId
       )
+      const relatedTranslationPost =
+        await syncTranslationPostRelationsForAiImport(
+          relatedTranslationPostDetail.post
+        )
       const relatedPublish = item.publish || relatedItem.publish
       const relatedApplyResult = await applyAiTranslationPayload({
         payload: relatedItem.payload,
-        translationPost: relatedTranslationPostDetail.post,
+        translationPost: relatedTranslationPost,
         publish: relatedPublish,
         appliedEntryKeySet
       })
       const relatedCoverImageAdoptedCount =
         await adoptAiImportPreviewCoverImages(
           {
-            targetPostId: relatedTranslationPostDetail.post._id,
+            targetPostId: relatedTranslationPost._id,
             languageCode: item.languageCode,
             previewEntryList: relatedItem.coverImagePreviewEntries,
             artifactList: relatedItem.coverImageArtifacts,
-            nameFallback: relatedTranslationPostDetail.post.title
+            nameFallback: relatedTranslationPost.title
           },
           {
             admin: options.admin
