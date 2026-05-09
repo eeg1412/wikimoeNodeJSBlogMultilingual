@@ -1816,6 +1816,24 @@ function buildChatCompletionUrl(settings) {
   }
 }
 
+function buildDeepSeekRequestHeaders(settings, requestText, accept = '') {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(requestText)
+  }
+  if (accept) {
+    headers.Accept = accept
+  }
+
+  if (settings.deepSeekUseCloudflareAiGateway === true) {
+    headers['cf-aig-authorization'] = `Bearer ${settings.deepSeekApiKey}`
+    return headers
+  }
+
+  headers.Authorization = `Bearer ${settings.deepSeekApiKey}`
+  return headers
+}
+
 function createTranslationCancelledError(reason) {
   const message = String(reason || '').trim() || 'AI 翻译已停止'
   return new ApiError(
@@ -1860,11 +1878,7 @@ function requestJson(url, requestBody, settings, options = {}) {
       url,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.deepSeekApiKey}`,
-          'Content-Length': Buffer.byteLength(requestText)
-        },
+        headers: buildDeepSeekRequestHeaders(settings, requestText),
         timeout
       },
       response => {
@@ -1982,12 +1996,11 @@ function requestStream(
       url,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-          Authorization: `Bearer ${settings.deepSeekApiKey}`,
-          'Content-Length': Buffer.byteLength(requestText)
-        },
+        headers: buildDeepSeekRequestHeaders(
+          settings,
+          requestText,
+          'text/event-stream'
+        ),
         timeout
       },
       response => {

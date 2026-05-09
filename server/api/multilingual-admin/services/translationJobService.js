@@ -1432,6 +1432,7 @@ async function renewTranslationJobLease(options = {}) {
 async function updateRunningTranslationJobProgress(options = {}) {
   const progress = normalizeObject(options.progress, 'progress')
   const setData = {}
+  const maxData = {}
   if (progress.currentStep !== undefined) {
     setData['progress.currentStep'] = toTrimmedString(progress.currentStep)
   }
@@ -1463,13 +1464,19 @@ async function updateRunningTranslationJobProgress(options = {}) {
         400
       )
     }
-    setData['progress.percent'] = percent
+    maxData['progress.percent'] = percent
   }
 
   const logMessage = toTrimmedString(
     progress.logMessage || progress.currentStep
   )
-  const update = { $set: setData }
+  const update = {}
+  if (Object.keys(setData).length > 0) {
+    update.$set = setData
+  }
+  if (Object.keys(maxData).length > 0) {
+    update.$max = maxData
+  }
   if (logMessage) {
     update.$push = {
       'progress.recentLogs': {

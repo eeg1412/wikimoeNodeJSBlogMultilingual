@@ -172,6 +172,105 @@ const FIELD_GROUP_OPTIONS = [
   { label: '互联网搜索请求', value: 'internetSearchRequest' }
 ]
 
+const AI_GATEWAY_FIELD_LIST = [
+  {
+    name: 'deepSeekUseCloudflareAiGateway',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'deepseek',
+    defaultValue: false,
+    insertAfter: 'deepSeekApiKey',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发文本翻译请求。'
+  },
+  {
+    name: 'geminiImageCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'imageProvider',
+    defaultValue: false,
+    insertAfter: 'imageGenerationProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像生成请求。'
+  },
+  {
+    name: 'geminiImageRecognitionCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'imageRecognitionProvider',
+    defaultValue: false,
+    insertAfter: 'imageRecognitionProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像识别请求。'
+  },
+  {
+    name: 'geminiInternetSearchCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'internetSearchProvider',
+    defaultValue: false,
+    insertAfter: 'internetSearchProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发互联网搜索请求。'
+  }
+]
+
+const AI_FIELD_DISPLAY_OVERRIDES = {
+  deepSeekApiKey: {
+    label: 'API Key / Token',
+    helpText:
+      '直连模型服务时填写服务商 API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  deepSeekUseCloudflareAiGateway: {
+    label: '使用 AI Gateway',
+    group: 'deepseek',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发文本翻译请求。'
+  },
+  deepSeekBaseUrl: {
+    label: 'Base URL',
+    helpText:
+      '直连时填写模型服务地址；使用 AI Gateway 时填写 Cloudflare 的 /compat 地址。'
+  },
+  geminiImageApiKey: {
+    label: 'API Key / Token',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  geminiImageCloudflareAiGatewayEnabled: {
+    label: '使用 AI Gateway',
+    group: 'imageProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像生成请求。'
+  },
+  geminiImageBaseUrl: {
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+  },
+  geminiImageRecognitionApiKey: {
+    label: 'API Key / Token',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  geminiImageRecognitionCloudflareAiGatewayEnabled: {
+    label: '使用 AI Gateway',
+    group: 'imageRecognitionProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像识别请求。'
+  },
+  geminiImageRecognitionBaseUrl: {
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+  },
+  geminiInternetSearchApiKey: {
+    label: 'API Key / Token',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  geminiInternetSearchCloudflareAiGatewayEnabled: {
+    label: '使用 AI Gateway',
+    group: 'internetSearchProvider',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发互联网搜索请求。'
+  },
+  geminiInternetSearchBaseUrl: {
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+  }
+}
+
 const IMAGE_PROVIDER_GROUP_MAP = {
   gemini: 'geminiImage'
 }
@@ -316,8 +415,58 @@ export default {
       })
     }
 
+    function buildDisplayField(field) {
+      const displayField = { ...field }
+      const displayOverride = AI_FIELD_DISPLAY_OVERRIDES[displayField.name]
+      if (displayOverride) {
+        Object.assign(displayField, displayOverride)
+      }
+      delete displayField.insertAfter
+      return displayField
+    }
+
+    function mergeAiGatewayFields(apiFields) {
+      let apiFieldList = []
+      if (Array.isArray(apiFields)) {
+        apiFieldList = apiFields
+      }
+
+      const apiFieldNames = new Set(apiFieldList.map(field => field.name))
+      const insertedFieldNames = new Set()
+      const mergedFields = []
+
+      apiFieldList.forEach(field => {
+        mergedFields.push(buildDisplayField(field))
+        AI_GATEWAY_FIELD_LIST.forEach(localField => {
+          if (apiFieldNames.has(localField.name)) {
+            return
+          }
+          if (insertedFieldNames.has(localField.name)) {
+            return
+          }
+          if (localField.insertAfter !== field.name) {
+            return
+          }
+          mergedFields.push(buildDisplayField(localField))
+          insertedFieldNames.add(localField.name)
+        })
+      })
+
+      AI_GATEWAY_FIELD_LIST.forEach(localField => {
+        if (apiFieldNames.has(localField.name)) {
+          return
+        }
+        if (insertedFieldNames.has(localField.name)) {
+          return
+        }
+        mergedFields.push(buildDisplayField(localField))
+      })
+
+      return mergedFields
+    }
+
     function applySettingsData(data) {
-      fieldList.value = data.fields || []
+      fieldList.value = mergeAiGatewayFields(data.fields)
       ensureFormFields()
       const values = data.values || {}
       fieldList.value.forEach(field => {

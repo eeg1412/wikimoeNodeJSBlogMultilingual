@@ -169,17 +169,29 @@ const AI_SETTING_FIELDS = [
   },
   {
     name: 'deepSeekApiKey',
-    label: 'DeepSeek API Key',
+    label: 'API Key / Token',
     type: 'password',
     group: 'deepseek',
-    defaultValue: ''
+    defaultValue: '',
+    helpText:
+      '直连模型服务时填写服务商 API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  {
+    name: 'deepSeekUseCloudflareAiGateway',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'deepseek',
+    defaultValue: false,
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发文本翻译请求。'
   },
   {
     name: 'deepSeekBaseUrl',
-    label: 'DeepSeek Base URL',
+    label: 'Base URL',
     type: 'string',
     group: 'deepseek',
-    defaultValue: 'https://api.deepseek.com'
+    defaultValue: 'https://api.deepseek.com',
+    helpText:
+      '直连时填写模型服务地址；使用 AI Gateway 时填写 Cloudflare 的 /compat 地址。'
   },
   {
     name: 'deepSeekModel',
@@ -294,10 +306,20 @@ const AI_SETTING_FIELDS = [
   },
   {
     name: 'geminiImageApiKey',
-    label: 'Gemini API Key',
+    label: 'API Key / Token',
     type: 'password',
     group: 'geminiImage',
-    defaultValue: ''
+    defaultValue: '',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  {
+    name: 'geminiImageCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'imageProvider',
+    defaultValue: false,
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像生成请求。'
   },
   {
     name: 'geminiImageBaseUrl',
@@ -306,7 +328,7 @@ const AI_SETTING_FIELDS = [
     group: 'geminiImage',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
     helpText:
-      '服务端直接调用 Gemini generateContent API；旧兼容层地址会自动归一化为原生路径。'
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
   },
   {
     name: 'geminiImageModel',
@@ -389,10 +411,20 @@ const AI_SETTING_FIELDS = [
   },
   {
     name: 'geminiImageRecognitionApiKey',
-    label: 'Gemini API Key',
+    label: 'API Key / Token',
     type: 'password',
     group: 'geminiImageRecognition',
-    defaultValue: ''
+    defaultValue: '',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  {
+    name: 'geminiImageRecognitionCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'imageRecognitionProvider',
+    defaultValue: false,
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发图像识别请求。'
   },
   {
     name: 'geminiImageRecognitionBaseUrl',
@@ -400,7 +432,8 @@ const AI_SETTING_FIELDS = [
     type: 'string',
     group: 'geminiImageRecognition',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
-    helpText: '服务端直接调用 Gemini generateContent 并使用原生结构化输出。'
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
   },
   {
     name: 'geminiImageRecognitionModel',
@@ -454,10 +487,20 @@ const AI_SETTING_FIELDS = [
   },
   {
     name: 'geminiInternetSearchApiKey',
-    label: 'Gemini API Key',
+    label: 'API Key / Token',
     type: 'password',
     group: 'geminiInternetSearch',
-    defaultValue: ''
+    defaultValue: '',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  {
+    name: 'geminiInternetSearchCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'internetSearchProvider',
+    defaultValue: false,
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发互联网搜索请求。'
   },
   {
     name: 'geminiInternetSearchBaseUrl',
@@ -466,7 +509,7 @@ const AI_SETTING_FIELDS = [
     group: 'geminiInternetSearch',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
     helpText:
-      '服务端直接调用 Gemini generateContent API，并按最新文档使用 google_search 工具。'
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
   },
   {
     name: 'geminiInternetSearchModel',
@@ -828,6 +871,8 @@ function buildGeminiImageRuntimeSettings(values) {
     provider: 'gemini',
     apiKey: normalizeTrimmedString(values.geminiImageApiKey),
     baseUrl: normalizeTrimmedString(values.geminiImageBaseUrl),
+    useCloudflareAiGateway:
+      values.geminiImageCloudflareAiGatewayEnabled === true,
     model: normalizeTrimmedString(values.geminiImageModel),
     timeoutSeconds: values.imageGenerationTimeoutSeconds,
     promptPrefix: normalizeTrimmedString(values.imageGenerationPromptPrefix),
@@ -876,6 +921,8 @@ function buildGeminiImageRecognitionRuntimeSettings(values) {
     provider: 'gemini',
     apiKey: normalizeTrimmedString(values.geminiImageRecognitionApiKey),
     baseUrl: normalizeTrimmedString(values.geminiImageRecognitionBaseUrl),
+    useCloudflareAiGateway:
+      values.geminiImageRecognitionCloudflareAiGatewayEnabled === true,
     model: normalizeTrimmedString(values.geminiImageRecognitionModel),
     timeoutSeconds: values.imageRecognitionTimeoutSeconds,
     confidenceThreshold: values.imageRecognitionConfidenceThreshold,
@@ -924,6 +971,8 @@ function buildGeminiInternetSearchRuntimeSettings(values) {
     provider: 'gemini',
     apiKey: normalizeTrimmedString(values.geminiInternetSearchApiKey),
     baseUrl: normalizeTrimmedString(values.geminiInternetSearchBaseUrl),
+    useCloudflareAiGateway:
+      values.geminiInternetSearchCloudflareAiGatewayEnabled === true,
     model: normalizeTrimmedString(values.geminiInternetSearchModel),
     timeoutSeconds: values.internetSearchTimeoutSeconds,
     requestOptions: {

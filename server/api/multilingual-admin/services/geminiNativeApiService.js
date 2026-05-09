@@ -17,8 +17,22 @@ function normalizeText(value) {
   return String(value).trim()
 }
 
-function normalizeGeminiBaseUrl(baseUrl) {
+function isCloudflareAiGatewayEnabled(settings) {
+  return settings?.useCloudflareAiGateway === true
+}
+
+function normalizeGeminiBaseUrl(baseUrl, settings = {}) {
   const configuredBaseUrl = normalizeText(baseUrl)
+  if (isCloudflareAiGatewayEnabled(settings)) {
+    if (!configuredBaseUrl) {
+      throw new Error('Cloudflare AI Gateway 的 Gemini Base URL 不能为空')
+    }
+    return configuredBaseUrl
+      .replace(/\/+$/, '')
+      .replace(/\/v1beta$/i, '')
+      .replace(/\/v1$/i, '')
+  }
+
   if (!configuredBaseUrl) {
     return 'https://generativelanguage.googleapis.com/v1beta'
   }
@@ -29,13 +43,28 @@ function normalizeGeminiBaseUrl(baseUrl) {
 }
 
 function buildGeminiNativeGenerateContentUrl(settings) {
-  const normalizedBaseUrl = normalizeGeminiBaseUrl(settings?.baseUrl)
+  const normalizedBaseUrl = normalizeGeminiBaseUrl(settings?.baseUrl, settings)
   const model = encodeURIComponent(normalizeText(settings?.model))
   const apiKey = encodeURIComponent(normalizeText(settings?.apiKey))
   if (!model || !apiKey) {
     throw new Error('Gemini 原生请求缺少 model 或 apiKey')
   }
+  if (isCloudflareAiGatewayEnabled(settings)) {
+    return `${normalizedBaseUrl}/v1/models/${model}:generateContent`
+  }
   return `${normalizedBaseUrl}/models/${model}:generateContent?key=${apiKey}`
+}
+
+function buildGeminiNativeRequestHeaders(settings) {
+  const headers = {
+    'Content-Type': 'application/json'
+  }
+  if (isCloudflareAiGatewayEnabled(settings)) {
+    headers['cf-aig-authorization'] = `Bearer ${normalizeText(
+      settings?.apiKey
+    )}`
+  }
+  return headers
 }
 
 function summarizeGeminiNativeRequestBody(requestBody, requestUrl = '') {
@@ -107,9 +136,7 @@ async function sendGeminiNativeGenerateContentRequest(
   const payloadText = JSON.stringify(requestBody)
   const response = await fetch(targetUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: buildGeminiNativeRequestHeaders(settings),
     body: payloadText,
     signal: AbortSignal.timeout(normalizeTimeout(settings?.timeoutSeconds))
   })
