@@ -191,7 +191,7 @@ const AI_SETTING_FIELDS = [
     group: 'deepseek',
     defaultValue: 'https://api.deepseek.com',
     helpText:
-      '直连时填写模型服务地址；使用 AI Gateway 时填写 Cloudflare 的 /compat 地址。'
+      '直连时填写模型服务地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat。'
   },
   {
     name: 'deepSeekModel',
@@ -328,7 +328,7 @@ const AI_SETTING_FIELDS = [
     group: 'geminiImage',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
     helpText:
-      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
   },
   {
     name: 'geminiImageModel',
@@ -433,7 +433,7 @@ const AI_SETTING_FIELDS = [
     group: 'geminiImageRecognition',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
     helpText:
-      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
   },
   {
     name: 'geminiImageRecognitionModel',
@@ -509,7 +509,7 @@ const AI_SETTING_FIELDS = [
     group: 'geminiInternetSearch',
     defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
     helpText:
-      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 Cloudflare 的 /google-ai-studio 地址。'
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
   },
   {
     name: 'geminiInternetSearchModel',

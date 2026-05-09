@@ -1801,7 +1801,17 @@ function buildChatCompletionUrl(settings) {
   }
 
   try {
-    const url = new URL(baseUrl.replace(/\/+$/, '') + '/chat/completions')
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
+    if (/\/chat\/completions$/i.test(normalizedBaseUrl)) {
+      throw new ApiError(
+        ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+        'DeepSeek Base URL 只填写到服务地址，不要包含 /chat/completions',
+        'deepSeekBaseUrl',
+        400
+      )
+    }
+
+    const url = new URL(normalizedBaseUrl + '/chat/completions')
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       throw new Error('unsupported protocol')
     }

@@ -27,10 +27,26 @@ function normalizeGeminiBaseUrl(baseUrl, settings = {}) {
     if (!configuredBaseUrl) {
       throw new Error('Cloudflare AI Gateway 的 Gemini Base URL 不能为空')
     }
-    return configuredBaseUrl
+    const normalizedGatewayBaseUrl = configuredBaseUrl
       .replace(/\/+$/, '')
       .replace(/\/v1beta$/i, '')
       .replace(/\/v1$/i, '')
+    if (/\/compat(\/|$)/i.test(normalizedGatewayBaseUrl)) {
+      throw new Error(
+        'Gemini 使用 Cloudflare AI Gateway 时，Base URL 必须填写 /google-ai-studio 地址，不能填写 /compat。'
+      )
+    }
+    if (/\/models\//i.test(normalizedGatewayBaseUrl)) {
+      throw new Error(
+        'Gemini 使用 Cloudflare AI Gateway 时，Base URL 只填写到 /google-ai-studio，不要包含 /v1beta/models。'
+      )
+    }
+    if (!/\/google-ai-studio(\/|$)/i.test(normalizedGatewayBaseUrl)) {
+      throw new Error(
+        'Gemini 使用 Cloudflare AI Gateway 时，Base URL 必须填写 /google-ai-studio 地址。'
+      )
+    }
+    return normalizedGatewayBaseUrl
   }
 
   if (!configuredBaseUrl) {
@@ -50,7 +66,7 @@ function buildGeminiNativeGenerateContentUrl(settings) {
     throw new Error('Gemini 原生请求缺少 model 或 apiKey')
   }
   if (isCloudflareAiGatewayEnabled(settings)) {
-    return `${normalizedBaseUrl}/v1/models/${model}:generateContent`
+    return `${normalizedBaseUrl}/v1beta/models/${model}:generateContent`
   }
   return `${normalizedBaseUrl}/models/${model}:generateContent?key=${apiKey}`
 }
