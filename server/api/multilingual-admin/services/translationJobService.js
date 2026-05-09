@@ -1784,16 +1784,129 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
   const now = new Date()
   const maxAttempts = Number(options.maxAttempts || 3)
   const JobModel = getTranslationJobModel()
+  const expiredLeaseCondition = [
+    { 'runtime.leaseExpiresAt': { $lt: now } },
+    { 'runtime.leaseExpiresAt': null }
+  ]
+  await JobModel.updateMany(
+    {
+      status: TRANSLATION_JOB_STATUS.RUNNING,
+      'queueControl.active': false,
+      $or: expiredLeaseCondition
+    },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.FAILED,
+        'runtime.lockedBy': '',
+        'runtime.workerId': '',
+        'runtime.finishedAt': now,
+        'runtime.heartbeatAt': now,
+        'runtime.leaseExpiresAt': null,
+        'runtime.recovering': false,
+        'runtime.lastInterruptedAt': now,
+        'runtime.interruptReason': '停止请求在服务重启后确认完成',
+        'failure.failedStep': 'stop',
+        'failure.errorCode': ERROR_CODES.AI_TRANSLATION_CANCELLED,
+        'failure.errorMessage': '任务已停止，后台不会继续执行',
+        'failure.stackSummary': '',
+        'failure.retryable': false,
+        'failure.lastFailedAt': now,
+        'progress.currentStage': 'Failure',
+        'progress.currentStep': '任务已停止，后台不会继续执行',
+        'attempts.$[attempt].status': 'interrupted',
+        'attempts.$[attempt].finishedAt': now,
+        'attempts.$[attempt].error': {
+          code: ERROR_CODES.AI_TRANSLATION_CANCELLED,
+          message: '任务已停止，后台不会继续执行',
+          stackSummary: ''
+        }
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              '停止请求在服务重启后确认完成，任务不会继续执行',
+              'warn',
+              'stop'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    },
+    {
+      arrayFilters: [{ 'attempt.status': 'running' }]
+    }
+  )
+
+  await JobModel.updateMany(
+    {
+      status: TRANSLATION_JOB_STATUS.RUNNING,
+      'queueControl.active': true,
+      $or: expiredLeaseCondition,
+      $and: [
+        {
+          $or: [
+            { 'runtime.attempts': { $gte: maxAttempts } },
+            { 'failure.retryable': false }
+          ]
+        }
+      ]
+    },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.FAILED,
+        'queueControl.active': false,
+        'runtime.lockedBy': '',
+        'runtime.workerId': '',
+        'runtime.finishedAt': now,
+        'runtime.heartbeatAt': now,
+        'runtime.leaseExpiresAt': null,
+        'runtime.recovering': false,
+        'runtime.lastInterruptedAt': now,
+        'runtime.interruptReason': '任务恢复次数已达到上限',
+        'failure.failedStep': 'recover',
+        'failure.errorCode': ERROR_CODES.AI_TRANSLATION_FAILED,
+        'failure.errorMessage': '任务恢复次数已达到上限，已停止自动重试',
+        'failure.stackSummary': '',
+        'failure.retryable': false,
+        'failure.attempts': maxAttempts,
+        'failure.lastFailedAt': now,
+        'progress.currentStage': 'Failure',
+        'progress.currentStep': '任务恢复次数已达到上限，已停止自动重试',
+        'attempts.$[attempt].status': 'failed',
+        'attempts.$[attempt].finishedAt': now,
+        'attempts.$[attempt].error': {
+          code: ERROR_CODES.AI_TRANSLATION_FAILED,
+          message: '任务恢复次数已达到上限，已停止自动重试',
+          stackSummary: ''
+        }
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              '任务恢复次数已达到上限，已停止自动重试',
+              'error',
+              'recover'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    },
+    {
+      arrayFilters: [{ 'attempt.status': 'running' }]
+    }
+  )
+
   return await JobModel.updateMany(
     {
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'queueControl.active': true,
       'runtime.attempts': { $lt: maxAttempts },
       'failure.retryable': { $ne: false },
-      $or: [
-        { 'runtime.leaseExpiresAt': { $lt: now } },
-        { 'runtime.leaseExpiresAt': null }
-      ]
+      $or: expiredLeaseCondition
     },
     {
       $set: {
