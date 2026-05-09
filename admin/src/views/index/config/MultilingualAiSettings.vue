@@ -617,6 +617,8 @@ export default {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .language-prompt-list {

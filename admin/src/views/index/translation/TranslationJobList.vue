@@ -233,6 +233,9 @@
             <div class="source-meta">
               {{ getProgressStageText(row.progress?.currentStage) }}
             </div>
+            <div v-if="row.progress?.currentStep" class="job-progress-step">
+              {{ row.progress.currentStep }}
+            </div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="队列" width="120">
@@ -2616,6 +2619,15 @@ html.dark .translation-job-storage-panel {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
+}
+
+.job-progress-step {
+  margin-top: 4px;
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .job-status-cell {
