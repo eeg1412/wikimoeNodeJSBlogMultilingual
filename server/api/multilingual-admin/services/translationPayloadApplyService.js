@@ -1286,10 +1286,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
     normalizeIdentityValue(body.applyBatchId) || crypto.randomUUID()
   const adminSnapshot = normalizeAdminSnapshot(options.admin)
   const JobModel = getTranslationJobModel()
-  const job = await JobModel.findOne({
-    _id: jobId,
-    'storage.deletedAt': null
-  }).lean()
+  const job = await JobModel.findOne({ _id: jobId }).lean()
 
   if (!job) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)

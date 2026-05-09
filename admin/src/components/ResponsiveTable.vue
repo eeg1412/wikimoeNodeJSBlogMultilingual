@@ -111,6 +111,7 @@
           <div v-if="hasSelection" class="responsive-table-card__selection">
             <el-checkbox
               :model-value="isRowSelected(row.row)"
+              :disabled="!isRowSelectable(row.row, rowIndex)"
               @change="val => toggleRowSelect(row.row, val)"
               @click.stop
             />
@@ -382,6 +383,12 @@ export default {
       registeredColumns.some(col => col.type === 'selection' || col.isSelection)
     )
 
+    const selectionColumn = computed(() =>
+      registeredColumns.find(
+        col => col.type === 'selection' || col.isSelection
+      )
+    )
+
     /** 可排序列 */
     const sortableColumns = computed(() =>
       registeredColumns.filter(col => col.sortable && col.prop)
@@ -503,7 +510,20 @@ export default {
       return selectedRows.value.some(r => getRowKey(r, -1) === key)
     }
 
+    const isRowSelectable = (row, index) => {
+      const selectable = selectionColumn.value?.selectable
+      if (typeof selectable !== 'function') {
+        return true
+      }
+
+      return selectable(row, index) !== false
+    }
+
     const toggleRowSelect = (row, selected) => {
+      if (selected && !isRowSelectable(row, -1)) {
+        return
+      }
+
       const key = getRowKey(row, -1)
       if (selected) {
         if (!isRowSelected(row)) {
@@ -520,8 +540,11 @@ export default {
 
     const isAllSelected = computed({
       get: () => {
-        if (!props.data || props.data.length === 0) return false
-        return props.data.every(row => isRowSelected(row))
+        const selectableRows = props.data.filter((row, index) => {
+          return isRowSelectable(row, index)
+        })
+        if (selectableRows.length === 0) return false
+        return selectableRows.every(row => isRowSelected(row))
       },
       set: val => handleSelectAll(val)
     })
@@ -533,13 +556,16 @@ export default {
     })
 
     const handleSelectAll = val => {
+      const selectableRows = props.data.filter((row, index) => {
+        return isRowSelectable(row, index)
+      })
       if (val) {
         // 合并选中，保留之前选中的（跨页保留）
         const currentKeys = new Set(props.data.map((r, i) => getRowKey(r, i)))
         const kept = selectedRows.value.filter(
           r => !currentKeys.has(getRowKey(r, -1))
         )
-        selectedRows.value = [...kept, ...props.data]
+        selectedRows.value = [...kept, ...selectableRows]
       } else {
         const currentKeys = new Set(props.data.map((r, i) => getRowKey(r, i)))
         selectedRows.value = selectedRows.value.filter(
@@ -728,6 +754,7 @@ export default {
       actionColumns,
       hasSelection,
       sortableColumns,
+      selectionColumn,
       selectedRows,
       isAllSelected,
       isIndeterminate,
@@ -738,6 +765,7 @@ export default {
       flattenedData,
       getRowKey,
       isRowSelected,
+      isRowSelectable,
       toggleRowSelect,
       handleSelectAll,
       handleMobileSortChange,

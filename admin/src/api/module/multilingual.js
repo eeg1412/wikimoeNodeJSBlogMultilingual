@@ -181,6 +181,13 @@ export default function (api) {
         noLoading
       })
     },
+    getTranslationJobStorageSummary(data = {}, noLoading = false) {
+      return api.get('/translation/job/storage', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getTranslationJobDetail(data, noLoading = false) {
       return api.get('/translation/job/detail', {
         params: data,
@@ -203,6 +210,12 @@ export default function (api) {
     deleteTranslationJob(data, noLoading = false) {
       return api.delete('/translation/job/delete', {
         params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    batchDeleteTranslationJobs(data, noLoading = false) {
+      return api.post('/translation/job/batch-delete', data, {
         shouldAdminJWT: true,
         noLoading
       })

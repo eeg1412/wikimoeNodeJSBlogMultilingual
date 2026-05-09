@@ -519,6 +519,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/job/list')
   },
   {
+    path: '/translation/job/storage',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/storage')
+  },
+  {
     path: '/translation/job/detail',
     method: 'get',
     middleware: [checkAuth],
@@ -541,6 +547,12 @@ const multilingualAdminRouteSetting = [
     method: 'delete',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/job/delete')
+  },
+  {
+    path: '/translation/job/batch-delete',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/batchDelete')
   },
   {
     path: '/translation/job/reject',

@@ -1,7 +1,4 @@
 const mongoose = require('mongoose')
-const {
-  buildCoverImageCleanupUpdate
-} = require('./coverImageCleanupStateService')
 const coverImageTempFileService = require('./coverImageTempFileService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const {
@@ -24,6 +21,7 @@ const {
 const MAX_LIST_LIMIT = 100
 const DEFAULT_LIST_LIMIT = 20
 const MAX_RECENT_LOGS = 20
+const MAX_BATCH_DELETE_COUNT = 100
 
 function buildRecentLog(message, level = 'info', stage = '') {
   return {
@@ -51,6 +49,48 @@ function getTranslationJobModel() {
   }
 
   return repository.model
+}
+
+function getNativeDb(model) {
+  const nativeDb = model && model.db && model.db.db
+  if (!nativeDb || typeof nativeDb.command !== 'function') {
+    throw new ApiError(
+      ERROR_CODES.SERVICE_UNAVAILABLE,
+      'MongoDB native db is not ready',
+      'translationJobs',
+      503
+    )
+  }
+
+  return nativeDb
+}
+
+function getFiniteNumber(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return 0
+  }
+
+  return numberValue
+}
+
+function getCollectionName(model) {
+  return model.collection && model.collection.collectionName
+}
+
+async function getCollectionStats(model) {
+  const collectionName = getCollectionName(model)
+  if (!collectionName) {
+    throw new ApiError(
+      ERROR_CODES.SERVICE_UNAVAILABLE,
+      'translationJobs collection is not ready',
+      'translationJobs',
+      503
+    )
+  }
+
+  const nativeDb = getNativeDb(model)
+  return await nativeDb.command({ collStats: collectionName })
 }
 
 function toTrimmedString(value) {
@@ -507,7 +547,6 @@ async function createTranslationJob(body = {}, options = {}) {
     queueControl: {
       active: true,
       deferred: false,
-      deleteRequested: false,
       priority
     },
     source,
@@ -569,10 +608,6 @@ function appendAndCondition(params, condition) {
 
 function buildListParams(query = {}) {
   const params = {}
-  const includeDeleted = parseBooleanFilter(query.includeDeleted)
-  if (!includeDeleted) {
-    params['storage.deletedAt'] = null
-  }
 
   if (query.jobType) {
     params.jobType = normalizeJobType(query.jobType)
@@ -651,20 +686,17 @@ function getListProjection() {
     'runtime.recovering': 1,
     'failure.errorCode': 1,
     'failure.errorMessage': 1,
-    'failure.retryable': 1,
-    'storage.deletedAt': 1
+    'failure.retryable': 1
   }
 }
 
 async function getQueuePositionMap(list) {
   const pendingList = list.filter(item => {
-    const storage = item.storage || {}
     return (
       item.status === TRANSLATION_JOB_STATUS.PENDING &&
       item.queueControl &&
       item.queueControl.active &&
-      !item.queueControl.deferred &&
-      !storage.deletedAt
+      !item.queueControl.deferred
     )
   })
   if (!pendingList.length) {
@@ -703,8 +735,7 @@ async function getQueuePositionMap(list) {
       $match: {
         status: TRANSLATION_JOB_STATUS.PENDING,
         'queueControl.active': true,
-        'queueControl.deferred': false,
-        'storage.deletedAt': null
+        'queueControl.deferred': false
       }
     },
     {
@@ -810,13 +841,61 @@ async function listTranslationJobs(query = {}) {
   }
 }
 
+async function buildTranslationJobCollectionStorageSummary() {
+  const JobModel = getTranslationJobModel()
+  const stats = await getCollectionStats(JobModel)
+  const collectionName = getCollectionName(JobModel)
+  const documentCount = await JobModel.countDocuments({})
+  const storageSizeBytes = getFiniteNumber(stats.storageSize)
+  const indexSizeBytes = getFiniteNumber(stats.totalIndexSize)
+  let totalSizeBytes = getFiniteNumber(stats.totalSize)
+  if (totalSizeBytes === 0) {
+    totalSizeBytes = storageSizeBytes + indexSizeBytes
+  }
+
+  return {
+    key: 'translationJobs',
+    label: 'AI 翻译任务',
+    collectionName,
+    documentCount,
+    sizeBytes: getFiniteNumber(stats.size),
+    storageSizeBytes,
+    indexSizeBytes,
+    totalSizeBytes,
+    avgObjSizeBytes: getFiniteNumber(stats.avgObjSize),
+    indexCount: getFiniteNumber(stats.nindexes)
+  }
+}
+
+async function getTranslationJobStorageSummary() {
+  const table = await buildTranslationJobCollectionStorageSummary()
+  const coverImageTempStorage =
+    await coverImageTempFileService.getCoverImageTempStorageSummary()
+  const updatedAt = new Date()
+  const databaseSizeBytes = table.totalSizeBytes
+  const cacheSizeBytes = coverImageTempStorage.totalSizeBytes
+
+  return {
+    updatedAt,
+    tables: [table],
+    fileCaches: [coverImageTempStorage],
+    totals: {
+      tableCount: 1,
+      documentCount: table.documentCount,
+      fileCacheCount: 1,
+      sizeBytes: table.sizeBytes,
+      storageSizeBytes: table.storageSizeBytes,
+      indexSizeBytes: table.indexSizeBytes,
+      databaseSizeBytes,
+      cacheSizeBytes,
+      totalSizeBytes: databaseSizeBytes + cacheSizeBytes
+    }
+  }
+}
+
 async function getTranslationJobDetail(query = {}) {
   const id = toObjectId(query.id, 'id', true)
   const params = { _id: id }
-  const includeDeleted = parseBooleanFilter(query.includeDeleted)
-  if (!includeDeleted) {
-    params['storage.deletedAt'] = null
-  }
 
   const JobModel = getTranslationJobModel()
   const job = await JobModel.findOne(params).lean()
@@ -845,8 +924,7 @@ function appendLog(job, message, level = 'info', stage = '') {
 async function getMutableJob(id) {
   const JobModel = getTranslationJobModel()
   const job = await JobModel.findOne({
-    _id: toObjectId(id, 'id', true),
-    'storage.deletedAt': null
+    _id: toObjectId(id, 'id', true)
   })
 
   if (!job) {
@@ -900,6 +978,46 @@ function isStoppedFailedJob(job) {
   return new Date(leaseExpiresAt) <= new Date()
 }
 
+function canDeleteTranslationJob(job) {
+  if (isStoppedFailedJob(job)) {
+    return true
+  }
+
+  return TRANSLATION_JOB_DELETE_ALLOWED_STATUS_VALUES.includes(job.status)
+}
+
+function assertCanDeleteTranslationJob(job) {
+  if (canDeleteTranslationJob(job)) {
+    return
+  }
+
+  assertStatus(job, TRANSLATION_JOB_DELETE_ALLOWED_STATUS_VALUES, '删除任务')
+}
+
+async function cleanupJobCoverImageCacheBeforeDelete(job) {
+  const cleanupResult =
+    await coverImageTempFileService.cleanupJobCoverImageTempFiles(job, {
+      ignoreMissing: true
+    })
+  const failedItems = Array.isArray(cleanupResult.failedItems)
+    ? cleanupResult.failedItems
+    : []
+  const jobTempDirFailed = failedItems.some(item => {
+    return item && item.type === 'job-temp-dir'
+  })
+  if (jobTempDirFailed) {
+    throw new ApiError(
+      ERROR_CODES.LOCAL_FILE_DELETE_FAILED,
+      '封面图缓存图片清理失败，任务未删除',
+      'coverImageTempFiles',
+      500,
+      { cleanupResult }
+    )
+  }
+
+  return cleanupResult
+}
+
 async function deferTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertStatus(job, [TRANSLATION_JOB_STATUS.PENDING], '暂时跳过')
@@ -926,52 +1044,124 @@ async function resumeTranslationJob(body = {}, options = {}) {
 
 async function deleteTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
-  if (!isStoppedFailedJob(job)) {
-    assertStatus(job, TRANSLATION_JOB_DELETE_ALLOWED_STATUS_VALUES, '删除任务')
+  assertCanDeleteTranslationJob(job)
+  const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
+
+  const JobModel = getTranslationJobModel()
+  const deleteResult = await JobModel.deleteOne({
+    _id: job._id
+  })
+  if (!deleteResult || deleteResult.deletedCount !== 1) {
+    throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
-  job.queueControl.active = false
-  job.queueControl.deleteRequested = true
-  job.storage.deletedAt = new Date()
-  job.storage.deletedBy = normalizeAdminSnapshot(options.admin)
-  job.updatedBy = normalizeAdminSnapshot(options.admin)
-  let deleteMessage = '任务已删除'
-  let deleteLogLevel = 'info'
-  try {
-    const cleanupResult =
-      await coverImageTempFileService.cleanupJobCoverImageTempFiles(job, {
-        ignoreMissing: true
-      })
-    const cleanupUpdate = buildCoverImageCleanupUpdate(
-      job.result,
-      cleanupResult
-    )
-    job.result = job.result || {}
-    job.result.coverImageArtifacts = cleanupUpdate.coverImageArtifacts
-    job.result.previewEntries = cleanupUpdate.previewEntries
-    job.storage.cleanupStatus = cleanupResult.cleanupStatus
-    job.storage.cleanupRequested = cleanupResult.cleanupStatus !== 'cleaned'
-    if (cleanupResult.cleanupStatus === 'cleaned') {
-      deleteMessage = '任务已删除，并已清理封面图缓存图片'
-    } else if (cleanupResult.cleanupStatus === 'partial-cleaned') {
-      deleteMessage = '任务已删除，但封面图缓存图片仅部分清理'
-      deleteLogLevel = 'warn'
-    } else {
-      deleteMessage = '任务已删除，但封面图缓存图片清理失败'
-      deleteLogLevel = 'warn'
-    }
-  } catch (error) {
-    job.storage.cleanupRequested = true
-    job.storage.cleanupStatus = 'cleanup-failed'
-    deleteMessage = `任务已删除，但封面图缓存图片清理失败：${error.message}`
-    deleteLogLevel = 'warn'
-  }
-  appendLog(job, deleteMessage, deleteLogLevel, 'delete')
-  await job.save()
   return {
     id: job._id,
-    deletedAt: job.storage.deletedAt,
-    cleanupStatus: job.storage.cleanupStatus
+    deleted: true,
+    cleanupStatus: cleanupResult.cleanupStatus
+  }
+}
+
+function normalizeBatchDeleteIds(body = {}) {
+  const rawIds = normalizeStringList(body.ids, 'ids')
+  const ids = []
+  rawIds.forEach(rawId => {
+    const normalizedId = String(toObjectId(rawId, 'ids', true))
+    if (!ids.includes(normalizedId)) {
+      ids.push(normalizedId)
+    }
+  })
+  if (ids.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      'ids 不能为空',
+      'ids',
+      400
+    )
+  }
+  if (ids.length > MAX_BATCH_DELETE_COUNT) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      `单次最多删除 ${MAX_BATCH_DELETE_COUNT} 个 AI 翻译任务`,
+      'ids',
+      400
+    )
+  }
+
+  return ids
+}
+
+async function getBatchDeleteJobs(ids) {
+  const objectIds = ids.map(id => toObjectId(id, 'ids', true))
+  const normalizedIds = objectIds.map(id => String(id))
+  const JobModel = getTranslationJobModel()
+  const jobs = await JobModel.find({
+    _id: { $in: objectIds }
+  }).lean()
+  const jobMap = new Map()
+  jobs.forEach(job => {
+    jobMap.set(String(job._id), job)
+  })
+  const missingIds = ids.filter((id, index) => {
+    return !jobMap.has(normalizedIds[index])
+  })
+  if (missingIds.length > 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_NOT_FOUND,
+      `以下任务不存在或已删除：${missingIds.join('、')}`,
+      'ids',
+      400,
+      { missingIds }
+    )
+  }
+
+  const forbiddenJobs = ids
+    .map((id, index) => jobMap.get(normalizedIds[index]))
+    .filter(job => !canDeleteTranslationJob(job))
+  if (forbiddenJobs.length > 0) {
+    const forbiddenItems = forbiddenJobs.map(job => {
+      return {
+        id: String(job._id),
+        status: job.status
+      }
+    })
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
+      '所选 AI 翻译任务中包含当前状态不可删除的任务',
+      'ids',
+      400,
+      { forbiddenItems }
+    )
+  }
+
+  return normalizedIds.map(id => jobMap.get(id))
+}
+
+async function batchDeleteTranslationJobs(body = {}, options = {}) {
+  const ids = normalizeBatchDeleteIds(body)
+  const jobs = await getBatchDeleteJobs(ids)
+  const items = []
+  for (const job of jobs) {
+    const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
+    items.push({
+      id: job._id,
+      deleted: true,
+      cleanupStatus: cleanupResult.cleanupStatus
+    })
+  }
+
+  const JobModel = getTranslationJobModel()
+  const deleteResult = await JobModel.deleteMany({
+    _id: { $in: jobs.map(job => job._id) }
+  })
+  if (!deleteResult || deleteResult.deletedCount !== jobs.length) {
+    throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
+  }
+
+  return {
+    requestedCount: ids.length,
+    deletedCount: items.length,
+    items
   }
 }
 
@@ -1047,7 +1237,6 @@ async function retryTranslationJob(body = {}, options = {}) {
   job.status = TRANSLATION_JOB_STATUS.PENDING
   job.queueControl.active = true
   job.queueControl.deferred = false
-  job.queueControl.deleteRequested = false
   job.runtime.lockedBy = ''
   job.runtime.workerId = ''
   job.runtime.lockedAt = null
@@ -1099,8 +1288,6 @@ function buildClaimBaseParams(now, maxAttempts) {
   return {
     'queueControl.active': true,
     'queueControl.deferred': false,
-    'queueControl.deleteRequested': false,
-    'storage.deletedAt': null,
     'runtime.attempts': { $lt: maxAttempts },
     'failure.retryable': { $ne: false },
     $or: [
@@ -1121,8 +1308,6 @@ function buildClaimGuard(candidate, now, maxAttempts) {
     _id: candidate._id,
     'queueControl.active': true,
     'queueControl.deferred': false,
-    'queueControl.deleteRequested': false,
-    'storage.deletedAt': null,
     'runtime.attempts': { $lt: maxAttempts },
     'failure.retryable': { $ne: false }
   }
@@ -1221,8 +1406,7 @@ async function renewTranslationJobLease(options = {}) {
       _id: toObjectId(options.id, 'id', true),
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
-      'runtime.attempts': Number(options.attemptNo),
-      'storage.deletedAt': null
+      'runtime.attempts': Number(options.attemptNo)
     },
     {
       $set: {
@@ -1307,8 +1491,7 @@ async function updateRunningTranslationJobProgress(options = {}) {
       _id: toObjectId(options.id, 'id', true),
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
-      'runtime.attempts': Number(options.attemptNo),
-      'storage.deletedAt': null
+      'runtime.attempts': Number(options.attemptNo)
     },
     update
   )
@@ -1341,8 +1524,7 @@ async function saveRunningTranslationJobCheckpoint(options = {}) {
       _id: toObjectId(options.id, 'id', true),
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
-      'runtime.attempts': Number(options.attemptNo),
-      'storage.deletedAt': null
+      'runtime.attempts': Number(options.attemptNo)
     },
     {
       $set: {
@@ -1401,8 +1583,7 @@ async function completeRunningTranslationJobForReview(options = {}) {
       _id: toObjectId(options.id, 'id', true),
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
-      'runtime.attempts': Number(options.attemptNo),
-      'storage.deletedAt': null
+      'runtime.attempts': Number(options.attemptNo)
     },
     {
       $set: {
@@ -1500,8 +1681,7 @@ async function failRunningTranslationJob(options = {}) {
       _id: toObjectId(options.id, 'id', true),
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
-      'runtime.attempts': currentAttemptNo,
-      'storage.deletedAt': null
+      'runtime.attempts': currentAttemptNo
     },
     {
       $set: {
@@ -1565,8 +1745,6 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
     {
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'queueControl.active': true,
-      'queueControl.deleteRequested': false,
-      'storage.deletedAt': null,
       'runtime.attempts': { $lt: maxAttempts },
       'failure.retryable': { $ne: false },
       $or: [
@@ -1595,10 +1773,12 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
 module.exports = {
   createTranslationJob,
   listTranslationJobs,
+  getTranslationJobStorageSummary,
   getTranslationJobDetail,
   deferTranslationJob,
   resumeTranslationJob,
   deleteTranslationJob,
+  batchDeleteTranslationJobs,
   rejectTranslationJob,
   retryTranslationJob,
   claimNextRunnableTranslationJob,

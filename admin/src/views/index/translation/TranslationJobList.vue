@@ -62,9 +62,96 @@
         </el-form>
       </div>
       <div class="fr translation-actions">
-        <el-button @click="getJobList(true)">
+        <el-button
+          class="translation-batch-delete-button"
+          type="danger"
+          size="small"
+          :disabled="selectedDeletableJobIds.length === 0"
+          :loading="batchDeleting"
+          @click="deleteSelectedJobs"
+        >
+          批量删除
+          <span v-if="selectedDeletableJobIds.length > 0">
+            {{ selectedDeletableJobIds.length }}
+          </span>
+        </el-button>
+        <el-button
+          class="translation-refresh-button"
+          size="small"
+          @click="refreshJobPage(true)"
+        >
           <el-icon><Refresh /></el-icon>
         </el-button>
+      </div>
+    </div>
+
+    <div
+      class="translation-job-storage-panel mb20"
+      v-loading="jobStorageSummaryLoading"
+    >
+      <div class="translation-job-storage-header">
+        <div>
+          <div class="translation-job-storage-title">
+            AI 翻译任务相关表存储
+          </div>
+          <div class="translation-job-storage-subtitle">
+            {{ jobStorageUpdatedText }}
+          </div>
+        </div>
+        <el-tooltip content="刷新存储统计" placement="top">
+          <el-button text @click="getJobStorageSummary">
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </div>
+      <div class="translation-job-storage-metrics">
+        <div class="translation-job-storage-metric">
+          <span>总占用</span>
+          <strong>{{ formatBytes(jobStorageTotals.totalSizeBytes) }}</strong>
+        </div>
+        <div class="translation-job-storage-metric">
+          <span>任务表占用</span>
+          <strong>{{ formatBytes(jobStorageTotals.databaseSizeBytes) }}</strong>
+        </div>
+        <div class="translation-job-storage-metric">
+          <span>缓存图片</span>
+          <strong>{{ formatBytes(jobStorageTotals.cacheSizeBytes) }}</strong>
+        </div>
+        <div class="translation-job-storage-metric">
+          <span>表内文档</span>
+          <strong>{{ jobStorageTotals.documentCount || 0 }}</strong>
+        </div>
+      </div>
+      <div class="translation-job-storage-table-list">
+        <div
+          v-for="table in jobStorageTables"
+          :key="table.key"
+          class="translation-job-storage-table-row"
+        >
+          <div>
+            <strong>{{ table.label }}</strong>
+            <span>{{ table.collectionName }}</span>
+          </div>
+          <div>
+            文档 {{ table.documentCount || 0 }}，平均
+            {{ formatBytes(table.avgObjSizeBytes) }}
+          </div>
+        </div>
+        <div
+          v-for="cacheItem in jobStorageFileCaches"
+          :key="cacheItem.key"
+          class="translation-job-storage-table-row"
+        >
+          <div>
+            <strong>{{ cacheItem.label }}</strong>
+            <span>临时文件</span>
+          </div>
+          <div>
+            文件 {{ cacheItem.fileCount || 0 }}，目录
+            {{ cacheItem.directoryCount || 0 }}，占用
+            {{ formatBytes(cacheItem.totalSizeBytes) }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -75,7 +162,14 @@
         row-key="_id"
         height="100%"
         border
+        @selection-change="handleJobSelectionChange"
       >
+        <ResponsiveTableColumn
+          type="selection"
+          width="48"
+          :selectable="isJobSelectable"
+          reserve-selection
+        />
         <ResponsiveTableColumn label="任务" min-width="260">
           <template #default="{ row }">
             <div class="source-title">
@@ -1322,6 +1416,10 @@ export default {
     const tableRef = ref(null)
     const jobList = ref([])
     const total = ref(0)
+    const selectedJobRows = ref([])
+    const batchDeleting = ref(false)
+    const jobStorageSummary = ref(null)
+    const jobStorageSummaryLoading = ref(false)
     const currentJob = ref(null)
     const detailDrawerVisible = ref(false)
     const activeReviewLanguageCode = ref('')
@@ -1747,6 +1845,33 @@ export default {
       return currentJob.value && applyStatusSet.has(currentJob.value.status)
     })
 
+    const jobStorageTables = computed(() => {
+      return jobStorageSummary.value?.tables || []
+    })
+
+    const jobStorageFileCaches = computed(() => {
+      return jobStorageSummary.value?.fileCaches || []
+    })
+
+    const jobStorageTotals = computed(() => {
+      return jobStorageSummary.value?.totals || {}
+    })
+
+    const jobStorageUpdatedText = computed(() => {
+      const updatedAt = jobStorageSummary.value?.updatedAt
+      if (!updatedAt) {
+        return '等待读取存储统计'
+      }
+
+      return `统计时间：${formatDate(updatedAt)}`
+    })
+
+    const selectedDeletableJobIds = computed(() => {
+      return selectedJobRows.value
+        .filter(row => canDelete(row))
+        .map(row => String(row._id))
+    })
+
     const getRequestParams = () => {
       const requestParams = {
         page: params.page,
@@ -1765,6 +1890,9 @@ export default {
     }
 
     const getJobList = resetPage => {
+      if (resetPage === true) {
+        clearJobSelection()
+      }
       if (resetPage === true && params.page !== 1) {
         params.page = 1
         return
@@ -1780,6 +1908,26 @@ export default {
         .catch(error => {
           console.log(error)
         })
+    }
+
+    const getJobStorageSummary = () => {
+      jobStorageSummaryLoading.value = true
+      multilingualApi
+        .getTranslationJobStorageSummary({}, true)
+        .then(response => {
+          jobStorageSummary.value = response.data.data || null
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          jobStorageSummaryLoading.value = false
+        })
+    }
+
+    const refreshJobPage = resetPage => {
+      getJobList(resetPage)
+      getJobStorageSummary()
     }
 
     const openDetail = row => {
@@ -1811,6 +1959,7 @@ export default {
         .then(() => {
           ElMessage.success(successText)
           getJobList(false)
+          getJobStorageSummary()
           if (currentJob.value?._id === row._id) {
             refreshDetail()
           }
@@ -1841,11 +1990,66 @@ export default {
     }
 
     const deleteJob = row => {
-      ElMessageBox.confirm('确认删除该任务？', '确认操作', {
+      ElMessageBox.confirm('确认永久删除该任务？', '确认操作', {
         type: 'warning'
       }).then(() => {
         runJobAction(row, multilingualApi.deleteTranslationJob, '已删除')
       })
+    }
+
+    const handleJobSelectionChange = selection => {
+      if (!Array.isArray(selection)) {
+        selectedJobRows.value = []
+        return
+      }
+
+      selectedJobRows.value = selection.filter(row => canDelete(row))
+    }
+
+    const isJobSelectable = row => {
+      return canDelete(row)
+    }
+
+    const clearJobSelection = () => {
+      selectedJobRows.value = []
+      tableRef.value?.clearSelection()
+    }
+
+    const deleteSelectedJobs = async () => {
+      const ids = selectedDeletableJobIds.value
+      if (ids.length === 0) {
+        return
+      }
+
+      try {
+        await ElMessageBox.confirm(
+          `确认永久删除选中的 ${ids.length} 个 AI 翻译任务？`,
+          '批量删除',
+          {
+            type: 'warning'
+          }
+        )
+      } catch (error) {
+        return
+      }
+
+      batchDeleting.value = true
+      try {
+        const response = await multilingualApi.batchDeleteTranslationJobs(
+          { ids },
+          true
+        )
+        const responseData = response.data.data || {}
+        const deletedCount = responseData.deletedCount || ids.length
+        ElMessage.success(`已删除 ${deletedCount} 个 AI 翻译任务`)
+        clearJobSelection()
+        getJobList(false)
+        getJobStorageSummary()
+      } catch (error) {
+        console.log(error)
+      } finally {
+        batchDeleting.value = false
+      }
     }
 
     const applySelectedEntries = () => {
@@ -2045,6 +2249,31 @@ export default {
       return failureCodeMeaningMap[errorCode] || ''
     }
 
+    const formatBytes = value => {
+      const bytes = Number(value || 0)
+      if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B'
+      }
+
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let size = bytes
+      let unitIndex = 0
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size = size / 1024
+        unitIndex += 1
+      }
+
+      if (unitIndex === 0) {
+        return `${Math.round(size)} ${units[unitIndex]}`
+      }
+
+      let fractionDigits = 2
+      if (size >= 10) {
+        fractionDigits = 1
+      }
+      return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
+    }
+
     const formatDate = value => {
       if (!value) {
         return '-'
@@ -2189,6 +2418,7 @@ export default {
 
     onMounted(() => {
       getJobList(false)
+      getJobStorageSummary()
     })
 
     return {
@@ -2199,6 +2429,7 @@ export default {
       aiResultJsonText,
       applyForm,
       activeReviewLanguageCode,
+      batchDeleting,
       canApplyCurrentJob,
       canCleanupCoverImages,
       canSelectCoverImage,
@@ -2214,8 +2445,11 @@ export default {
       coverImageCleanupLoading,
       deferJob,
       deleteJob,
+      deleteSelectedJobs,
       detailDrawerVisible,
+      formatBytes,
       formatDate,
+      getJobStorageSummary,
       getJobList,
       getJobTypeText,
       getCoverImageStatusTagType,
@@ -2228,14 +2462,22 @@ export default {
       getProgressStageText,
       getSelectedEntryCount,
       getStatusTagType,
+      handleJobSelectionChange,
       hasAiResultJson,
+      isJobSelectable,
       isAiJsonTableView,
       jobList,
+      jobStorageFileCaches,
+      jobStorageTables,
+      jobStorageTotals,
+      jobStorageSummaryLoading,
+      jobStorageUpdatedText,
       jobTypeOptions,
       openAiJsonDialog,
       openDetail,
       params,
       previewEntries,
+      refreshJobPage,
       refreshDetail,
       rejectJob,
       reviewLanguageTabs,
@@ -2244,6 +2486,7 @@ export default {
       selectAllReviewEntries,
       selectableEntryKeys,
       selectedEntryKeys,
+      selectedDeletableJobIds,
       setCoverImageSelected,
       skippedReviewEntries,
       statusOptions,
@@ -2266,6 +2509,103 @@ export default {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.translation-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.translation-job-storage-panel {
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.translation-job-storage-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.translation-job-storage-title {
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.translation-job-storage-subtitle {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 2px;
+}
+
+.translation-job-storage-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.translation-job-storage-metric {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.translation-job-storage-metric span {
+  color: var(--el-text-color-secondary);
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.translation-job-storage-metric strong {
+  color: var(--el-text-color-primary);
+  display: block;
+  font-size: 18px;
+  line-height: 1.4;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.translation-job-storage-table-list {
+  border-top: 1px solid var(--el-border-color-lighter);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.translation-job-storage-table-row {
+  align-items: flex-start;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px 14px;
+  justify-content: space-between;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.translation-job-storage-table-row strong {
+  color: var(--el-text-color-primary);
+  margin-right: 8px;
+}
+
+.translation-job-storage-table-row span {
+  word-break: break-all;
+}
+
+html.dark .translation-job-storage-panel {
+  background: var(--el-fill-color-blank);
 }
 
 .source-title {
@@ -2670,6 +3010,11 @@ html.dark .job-state-panel-meta {
 }
 
 @media (max-width: 767px) {
+  .common-top-search-form-body {
+    float: none !important;
+    width: 100%;
+  }
+
   .translation-search-form :deep(.el-form-item) {
     margin-right: 0;
     width: 100%;
@@ -2681,8 +3026,39 @@ html.dark .job-state-panel-meta {
   }
 
   .translation-actions {
-    float: none;
+    display: flex;
+    float: none !important;
+    justify-content: flex-end;
     margin-top: 10px;
+    width: 100%;
+  }
+
+  .translation-actions :deep(.el-button) {
+    flex: 0 1 auto;
+    margin-left: 0;
+    min-width: 0;
+    width: auto;
+  }
+
+  .translation-batch-delete-button {
+    max-width: 126px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .translation-refresh-button {
+    flex-basis: 34px;
+    width: 34px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .translation-job-storage-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .translation-job-storage-table-row {
+    display: block;
   }
 
   .detail-header {

@@ -231,11 +231,6 @@ const translationJobs = new Schema(
         default: false,
         index: true
       },
-      deleteRequested: {
-        type: Boolean,
-        default: false,
-        index: true
-      },
       priority: {
         type: Number,
         default: 0,
@@ -583,15 +578,6 @@ const translationJobs = new Schema(
         type: Boolean,
         default: false,
         index: true
-      },
-      deletedAt: {
-        type: Date,
-        default: null,
-        index: true
-      },
-      deletedBy: {
-        type: adminSnapshotSchema,
-        default: null
       }
     },
     createdBy: {
@@ -619,7 +605,6 @@ translationJobs.index({ 'source.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.languageCode': 1, status: 1, createdAt: -1 })
 translationJobs.index({ 'target.languageCodes': 1, status: 1, createdAt: -1 })
-translationJobs.index({ 'storage.deletedAt': 1, createdAt: -1 })
 
 module.exports = require('../modelFactory/defaultModel')(
   'translationJobs',

@@ -448,10 +448,7 @@ async function adoptCoverImage(body = {}, options = {}) {
   }
 
   const JobModel = getRepositoryModel('translationJobs')
-  const job = await JobModel.findOne({
-    _id: jobId,
-    'storage.deletedAt': null
-  }).lean()
+  const job = await JobModel.findOne({ _id: jobId }).lean()
   if (!job) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_NOT_FOUND,
@@ -639,10 +636,7 @@ async function adoptPreviewCoverImage(body = {}) {
 async function cleanupCoverImageTempFiles(body = {}) {
   const jobId = toObjectId(body.jobId, 'jobId')
   const JobModel = getRepositoryModel('translationJobs')
-  const job = await JobModel.findOne({
-    _id: jobId,
-    'storage.deletedAt': null
-  }).lean()
+  const job = await JobModel.findOne({ _id: jobId }).lean()
   if (!job) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_NOT_FOUND,

@@ -186,6 +186,8 @@ export default {
         minWidth: props.minWidth,
         fixed: props.fixed,
         sortable: props.sortable,
+        selectable: props.selectable,
+        reserveSelection: props.reserveSelection,
         cardHidden: props.cardHidden,
         cardAction: props.cardAction,
         isAction: isAction.value,
@@ -211,6 +213,8 @@ export default {
           props.prop,
           props.cardHidden,
           props.cardAction,
+          props.selectable,
+          props.reserveSelection,
           isAction.value,
           isSelection.value
         ],
@@ -219,6 +223,8 @@ export default {
           newProp,
           newCardHidden,
           newCardAction,
+          newSelectable,
+          newReserveSelection,
           newIsAction,
           newIsSelection
         ]) => {
@@ -229,6 +235,8 @@ export default {
             existingCol.prop = newProp
             existingCol.cardHidden = newCardHidden
             existingCol.cardAction = newCardAction
+            existingCol.selectable = newSelectable
+            existingCol.reserveSelection = newReserveSelection
             existingCol.isAction = newIsAction
             existingCol.isSelection = newIsSelection
           }

@@ -223,6 +223,57 @@ async function cleanupJobCoverImageTempFiles(job, options = {}) {
   }
 }
 
+async function collectDirectoryStorageStats(directoryPath) {
+  const result = {
+    totalSizeBytes: 0,
+    fileCount: 0,
+    directoryCount: 0
+  }
+  let entries = []
+  try {
+    entries = await fs.promises.readdir(directoryPath, { withFileTypes: true })
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return result
+    }
+    throw error
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry.name)
+    const resolvedPath = assertPathInsideCoverTempRoot(entryPath)
+    if (entry.isDirectory()) {
+      result.directoryCount += 1
+      const childResult = await collectDirectoryStorageStats(resolvedPath)
+      result.totalSizeBytes += childResult.totalSizeBytes
+      result.fileCount += childResult.fileCount
+      result.directoryCount += childResult.directoryCount
+      continue
+    }
+    if (!entry.isFile()) {
+      continue
+    }
+    const stats = await fs.promises.stat(resolvedPath)
+    result.totalSizeBytes += stats.size
+    result.fileCount += 1
+  }
+
+  return result
+}
+
+async function getCoverImageTempStorageSummary() {
+  const rootPath = resolveCoverTempRoot()
+  const stats = await collectDirectoryStorageStats(rootPath)
+  return {
+    key: 'coverImageTempFiles',
+    label: 'AI 翻译封面图缓存',
+    rootPath,
+    totalSizeBytes: stats.totalSizeBytes,
+    fileCount: stats.fileCount,
+    directoryCount: stats.directoryCount
+  }
+}
+
 module.exports = {
   COVER_TEMP_ROOT,
   assertPathInsideCoverTempRoot,
@@ -230,6 +281,7 @@ module.exports = {
   buildTempPreviewUrl,
   cleanupJobCoverImageTempFiles,
   ensureCoverImageJobTempDir,
+  getCoverImageTempStorageSummary,
   getCoverImageJobTempDir,
   readGeneratedCoverFile,
   writeBufferFile
