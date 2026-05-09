@@ -1898,7 +1898,7 @@ export default {
         params.page = 1
         return
       }
-      multilingualApi
+      return multilingualApi
         .getTranslationJobList(getRequestParams())
         .then(response => {
           const responseData = response.data.data || {}

@@ -26,14 +26,15 @@ const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
   'richTextDocument'
 ])
 const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
-const MAX_AI_REQUEST_TEXT_LENGTH = 12000
-const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 6000
+const MAX_AI_REQUEST_TEXT_LENGTH = 6000
+const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 3000
 const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
 const MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH = 10000
 const MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000
 const MAX_EXTRACTED_TERM_COUNT = 50
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
+const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -2030,6 +2031,7 @@ function requestStream(
         let usage = {}
         let responseId = ''
         let responseModel = settings.deepSeekModel
+        let finishReason = ''
 
         function handleDataText(dataText) {
           if (!dataText || dataText === '[DONE]') {
@@ -2059,7 +2061,11 @@ function requestStream(
             usage = chunkData.usage
           }
 
-          const delta = chunkData.choices?.[0]?.delta || {}
+          const choice = chunkData.choices?.[0] || {}
+          if (choice.finish_reason) {
+            finishReason = choice.finish_reason
+          }
+          const delta = choice.delta || {}
           const contentDelta = delta.content || ''
           const reasoningDelta = delta.reasoning_content || ''
           if (contentDelta) {
@@ -2108,6 +2114,7 @@ function requestStream(
                 object: 'chat.completion.stream',
                 choices: [
                   {
+                    finish_reason: finishReason || null,
                     message: {
                       content,
                       reasoning_content: reasoningContent
@@ -2183,6 +2190,112 @@ function collectNonStreamResponse(response, resolve) {
   })
 }
 
+function getAiResponseContentPreview(content) {
+  const text = String(content || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!text) {
+    return ''
+  }
+  if (text.length <= MAX_AI_PARSE_ERROR_PREVIEW_LENGTH) {
+    return text
+  }
+  return `${text.slice(0, MAX_AI_PARSE_ERROR_PREVIEW_LENGTH)}...`
+}
+
+function addJsonContentCandidate(candidateList, value) {
+  const candidate = String(value || '').trim()
+  if (!candidate) {
+    return
+  }
+  if (candidateList.includes(candidate)) {
+    return
+  }
+  candidateList.push(candidate)
+}
+
+function collectFencedJsonCandidates(content, candidateList) {
+  const fencePattern = /```(?:json)?\s*([\s\S]*?)```/gi
+  let match = fencePattern.exec(content)
+  while (match) {
+    addJsonContentCandidate(candidateList, match[1])
+    match = fencePattern.exec(content)
+  }
+}
+
+function getFirstJsonStartIndex(content) {
+  const objectIndex = content.indexOf('{')
+  const arrayIndex = content.indexOf('[')
+  if (objectIndex < 0) {
+    return arrayIndex
+  }
+  if (arrayIndex < 0) {
+    return objectIndex
+  }
+  return Math.min(objectIndex, arrayIndex)
+}
+
+function extractBalancedJsonText(content) {
+  const startIndex = getFirstJsonStartIndex(content)
+  if (startIndex < 0) {
+    return ''
+  }
+
+  const stack = []
+  let inString = false
+  let escaped = false
+
+  for (let index = startIndex; index < content.length; index += 1) {
+    const char = content[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    if (char === '{') {
+      stack.push('}')
+      continue
+    }
+    if (char === '[') {
+      stack.push(']')
+      continue
+    }
+    if (char === '}' || char === ']') {
+      const expectedChar = stack.pop()
+      if (expectedChar !== char) {
+        return ''
+      }
+      if (stack.length === 0) {
+        return content.slice(startIndex, index + 1)
+      }
+    }
+  }
+
+  return ''
+}
+
+function buildJsonContentCandidates(content) {
+  const candidateList = []
+  addJsonContentCandidate(candidateList, content)
+  collectFencedJsonCandidates(content, candidateList)
+  addJsonContentCandidate(candidateList, extractBalancedJsonText(content))
+  return candidateList
+}
+
+function getDeepSeekFinishReason(responseData) {
+  return String(responseData?.choices?.[0]?.finish_reason || '').trim()
+}
+
 function parseAiContent(responseData) {
   const content = responseData?.choices?.[0]?.message?.content
   if (!content || typeof content !== 'string') {
@@ -2194,16 +2307,33 @@ function parseAiContent(responseData) {
     )
   }
 
-  try {
-    return JSON.parse(content)
-  } catch (error) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 返回的 JSON 内容解析失败',
-      'deepSeek',
-      502
-    )
+  const candidateList = buildJsonContentCandidates(content)
+  for (const candidate of candidateList) {
+    try {
+      return JSON.parse(candidate)
+    } catch (error) {
+      continue
+    }
   }
+
+  const finishReason = getDeepSeekFinishReason(responseData)
+  const preview = getAiResponseContentPreview(content)
+  let message = 'DeepSeek 返回的 JSON 内容解析失败'
+  const extra = { finishReason }
+  if (finishReason === 'length') {
+    message = 'DeepSeek 返回内容被最大输出 Token 截断，JSON 内容解析失败'
+    extra.retryable = false
+  }
+  if (preview) {
+    message = `${message}，内容开头：${preview}`
+  }
+  throw new ApiError(
+    ERROR_CODES.AI_TRANSLATION_FAILED,
+    message,
+    'deepSeek',
+    502,
+    extra
+  )
 }
 
 function buildEntriesFromObjectMap(value) {

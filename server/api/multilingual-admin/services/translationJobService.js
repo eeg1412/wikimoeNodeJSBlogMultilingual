@@ -680,6 +680,7 @@ function getListProjection() {
     'queueControl.active': 1,
     'queueControl.deferred': 1,
     'queueControl.priority': 1,
+    'progress.currentStep': 1,
     'progress.currentStage': 1,
     'progress.percent': 1,
     'runtime.leaseExpiresAt': 1,
@@ -806,6 +807,7 @@ function buildListItemSummary(item, queuePositionMap) {
       deferred: queueControl.deferred === true
     },
     progress: {
+      currentStep: progress.currentStep || '',
       currentStage: progress.currentStage || '',
       percent: progress.percent || 0
     },
