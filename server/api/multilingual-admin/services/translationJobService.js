@@ -3,6 +3,7 @@ const {
   buildCoverImageCleanupUpdate
 } = require('./coverImageCleanupStateService')
 const coverImageTempFileService = require('./coverImageTempFileService')
+const translationAiJsonLogService = require('./translationAiJsonLogService')
 const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
@@ -1417,14 +1418,24 @@ async function completeRunningTranslationJobForReview(options = {}) {
         'result.previewEntries': resultData.previewEntries,
         'result.warningList': resultData.warningList || [],
         'result.aiSkipList': resultData.aiSkipList || [],
+        'result.aiJsonLogs': translationAiJsonLogService.sanitizeAiJsonValue(
+          resultData.aiJsonLogs || []
+        ),
         'result.relatedResults': resultData.relatedResults || [],
         'result.languageResults': resultData.languageResults || [],
         'result.translationPostMap': resultData.translationPostMap || {},
-        'result.coverImageArtifacts': resultData.coverImageArtifacts || [],
+        'result.coverImageArtifacts':
+          translationAiJsonLogService.sanitizeAiJsonValue(
+            resultData.coverImageArtifacts || []
+          ),
         'result.coverImageGenerationMap':
-          resultData.coverImageGenerationMap || {},
+          translationAiJsonLogService.sanitizeAiJsonValue(
+            resultData.coverImageGenerationMap || {}
+          ),
         'result.coverImageRecognitionMap':
-          resultData.coverImageRecognitionMap || {},
+          translationAiJsonLogService.sanitizeAiJsonValue(
+            resultData.coverImageRecognitionMap || {}
+          ),
         'result.sourceSnapshotId': toObjectId(
           resultData.sourceSnapshotId,
           'result.sourceSnapshotId'

@@ -465,6 +465,10 @@ const translationJobs = new Schema(
         type: [Schema.Types.Mixed],
         default: []
       },
+      aiJsonLogs: {
+        type: [Schema.Types.Mixed],
+        default: []
+      },
       relatedResults: {
         type: [Schema.Types.Mixed],
         default: []

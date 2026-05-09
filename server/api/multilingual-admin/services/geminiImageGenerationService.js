@@ -186,7 +186,9 @@ async function generateCoverImage(options = {}) {
       model: settings.model,
       mimeType: extractedImage.mimeType || 'image/png',
       buffer: Buffer.from(extractedImage.base64, 'base64'),
-      rawResponseId: response?.responseId || ''
+      rawResponseId: response?.responseId || '',
+      requestSummary,
+      responseSummary
     }
   } catch (error) {
     if (error?.diagnostics) {

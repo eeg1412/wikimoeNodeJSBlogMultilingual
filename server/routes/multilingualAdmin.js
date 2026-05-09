@@ -10,6 +10,7 @@ const upload = multer({ storage: storage })
 
 const jwtVersion = 1
 const localContentController = require('../api/multilingual-admin/localContentController')
+const properNounTranslationController = require('../api/multilingual-admin/properNounTranslationController')
 
 const checkIsReady = (req, res, next) => {
   const isReady = global.$isReady
@@ -126,6 +127,60 @@ const multilingualAdminRouteSetting = [
     method: 'get',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/ai/usage/getSummary')
+  },
+  {
+    path: '/proper-noun/term/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.getTermList
+  },
+  {
+    path: '/proper-noun/term/detail',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.getTermDetail
+  },
+  {
+    path: '/proper-noun/term/create',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.createTerm
+  },
+  {
+    path: '/proper-noun/term/update',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.updateTerm
+  },
+  {
+    path: '/proper-noun/term/delete',
+    method: 'delete',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.deleteTerm
+  },
+  {
+    path: '/proper-noun/translation/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.getTranslationList
+  },
+  {
+    path: '/proper-noun/translation/create',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.createTranslation
+  },
+  {
+    path: '/proper-noun/translation/update',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.updateTranslation
+  },
+  {
+    path: '/proper-noun/translation/delete',
+    method: 'delete',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.deleteTranslation
   },
   {
     path: '/dashboard/summary',

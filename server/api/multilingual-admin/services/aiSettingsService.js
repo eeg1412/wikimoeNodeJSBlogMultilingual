@@ -18,6 +18,8 @@ const IMAGE_RECOGNITION_PROVIDER_OPTIONS = [
   { label: 'Gemini', value: 'gemini' }
 ]
 
+const INTERNET_SEARCH_PROVIDER_OPTIONS = [{ label: 'Gemini', value: 'gemini' }]
+
 const DEEPSEEK_MODEL_OPTIONS = [
   {
     label: 'DeepSeek V4 Flash',
@@ -81,6 +83,30 @@ const GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS = [
   {
     label: 'Gemini 2.5 Flash',
     value: 'gemini-2.5-flash'
+  }
+]
+
+const GEMINI_INTERNET_SEARCH_MODEL_OPTIONS = [
+  {
+    label: 'Gemini 3 Flash Preview（Google Search 示例模型）',
+    value: 'gemini-3-flash-preview',
+    tag: 'preview'
+  },
+  {
+    label: 'Gemini 3.1 Flash-Lite（稳定）',
+    value: 'gemini-3.1-flash-lite'
+  },
+  {
+    label: 'Gemini 2.5 Flash',
+    value: 'gemini-2.5-flash'
+  },
+  {
+    label: 'Gemini 2.5 Pro',
+    value: 'gemini-2.5-pro'
+  },
+  {
+    label: 'Gemini 2.5 Flash-Lite',
+    value: 'gemini-2.5-flash-lite'
   }
 ]
 
@@ -396,6 +422,62 @@ const AI_SETTING_FIELDS = [
     options: GEMINI_MEDIA_RESOLUTION_OPTIONS,
     helpText:
       'Google 文档建议图像分析使用 MEDIA_RESOLUTION_HIGH，以提升读取细小文字的准确率。'
+  },
+  {
+    name: 'internetSearchEnabled',
+    label: '启用互联网搜索',
+    type: 'boolean',
+    group: 'internetSearchProvider',
+    defaultValue: false,
+    helpText:
+      '启用后，AI 翻译可在翻译前检索专有名词、作品名等官方译名，并写入专有名词翻译库。'
+  },
+  {
+    name: 'internetSearchProvider',
+    label: '互联网搜索服务商',
+    type: 'select',
+    group: 'internetSearchProvider',
+    defaultValue: 'gemini',
+    options: INTERNET_SEARCH_PROVIDER_OPTIONS,
+    helpText: '当前仅开放 Gemini，后续可在服务层扩展其他支持联网搜索的 AI。'
+  },
+  {
+    name: 'internetSearchTimeoutSeconds',
+    label: '互联网搜索超时秒数',
+    type: 'number',
+    group: 'internetSearchRequest',
+    defaultValue: 180,
+    min: 30,
+    max: 600,
+    helpText:
+      'Gemini 使用 google_search 工具时可能执行多次搜索，请为批量名词检索保留足够时间。'
+  },
+  {
+    name: 'geminiInternetSearchApiKey',
+    label: 'Gemini API Key',
+    type: 'password',
+    group: 'geminiInternetSearch',
+    defaultValue: ''
+  },
+  {
+    name: 'geminiInternetSearchBaseUrl',
+    label: 'Gemini Base URL',
+    type: 'string',
+    group: 'geminiInternetSearch',
+    defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
+    helpText:
+      '服务端直接调用 Gemini generateContent API，并按最新文档使用 google_search 工具。'
+  },
+  {
+    name: 'geminiInternetSearchModel',
+    label: 'Gemini 搜索模型',
+    type: 'modelSelect',
+    group: 'geminiInternetSearch',
+    defaultValue: 'gemini-3-flash-preview',
+    allowCreate: true,
+    options: GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
+    helpText:
+      'Google Search grounding 当前模型使用 tools: [{ google_search: {} }]；默认采用文档示例的 gemini-3-flash-preview。'
   }
 ]
 
@@ -637,6 +719,12 @@ async function getAiSettings() {
         geminiModelOptions: GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
         defaultConfidenceThreshold: 0.75,
         maxInputImageDimension: 1280
+      },
+      internetSearch: {
+        geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        geminiDefaultModel: 'gemini-3-flash-preview',
+        geminiModelOptions: GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
+        googleSearchTool: { google_search: {} }
       }
     }
   }
@@ -822,16 +910,65 @@ async function getImageRecognitionRuntimeSettings() {
   )
 }
 
+function buildGeminiInternetSearchRuntimeSettings(values) {
+  if (!normalizeTrimmedString(values.geminiInternetSearchApiKey)) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      '请先配置 Gemini Internet Search API Key',
+      'geminiInternetSearchApiKey',
+      400
+    )
+  }
+
+  return {
+    provider: 'gemini',
+    apiKey: normalizeTrimmedString(values.geminiInternetSearchApiKey),
+    baseUrl: normalizeTrimmedString(values.geminiInternetSearchBaseUrl),
+    model: normalizeTrimmedString(values.geminiInternetSearchModel),
+    timeoutSeconds: values.internetSearchTimeoutSeconds,
+    requestOptions: {
+      tool: 'google_search'
+    }
+  }
+}
+
+async function getInternetSearchRuntimeSettings() {
+  const settings = await getAiSettings()
+  const values = settings.values
+  if (values.internetSearchEnabled !== true) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      '请先在 AI 设置中启用互联网搜索',
+      'internetSearchEnabled',
+      400
+    )
+  }
+
+  if (values.internetSearchProvider === 'gemini') {
+    return buildGeminiInternetSearchRuntimeSettings(values)
+  }
+
+  throw new ApiError(
+    ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+    '互联网搜索服务商配置无效',
+    'internetSearchProvider',
+    400
+  )
+}
+
 module.exports = {
   AI_SETTING_FIELDS,
   IMAGE_GENERATION_PROVIDER_OPTIONS,
   IMAGE_RECOGNITION_PROVIDER_OPTIONS,
+  INTERNET_SEARCH_PROVIDER_OPTIONS,
   GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
   GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
+  GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
   DEEPSEEK_MODEL_OPTIONS,
   getAiSettings,
   getDeepSeekRuntimeSettings,
   getImageGenerationRuntimeSettings,
   getImageRecognitionRuntimeSettings,
+  getInternetSearchRuntimeSettings,
   updateAiSettings
 }

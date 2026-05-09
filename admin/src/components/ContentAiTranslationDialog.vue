@@ -54,6 +54,13 @@
                 <el-radio value="current">当前内容</el-radio>
               </el-radio-group>
             </el-form-item>
+            <el-form-item label="名词检索">
+              <el-switch
+                v-model="searchOfficialTermTranslations"
+                :disabled="isBusy || officialTermSearchDefaultLoading"
+                active-text="联网检索官方译名"
+              />
+            </el-form-item>
           </el-form>
 
           <div class="translation-json-toolbar">
@@ -224,6 +231,7 @@ import {
   extractApiErrorMessages
 } from '@/utils/apiError'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
+import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
 import { renderRichTextDocument } from '@/utils/translationJson'
 
 function stringifyValue(valueType, value) {
@@ -309,11 +317,14 @@ export default {
     const currentEntryList = ref([])
     const selectedEntryIds = ref([])
     const prompt = ref('')
+    const searchOfficialTermTranslations = ref(false)
+    const officialTermSearchDefaultLoading = ref(false)
     const preview = ref(null)
     const streamStatusList = ref([])
     const streamContent = ref('')
     const activeAbortController = ref(null)
     let entryLoadRequestId = 0
+    let officialTermSearchDefaultRequestId = 0
 
     const visible = computed({
       get() {
@@ -351,9 +362,39 @@ export default {
       currentEntryList.value = []
       selectedEntryIds.value = []
       prompt.value = ''
+      searchOfficialTermTranslations.value = false
+      officialTermSearchDefaultLoading.value = false
+      officialTermSearchDefaultRequestId += 1
       preview.value = null
       streamStatusList.value = []
       streamContent.value = ''
+    }
+
+    async function applyOfficialTermSearchDefault() {
+      const requestId = officialTermSearchDefaultRequestId + 1
+      officialTermSearchDefaultRequestId = requestId
+      officialTermSearchDefaultLoading.value = true
+      try {
+        const defaultValue =
+          await getOfficialTermSearchDefaultValue(multilingualApi)
+        if (requestId !== officialTermSearchDefaultRequestId) {
+          return
+        }
+        if (!visible.value) {
+          return
+        }
+        searchOfficialTermTranslations.value = defaultValue
+      } catch (error) {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          officialTermSearchDefaultLoading.value = false
+        }
+      }
     }
 
     function selectAll() {
@@ -666,6 +707,8 @@ export default {
               targetLanguageCode: props.targetLanguageCode,
               snapshotVersion: props.snapshotVersion,
               prompt: prompt.value,
+              searchOfficialTermTranslations:
+                searchOfficialTermTranslations.value,
               entries: selectedEntries
             })
           }
@@ -728,6 +771,10 @@ export default {
           request: {
             prompt: prompt.value,
             baseMode: baseMode.value,
+            options: {
+              searchOfficialTermTranslations:
+                searchOfficialTermTranslations.value
+            },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
           }
@@ -790,6 +837,7 @@ export default {
           return
         }
         resetState()
+        applyOfficialTermSearchDefault()
         reloadEntries()
       }
     )
@@ -807,6 +855,7 @@ export default {
       isBusy,
       languageOptions,
       loading,
+      officialTermSearchDefaultLoading,
       preview,
       prompt,
       reloadEntries,
@@ -817,6 +866,7 @@ export default {
       selectAll,
       selectedEntryIds,
       selectedSourceLanguageCode,
+      searchOfficialTermTranslations,
       streamContent,
       streamStatusList,
       targetLanguageCode: currentTargetLanguageCode,

@@ -3,7 +3,8 @@ import { getPostTypeText } from '@/utils/multilingual'
 const VALUE_TYPE_LABEL_MAP = {
   plainText: '纯文本',
   richTextLite: 'HTML 富文本',
-  richTextDocument: '结构化富文本'
+  richTextDocument: '结构化富文本',
+  mediaFile: '媒体文件'
 }
 
 const SCOPE_LABEL_MAP = {

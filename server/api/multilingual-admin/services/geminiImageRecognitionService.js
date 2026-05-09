@@ -429,7 +429,9 @@ async function recognizeCoverTitle(options = {}) {
       provider: settings.provider,
       model: settings.model,
       result,
-      rawText
+      rawText,
+      requestSummary,
+      responseSummary
     }
   } catch (error) {
     const providerErrorSummary = extractProviderErrorSummary(error)

@@ -65,6 +65,53 @@ function createWarning(code, message, context = {}) {
   }
 }
 
+function normalizeStorageString(value) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value)
+}
+
+function summarizeRecognitionDataUrl(dataUrl) {
+  const text = normalizeStorageString(dataUrl)
+  const match = text.match(/^data:([^;]+);base64,(.*)$/i)
+  if (!match) {
+    return null
+  }
+  return {
+    omitted: true,
+    reason: 'recognition-input-base64-data-url',
+    field: 'recognitionInput.dataUrl',
+    contentType: match[1],
+    encoding: 'base64',
+    charLength: text.length,
+    base64Length: match[2].length
+  }
+}
+
+function buildStoredRecognitionInput(recognitionInput) {
+  if (!recognitionInput || typeof recognitionInput !== 'object') {
+    return null
+  }
+  const storedInput = { ...recognitionInput }
+  delete storedInput.dataUrl
+  const dataUrlSummary = summarizeRecognitionDataUrl(recognitionInput.dataUrl)
+  if (dataUrlSummary) {
+    storedInput.dataUrlSummary = dataUrlSummary
+  }
+  return storedInput
+}
+
+function buildStoredCoverImageArtifact(artifact) {
+  if (!artifact || typeof artifact !== 'object') {
+    return artifact
+  }
+  return {
+    ...artifact,
+    recognitionInput: buildStoredRecognitionInput(artifact.recognitionInput)
+  }
+}
+
 function createArtifactId() {
   if (typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -533,6 +580,7 @@ function buildCoverImagePreviewEntry({
   languageCode,
   warningMessage = ''
 }) {
+  const currentCoverAttachment = resolveFirstCoverImage(targetPost)
   return {
     entryType: COVER_IMAGE_ENTRY_TYPE,
     entryKey: [
@@ -549,6 +597,7 @@ function buildCoverImagePreviewEntry({
     generationKey: artifact.generationKey || '',
     recognitionKey: artifact.recognitionKey || '',
     sourceCoverUrl: artifact.sourceImage?.filepath || '',
+    currentCoverUrl: getAttachmentPreviewUrl(currentCoverAttachment),
     generatedCoverUrl: artifact.generatedImage?.previewUrl || '',
     sourceTitle: artifact.sourceTitle || '',
     targetTitle: artifact.targetTitle || '',
@@ -898,6 +947,9 @@ async function runRecognition({
       status: 'success',
       recognitionInput: currentRecognitionInput,
       result: response.result,
+      rawText: response.rawText || '',
+      requestSummary: response.requestSummary || null,
+      responseSummary: response.responseSummary || null,
       provider: {
         recognitionProvider: response.provider,
         recognitionModel: response.model
@@ -1038,12 +1090,22 @@ async function runGeneration({
       recognition,
       promptHash: generationPrompt.promptHash
     })
-    artifact.recognitionInput = recognitionInput
+    artifact.recognitionInput = buildStoredRecognitionInput(recognitionInput)
     artifact.generatedImage = generatedImage
     registry.artifacts.set(artifact.artifactId, artifact)
     return {
       status: 'generated',
-      artifact
+      artifact,
+      response: {
+        provider: generated.provider,
+        model: generated.model,
+        mimeType: generated.mimeType,
+        rawResponseId: generated.rawResponseId,
+        promptHash: generationPrompt.promptHash,
+        selectedRatio: selectedRatio || null,
+        requestSummary: generated.requestSummary || null,
+        responseSummary: generated.responseSummary || null
+      }
     }
   })()
 
@@ -1286,7 +1348,9 @@ async function processCoverImageTranslation(options = {}) {
         recognitionModel: recognitionSettings?.model || ''
       }
     })
-    artifact.recognitionInput = recognitionResult.recognitionInput || null
+    artifact.recognitionInput = buildStoredRecognitionInput(
+      recognitionResult.recognitionInput
+    )
     artifact.error = recognitionResult.error || null
     registry.artifacts.set(artifact.artifactId, artifact)
     const warningMessage =
@@ -1320,7 +1384,9 @@ async function processCoverImageTranslation(options = {}) {
       provider: recognitionResult.provider,
       recognition: recognitionResult.result
     })
-    artifact.recognitionInput = recognitionResult.recognitionInput
+    artifact.recognitionInput = buildStoredRecognitionInput(
+      recognitionResult.recognitionInput
+    )
     registry.artifacts.set(artifact.artifactId, artifact)
     return {
       artifact,
@@ -1377,7 +1443,9 @@ async function processCoverImageTranslation(options = {}) {
       },
       recognition: recognitionResult.result
     })
-    artifact.recognitionInput = recognitionResult.recognitionInput
+    artifact.recognitionInput = buildStoredRecognitionInput(
+      recognitionResult.recognitionInput
+    )
     artifact.error = generationResult.error || null
     registry.artifacts.set(artifact.artifactId, artifact)
     const warningMessage = generationResult.error?.message || '封面图生成失败'
@@ -1472,6 +1540,7 @@ function buildRegistrySnapshot(registry) {
     coverImageGenerationMap[key] = {
       status: value.status || '',
       artifactId: value.artifact?.artifactId || value.artifactId || '',
+      response: value.response || null,
       error: value.error || null
     }
   })
@@ -1480,11 +1549,18 @@ function buildRegistrySnapshot(registry) {
     coverImageRecognitionMap[key] = {
       status: value.status || '',
       result: value.result || null,
+      rawText: value.rawText || '',
+      requestSummary: value.requestSummary || null,
+      responseSummary: value.responseSummary || null,
       error: value.error || null
     }
   })
   return {
-    coverImageArtifacts: Array.from(registry.artifacts.values()),
+    coverImageArtifacts: Array.from(registry.artifacts.values()).map(
+      artifact => {
+        return buildStoredCoverImageArtifact(artifact)
+      }
+    ),
     coverImageGenerationMap,
     coverImageRecognitionMap
   }

@@ -122,7 +122,8 @@ function parseInput(body = {}) {
     entries,
     translateCoverImage,
     allowEmptyEntries,
-    skipUsageLog: body.skipUsageLog === true
+    skipUsageLog: body.skipUsageLog === true,
+    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
 }
 
@@ -148,6 +149,7 @@ async function translateSourcePostAiImportEntriesStream(
         targetLanguageCode: input.targetLanguageCode,
         prompt: input.prompt,
         skipUsageLog: input.skipUsageLog,
+        searchOfficialTermTranslations: input.searchOfficialTermTranslations,
         entries: input.entries
       },
       handlers

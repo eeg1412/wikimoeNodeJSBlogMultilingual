@@ -336,6 +336,13 @@
                 placeholder="可补充本次翻译的语气、专有名词、保留词或风格要求"
               />
             </el-form-item>
+            <el-form-item label="名词检索">
+              <el-switch
+                v-model="aiForm.searchOfficialTermTranslations"
+                :disabled="isAiImportBusy || officialTermSearchDefaultLoading"
+                active-text="联网检索官方译名"
+              />
+            </el-form-item>
           </el-form>
         </template>
 
@@ -1028,6 +1035,7 @@ import {
   getPostTypeText
 } from '@/utils/multilingual'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
+import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
 import {
   buildTranslationImportPreview,
   renderRichTextDocument
@@ -1085,14 +1093,17 @@ export default {
     const aiAbortController = ref(null)
     const aiStreamFeedbackRef = ref(null)
     const aiStreamContentRef = ref(null)
+    const officialTermSearchDefaultLoading = ref(false)
     const rowActionLoadingMap = reactive({})
+    let officialTermSearchDefaultRequestId = 0
     const languageForm = reactive({
       sourceLanguageCode: 'zh-CN'
     })
     const aiForm = reactive({
       sourceLanguageCode: 'zh-CN',
       targetLanguageCodes: [],
-      prompt: ''
+      prompt: '',
+      searchOfficialTermTranslations: false
     })
     const params = reactive({
       page: 1,
@@ -1313,6 +1324,36 @@ export default {
       aiProgressList.value = []
       aiStreamContent.value = ''
       aiForm.prompt = ''
+      aiForm.searchOfficialTermTranslations = false
+      officialTermSearchDefaultLoading.value = false
+      officialTermSearchDefaultRequestId += 1
+    }
+
+    const applyOfficialTermSearchDefault = async () => {
+      const requestId = officialTermSearchDefaultRequestId + 1
+      officialTermSearchDefaultRequestId = requestId
+      officialTermSearchDefaultLoading.value = true
+      try {
+        const defaultValue =
+          await getOfficialTermSearchDefaultValue(multilingualApi)
+        if (requestId !== officialTermSearchDefaultRequestId) {
+          return
+        }
+        if (!aiDialogVisible.value) {
+          return
+        }
+        aiForm.searchOfficialTermTranslations = defaultValue
+      } catch (error) {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          officialTermSearchDefaultLoading.value = false
+        }
+      }
     }
 
     const openAiImportDialog = row => {
@@ -1333,7 +1374,9 @@ export default {
         aiForm.sourceLanguageCode
       )
       aiForm.prompt = ''
+      aiForm.searchOfficialTermTranslations = false
       aiDialogVisible.value = true
+      applyOfficialTermSearchDefault()
     }
 
     const handleAiSourceLanguageChange = () => {
@@ -2457,6 +2500,8 @@ export default {
             targetLanguageCode: languageCode,
             prompt: aiForm.prompt,
             skipUsageLog: true,
+            searchOfficialTermTranslations:
+              aiForm.searchOfficialTermTranslations,
             translateCoverImage: false,
             allowEmptyEntries: true,
             entries
@@ -2866,7 +2911,9 @@ export default {
           request: {
             prompt: aiForm.prompt,
             options: {
-              translateCoverImage: true
+              translateCoverImage: true,
+              searchOfficialTermTranslations:
+                aiForm.searchOfficialTermTranslations
             },
             targetLanguageCodes: aiForm.targetLanguageCodes,
             recursion: {
@@ -3121,6 +3168,7 @@ export default {
       languageForm,
       copiedCountRows,
       isAiImportBusy,
+      officialTermSearchDefaultLoading,
       rowActionLoadingMap,
       targetLanguageOptions,
       getLanguageText,

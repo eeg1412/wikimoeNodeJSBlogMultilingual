@@ -1,0 +1,761 @@
+<template>
+  <div class="common-right-panel-form proper-noun-page">
+    <div class="pb20">
+      <el-breadcrumb separator="/">
+        <el-breadcrumb-item>多语言数据管理</el-breadcrumb-item>
+        <el-breadcrumb-item>专有名词翻译库</el-breadcrumb-item>
+      </el-breadcrumb>
+    </div>
+
+    <div class="clearfix pb20">
+      <div class="fl common-top-search-form-body">
+        <el-form
+          :inline="true"
+          :model="params"
+          class="proper-noun-search-form"
+          @submit.prevent
+          @keypress.enter="getTermList(true)"
+        >
+          <el-form-item>
+            <el-input
+              v-model="params.keyword"
+              placeholder="原文、备注"
+              clearable
+              style="width: 220px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.languageCode"
+              placeholder="译名语言"
+              clearable
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in languageOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.enabled"
+              placeholder="状态"
+              clearable
+              style="width: 120px"
+            >
+              <el-option label="启用" value="true" />
+              <el-option label="停用" value="false" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="getTermList(true)">
+              搜索
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+      <div class="fr proper-noun-actions">
+        <el-button @click="getTermList(true)">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+        <el-button type="primary" @click="openCreateTermDialog">
+          <el-icon><Plus /></el-icon>
+          新增名词
+        </el-button>
+      </div>
+    </div>
+
+    <div class="mb20 list-table-body">
+      <ResponsiveTable
+        ref="tableRef"
+        v-loading="loading"
+        :data="termList"
+        row-key="_id"
+        height="100%"
+        border
+      >
+        <ResponsiveTableColumn label="原文名词" min-width="240">
+          <template #default="{ row }">
+            <div class="proper-noun-source-text">{{ row.sourceText }}</div>
+            <div v-if="row.note" class="proper-noun-note">{{ row.note }}</div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="译名" min-width="260">
+          <template #default="{ row }">
+            <div
+              v-if="getDisplayedTranslations(row).length > 0"
+              class="proper-noun-translation-list"
+            >
+              <el-tag
+                v-for="translation in getDisplayedTranslations(row)"
+                :key="translation._id"
+                :type="translation.enabled ? 'primary' : 'info'"
+                effect="plain"
+              >
+                {{ getLanguageText(translation.languageCode) }}：{{
+                  translation.translatedText
+                }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">暂无译名</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.enabled" type="success" effect="plain">
+              启用
+            </el-tag>
+            <el-tag v-else type="info" effect="plain">停用</el-tag>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="更新时间" width="180">
+          <template #default="{ row }">
+            {{ row.updatedAt ? $formatDate(row.updatedAt) : '-' }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="操作" width="260" fixed="right">
+          <template #default="{ row }">
+            <div class="proper-noun-row-actions">
+              <el-button
+                type="primary"
+                size="small"
+                @click="openTranslationDialog(row)"
+              >
+                译名
+              </el-button>
+              <el-button size="small" @click="openEditTermDialog(row)">
+                编辑
+              </el-button>
+              <el-button type="danger" size="small" @click="deleteTerm(row)">
+                删除
+              </el-button>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+      </ResponsiveTable>
+    </div>
+
+    <div class="clearfix">
+      <el-pagination
+        class="fr"
+        background
+        layout="total, prev, pager, next"
+        :total="total"
+        :pager-count="5"
+        size="small"
+        v-model:current-page="params.page"
+        v-model:page-size="params.limit"
+      />
+    </div>
+
+    <el-dialog
+      v-model="termDialogVisible"
+      :title="termDialogTitle"
+      width="min(680px, 96vw)"
+      append-to-body
+      destroy-on-close
+    >
+      <el-form :model="termForm" label-width="120px" class="proper-noun-form">
+        <el-form-item label="原文名词" required>
+          <el-input
+            v-model="termForm.sourceText"
+            maxlength="300"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="原文语言">
+          <el-select
+            v-model="termForm.sourceLanguageCode"
+            clearable
+            filterable
+            class="w_10"
+            placeholder="可不指定"
+          >
+            <el-option
+              v-for="item in languageOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="termForm.enabled" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="termForm.note" type="textarea" :rows="4" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="termDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="termSaving" @click="submitTerm">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="translationDialogVisible"
+      title="译名管理"
+      width="min(920px, 96vw)"
+      append-to-body
+      destroy-on-close
+    >
+      <div v-if="activeTerm" class="proper-noun-translation-header">
+        <div class="proper-noun-source-text">{{ activeTerm.sourceText }}</div>
+        <el-button
+          type="primary"
+          size="small"
+          @click="openCreateTranslationDialog"
+        >
+          <el-icon><Plus /></el-icon>
+          新增译名
+        </el-button>
+      </div>
+      <ResponsiveTable
+        v-loading="translationLoading"
+        :data="translationList"
+        row-key="_id"
+        border
+      >
+        <ResponsiveTableColumn label="语言" width="150">
+          <template #default="{ row }">
+            {{ getLanguageText(row.languageCode) }}
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="译名" min-width="220">
+          <template #default="{ row }">
+            <div class="proper-noun-source-text">{{ row.translatedText }}</div>
+            <div v-if="row.note" class="proper-noun-note">{{ row.note }}</div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="来源" width="150">
+          <template #default="{ row }">
+            <el-tag effect="plain">{{
+              getTranslationSourceText(row.translationSource)
+            }}</el-tag>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.enabled" type="success" effect="plain"
+              >启用</el-tag
+            >
+            <el-tag v-else type="info" effect="plain">停用</el-tag>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="操作" width="170" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="openEditTranslationDialog(row)">
+              编辑
+            </el-button>
+            <el-button
+              type="danger"
+              size="small"
+              @click="deleteTranslation(row)"
+            >
+              删除
+            </el-button>
+          </template>
+        </ResponsiveTableColumn>
+      </ResponsiveTable>
+    </el-dialog>
+
+    <el-dialog
+      v-model="translationEditDialogVisible"
+      :title="translationDialogTitle"
+      width="min(620px, 96vw)"
+      append-to-body
+      destroy-on-close
+    >
+      <el-form
+        :model="translationForm"
+        label-width="120px"
+        class="proper-noun-form"
+      >
+        <el-form-item label="语言" required>
+          <el-select
+            v-model="translationForm.languageCode"
+            class="w_10"
+            filterable
+            :disabled="translationMode === 'edit'"
+          >
+            <el-option
+              v-for="item in languageOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="译名" required>
+          <el-input
+            v-model="translationForm.translatedText"
+            maxlength="300"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="translationForm.enabled" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="translationForm.note" type="textarea" :rows="4" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="translationEditDialogVisible = false"
+          >取消</el-button
+        >
+        <el-button
+          type="primary"
+          :loading="translationSaving"
+          @click="submitTranslation"
+        >
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh } from '@element-plus/icons-vue'
+import { multilingualApi } from '@/api'
+import {
+  getLanguageText,
+  SUPPORTED_LANGUAGE_OPTIONS
+} from '@/utils/multilingual'
+
+const TRANSLATION_SOURCE_TEXT_MAP = {
+  manual: '手动维护',
+  internetSearchAi: '联网检索',
+  aiKnowledgeBase: 'AI知识库',
+  imported: '导入'
+}
+
+function getInitialTermForm() {
+  return {
+    id: '',
+    sourceText: '',
+    sourceLanguageCode: '',
+    note: '',
+    enabled: true
+  }
+}
+
+function getInitialTranslationForm() {
+  return {
+    id: '',
+    termId: '',
+    languageCode: 'zh-CN',
+    translatedText: '',
+    note: '',
+    enabled: true
+  }
+}
+
+export default {
+  name: 'ProperNounTranslationList',
+  components: {
+    Plus,
+    Refresh
+  },
+  setup() {
+    const tableRef = ref(null)
+    const loading = ref(false)
+    const termList = ref([])
+    const total = ref(0)
+    const params = reactive({
+      page: 1,
+      limit: 20,
+      keyword: '',
+      languageCode: '',
+      enabled: ''
+    })
+
+    const termDialogVisible = ref(false)
+    const termSaving = ref(false)
+    const termMode = ref('create')
+    const termForm = reactive(getInitialTermForm())
+
+    const translationDialogVisible = ref(false)
+    const translationEditDialogVisible = ref(false)
+    const translationLoading = ref(false)
+    const translationSaving = ref(false)
+    const translationMode = ref('create')
+    const activeTerm = ref(null)
+    const translationList = ref([])
+    const translationForm = reactive(getInitialTranslationForm())
+
+    const languageOptions = SUPPORTED_LANGUAGE_OPTIONS
+    const termDialogTitle = computed(() => {
+      if (termMode.value === 'edit') {
+        return '编辑名词'
+      }
+      return '新增名词'
+    })
+    const translationDialogTitle = computed(() => {
+      if (translationMode.value === 'edit') {
+        return '编辑译名'
+      }
+      return '新增译名'
+    })
+
+    function assignReactive(target, source) {
+      Object.keys(target).forEach(key => {
+        target[key] = source[key]
+      })
+    }
+
+    function getTermRequestParams() {
+      const requestParams = {
+        page: params.page,
+        limit: params.limit
+      }
+      if (params.keyword) {
+        requestParams.keyword = params.keyword
+      }
+      if (params.languageCode) {
+        requestParams.languageCode = params.languageCode
+      }
+      if (params.enabled !== '') {
+        requestParams.enabled = params.enabled
+      }
+      return requestParams
+    }
+
+    function getTermList(resetPage = false) {
+      if (resetPage === true && params.page !== 1) {
+        params.page = 1
+        return
+      }
+      loading.value = true
+      multilingualApi
+        .getProperNounTermList(getTermRequestParams(), true)
+        .then(response => {
+          const data = response.data.data || {}
+          termList.value = data.list || []
+          total.value = data.total || 0
+          tableRef.value?.scrollTo({ top: 0 })
+        })
+        .finally(() => {
+          loading.value = false
+        })
+    }
+
+    function resetTermForm() {
+      assignReactive(termForm, getInitialTermForm())
+    }
+
+    function openCreateTermDialog() {
+      resetTermForm()
+      termMode.value = 'create'
+      termDialogVisible.value = true
+    }
+
+    function openEditTermDialog(row) {
+      resetTermForm()
+      termMode.value = 'edit'
+      assignReactive(termForm, {
+        id: row._id,
+        sourceText: row.sourceText || '',
+        sourceLanguageCode: row.sourceLanguageCode || '',
+        note: row.note || '',
+        enabled: row.enabled !== false
+      })
+      termDialogVisible.value = true
+    }
+
+    function submitTerm() {
+      const requestData = { ...termForm }
+      termSaving.value = true
+      let request = null
+      if (termMode.value === 'edit') {
+        request = multilingualApi.updateProperNounTerm(requestData)
+      } else {
+        request = multilingualApi.createProperNounTerm(requestData)
+      }
+      request
+        .then(() => {
+          ElMessage.success('名词已保存')
+          termDialogVisible.value = false
+          getTermList()
+        })
+        .finally(() => {
+          termSaving.value = false
+        })
+    }
+
+    async function deleteTerm(row) {
+      try {
+        await ElMessageBox.confirm(
+          `确认删除“${row.sourceText}”及其所有译名？`,
+          '删除名词',
+          {
+            type: 'warning',
+            confirmButtonText: '删除',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+      multilingualApi.deleteProperNounTerm({ id: row._id }).then(() => {
+        ElMessage.success('名词已删除')
+        getTermList()
+      })
+    }
+
+    function openTranslationDialog(row) {
+      activeTerm.value = row
+      translationDialogVisible.value = true
+      getTranslationList()
+    }
+
+    function getTranslationList() {
+      if (!activeTerm.value) {
+        return
+      }
+      translationLoading.value = true
+      multilingualApi
+        .getProperNounTranslationList({ termId: activeTerm.value._id }, true)
+        .then(response => {
+          const data = response.data.data || {}
+          translationList.value = data.list || []
+        })
+        .finally(() => {
+          translationLoading.value = false
+        })
+    }
+
+    function resetTranslationForm() {
+      assignReactive(translationForm, getInitialTranslationForm())
+      if (activeTerm.value) {
+        translationForm.termId = activeTerm.value._id
+      }
+    }
+
+    function openCreateTranslationDialog() {
+      resetTranslationForm()
+      translationMode.value = 'create'
+      translationEditDialogVisible.value = true
+    }
+
+    function openEditTranslationDialog(row) {
+      resetTranslationForm()
+      translationMode.value = 'edit'
+      assignReactive(translationForm, {
+        id: row._id,
+        termId: row.termId,
+        languageCode: row.languageCode,
+        translatedText: row.translatedText || '',
+        note: row.note || '',
+        enabled: row.enabled !== false
+      })
+      translationEditDialogVisible.value = true
+    }
+
+    function submitTranslation() {
+      const requestData = { ...translationForm }
+      translationSaving.value = true
+      let request = null
+      if (translationMode.value === 'edit') {
+        request = multilingualApi.updateProperNounTranslation(requestData)
+      } else {
+        request = multilingualApi.createProperNounTranslation(requestData)
+      }
+      request
+        .then(() => {
+          ElMessage.success('译名已保存')
+          translationEditDialogVisible.value = false
+          getTranslationList()
+          getTermList()
+        })
+        .finally(() => {
+          translationSaving.value = false
+        })
+    }
+
+    async function deleteTranslation(row) {
+      try {
+        await ElMessageBox.confirm(
+          `确认删除“${getLanguageText(row.languageCode)}：${row.translatedText}”？`,
+          '删除译名',
+          {
+            type: 'warning',
+            confirmButtonText: '删除',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+      multilingualApi.deleteProperNounTranslation({ id: row._id }).then(() => {
+        ElMessage.success('译名已删除')
+        getTranslationList()
+        getTermList()
+      })
+    }
+
+    function getTranslationSourceText(value) {
+      return TRANSLATION_SOURCE_TEXT_MAP[value] || value || '未知'
+    }
+
+    function getDisplayedTranslations(row) {
+      const translations = Array.isArray(row.translations)
+        ? row.translations
+        : []
+      if (params.languageCode) {
+        return translations.filter(
+          item => item.languageCode === params.languageCode
+        )
+      }
+      return translations.slice(0, 4)
+    }
+
+    watch(
+      () => [params.page, params.limit],
+      () => {
+        getTermList()
+      }
+    )
+
+    onMounted(() => {
+      getTermList()
+    })
+
+    return {
+      Plus,
+      Refresh,
+      activeTerm,
+      deleteTerm,
+      deleteTranslation,
+      getDisplayedTranslations,
+      getLanguageText,
+      getTermList,
+      getTranslationList,
+      getTranslationSourceText,
+      languageOptions,
+      loading,
+      openCreateTermDialog,
+      openCreateTranslationDialog,
+      openEditTermDialog,
+      openEditTranslationDialog,
+      openTranslationDialog,
+      params,
+      submitTerm,
+      submitTranslation,
+      tableRef,
+      termDialogTitle,
+      termDialogVisible,
+      termForm,
+      termList,
+      termSaving,
+      total,
+      translationDialogTitle,
+      translationDialogVisible,
+      translationEditDialogVisible,
+      translationForm,
+      translationList,
+      translationLoading,
+      translationMode,
+      translationSaving
+    }
+  }
+}
+</script>
+
+<style scoped>
+.proper-noun-page {
+  min-width: 0;
+}
+
+.proper-noun-actions,
+.proper-noun-row-actions,
+.proper-noun-translation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proper-noun-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.proper-noun-row-actions {
+  flex-wrap: wrap;
+}
+
+.proper-noun-source-text {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.proper-noun-note {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.proper-noun-translation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.proper-noun-translation-header {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.proper-noun-form {
+  max-width: 560px;
+}
+
+@media (max-width: 767px) {
+  .proper-noun-actions {
+    float: none;
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+
+  .proper-noun-search-form :deep(.el-form-item) {
+    display: block;
+    margin-right: 0;
+  }
+
+  .proper-noun-search-form :deep(.el-input),
+  .proper-noun-search-form :deep(.el-select) {
+    width: 100% !important;
+  }
+
+  .proper-noun-form {
+    max-width: none;
+  }
+
+  .proper-noun-form :deep(.el-form-item) {
+    display: block;
+  }
+
+  .proper-noun-form :deep(.el-form-item__label) {
+    width: auto !important;
+    justify-content: flex-start;
+  }
+
+  .proper-noun-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+}
+</style>

@@ -12,10 +12,14 @@ const {
 const aiSettingsService = require('./aiSettingsService')
 const aiUsageService = require('./aiUsageService')
 const coverImageTranslationService = require('./coverImageTranslationService')
+const internetSearchAiService = require('./internetSearchAiService')
+const properNounTranslationService = require('./properNounTranslationService')
+const translationAiJsonLogService = require('./translationAiJsonLogService')
 
 const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 const TRANSLATION_JSON_VERSION = 2
 const AI_RESULT_SCHEMA = 'wikimoe.ai.translation.result'
+const TERM_EXTRACTION_RESULT_SCHEMA = 'wikimoe.ai.proper_noun.term_extract'
 const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
   'plainText',
   'richTextLite',
@@ -25,6 +29,11 @@ const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
 const MAX_AI_REQUEST_TEXT_LENGTH = 12000
 const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 6000
 const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
+const MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH = 10000
+const MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000
+const MAX_EXTRACTED_TERM_COUNT = 50
+const MIN_TERM_IMPORTANCE = 1
+const MAX_TERM_IMPORTANCE = 100
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -51,6 +60,27 @@ function normalizeString(value) {
 
 function normalizePrompt(value) {
   return normalizeString(value).trim().slice(0, 6000)
+}
+
+function normalizeTargetLanguageCodeList({
+  targetLanguageCode,
+  targetLanguageCodes
+} = {}) {
+  const languageCodes = []
+  const primaryLanguageCode = normalizeLanguageCode(targetLanguageCode)
+  if (primaryLanguageCode) {
+    languageCodes.push(primaryLanguageCode)
+  }
+  if (Array.isArray(targetLanguageCodes)) {
+    targetLanguageCodes.forEach(value => {
+      const languageCode = normalizeLanguageCode(value)
+      if (!languageCode || languageCodes.includes(languageCode)) {
+        return
+      }
+      languageCodes.push(languageCode)
+    })
+  }
+  return languageCodes
 }
 
 function cloneSerializableValue(value) {
@@ -233,15 +263,21 @@ function parseInput(body = {}) {
   const entries = Array.isArray(body.entries) ? body.entries : []
   entries.forEach((entry, index) => validateInputEntry(entry, index))
   const targetTitle = String(body.targetTitle || '').trim()
+  const targetLanguageCodes = normalizeTargetLanguageCodeList({
+    targetLanguageCode,
+    targetLanguageCodes: body.targetLanguageCodes
+  })
 
   return {
     postId,
     sourceLanguageCode,
     targetLanguageCode,
+    targetLanguageCodes,
     prompt: normalizePrompt(body.prompt),
     entries,
     targetTitle,
-    translateCoverImage
+    translateCoverImage,
+    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
 }
 
@@ -274,17 +310,23 @@ function parseGenericInput(body = {}) {
   }
 
   body.entries.forEach((entry, index) => validateInputEntry(entry, index))
+  const targetLanguageCodes = normalizeTargetLanguageCodeList({
+    targetLanguageCode,
+    targetLanguageCodes: body.targetLanguageCodes
+  })
 
   return {
     contentId: String(body.contentId || '').trim(),
     contentType: String(body.contentType || 'content').trim() || 'content',
     sourceLanguageCode,
     targetLanguageCode,
+    targetLanguageCodes,
     prompt: normalizePrompt(body.prompt),
     entries: body.entries,
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
-    skipUsageLog: body.skipUsageLog === true
+    skipUsageLog: body.skipUsageLog === true,
+    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
 }
 
@@ -333,9 +375,15 @@ async function getSourcePostForTranslationPost(post) {
     .lean()
 }
 
-function appendCoverImageResultToStreamData(data, coverResult, registry) {
+function appendCoverImageResultToStreamData(
+  data,
+  coverResult,
+  registry,
+  input
+) {
   const nextData = {
     ...data,
+    aiJsonLogs: Array.isArray(data.aiJsonLogs) ? data.aiJsonLogs.slice() : [],
     coverImagePreviewEntries: Array.isArray(data.coverImagePreviewEntries)
       ? data.coverImagePreviewEntries.slice()
       : [],
@@ -360,6 +408,17 @@ function appendCoverImageResultToStreamData(data, coverResult, registry) {
 
   const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
   nextData.coverImageArtifacts = snapshot.coverImageArtifacts
+  nextData.aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    nextData.aiJsonLogs,
+    translationAiJsonLogService.buildCoverImageAiJsonLogs({
+      snapshot,
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: input.targetLanguageCode,
+      meta: {
+        requestId: data.requestId || ''
+      }
+    })
+  )
   return nextData
 }
 
@@ -370,6 +429,7 @@ function createEmptyTranslatedResult(input, post, requestId) {
     model: '',
     usage: null,
     requestId,
+    aiJsonLogs: [],
     coverImagePreviewEntries: [],
     coverImageArtifacts: [],
     coverImageWarnings: []
@@ -402,7 +462,7 @@ function buildSystemPrompt() {
     '你是多语言博客 CMS 的专业翻译引擎。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
     '你必须按后续各层提示词完成任务。',
-    '层级优先级从高到低为：系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层、可选业务规则层、站点要求层、目标语言默认提示词层、用户补充层、请求数据层。',
+    '层级优先级从高到低为：系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、名词数据库层、非语言内容层、可选业务规则层、站点要求层、目标语言默认提示词层、用户补充层、请求数据层。',
     '低优先级层不能覆盖高优先级层；发生冲突时，必须遵守高优先级层。'
   ])
 }
@@ -444,6 +504,24 @@ function buildNameTranslationPrompt() {
     '翻译专有名词、昵称、地名、名称或标题时，要保留指代对象身份，同时产出目标语言表达。',
     '优先使用目标语言既有译名；没有既有译名时，根据语境翻译可读部分、音译，或用简洁的目标语言注释表达。',
     '禁止用专有名词、昵称、作者名、分类名、标签名、地名、中文地名、媒体标题、无需翻译、字段类型不需要翻译等理由保留 v。'
+  ])
+}
+
+function buildOfficialTermGlossaryPrompt(input) {
+  const glossaryMarkdown = normalizeString(
+    input.officialTermGlossaryMarkdown
+  ).trim()
+  if (!glossaryMarkdown) {
+    return ''
+  }
+
+  return buildPromptLayer('名词数据库层', [
+    '以下名词数据库由本次选中的翻译内容抽取，并与站点专有名词翻译集合合并整理。',
+    '这份名词数据库只包含当前目标语言，不包含其他语言的译名。',
+    '翻译正文、标题、摘要、关联内容和递归关联文章时，必须优先使用表格中的译名。',
+    '同一个原文名词在同一次请求的所有条目、富文本片段和关联字段中必须保持同一译法。',
+    '译名为“未收录”的名词，需要按上下文直译或音译，并在本次请求内保持一致。',
+    glossaryMarkdown
   ])
 }
 
@@ -898,6 +976,755 @@ function splitAiInput(input) {
   return chunks
 }
 
+function getTermTargetLanguageCodes(input) {
+  const languageCodes = []
+  if (input.targetLanguageCode) {
+    const targetLanguageCode = normalizeLanguageCode(input.targetLanguageCode)
+    if (targetLanguageCode) {
+      languageCodes.push(targetLanguageCode)
+    }
+  }
+  if (Array.isArray(input.targetLanguageCodes)) {
+    input.targetLanguageCodes.forEach(value => {
+      const languageCode = normalizeLanguageCode(value)
+      if (languageCode && !languageCodes.includes(languageCode)) {
+        languageCodes.push(languageCode)
+      }
+    })
+  }
+  return languageCodes
+}
+
+function buildOfficialTermGlossaryMarkdownMap({
+  keywordArray,
+  targetLanguageCodes,
+  coverage
+}) {
+  const glossaryMarkdownMap = {}
+  targetLanguageCodes.forEach(languageCode => {
+    const markdown = properNounTranslationService.buildGlossaryMarkdown({
+      sourceTexts: keywordArray,
+      targetLanguageCodes: [languageCode],
+      translations: coverage.translations,
+      missingTerms: coverage.missingTerms
+    })
+    if (markdown) {
+      glossaryMarkdownMap[languageCode] = markdown
+    }
+  })
+  return glossaryMarkdownMap
+}
+
+function getCurrentOfficialTermGlossaryMarkdown({
+  input,
+  glossaryMarkdownMap
+}) {
+  const currentLanguageCode = normalizeLanguageCode(input.targetLanguageCode)
+  if (currentLanguageCode && glossaryMarkdownMap[currentLanguageCode]) {
+    return glossaryMarkdownMap[currentLanguageCode]
+  }
+  return ''
+}
+
+function getEntryTermExtractionLabel(entry, index) {
+  const labelList = [
+    entry.groupLabel,
+    entry.label,
+    entry.recordLabel,
+    entry.fieldName,
+    entry.id
+  ]
+    .map(value => normalizeString(value).trim())
+    .filter(Boolean)
+  if (labelList.length > 0) {
+    return labelList.join(' / ')
+  }
+  return `条目 ${index + 1}`
+}
+
+function decodeHtmlEntitiesForTermExtraction(text) {
+  return normalizeString(text)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (matchText, codeText) => {
+      const codePoint = Number(codeText)
+      if (
+        !Number.isFinite(codePoint) ||
+        codePoint < 0 ||
+        codePoint > 0x10ffff
+      ) {
+        return matchText
+      }
+      return String.fromCodePoint(codePoint)
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (matchText, codeText) => {
+      const codePoint = Number.parseInt(codeText, 16)
+      if (
+        !Number.isFinite(codePoint) ||
+        codePoint < 0 ||
+        codePoint > 0x10ffff
+      ) {
+        return matchText
+      }
+      return String.fromCodePoint(codePoint)
+    })
+}
+
+function stripHtmlForTermExtraction(value) {
+  return decodeHtmlEntitiesForTermExtraction(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(
+      /<\/\s*(p|div|section|article|blockquote|li|tr|h[1-6])\s*>/gi,
+      '\n'
+    )
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function buildTermExtractionTextFromRichTextSegments(segments) {
+  return segments
+    .map(segment => stripHtmlForTermExtraction(segment.text))
+    .filter(Boolean)
+    .join('\n')
+}
+
+function getEntryTermExtractionText(entry) {
+  const value = getAiPromptValue(entry)
+  if (
+    value &&
+    value.type === RICH_TEXT_INDEXED_VALUE_TYPE &&
+    Array.isArray(value.segments)
+  ) {
+    return buildTermExtractionTextFromRichTextSegments(value.segments)
+  }
+  if (typeof value === 'string') {
+    return stripHtmlForTermExtraction(value)
+  }
+  if (value && typeof value === 'object') {
+    const segments = collectRichTextSegments(value)
+    if (segments.length > 0) {
+      return buildTermExtractionTextFromRichTextSegments(segments)
+    }
+    return stripHtmlForTermExtraction(JSON.stringify(value))
+  }
+  return ''
+}
+
+function isArticleContentTermEntry(entry) {
+  if (entry.fieldName !== 'content') {
+    return false
+  }
+  if (entry.scope === 'post') {
+    return true
+  }
+  if (entry.collectionName === 'posts') {
+    return true
+  }
+  if (!entry.collectionName && !entry.scope) {
+    return true
+  }
+  return false
+}
+
+function pushTermExtractionPackage(packages, packageData) {
+  const text = normalizeString(packageData.text).trim()
+  if (!text) {
+    return
+  }
+  packages.push({
+    packageType: packageData.packageType || 'overview',
+    title: packageData.title || '翻译内容',
+    text
+  })
+}
+
+function pushOverviewTermPackages(packages, overviewItems) {
+  let currentTextList = []
+  let currentLength = 0
+
+  function flushCurrentPackage() {
+    if (currentTextList.length === 0) {
+      return
+    }
+    pushTermExtractionPackage(packages, {
+      packageType: 'overview',
+      title: '标题、摘要与关联内容',
+      text: currentTextList.join('\n\n')
+    })
+    currentTextList = []
+    currentLength = 0
+  }
+
+  overviewItems.forEach(item => {
+    const blockText = [`【${item.label}】`, item.text].join('\n')
+    if (blockText.length > MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH) {
+      flushCurrentPackage()
+      splitLongText(blockText, MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH).forEach(
+        (partText, partIndex) => {
+          pushTermExtractionPackage(packages, {
+            packageType: 'overview',
+            title: `标题、摘要与关联内容 ${partIndex + 1}`,
+            text: partText
+          })
+        }
+      )
+      return
+    }
+
+    if (
+      currentTextList.length > 0 &&
+      currentLength + blockText.length > MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH
+    ) {
+      flushCurrentPackage()
+    }
+    currentTextList.push(blockText)
+    currentLength += blockText.length
+  })
+
+  flushCurrentPackage()
+}
+
+function buildTermExtractionPackages(input) {
+  const packages = []
+  const contentPackages = []
+  const overviewItems = []
+  input.entries.forEach((entry, index) => {
+    const text = getEntryTermExtractionText(entry)
+    if (!text.trim()) {
+      return
+    }
+    const label = getEntryTermExtractionLabel(entry, index)
+    if (!isArticleContentTermEntry(entry)) {
+      overviewItems.push({ label, text })
+      return
+    }
+
+    const textSlices = splitLongText(
+      text,
+      MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH
+    )
+    textSlices.forEach((partText, partIndex) => {
+      pushTermExtractionPackage(contentPackages, {
+        packageType: 'articleContent',
+        title: `${label} / 正文切片 ${partIndex + 1}`,
+        text: partText
+      })
+    })
+  })
+
+  pushOverviewTermPackages(packages, overviewItems)
+  return packages.concat(contentPackages)
+}
+
+function buildTermExtractionRequestData(input, termPackage) {
+  return JSON.stringify(
+    {
+      task: 'extract_proper_noun_terms',
+      outputContract: {
+        rootType: 'object',
+        requiredFields: ['schema', 'version', 'terms'],
+        schema: TERM_EXTRACTION_RESULT_SCHEMA,
+        version: 1,
+        terms: {
+          type: 'array',
+          itemType: 'object',
+          requiredFields: ['sourceText', 'importance'],
+          itemSchema: {
+            sourceText:
+              '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
+            importance: '1-100 的整数，数值越高越需要联网确认官方译名'
+          }
+        }
+      },
+      sourceLanguageCode: input.sourceLanguageCode || '',
+      targetLanguageCode: input.targetLanguageCode || '',
+      packageType: termPackage.packageType,
+      packageTitle: termPackage.title,
+      textFormat: 'plain_text_without_html',
+      text: termPackage.text
+    },
+    null,
+    2
+  )
+}
+
+function buildTermExtractionMessages(input, termPackage) {
+  return [
+    {
+      role: 'system',
+      content: buildPromptLayer('系统基础层', [
+        '你是多语言博客 CMS 的官方译名联网检索候选词筛选器。',
+        '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
+        `JSON 根节点必须包含 schema、version 和 terms，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
+        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","importance":90}]}。`,
+        '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
+        '如果词条仅靠普通翻译常识、上下文直译或目标语言常规表达即可处理，不要抽取。'
+      ])
+    },
+    {
+      role: 'system',
+      content: buildPromptLayer('抽取规则层', [
+        '优先抽取作品名称、系列名称、角色名称、真实组织、品牌产品、游戏/书籍/影视/番剧标题、现实地标、官方活动名等需要核对正式译名的词条。',
+        '必须保留原文表面形式，不要自行翻译、改写、解释或添加括号。',
+        '输入正文已移除 HTML 标签；不要根据标签、属性或结构推测词条。',
+        '不要抽取普通形容词、通用名词、完整句子、URL、代码、纯数字、日期、文件路径或随机 ID。',
+        '不要抽取可以直接按目标语言常规表达翻译的道路、楼层、房间、编号路线、普通设施、泛称地点或行政区划组合。',
+        '例如“1号路”“2号路”“第3层”“A区入口”“北门”“停车场”这类不需要联网确认官方译名的词条必须排除。',
+        '如果你不确定一个词是否存在官方译名，只有它确实像作品、角色、品牌、组织、产品或现实地标时才抽取。',
+        '同一对象出现不同写法时，可以分别返回；完全重复的字符串只返回一次。',
+        'importance 必须综合判断词条对文章主题、标题摘要、关联内容和正文理解的一致性影响，以及联网确认官方译名的必要性。',
+        `最多返回 ${MAX_EXTRACTED_TERM_COUNT} 个对象。`
+      ])
+    },
+    {
+      role: 'user',
+      content: buildTermExtractionRequestData(input, termPackage)
+    }
+  ]
+}
+
+function buildTermExtractionRequestBody(settings, input, termPackage) {
+  const requestBody = {
+    model: settings.deepSeekModel,
+    messages: buildTermExtractionMessages(input, termPackage),
+    response_format: { type: 'json_object' },
+    max_tokens: settings.deepSeekMaxTokens,
+    stream: false
+  }
+
+  if (settings.deepSeekThinkingType === 'enabled') {
+    requestBody.thinking = { type: 'enabled' }
+    requestBody.reasoning_effort = settings.deepSeekReasoningEffort
+    return requestBody
+  }
+
+  requestBody.thinking = { type: 'disabled' }
+  requestBody.temperature = settings.deepSeekTemperature
+  return requestBody
+}
+
+function getTermArrayFromExtractionResult(resultData) {
+  if (Array.isArray(resultData?.terms)) {
+    return resultData.terms
+  }
+  if (Array.isArray(resultData?.keywords)) {
+    return resultData.keywords
+  }
+  if (Array.isArray(resultData?.requiredOutput?.terms)) {
+    return resultData.requiredOutput.terms
+  }
+  if (Array.isArray(resultData?.outputContract?.terms)) {
+    return resultData.outputContract.terms
+  }
+  return null
+}
+
+function normalizeTermImportance(value, index) {
+  const importance = Number(value)
+  if (
+    !Number.isInteger(importance) ||
+    importance < MIN_TERM_IMPORTANCE ||
+    importance > MAX_TERM_IMPORTANCE
+  ) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.importance 必须是 1-100 的整数`,
+      'deepSeek',
+      502
+    )
+  }
+  return importance
+}
+
+function normalizeExtractedTermItem(item, index) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms 项必须是对象`,
+      'deepSeek',
+      502
+    )
+  }
+
+  const sourceText = properNounTranslationService.normalizeSourceText(
+    item.sourceText
+  )
+  const normalizedSourceText = properNounTranslationService
+    .buildNormalizedSourceText(sourceText)
+    .trim()
+  if (!sourceText || !normalizedSourceText) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.sourceText 不能为空`,
+      'deepSeek',
+      502
+    )
+  }
+
+  return {
+    sourceText,
+    normalizedSourceText,
+    importance: normalizeTermImportance(item.importance, index)
+  }
+}
+
+function normalizeExtractedTermList(resultData) {
+  const termList = getTermArrayFromExtractionResult(resultData)
+  if (!termList) {
+    const fieldNames = Object.keys(resultData || {})
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果缺少 terms 数组，实际字段：${fieldNames.join('，')}`,
+      'deepSeek',
+      502
+    )
+  }
+
+  const termMap = new Map()
+  termList.forEach((item, index) => {
+    const termItem = normalizeExtractedTermItem(item, index)
+    const existingTerm = termMap.get(termItem.normalizedSourceText)
+    if (!existingTerm || termItem.importance > existingTerm.importance) {
+      termMap.set(termItem.normalizedSourceText, termItem)
+    }
+  })
+
+  return Array.from(termMap.values())
+}
+
+function buildKeywordArrayFromExtractedTermMap(termMap) {
+  const termList = Array.from(termMap.values())
+  let selectedTerms = termList
+  if (termList.length > MAX_EXTRACTED_TERM_COUNT) {
+    selectedTerms = termList
+      .slice()
+      .sort((leftItem, rightItem) => {
+        if (rightItem.importance !== leftItem.importance) {
+          return rightItem.importance - leftItem.importance
+        }
+        return leftItem.order - rightItem.order
+      })
+      .slice(0, MAX_EXTRACTED_TERM_COUNT)
+  }
+
+  return selectedTerms.map(item => item.sourceText)
+}
+
+async function recordTermExtractionUsage({
+  input,
+  settings,
+  responseData,
+  status,
+  httpStatusCode,
+  packageIndex,
+  packageCount,
+  termPackage
+}) {
+  if (input.skipUsageLog === true) {
+    return
+  }
+  await aiUsageService.recordAiUsageLog({
+    provider: 'deepseek',
+    model: responseData.model || settings.deepSeekModel,
+    operation: 'proper-noun.keyword.extract',
+    status,
+    requestId: responseData.id || '',
+    sourceLanguageCode: input.sourceLanguageCode,
+    targetLanguageCode: input.targetLanguageCode,
+    usage: responseData.usage || {},
+    rawResponse: responseData,
+    meta: {
+      httpStatusCode,
+      packageIndex,
+      packageCount,
+      packageType: termPackage.packageType,
+      packageTitle: termPackage.title,
+      textLength: termPackage.text.length
+    }
+  })
+}
+
+async function extractTermsFromPackage({
+  input,
+  settings,
+  url,
+  termPackage,
+  packageIndex,
+  packageCount,
+  handlers
+}) {
+  const requestBody = buildTermExtractionRequestBody(
+    settings,
+    input,
+    termPackage
+  )
+  const response = await requestJson(url, requestBody, settings, handlers)
+  const responseData = response.data
+  const isSuccessStatus =
+    response.statusCode >= 200 && response.statusCode < 300
+  let usageStatus = 'error'
+  if (isSuccessStatus && !response.parseError) {
+    usageStatus = 'success'
+  }
+  await recordTermExtractionUsage({
+    input,
+    settings,
+    responseData,
+    status: usageStatus,
+    httpStatusCode: response.statusCode,
+    packageIndex,
+    packageCount,
+    termPackage
+  })
+
+  if (response.parseError) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      'DeepSeek 名词抽取返回内容不是 JSON',
+      'deepSeek',
+      502
+    )
+  }
+  if (!isSuccessStatus) {
+    const message =
+      responseData.error?.message ||
+      responseData.message ||
+      `DeepSeek 名词抽取请求失败：${response.statusCode}`
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      message,
+      'deepSeek',
+      502
+    )
+  }
+
+  const resultData = parseAiContent(responseData)
+  const terms = normalizeExtractedTermList(resultData)
+  return {
+    terms,
+    aiJsonLog: translationAiJsonLogService.createAiJsonLog({
+      operation: 'proper-noun.keyword.extract',
+      stage: 'ProperNounKeywordExtract',
+      provider: 'deepseek',
+      model: responseData.model || settings.deepSeekModel,
+      requestId: responseData.id || '',
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: input.targetLanguageCode,
+      meta: {
+        packageIndex,
+        packageCount,
+        packageType: termPackage.packageType,
+        packageTitle: termPackage.title,
+        textLength: termPackage.text.length,
+        normalizedTermCount: terms.length
+      },
+      json: {
+        result: resultData,
+        normalizedTerms: terms
+      }
+    })
+  }
+}
+
+async function extractProperNounKeywords({ input, settings, url, handlers }) {
+  const packages = buildTermExtractionPackages(input)
+  if (packages.length === 0) {
+    return {
+      keywordArray: [],
+      aiJsonLogs: []
+    }
+  }
+
+  const termMap = new Map()
+  const aiJsonLogs = []
+  let termOrder = 0
+  for (let index = 0; index < packages.length; index += 1) {
+    throwIfCancellationRequested(handlers)
+    const termPackage = packages[index]
+    if (handlers.onStatus) {
+      handlers.onStatus({
+        message: `正在提取专有名词第 ${index + 1}/${packages.length} 包`
+      })
+    }
+    const packageResult = await extractTermsFromPackage({
+      input,
+      settings,
+      url,
+      termPackage,
+      packageIndex: index + 1,
+      packageCount: packages.length,
+      handlers
+    })
+    if (packageResult.aiJsonLog) {
+      aiJsonLogs.push(packageResult.aiJsonLog)
+    }
+    packageResult.terms.forEach(termItem => {
+      const existingTerm = termMap.get(termItem.normalizedSourceText)
+      if (!existingTerm) {
+        termMap.set(termItem.normalizedSourceText, {
+          ...termItem,
+          order: termOrder
+        })
+        termOrder += 1
+        return
+      }
+      if (termItem.importance > existingTerm.importance) {
+        termMap.set(termItem.normalizedSourceText, {
+          ...existingTerm,
+          sourceText: termItem.sourceText,
+          importance: termItem.importance
+        })
+      }
+    })
+  }
+  return {
+    keywordArray: buildKeywordArrayFromExtractedTermMap(termMap),
+    aiJsonLogs
+  }
+}
+
+function getMissingSourceTexts(missingTerms) {
+  const sourceTextMap = new Map()
+  missingTerms.forEach(item => {
+    if (item.sourceText && !sourceTextMap.has(item.normalizedSourceText)) {
+      sourceTextMap.set(item.normalizedSourceText, item.sourceText)
+    }
+  })
+  return Array.from(sourceTextMap.values())
+}
+
+async function prepareOfficialTermGlossaryForAiInput({
+  input,
+  settings,
+  url,
+  handlers
+}) {
+  const targetLanguageCodes = getTermTargetLanguageCodes(input)
+  if (!Array.isArray(input.entries) || input.entries.length === 0) {
+    return input
+  }
+  if (targetLanguageCodes.length === 0) {
+    return input
+  }
+
+  if (handlers.onStatus) {
+    handlers.onStatus({ message: '正在准备专有名词翻译数据库' })
+  }
+  const extractionResult = await extractProperNounKeywords({
+    input,
+    settings,
+    url,
+    handlers
+  })
+  const keywordArray = extractionResult.keywordArray
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    input.aiJsonLogs,
+    extractionResult.aiJsonLogs
+  )
+  if (keywordArray.length === 0) {
+    if (handlers.onStatus) {
+      handlers.onStatus({ message: '未抽取到需要检索的专有名词' })
+    }
+    return {
+      ...input,
+      aiJsonLogs
+    }
+  }
+
+  let coverage =
+    await properNounTranslationService.compareTermTranslationCoverage({
+      sourceTexts: keywordArray,
+      targetLanguageCodes
+    })
+
+  const missingSourceTexts = getMissingSourceTexts(coverage.missingTerms)
+  if (
+    input.searchOfficialTermTranslations === true &&
+    missingSourceTexts.length > 0
+  ) {
+    if (handlers.onStatus) {
+      handlers.onStatus({
+        message: `正在联网检索 ${missingSourceTexts.length} 个专有名词官方译名`
+      })
+    }
+    const searchResult =
+      await internetSearchAiService.searchOfficialTermTranslations({
+        sourceTerms: missingSourceTexts,
+        targetLanguageCodes,
+        sourceLanguageCode: input.sourceLanguageCode,
+        skipUsageLog: input.skipUsageLog
+      })
+    aiJsonLogs.push(
+      translationAiJsonLogService.createAiJsonLog({
+        operation: 'proper-noun.official-translation.search',
+        stage: 'ProperNounOfficialTranslationSearch',
+        provider: searchResult.provider,
+        model: searchResult.model,
+        requestId: '',
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCode: targetLanguageCodes.join(','),
+        meta: {
+          sourceTermCount: missingSourceTexts.length,
+          targetLanguageCodes
+        },
+        json: {
+          terms: searchResult.terms,
+          rawResponse: searchResult.rawResponse
+        }
+      })
+    )
+    await properNounTranslationService.upsertAiSearchTerms({
+      terms: searchResult.terms,
+      provider: searchResult.provider,
+      model: searchResult.model
+    })
+    coverage =
+      await properNounTranslationService.compareTermTranslationCoverage({
+        sourceTexts: keywordArray,
+        targetLanguageCodes
+      })
+  }
+
+  const glossaryMarkdownMap = buildOfficialTermGlossaryMarkdownMap({
+    keywordArray,
+    targetLanguageCodes,
+    coverage
+  })
+  const glossaryMarkdown = getCurrentOfficialTermGlossaryMarkdown({
+    input,
+    glossaryMarkdownMap
+  })
+  if (handlers.onStatus) {
+    handlers.onStatus({
+      message: `已整理 ${keywordArray.length} 个专有名词用于本次翻译`
+    })
+  }
+
+  return {
+    ...input,
+    aiJsonLogs,
+    officialTermGlossaryMarkdown: glossaryMarkdown,
+    officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
+    officialTermStats: {
+      keywordCount: keywordArray.length,
+      existingCount: coverage.existingTerms.length,
+      missingCount: coverage.missingTerms.length,
+      glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
+    }
+  }
+}
+
 function buildDeepSeekMessages(settings, input) {
   const systemPromptList = [
     buildSystemPrompt(),
@@ -905,6 +1732,7 @@ function buildDeepSeekMessages(settings, input) {
     buildTranslationTaskPrompt(input),
     buildLanguageJudgementPrompt(input),
     buildNameTranslationPrompt(input),
+    buildOfficialTermGlossaryPrompt(input),
     buildNonLanguagePrompt(input),
     buildSkipPolicyPrompt(input),
     buildCurrentValuePolicyPrompt(input),
@@ -2017,9 +2845,15 @@ async function translatePostEntries(body = {}) {
   const input = parseInput(body)
   const post = await getTranslationPost(input)
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
-  const aiInput = prepareAiInput(input)
-  const requestBody = buildDeepSeekRequestBody(settings, aiInput)
   const url = buildChatCompletionUrl(settings)
+  let aiInput = prepareAiInput(input)
+  aiInput = await prepareOfficialTermGlossaryForAiInput({
+    input: aiInput,
+    settings,
+    url,
+    handlers: {}
+  })
+  const requestBody = buildDeepSeekRequestBody(settings, aiInput)
   const deepSeekResponse = await requestJson(url, requestBody, settings)
   const responseData = deepSeekResponse.data
   const isSuccessStatus =
@@ -2072,22 +2906,51 @@ async function translatePostEntries(body = {}) {
 
   const resultData = parseAiContent(responseData)
   const payload = buildTranslatedPayload(aiInput, post, resultData)
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    aiInput.aiJsonLogs,
+    [
+      translationAiJsonLogService.createAiJsonLog({
+        operation: 'translation.post',
+        stage: 'PostTranslation',
+        provider: 'deepseek',
+        model: responseData.model || settings.deepSeekModel,
+        requestId: responseData.id || '',
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCode: input.targetLanguageCode,
+        meta: {
+          stream: false,
+          entryCount: input.entries.length
+        },
+        json: resultData
+      })
+    ]
+  )
 
   return {
     payload,
     model: responseData.model || settings.deepSeekModel,
     usage: responseData.usage || null,
-    requestId: responseData.id || null
+    requestId: responseData.id || null,
+    aiJsonLogs
   }
 }
 
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
-  const aiInput = prepareAiInput(input)
+  let aiInput = prepareAiInput(input)
+  aiInput = await prepareOfficialTermGlossaryForAiInput({
+    input: aiInput,
+    settings,
+    url,
+    handlers
+  })
   const inputChunks = splitAiInput(aiInput)
   const chunkTotal = inputChunks.length
   const chunkResponses = []
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    aiInput.aiJsonLogs
+  )
   const resultMap = new Map()
   let combinedUsage = {}
   let responseModel = settings.deepSeekModel
@@ -2145,6 +3008,24 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       }
 
       const resultData = parseAiContent(responseData)
+      aiJsonLogs.push(
+        translationAiJsonLogService.createAiJsonLog({
+          operation: input.operation || 'translation.post',
+          stage: 'TranslationChunk',
+          provider: 'deepseek',
+          model: responseData.model || responseModel,
+          requestId: responseData.id || '',
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCode: input.targetLanguageCode,
+          meta: {
+            stream: true,
+            chunkIndex: index + 1,
+            chunkCount: chunkTotal,
+            entryCount: chunkInput.entries.length
+          },
+          json: resultData
+        })
+      )
       normalizeResultEntries(resultData).forEach(entry => {
         mergeChunkResultEntry(resultMap, entry)
       })
@@ -2182,6 +3063,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       model: responseModel,
       usage: combinedUsage,
       requestId: responseId || null,
+      aiJsonLogs,
       coverImagePreviewEntries: [],
       coverImageArtifacts: [],
       coverImageWarnings: []
@@ -2250,7 +3132,12 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
           targetLanguageCode: input.targetLanguageCode,
           skipRecognition: true
         })
-      data = appendCoverImageResultToStreamData(data, coverResult, registry)
+      data = appendCoverImageResultToStreamData(
+        data,
+        coverResult,
+        registry,
+        input
+      )
     }
   }
 

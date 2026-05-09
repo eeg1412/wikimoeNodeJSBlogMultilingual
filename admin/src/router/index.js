@@ -185,6 +185,12 @@ const routes = [
         component: () => import('../views/index/ai/AiUsageSummary.vue')
       },
       {
+        path: '/translation/proper-noun/list',
+        name: 'ProperNounTranslationList',
+        component: () =>
+          import('../views/index/properNoun/ProperNounTranslationList.vue')
+      },
+      {
         path: '/home',
         name: 'Home',
         redirect: '/dashboard/multilingual'

@@ -109,6 +109,65 @@ export default function (api) {
         noLoading
       })
     },
+    getProperNounTermList(data = {}, noLoading = false) {
+      return api.get('/proper-noun/term/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getProperNounTermDetail(data = {}, noLoading = false) {
+      return api.get('/proper-noun/term/detail', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    createProperNounTerm(data, noLoading = false) {
+      return api.post('/proper-noun/term/create', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    updateProperNounTerm(data, noLoading = false) {
+      return api.put('/proper-noun/term/update', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    deleteProperNounTerm(data, noLoading = false) {
+      return api.delete('/proper-noun/term/delete', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getProperNounTranslationList(data = {}, noLoading = false) {
+      return api.get('/proper-noun/translation/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    createProperNounTranslation(data, noLoading = false) {
+      return api.post('/proper-noun/translation/create', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    updateProperNounTranslation(data, noLoading = false) {
+      return api.put('/proper-noun/translation/update', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    deleteProperNounTranslation(data, noLoading = false) {
+      return api.delete('/proper-noun/translation/delete', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationJob(data, noLoading = false) {
       return api.post('/translation/job/create', data, {
         shouldAdminJWT: true,

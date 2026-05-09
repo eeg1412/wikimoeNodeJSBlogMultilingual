@@ -23,12 +23,18 @@
             </div>
           </div>
           <div
-            v-if="getSourceHtml(item)"
+            v-if="getSourceMediaUrl(item)"
+            class="translation-import-preview-media"
+          >
+            <img :src="getSourceMediaUrl(item)" :alt="item.sourceTitle || ''" />
+          </div>
+          <div
+            v-if="!getSourceMediaUrl(item) && getSourceHtml(item)"
             class="translation-import-preview-html"
             v-html="getSourceHtml(item)"
           />
           <pre
-            v-if="!getSourceHtml(item)"
+            v-if="!getSourceMediaUrl(item) && !getSourceHtml(item)"
             class="translation-import-preview-raw"
             >{{ getSourceValue(item) }}</pre
           >
@@ -48,18 +54,27 @@
           </div>
           <template v-if="hasCurrentValue(item)">
             <div
-              v-if="getCurrentHtml(item)"
+              v-if="getCurrentMediaUrl(item)"
+              class="translation-import-preview-media"
+            >
+              <img
+                :src="getCurrentMediaUrl(item)"
+                :alt="item.targetTitle || item.currentTitle || ''"
+              />
+            </div>
+            <div
+              v-if="!getCurrentMediaUrl(item) && getCurrentHtml(item)"
               class="translation-import-preview-html"
               v-html="getCurrentHtml(item)"
             />
             <pre
-              v-if="!getCurrentHtml(item)"
+              v-if="!getCurrentMediaUrl(item) && !getCurrentHtml(item)"
               class="translation-import-preview-raw"
               >{{ getCurrentValue(item) }}</pre
             >
           </template>
           <div v-else class="translation-import-preview-empty">
-            不存在当前语言内容（未导入）
+            {{ getCurrentEmptyText(item) }}
           </div>
         </div>
         <div class="translation-skip-preview-panel">
@@ -105,6 +120,16 @@ export default {
     }
   },
   setup() {
+    function getSourceMediaUrl(item) {
+      return normalizePreviewText(item.sourceMediaUrl || item.sourceCoverUrl)
+    }
+
+    function getCurrentMediaUrl(item) {
+      return normalizePreviewText(
+        item.currentMediaUrl || item.currentCoverUrl || item.targetMediaUrl
+      )
+    }
+
     function getSourceHtml(item) {
       return normalizePreviewText(item.sourceHtml || item.sourcePreviewHtml)
     }
@@ -131,14 +156,20 @@ export default {
       if (item.hasSourceValue === false) {
         return false
       }
-      return Boolean(getSourceHtml(item) || getSourceValue(item))
+      return Boolean(
+        getSourceMediaUrl(item) || getSourceHtml(item) || getSourceValue(item)
+      )
     }
 
     function hasCurrentValue(item) {
       if (item.hasCurrentValue === false) {
         return false
       }
-      return Boolean(getCurrentHtml(item) || getCurrentValue(item))
+      return Boolean(
+        getCurrentMediaUrl(item) ||
+        getCurrentHtml(item) ||
+        getCurrentValue(item)
+      )
     }
 
     function getReason(item) {
@@ -147,11 +178,20 @@ export default {
       )
     }
 
+    function getCurrentEmptyText(item) {
+      return normalizePreviewText(
+        item.currentEmptyText || '不存在当前语言内容（未导入）'
+      )
+    }
+
     return {
+      getCurrentEmptyText,
       getCurrentHtml,
+      getCurrentMediaUrl,
       getCurrentValue,
       getReason,
       getSourceHtml,
+      getSourceMediaUrl,
       getSourceValue,
       hasCurrentValue,
       hasSourceValue
@@ -213,9 +253,19 @@ export default {
 }
 
 .translation-import-preview-html,
+.translation-import-preview-media,
 .translation-import-preview-raw {
   overflow: auto;
   word-break: break-word;
+}
+
+.translation-import-preview-media img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
 }
 
 .translation-import-preview-html {

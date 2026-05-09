@@ -225,6 +225,11 @@ const menuGroups = [
         name: 'SidebarList',
         title: '侧边栏',
         icon: 'fas fa-fw fa-columns pr10'
+      },
+      {
+        name: 'ProperNounTranslationList',
+        title: '专有名词翻译库',
+        icon: 'fas fa-fw fa-book-open pr10'
       }
     ]
   },

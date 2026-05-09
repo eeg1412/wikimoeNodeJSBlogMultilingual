@@ -82,7 +82,7 @@
       <ResponsiveTable :data="tokenRows" row-key="rowKey" border>
         <ResponsiveTableColumn label="AI 服务商" width="140">
           <template #default="{ row }">
-            {{ row.provider || '-' }}
+            {{ getProviderText(row.provider) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="模型" min-width="190">
@@ -118,7 +118,7 @@
       <ResponsiveTable :data="rawTokenRows" row-key="rowKey" border>
         <ResponsiveTableColumn label="AI 服务商" width="140">
           <template #default="{ row }">
-            {{ row.provider || '-' }}
+            {{ getProviderText(row.provider) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="模型" min-width="190">
@@ -128,7 +128,7 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="字段" min-width="260">
           <template #default="{ row }">
-            {{ row.tokenType }}
+            {{ getTokenTypeText(row.tokenType) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="总数" width="160">
@@ -154,7 +154,7 @@
       <ResponsiveTable :data="callRows" row-key="rowKey" border>
         <ResponsiveTableColumn label="AI 服务商" width="140">
           <template #default="{ row }">
-            {{ row.provider || '-' }}
+            {{ getProviderText(row.provider) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="模型" min-width="190">
@@ -194,12 +194,53 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { multilingualApi } from '@/api'
 
 const TOKEN_TYPE_TEXT_MAP = {
+  cachedContentTokenCount: '缓存命中输入 token',
+  candidatesTokenCount: '候选输出 token',
+  completion_tokens: '输出 token',
+  'completion_tokens_details.accepted_prediction_tokens':
+    '输出明细：接受预测 token',
+  'completion_tokens_details.audio_tokens': '输出明细：音频 token',
+  'completion_tokens_details.reasoning_tokens': '输出明细：推理 token',
+  'completion_tokens_details.rejected_prediction_tokens':
+    '输出明细：拒绝预测 token',
   input_cache_hit_tokens: '输入缓存命中 token',
   input_cache_miss_tokens: '输入缓存未命中 token',
   input_tokens: '输入 token',
   output_tokens: '输出 token',
+  prompt_cache_hit_tokens: '提示词缓存命中 token',
+  prompt_cache_miss_tokens: '提示词缓存未命中 token',
+  prompt_tokens: '提示词输入 token',
+  'prompt_tokens_details.audio_tokens': '提示词明细：音频 token',
+  'prompt_tokens_details.cached_tokens': '提示词明细：缓存 token',
+  promptTokenCount: '提示词输入 token',
   thought_tokens: '思考 token',
-  tool_use_prompt_tokens: '工具调用输入 token'
+  thoughtsTokenCount: '思考 token',
+  tool_use_prompt_tokens: '工具调用输入 token',
+  toolUsePromptTokenCount: '工具调用输入 token',
+  total_tokens: '总 token',
+  totalTokenCount: '总 token'
+}
+
+const TOKEN_TYPE_SEGMENT_TEXT_MAP = {
+  cacheTokensDetails: '缓存明细',
+  cachedContentTokenCount: '缓存命中输入 token',
+  candidatesTokenCount: '候选输出 token',
+  candidatesTokensDetails: '候选输出明细',
+  completion_tokens: '输出 token',
+  completion_tokens_details: '输出明细',
+  promptTokenCount: '提示词输入 token',
+  promptTokensDetails: '提示词明细',
+  prompt_tokens: '提示词输入 token',
+  prompt_tokens_details: '提示词明细',
+  tokenCount: 'token 数',
+  totalTokenCount: '总 token',
+  total_tokens: '总 token'
+}
+
+const PROVIDER_TEXT_MAP = {
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  unknown: '未知服务商'
 }
 
 const PROVIDER_OPTIONS = [
@@ -208,9 +249,24 @@ const PROVIDER_OPTIONS = [
 ]
 
 const OPERATION_TEXT_MAP = {
-  'translation.post': '文章翻译',
+  'translation.content': '内容 AI 翻译',
+  'translation.post': '文章 AI 翻译',
   'cover.image.recognition': '封面图识别',
-  'cover.image.generation': '封面图生成'
+  'cover.image.generation': '封面图生成',
+  'proper-noun.keyword.extract': '专有名词抽取',
+  'proper-noun.official-translation.search': '专有名词官方译名联网翻译'
+}
+
+const STATUS_TEXT_MAP = {
+  success: '成功',
+  error: '失败',
+  cancelled: '已取消'
+}
+
+const STATUS_TAG_TYPE_MAP = {
+  success: 'success',
+  error: 'danger',
+  cancelled: 'warning'
 }
 
 function padDateNumber(value) {
@@ -250,6 +306,24 @@ function getDefaultDateRange() {
   const startAt = new Date()
   startAt.setDate(startAt.getDate() - 29)
   return [formatLocalDate(startAt), formatLocalDate(endAt)]
+}
+
+function getTokenTypeSegmentText(segment) {
+  if (/^\d+$/.test(segment)) {
+    return `第 ${Number(segment) + 1} 项`
+  }
+  return TOKEN_TYPE_SEGMENT_TEXT_MAP[segment] || segment
+}
+
+function formatFallbackTokenType(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return ''
+  }
+  return text
+    .split('.')
+    .map(segment => getTokenTypeSegmentText(segment))
+    .join(' / ')
 }
 
 export default {
@@ -327,28 +401,26 @@ export default {
       return OPERATION_TEXT_MAP[value] || value || '-'
     }
 
+    function getProviderText(value) {
+      return PROVIDER_TEXT_MAP[value] || value || '-'
+    }
+
     function getStatusText(value) {
-      if (value === 'success') {
-        return '成功'
-      }
-      if (value === 'error') {
-        return '失败'
-      }
-      return value || '-'
+      return STATUS_TEXT_MAP[value] || value || '-'
     }
 
     function getStatusTagType(value) {
-      if (value === 'success') {
-        return 'success'
-      }
-      if (value === 'error') {
-        return 'danger'
-      }
-      return 'info'
+      return STATUS_TAG_TYPE_MAP[value] || 'info'
     }
 
     function getTokenTypeText(value) {
-      return TOKEN_TYPE_TEXT_MAP[value] || value || '-'
+      if (!value) {
+        return '-'
+      }
+      if (TOKEN_TYPE_TEXT_MAP[value]) {
+        return TOKEN_TYPE_TEXT_MAP[value]
+      }
+      return formatFallbackTokenType(value)
     }
 
     onMounted(() => {
@@ -363,6 +435,7 @@ export default {
       formatNumber,
       getAiUsageSummary,
       getOperationText,
+      getProviderText,
       getStatusTagType,
       getStatusText,
       getTokenTypeText,

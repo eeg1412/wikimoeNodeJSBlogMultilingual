@@ -12,6 +12,7 @@ const translationPayloadApplyService = require('./translationPayloadApplyService
 const translationEntryBuildService = require('./translationEntryBuildService')
 const translationPostService = require('./translationPostService')
 const coverImageTranslationService = require('./coverImageTranslationService')
+const translationAiJsonLogService = require('./translationAiJsonLogService')
 
 const POST_RELATED_POST_FIELDS = [
   'postList',
@@ -47,6 +48,29 @@ function shouldTranslateCoverImage(job, defaultValue) {
   return defaultValue === true
 }
 
+function shouldSearchOfficialTermTranslations(job) {
+  const options = job?.request?.options || {}
+  return options.searchOfficialTermTranslations === true
+}
+
+function getJobTargetLanguageCodes(job) {
+  const languageCodes = []
+  const targetLanguageCode = String(job?.target?.languageCode || '').trim()
+  if (targetLanguageCode) {
+    languageCodes.push(targetLanguageCode)
+  }
+  if (Array.isArray(job?.target?.languageCodes)) {
+    job.target.languageCodes.forEach(languageCodeValue => {
+      const languageCode = String(languageCodeValue || '').trim()
+      if (!languageCode || languageCodes.includes(languageCode)) {
+        return
+      }
+      languageCodes.push(languageCode)
+    })
+  }
+  return languageCodes
+}
+
 async function findPostById(id) {
   if (!isValidObjectId(id)) {
     return null
@@ -76,7 +100,7 @@ async function findSourcePostForTarget(job, targetPost) {
   return null
 }
 
-function appendCoverImageResult(result, coverResult, registry) {
+function appendCoverImageResult(result, coverResult, registry, options = {}) {
   if (!coverResult) {
     return result
   }
@@ -98,6 +122,20 @@ function appendCoverImageResult(result, coverResult, registry) {
   }
   result.coverImageGenerationMap = snapshot.coverImageGenerationMap
   result.coverImageRecognitionMap = snapshot.coverImageRecognitionMap
+  if (options.appendAiJsonLogs !== false) {
+    result.aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+      result.aiJsonLogs,
+      translationAiJsonLogService.buildCoverImageAiJsonLogs({
+        snapshot,
+        sourceLanguageCode: options.sourceLanguageCode || '',
+        targetLanguageCode: options.targetLanguageCode || '',
+        meta: {
+          requestId: result.requestId || '',
+          jobId: getJobId(options.job)
+        }
+      })
+    )
+  }
   return result
 }
 
@@ -135,7 +173,11 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
       targetLanguageCode: job.target.languageCode,
       skipRecognition: true
     })
-  appendCoverImageResult(result, coverResult, registry)
+  appendCoverImageResult(result, coverResult, registry, {
+    job,
+    sourceLanguageCode: job.source.languageCode,
+    targetLanguageCode: job.target.languageCode
+  })
   await context.saveCheckpoint({
     stage: 'TranslateCoverImage',
     stateSummary: {
@@ -198,7 +240,99 @@ function getPayloadEntryCount(payload) {
   return payload.entries.length
 }
 
-function createHandlers(context, stage) {
+function clampProgressPercent(value) {
+  const percent = Number(value)
+  if (!Number.isFinite(percent)) {
+    return 0
+  }
+  if (percent < 0) {
+    return 0
+  }
+  if (percent > 99) {
+    return 99
+  }
+  return Math.round(percent)
+}
+
+function getStatusFraction(message) {
+  const match = String(message || '').match(/第\s*(\d+)\s*\/\s*(\d+)/)
+  if (!match) {
+    return null
+  }
+  const current = Number(match[1])
+  const total = Number(match[2])
+  if (!Number.isInteger(current) || !Number.isInteger(total) || total < 1) {
+    return null
+  }
+  if (/已完成/.test(message)) {
+    return Math.min(current / total, 1)
+  }
+  return Math.min(Math.max((current - 1) / total, 0), 1)
+}
+
+function getProgressRange(progressRange) {
+  if (!progressRange || typeof progressRange !== 'object') {
+    return { start: 20, end: 85 }
+  }
+  const start = Number(progressRange.start)
+  const end = Number(progressRange.end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return { start: 20, end: 85 }
+  }
+  return {
+    start,
+    end
+  }
+}
+
+function getRangePercent(progressRange, startRatio, endRatio, fraction = 0) {
+  const range = getProgressRange(progressRange)
+  const width = range.end - range.start
+  const safeFraction = Math.min(Math.max(Number(fraction) || 0, 0), 1)
+  const start = range.start + width * startRatio
+  const end = range.start + width * endRatio
+  return clampProgressPercent(start + (end - start) * safeFraction)
+}
+
+function buildLanguageProgressRange(index, total) {
+  const safeTotal = Math.max(Number(total) || 1, 1)
+  const safeIndex = Math.min(Math.max(Number(index) || 0, 0), safeTotal - 1)
+  const start = 10 + (safeIndex / safeTotal) * 78
+  const end = 10 + ((safeIndex + 1) / safeTotal) * 78
+  return {
+    start,
+    end
+  }
+}
+
+function getStatusProgressPercent(message, progressRange) {
+  const text = String(message || '')
+  const fraction = getStatusFraction(text)
+  if (/准备专有名词翻译数据库/.test(text)) {
+    return getRangePercent(progressRange, 0, 0.08)
+  }
+  if (/提取专有名词/.test(text)) {
+    return getRangePercent(progressRange, 0.08, 0.28, fraction || 0)
+  }
+  if (/联网检索/.test(text)) {
+    return getRangePercent(progressRange, 0.28, 0.42)
+  }
+  if (/已整理|未抽取到需要检索/.test(text)) {
+    return getRangePercent(progressRange, 0.42, 0.46)
+  }
+  if (/准备\s*\d+\s*个翻译批次/.test(text)) {
+    return getRangePercent(progressRange, 0.46, 0.5)
+  }
+  if (/翻译第|已完成第/.test(text)) {
+    return getRangePercent(progressRange, 0.5, 0.95, fraction || 0)
+  }
+  if (/封面图/.test(text)) {
+    return getRangePercent(progressRange, 0.95, 1, fraction || 0)
+  }
+  return getRangePercent(progressRange, 0, 0.02)
+}
+
+function createHandlers(context, stage, progressRange) {
   function runWithoutAwait(promise) {
     Promise.resolve(promise).catch(error => {
       const message = error && error.message ? error.message : String(error)
@@ -220,7 +354,8 @@ function createHandlers(context, stage) {
         context.updateProgress({
           currentStage: stage,
           currentStep:
-            status && status.message ? status.message : 'AI 翻译执行中'
+            status && status.message ? status.message : 'AI 翻译执行中',
+          percent: getStatusProgressPercent(status?.message, progressRange)
         })
       )
     },
@@ -267,6 +402,7 @@ async function buildResult(job, data) {
     warningList: [],
     aiSkipList: payload.entries.filter(entry => Boolean(entry.aiSkipReason)),
     relatedResults: [],
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(data.aiJsonLogs),
     aiUsage: data.usage || {},
     model: data.model || '',
     requestId: data.requestId || null
@@ -277,17 +413,20 @@ async function executePostAiTranslation(job, context) {
   const entries = await resolveEntries(job, context)
   await context.updateProgress({
     currentStage: 'TranslatePost',
-    currentStep: '正在执行文章 AI 翻译'
+    currentStep: '正在执行文章 AI 翻译',
+    percent: 20
   })
   const data = await deepSeekTranslationService.translatePostEntriesStream(
     {
       postId: String(job.target.postId),
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
+      targetLanguageCodes: getJobTargetLanguageCodes(job),
       prompt: getPrompt(job),
+      searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
       entries
     },
-    createHandlers(context, 'TranslatePost')
+    createHandlers(context, 'TranslatePost', { start: 20, end: 85 })
   )
 
   const result = await buildResult(job, data)
@@ -304,7 +443,8 @@ async function executeContentAiTranslation(job, context) {
     'content'
   await context.updateProgress({
     currentStage: 'TranslateContent',
-    currentStep: '正在执行通用内容 AI 翻译'
+    currentStep: '正在执行通用内容 AI 翻译',
+    percent: 20
   })
   const data = await deepSeekTranslationService.translateContentEntriesStream(
     {
@@ -312,12 +452,14 @@ async function executeContentAiTranslation(job, context) {
       contentType,
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
+      targetLanguageCodes: getJobTargetLanguageCodes(job),
       prompt: getPrompt(job),
+      searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
       entries,
       snapshotVersion: job.source.snapshotVersion || 1,
       sourceSnapshotId: job.source.snapshotId || null
     },
-    createHandlers(context, 'TranslateContent')
+    createHandlers(context, 'TranslateContent', { start: 20, end: 85 })
   )
 
   return await buildResult(job, data)
@@ -691,6 +833,8 @@ async function translateSourcePostForLanguage({
   context,
   sourceId,
   languageCode,
+  targetLanguageCodes,
+  progressRange,
   isRoot,
   depth,
   translatedEntryKeySet,
@@ -698,7 +842,8 @@ async function translateSourcePostForLanguage({
 }) {
   await context.updateProgress({
     currentStage: 'BuildEntries',
-    currentStep: `正在准备 ${getLanguageText(languageCode)} 预览上下文`
+    currentStep: `正在准备 ${getLanguageText(languageCode)} 预览上下文`,
+    percent: getRangePercent(progressRange, 0, 0.03)
   })
   const previewContext =
     await translationPostService.getSourcePostAiImportPreviewContext({
@@ -762,7 +907,8 @@ async function translateSourcePostForLanguage({
   if (entries.length > 0) {
     await context.updateProgress({
       currentStage: 'TranslatePost',
-      currentStep: `正在执行 ${getLanguageText(languageCode)} AI 翻译`
+      currentStep: `正在执行 ${getLanguageText(languageCode)} AI 翻译`,
+      percent: getRangePercent(progressRange, 0.05, 0.08)
     })
     data = await deepSeekTranslationService.translateContentEntriesStream(
       {
@@ -770,10 +916,13 @@ async function translateSourcePostForLanguage({
         contentType: 'sourcePostImport',
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: languageCode,
+        targetLanguageCodes,
         prompt: getPrompt(job),
+        searchOfficialTermTranslations:
+          shouldSearchOfficialTermTranslations(job),
         entries
       },
-      createHandlers(context, `TranslatePost:${languageCode}`)
+      createHandlers(context, `TranslatePost:${languageCode}`, progressRange)
     )
   }
   const payload = data.payload || { entries: [] }
@@ -804,6 +953,7 @@ async function translateSourcePostForLanguage({
     warningList: [],
     aiSkipList: previewEntries.filter(entry => Boolean(entry.aiSkipReason)),
     relatedResults: [],
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(data.aiJsonLogs),
     aiUsage: data.usage || {},
     model: data.model || '',
     requestId: data.requestId || null
@@ -846,6 +996,8 @@ async function executeSourcePostLanguageDag({
   job,
   context,
   languageCode,
+  targetLanguageCodes,
+  progressRange,
   maxDepth,
   coverImageTasks
 }) {
@@ -873,6 +1025,8 @@ async function executeSourcePostLanguageDag({
       context,
       sourceId,
       languageCode,
+      targetLanguageCodes,
+      progressRange,
       isRoot: task.isRoot,
       depth: task.depth,
       translatedEntryKeySet,
@@ -914,12 +1068,22 @@ async function executeSourcePostAiImport(job, context) {
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
   const coverImageTasks = []
   const languageResults = []
-  for (const languageCode of languageCodes) {
+  for (
+    let languageIndex = 0;
+    languageIndex < languageCodes.length;
+    languageIndex += 1
+  ) {
+    const languageCode = languageCodes[languageIndex]
     languageResults.push(
       ...(await executeSourcePostLanguageDag({
         job,
         context,
         languageCode,
+        targetLanguageCodes: languageCodes,
+        progressRange: buildLanguageProgressRange(
+          languageIndex,
+          languageCodes.length
+        ),
         maxDepth,
         coverImageTasks
       }))
@@ -931,7 +1095,8 @@ async function executeSourcePostAiImport(job, context) {
   if (coverImageTasks.length > 0) {
     await context.updateProgress({
       currentStage: 'TranslateCoverImage',
-      currentStep: '正在按标题去重处理所有语言的封面图 AI 翻译'
+      currentStep: '正在按标题去重处理所有语言的封面图 AI 翻译',
+      percent: 88
     })
     const coverBatchResult =
       await coverImageTranslationService.processCoverImageTranslationBatch({
@@ -942,7 +1107,13 @@ async function executeSourcePostAiImport(job, context) {
             currentStage: 'TranslateCoverImage',
             currentStep: `正在处理 ${getLanguageText(
               task.targetLanguageCode
-            )} 封面图 AI 翻译（${taskIndex + 1}/${taskCount}）`
+            )} 封面图 AI 翻译（${taskIndex + 1}/${taskCount}）`,
+            percent: getRangePercent(
+              { start: 88, end: 96 },
+              0,
+              1,
+              taskIndex / Math.max(taskCount, 1)
+            )
           })
         }
       })
@@ -950,7 +1121,8 @@ async function executeSourcePostAiImport(job, context) {
       appendCoverImageResult(
         item.task.result,
         item.coverResult,
-        coverImageRegistry
+        coverImageRegistry,
+        { appendAiJsonLogs: false }
       )
     })
     await context.saveCheckpoint({
@@ -969,6 +1141,18 @@ async function executeSourcePostAiImport(job, context) {
   })
   const coverImageSnapshot =
     coverImageTranslationService.buildRegistrySnapshot(coverImageRegistry)
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    ...languageResults.map(item => item.result.aiJsonLogs || []),
+    translationAiJsonLogService.buildCoverImageAiJsonLogs({
+      snapshot: coverImageSnapshot,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: '',
+      meta: {
+        jobId: getJobId(job),
+        recursive: true
+      }
+    })
+  )
   const warningList = languageResults.flatMap(item => {
     return item.result.warningList || []
   })
@@ -992,6 +1176,7 @@ async function executeSourcePostAiImport(job, context) {
     })),
     languageResults,
     translationPostMap: {},
+    aiJsonLogs,
     coverImageArtifacts: coverImageSnapshot.coverImageArtifacts,
     coverImageGenerationMap: coverImageSnapshot.coverImageGenerationMap,
     coverImageRecognitionMap: coverImageSnapshot.coverImageRecognitionMap,

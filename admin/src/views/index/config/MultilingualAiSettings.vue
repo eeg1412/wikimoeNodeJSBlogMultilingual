@@ -24,6 +24,13 @@
         >
           图像识别
         </el-divider>
+        <el-divider
+          v-if="isInternetSearchSectionStart(group)"
+          content-position="left"
+          class="ai-settings-section-divider"
+        >
+          互联网搜索
+        </el-divider>
         <div class="config-border-item ai-settings-group">
           <div class="config-border-item-title mb10">{{ group.label }}</div>
           <el-row :gutter="18">
@@ -159,7 +166,10 @@ const FIELD_GROUP_OPTIONS = [
   { label: '图像识别服务', value: 'imageRecognitionProvider' },
   { label: 'Gemini 图像识别', value: 'geminiImageRecognition' },
   { label: '图像识别请求', value: 'imageRecognitionRequest' },
-  { label: '图像识别提示词', value: 'imageRecognitionPrompt' }
+  { label: '图像识别提示词', value: 'imageRecognitionPrompt' },
+  { label: '互联网搜索服务', value: 'internetSearchProvider' },
+  { label: 'Gemini 互联网搜索', value: 'geminiInternetSearch' },
+  { label: '互联网搜索请求', value: 'internetSearchRequest' }
 ]
 
 const IMAGE_PROVIDER_GROUP_MAP = {
@@ -174,6 +184,14 @@ const IMAGE_RECOGNITION_PROVIDER_GROUP_MAP = {
 
 const IMAGE_RECOGNITION_PROVIDER_GROUPS = Object.values(
   IMAGE_RECOGNITION_PROVIDER_GROUP_MAP
+)
+
+const INTERNET_SEARCH_PROVIDER_GROUP_MAP = {
+  gemini: 'geminiInternetSearch'
+}
+
+const INTERNET_SEARCH_PROVIDER_GROUPS = Object.values(
+  INTERNET_SEARCH_PROVIDER_GROUP_MAP
 )
 
 export default {
@@ -213,12 +231,29 @@ export default {
       return 'gemini'
     }
 
+    function getSelectedInternetSearchProvider() {
+      const provider = String(settingsForm.internetSearchProvider || '').trim()
+      if (
+        Object.prototype.hasOwnProperty.call(
+          INTERNET_SEARCH_PROVIDER_GROUP_MAP,
+          provider
+        )
+      ) {
+        return provider
+      }
+      return 'gemini'
+    }
+
     function isImageProviderGroup(groupValue) {
       return IMAGE_PROVIDER_GROUPS.includes(groupValue)
     }
 
     function isImageRecognitionProviderGroup(groupValue) {
       return IMAGE_RECOGNITION_PROVIDER_GROUPS.includes(groupValue)
+    }
+
+    function isInternetSearchProviderGroup(groupValue) {
+      return INTERNET_SEARCH_PROVIDER_GROUPS.includes(groupValue)
     }
 
     function isVisibleFieldGroup(group) {
@@ -236,6 +271,11 @@ export default {
         return IMAGE_RECOGNITION_PROVIDER_GROUP_MAP[provider] === group.value
       }
 
+      if (isInternetSearchProviderGroup(group.value)) {
+        const provider = getSelectedInternetSearchProvider()
+        return INTERNET_SEARCH_PROVIDER_GROUP_MAP[provider] === group.value
+      }
+
       return true
     }
 
@@ -245,6 +285,10 @@ export default {
 
     function isImageRecognitionSectionStart(group) {
       return group && group.value === 'imageRecognitionProvider'
+    }
+
+    function isInternetSearchSectionStart(group) {
+      return group && group.value === 'internetSearchProvider'
     }
 
     function getDefaultValue(field) {
@@ -372,6 +416,7 @@ export default {
       getFieldListByGroup,
       isImageGenerationSectionStart,
       isImageRecognitionSectionStart,
+      isInternetSearchSectionStart,
       getNumberPrecision,
       getNumberStep,
       isSelectField,

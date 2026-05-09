@@ -995,6 +995,13 @@
             </div>
 
             <el-form class="ai-translation-prompt-form" label-width="110px">
+              <el-form-item label="名词检索">
+                <el-switch
+                  v-model="aiSearchOfficialTermTranslations"
+                  :disabled="isAiBusy || officialTermSearchDefaultLoading"
+                  active-text="联网检索官方译名"
+                />
+              </el-form-item>
               <el-form-item label="此次提示词">
                 <el-input
                   v-model="aiPrompt"
@@ -1464,6 +1471,7 @@ import {
   extractApiErrorMessages
 } from '@/utils/apiError'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
+import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
 import { loadAndOpenImg, nowTimestampToBase36WithRandom } from '@/utils/utils'
 import {
   getRelationEditFields,
@@ -1857,6 +1865,8 @@ export default {
     const aiBaseMode = ref('source')
     const aiSourceLanguageCode = ref('')
     const aiTranslateCoverImage = ref(false)
+    const aiSearchOfficialTermTranslations = ref(false)
+    const officialTermSearchDefaultLoading = ref(false)
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
     const sourceReferencePost = ref(null)
@@ -1868,6 +1878,7 @@ export default {
     const skippedTranslationCreatingIds = ref([])
     const creatingAllSkippedTranslations = ref(false)
     let aiEntryLoadRequestId = 0
+    let officialTermSearchDefaultRequestId = 0
 
     const typeTitle = computed(() => getPostTypeText(form.type))
     const relationEditFields = computed(() => {
@@ -3115,6 +3126,9 @@ export default {
       aiBaseMode.value = 'source'
       aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
       aiTranslateCoverImage.value = false
+      aiSearchOfficialTermTranslations.value = false
+      officialTermSearchDefaultLoading.value = false
+      officialTermSearchDefaultRequestId += 1
       aiImportPreview.value = null
       sourceReferenceEntries.value = []
       sourceReferencePost.value = null
@@ -3123,6 +3137,33 @@ export default {
       aiStreamReasoning.value = ''
       skippedTranslationCreatingIds.value = []
       creatingAllSkippedTranslations.value = false
+    }
+
+    async function applyOfficialTermSearchDefault() {
+      const requestId = officialTermSearchDefaultRequestId + 1
+      officialTermSearchDefaultRequestId = requestId
+      officialTermSearchDefaultLoading.value = true
+      try {
+        const defaultValue =
+          await getOfficialTermSearchDefaultValue(multilingualApi)
+        if (requestId !== officialTermSearchDefaultRequestId) {
+          return
+        }
+        if (!aiDialogVisible.value) {
+          return
+        }
+        aiSearchOfficialTermTranslations.value = defaultValue
+      } catch (error) {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === officialTermSearchDefaultRequestId) {
+          officialTermSearchDefaultLoading.value = false
+        }
+      }
     }
 
     function canCreateSkippedTranslation(item) {
@@ -3309,6 +3350,7 @@ export default {
       resetAiTranslationState()
       aiBaseMode.value = 'source'
       aiDialogVisible.value = true
+      applyOfficialTermSearchDefault()
       refreshAiTranslationCandidates().then(() => {
         if (
           aiEntryList.value.length === 0 &&
@@ -3610,7 +3652,9 @@ export default {
               targetLanguageCode: form.languageCode,
               prompt: aiPrompt.value,
               entries: selectedEntries,
-              translateCoverImage: aiTranslateCoverImage.value
+              translateCoverImage: aiTranslateCoverImage.value,
+              searchOfficialTermTranslations:
+                aiSearchOfficialTermTranslations.value
             })
           }
         )
@@ -3675,7 +3719,9 @@ export default {
             prompt: aiPrompt.value,
             baseMode: aiBaseMode.value,
             options: {
-              translateCoverImage: aiTranslateCoverImage.value
+              translateCoverImage: aiTranslateCoverImage.value,
+              searchOfficialTermTranslations:
+                aiSearchOfficialTermTranslations.value
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
@@ -3787,6 +3833,7 @@ export default {
       aiImportPreviewTotalChangeCount,
       aiLoading,
       aiPrompt,
+      aiSearchOfficialTermTranslations,
       aiSourceLanguageCode,
       aiTranslateCoverImage,
       aiSkippedEntries,
@@ -3869,6 +3916,7 @@ export default {
       relationRecords,
       relationSaving,
       isAiBusy,
+      officialTermSearchDefaultLoading,
       postEditorVersion,
       resetRandomAlias,
       resetAiTranslationPreview,
