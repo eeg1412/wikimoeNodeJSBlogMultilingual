@@ -3299,7 +3299,7 @@ function buildAiEntryDedupeKey(entry, translationPost) {
   }
 
   const collectionName = normalizeAiEntryIdentityValue(entry.collectionName)
-  const sourceId = normalizeAiEntryIdentityValue(entry.sourceId)
+  const sourceId = collectRelationSourceIdentityCandidates(entry)[0]
   if (!collectionName || !sourceId) {
     return ''
   }
@@ -3319,6 +3319,78 @@ function buildSourceIdCandidates(sourceId) {
   return candidates
 }
 
+function addIdentityCandidate(candidateList, value) {
+  const text = normalizeAiEntryIdentityValue(value)
+  if (!text || candidateList.includes(text)) {
+    return
+  }
+  candidateList.push(text)
+}
+
+function addRelationSourceIdFromEntryKey(
+  candidateList,
+  entryKey,
+  collectionName
+) {
+  const keyText = normalizeAiEntryIdentityValue(entryKey)
+  if (!keyText || !collectionName) {
+    return
+  }
+  const parts = keyText.split(':')
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    if (parts[index] === collectionName) {
+      addIdentityCandidate(candidateList, parts[index + 1])
+      return
+    }
+  }
+}
+
+function addRelationSourceIdFromEntryId(candidateList, entryId) {
+  const idText = normalizeAiEntryIdentityValue(entryId)
+  const match = idText.match(/^relation\.[^.]+\.([a-f\d]{24})(\.|$)/i)
+  if (!match) {
+    return
+  }
+  addIdentityCandidate(candidateList, match[1])
+}
+
+function collectRelationSourceIdentityCandidates(entry = {}) {
+  const candidateList = []
+  const collectionName = normalizeAiEntryIdentityValue(entry.collectionName)
+  addRelationSourceIdFromEntryKey(
+    candidateList,
+    entry.originalEntryKey,
+    collectionName
+  )
+  addRelationSourceIdFromEntryKey(candidateList, entry.entryKey, collectionName)
+  addRelationSourceIdFromEntryId(candidateList, entry.id)
+  addIdentityCandidate(candidateList, entry.sourceId)
+  addIdentityCandidate(candidateList, entry.sourceRecordId)
+  addIdentityCandidate(candidateList, entry.recordId)
+  return candidateList
+}
+
+function buildIdentityQueryCandidates(identityValues) {
+  const candidates = []
+  identityValues.forEach(value => {
+    buildSourceIdCandidates(value).forEach(candidate => {
+      const candidateKey = String(candidate)
+      const exists = candidates.some(item => String(item) === candidateKey)
+      if (!exists) {
+        candidates.push(candidate)
+      }
+    })
+  })
+  return candidates
+}
+
+function buildRelationRecordIdCandidates(entry = {}) {
+  const idValues = []
+  addIdentityCandidate(idValues, entry.targetRecordId)
+  addIdentityCandidate(idValues, entry.recordId)
+  return buildIdentityQueryCandidates(idValues)
+}
+
 function getRelationRecordModel(collectionName) {
   if (!relationService.ALLOWED_COLLECTION_NAMES.has(collectionName)) {
     throw new ApiError(
@@ -3336,7 +3408,11 @@ function getRelationRecordModel(collectionName) {
 }
 
 async function findTranslationRecordBySourceEntry(entry, languageCode) {
-  const sourceIdCandidates = buildSourceIdCandidates(entry.sourceId)
+  const sourceIdentityCandidates =
+    collectRelationSourceIdentityCandidates(entry)
+  const sourceIdCandidates = buildIdentityQueryCandidates(
+    sourceIdentityCandidates
+  )
   if (sourceIdCandidates.length === 0) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
@@ -3346,6 +3422,18 @@ async function findTranslationRecordBySourceEntry(entry, languageCode) {
     )
   }
   const Model = getRelationRecordModel(entry.collectionName)
+  const recordIdCandidates = buildRelationRecordIdCandidates(entry)
+  if (recordIdCandidates.length > 0) {
+    const recordById = await Model.findOne({
+      _id: { $in: recordIdCandidates },
+      languageCode,
+      recordKind: TRANSLATION_RECORD_KIND
+    }).lean()
+    if (recordById) {
+      return recordById
+    }
+  }
+
   const record = await Model.findOne({
     sourceId: { $in: sourceIdCandidates },
     languageCode,

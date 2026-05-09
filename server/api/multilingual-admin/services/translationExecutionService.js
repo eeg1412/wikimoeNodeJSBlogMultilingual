@@ -812,10 +812,10 @@ function buildSourcePostPreviewEntries({
     const nextPreviewHtml =
       entry.nextPreviewHtml || buildPreviewHtml(entry.valueType, entry.value)
 
-    return {
+    const previewEntry = {
       ...entry,
       languageCode,
-      sourceId,
+      sourcePostId: sourceId,
       originalEntryKey,
       entryKey: buildSourcePostReviewEntryKey(languageCode, sourceId, entry),
       currentPreviewText,
@@ -829,6 +829,10 @@ function buildSourcePostPreviewEntries({
       nextPreviewHtml,
       hasCurrentValue: Boolean(currentPreviewRawValue || currentPreviewHtml)
     }
+    if (entry.scope === 'post' || !previewEntry.sourceId) {
+      previewEntry.sourceId = sourceId
+    }
+    return previewEntry
   })
 }
 
