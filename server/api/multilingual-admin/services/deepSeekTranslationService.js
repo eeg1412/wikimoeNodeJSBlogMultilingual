@@ -1723,7 +1723,7 @@ async function prepareOfficialTermGlossaryForAiInput({
   ) {
     if (handlers.onStatus) {
       handlers.onStatus({
-        message: `正在联网检索 ${missingSourceTexts.length} 个专有名词官方译名`
+        message: `正在用 AI 知识库整理 ${missingSourceTexts.length} 个专有名词；仅对无法确认的译名联网检索`
       })
     }
     const searchResult =
@@ -1736,8 +1736,8 @@ async function prepareOfficialTermGlossaryForAiInput({
       })
     aiJsonLogs.push(
       translationAiJsonLogService.createAiJsonLog({
-        operation: 'proper-noun.official-translation.search',
-        stage: 'ProperNounOfficialTranslationSearch',
+        operation: 'proper-noun.official-translation.resolve',
+        stage: 'ProperNounOfficialTranslationResolve',
         provider: searchResult.provider,
         model: searchResult.model,
         requestId: '',
@@ -1745,10 +1745,23 @@ async function prepareOfficialTermGlossaryForAiInput({
         targetLanguageCode: targetLanguageCodes.join(','),
         meta: {
           sourceTermCount: missingSourceTexts.length,
-          targetLanguageCodes
+          targetLanguageCodes,
+          aiKnowledgeBaseTermCount:
+            searchResult.stats?.aiKnowledgeBaseTermCount || 0,
+          aiKnowledgeBaseTranslationCount:
+            searchResult.stats?.aiKnowledgeBaseTranslationCount || 0,
+          internetSearchTermCount:
+            searchResult.stats?.internetSearchTermCount || 0,
+          internetSearchTranslationCount:
+            searchResult.stats?.internetSearchTranslationCount || 0,
+          internetSearchRequestedTermCount:
+            searchResult.stats?.internetSearchRequestedTermCount || 0,
+          internetSearchTargetLanguageCodes:
+            searchResult.stats?.internetSearchTargetLanguageCodes || []
         },
         json: {
           terms: searchResult.terms,
+          stats: searchResult.stats,
           rawResponse: searchResult.rawResponse
         }
       })

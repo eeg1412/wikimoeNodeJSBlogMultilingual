@@ -103,6 +103,10 @@ function hasInternetSearchMetadata(searchMetadata) {
 }
 
 function resolveAiTranslationSource(termItem = {}) {
+  const translationSource = normalizeString(termItem.translationSource, 60)
+  if (TRANSLATION_SOURCE_VALUES.includes(translationSource)) {
+    return translationSource
+  }
   if (hasInternetSearchMetadata(termItem.searchMetadata)) {
     return 'internetSearchAi'
   }
