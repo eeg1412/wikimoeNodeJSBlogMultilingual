@@ -384,9 +384,7 @@ export default {
     )
 
     const selectionColumn = computed(() =>
-      registeredColumns.find(
-        col => col.type === 'selection' || col.isSelection
-      )
+      registeredColumns.find(col => col.type === 'selection' || col.isSelection)
     )
 
     /** 可排序列 */
@@ -865,7 +863,9 @@ export default {
   border: 1px solid var(--el-border-color-lighter, #e4e7ed);
   border-radius: 8px;
   overflow: hidden;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.05);
 }
 

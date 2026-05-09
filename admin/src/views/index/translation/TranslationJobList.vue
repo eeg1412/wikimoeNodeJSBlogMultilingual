@@ -91,9 +91,7 @@
     >
       <div class="translation-job-storage-header">
         <div>
-          <div class="translation-job-storage-title">
-            AI 翻译任务相关表存储
-          </div>
+          <div class="translation-job-storage-title">AI 翻译任务相关表存储</div>
           <div class="translation-job-storage-subtitle">
             {{ jobStorageUpdatedText }}
           </div>
