@@ -3825,6 +3825,8 @@ async function applySourcePostAiImport(body = {}, options = {}) {
     input.sourceLanguageCode,
     sourceSnapshotIdCache
   )
+  const sourceSnapshotSummary =
+    await findSourcePostSnapshotSummary(sourceSnapshotId)
 
   const results = []
   for (const item of input.results) {
@@ -3952,7 +3954,10 @@ async function applySourcePostAiImport(body = {}, options = {}) {
 
   return {
     snapshot: {
-      ...importResult,
+      sourceSnapshotId: sourceSnapshotSummary._id,
+      translationGroupId: sourceSnapshotSummary.translationGroupId,
+      snapshotVersion: sourceSnapshotSummary.snapshotVersion,
+      sourceSnapshotAt: sourceSnapshotSummary.sourceSnapshotAt,
       sourceLanguageCode: input.sourceLanguageCode
     },
     results,
