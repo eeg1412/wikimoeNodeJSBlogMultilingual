@@ -1,4 +1,8 @@
 const { truncateText } = require('./coverImageAiDiagnosticService')
+const {
+  ApiError,
+  ERROR_CODES
+} = require('../../../utils/multilingualAdminResponse')
 
 const GEMINI_NATIVE_FETCH_TIMEOUT_MS = 180000
 
@@ -83,6 +87,50 @@ function buildGeminiNativeRequestHeaders(settings) {
   return headers
 }
 
+function createGeminiCancelledError(reason, retryable = true) {
+  return new ApiError(
+    ERROR_CODES.AI_TRANSLATION_CANCELLED,
+    String(reason || '').trim() || 'AI 翻译已停止',
+    'gemini',
+    499,
+    { retryable }
+  )
+}
+
+function createGeminiTimeoutError() {
+  return new ApiError(
+    ERROR_CODES.AI_TRANSLATION_FAILED,
+    'Gemini 请求超时',
+    'gemini',
+    504
+  )
+}
+
+function createRequestAbortController(settings, options = {}) {
+  const controller = new AbortController()
+  const timeoutMs = normalizeTimeout(settings?.timeoutSeconds)
+  const timeoutTimer = setTimeout(() => {
+    controller.abort(createGeminiTimeoutError())
+  }, timeoutMs)
+  let unbindCancellation = () => {}
+  const cancellation = options.cancellation
+  if (cancellation && typeof cancellation.onCancel === 'function') {
+    unbindCancellation = cancellation.onCancel(reason => {
+      controller.abort(
+        createGeminiCancelledError(reason, cancellation.retryable !== false)
+      )
+    })
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timeoutTimer)
+      unbindCancellation()
+    }
+  }
+}
+
 function summarizeGeminiNativeRequestBody(requestBody, requestUrl = '') {
   return {
     model: normalizeText(requestBody?.model),
@@ -146,17 +194,30 @@ function summarizeGeminiNativeResponse(response) {
 async function sendGeminiNativeGenerateContentRequest(
   settings,
   requestBody,
-  requestUrl = ''
+  requestUrl = '',
+  options = {}
 ) {
   const targetUrl = requestUrl || buildGeminiNativeGenerateContentUrl(settings)
   const payloadText = JSON.stringify(requestBody)
-  const response = await fetch(targetUrl, {
-    method: 'POST',
-    headers: buildGeminiNativeRequestHeaders(settings),
-    body: payloadText,
-    signal: AbortSignal.timeout(normalizeTimeout(settings?.timeoutSeconds))
-  })
-  const responseText = await response.text()
+  const abortController = createRequestAbortController(settings, options)
+  let response = null
+  let responseText = ''
+  try {
+    response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: buildGeminiNativeRequestHeaders(settings),
+      body: payloadText,
+      signal: abortController.signal
+    })
+    responseText = await response.text()
+  } catch (error) {
+    if (abortController.signal.aborted && abortController.signal.reason) {
+      throw abortController.signal.reason
+    }
+    throw error
+  } finally {
+    abortController.cleanup()
+  }
   let responseJson = null
   if (responseText) {
     try {

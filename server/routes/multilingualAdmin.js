@@ -543,6 +543,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/job/resume')
   },
   {
+    path: '/translation/job/stop',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/stop')
+  },
+  {
     path: '/translation/job/delete',
     method: 'delete',
     middleware: [checkAuth],

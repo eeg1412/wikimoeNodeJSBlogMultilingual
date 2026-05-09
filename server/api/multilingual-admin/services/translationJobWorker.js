@@ -68,6 +68,7 @@ function getWorkerConfig(options = {}) {
 function createCancellationContext() {
   let cancelled = false
   let reason = ''
+  let retryable = true
   const listeners = new Set()
 
   return {
@@ -77,12 +78,18 @@ function createCancellationContext() {
     get reason() {
       return reason
     },
-    cancel(nextReason) {
+    get retryable() {
+      return retryable
+    },
+    cancel(nextReason, options = {}) {
       if (cancelled) {
         return
       }
       cancelled = true
       reason = String(nextReason || '').trim() || '后台任务已停止'
+      if (typeof options.retryable === 'boolean') {
+        retryable = options.retryable
+      }
       listeners.forEach(listener => listener(reason))
       listeners.clear()
     },
@@ -135,8 +142,31 @@ function createCancelledError(cancellation) {
     ERROR_CODES.AI_TRANSLATION_CANCELLED,
     cancellation.reason,
     'translationJob',
-    499
+    499,
+    { retryable: cancellation.retryable !== false }
   )
+}
+
+function getActiveJobCancellation(jobId) {
+  if (!workerState || !workerState.activeJobs) {
+    return null
+  }
+  return workerState.activeJobs.get(String(jobId)) || null
+}
+
+function hasActiveTranslationJob(jobId) {
+  return Boolean(getActiveJobCancellation(jobId))
+}
+
+function cancelRunningTranslationJob(jobId, reason) {
+  const cancellation = getActiveJobCancellation(jobId)
+  if (!cancellation) {
+    return false
+  }
+  cancellation.cancel(reason || '用户停止了 AI 翻译任务', {
+    retryable: false
+  })
+  return true
 }
 
 function createExecutionContext(job, state, cancellation) {
@@ -295,5 +325,7 @@ function stopTranslationJobWorker(reason = 'worker stopped') {
 
 module.exports = {
   startTranslationJobWorker,
-  stopTranslationJobWorker
+  stopTranslationJobWorker,
+  hasActiveTranslationJob,
+  cancelRunningTranslationJob
 }

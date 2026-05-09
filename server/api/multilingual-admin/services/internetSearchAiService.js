@@ -319,7 +319,8 @@ async function searchOfficialTermTranslations(options = {}) {
     const response = await sendGeminiNativeGenerateContentRequest(
       settings,
       requestBody,
-      requestUrl
+      requestUrl,
+      { cancellation: options.cancellation }
     )
     const responseSummary = summarizeGeminiNativeResponse(response)
     const extractedText = extractTextFromGeminiNativeResponse(response)

@@ -1032,6 +1032,40 @@ async function deferTranslationJob(body = {}, options = {}) {
   return job.toObject()
 }
 
+async function requestStopRunningTranslationJob(body = {}, options = {}) {
+  const job = await getMutableJob(body.id)
+  assertStatus(job, [TRANSLATION_JOB_STATUS.RUNNING], '停止任务')
+
+  const workerId = toTrimmedString(job.runtime?.workerId)
+  const attemptNo = Number(job.runtime?.attempts || 0)
+  if (!workerId || attemptNo < 1) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
+      '当前任务没有可停止的后台 worker',
+      'runtime.workerId',
+      400
+    )
+  }
+
+  const adminSnapshot = normalizeAdminSnapshot(options.admin)
+  const reason =
+    toTrimmedString(body.reason) || '用户停止了 AI 翻译任务，正在断开 AI 连接'
+  job.queueControl.active = false
+  job.runtime.interruptReason = reason
+  job.updatedBy = adminSnapshot
+  job.progress = job.progress || {}
+  job.progress.currentStep = '正在停止任务，已请求断开 AI 连接'
+  appendLog(job, reason, 'warning', 'stop')
+  await job.save()
+
+  return {
+    id: String(job._id),
+    workerId,
+    attemptNo,
+    reason
+  }
+}
+
 async function resumeTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertStatus(job, [TRANSLATION_JOB_STATUS.PENDING], '恢复执行')
@@ -1785,6 +1819,7 @@ module.exports = {
   getTranslationJobStorageSummary,
   getTranslationJobDetail,
   deferTranslationJob,
+  requestStopRunningTranslationJob,
   resumeTranslationJob,
   deleteTranslationJob,
   batchDeleteTranslationJobs,

@@ -176,7 +176,8 @@ async function translateSourcePostAiImportEntriesStream(
           ? data.payload.entries
           : [],
         sourceLanguageCode: input.sourceLanguageCode,
-        targetLanguageCode: input.targetLanguageCode
+        targetLanguageCode: input.targetLanguageCode,
+        cancellation: handlers.cancellation
       })
     data = appendCoverImageResultToStreamData(data, coverResult, registry)
   }
@@ -334,7 +335,8 @@ async function translateSourcePostAiImportCoverImages(body = {}) {
   const batchResult =
     await coverImageTranslationService.processCoverImageTranslationBatch({
       registry,
-      tasks
+      tasks,
+      cancellation: body.cancellation
     })
   const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
   const items = batchResult.results.map(item => {

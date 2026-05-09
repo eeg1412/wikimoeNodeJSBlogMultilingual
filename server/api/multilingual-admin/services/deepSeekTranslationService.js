@@ -1664,7 +1664,8 @@ async function prepareOfficialTermGlossaryForAiInput({
         sourceTerms: missingSourceTexts,
         targetLanguageCodes,
         sourceLanguageCode: input.sourceLanguageCode,
-        skipUsageLog: input.skipUsageLog
+        skipUsageLog: input.skipUsageLog,
+        cancellation: handlers.cancellation
       })
     aiJsonLogs.push(
       translationAiJsonLogService.createAiJsonLog({
@@ -1845,13 +1846,14 @@ function buildDeepSeekRequestHeaders(settings, requestText, accept = '') {
   return headers
 }
 
-function createTranslationCancelledError(reason) {
+function createTranslationCancelledError(reason, retryable = true) {
   const message = String(reason || '').trim() || 'AI 翻译已停止'
   return new ApiError(
     ERROR_CODES.AI_TRANSLATION_CANCELLED,
     message,
     'translation',
-    499
+    499,
+    { retryable }
   )
 }
 
@@ -1863,7 +1865,10 @@ function throwIfCancellationRequested(options = {}) {
   if (!isCancellationRequested(options)) {
     return
   }
-  throw createTranslationCancelledError(options.cancellation?.reason)
+  throw createTranslationCancelledError(
+    options.cancellation?.reason,
+    options.cancellation?.retryable !== false
+  )
 }
 
 function bindCancellation(request, options = {}) {
@@ -1873,7 +1878,9 @@ function bindCancellation(request, options = {}) {
   }
 
   return cancellation.onCancel(reason => {
-    request.destroy(createTranslationCancelledError(reason))
+    request.destroy(
+      createTranslationCancelledError(reason, cancellation.retryable !== false)
+    )
   })
 }
 
@@ -1925,7 +1932,10 @@ function requestJson(url, requestBody, settings, options = {}) {
     unbindCancellation = bindCancellation(request, options)
     if (isCancellationRequested(options)) {
       request.destroy(
-        createTranslationCancelledError(options.cancellation?.reason)
+        createTranslationCancelledError(
+          options.cancellation?.reason,
+          options.cancellation?.retryable !== false
+        )
       )
       return
     }
@@ -2135,7 +2145,10 @@ function requestStream(
     unbindCancellation = bindCancellation(request, options)
     if (isCancellationRequested(options)) {
       request.destroy(
-        createTranslationCancelledError(options.cancellation?.reason)
+        createTranslationCancelledError(
+          options.cancellation?.reason,
+          options.cancellation?.retryable !== false
+        )
       )
       return
     }
@@ -3283,7 +3296,8 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
           targetTitle: input.targetTitle,
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: input.targetLanguageCode,
-          skipRecognition: true
+          skipRecognition: true,
+          cancellation: handlers.cancellation
         })
       data = appendCoverImageResultToStreamData(
         data,

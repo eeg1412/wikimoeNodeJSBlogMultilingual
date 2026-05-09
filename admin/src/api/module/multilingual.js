@@ -207,6 +207,12 @@ export default function (api) {
         noLoading
       })
     },
+    stopTranslationJob(data, noLoading = false) {
+      return api.post('/translation/job/stop', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     deleteTranslationJob(data, noLoading = false) {
       return api.delete('/translation/job/delete', {
         params: data,

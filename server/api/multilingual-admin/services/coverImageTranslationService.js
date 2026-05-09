@@ -16,6 +16,7 @@ const coverImagePostprocessService = require('./coverImagePostprocessService')
 const coverImageTempFileService = require('./coverImageTempFileService')
 const geminiImageRecognitionService = require('./geminiImageRecognitionService')
 const geminiImageGenerationService = require('./geminiImageGenerationService')
+const { ERROR_CODES } = require('../../../utils/multilingualAdminResponse')
 const {
   COVER_IMAGE_ARTIFACT_TYPE,
   COVER_IMAGE_ENTRY_TYPE,
@@ -63,6 +64,10 @@ function createWarning(code, message, context = {}) {
     scope: 'cover-image-translation',
     ...context
   }
+}
+
+function isCancellationError(error) {
+  return error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
 }
 
 function normalizeStorageString(value) {
@@ -896,7 +901,8 @@ async function runRecognition({
   sourceLanguageCode,
   targetLanguageCode,
   recognitionKey,
-  recognitionSettings
+  recognitionSettings,
+  cancellation
 }) {
   if (registry.recognitionMap.has(recognitionKey)) {
     const cached = registry.recognitionMap.get(recognitionKey)
@@ -934,7 +940,8 @@ async function runRecognition({
         sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
         sourceLanguageCode,
         targetLanguageCode
-      }
+      },
+      cancellation
     })
     if (!response.ok) {
       return {
@@ -966,6 +973,9 @@ async function runRecognition({
     registry.recognitionMap.set(recognitionKey, result)
     return result
   } catch (error) {
+    if (isCancellationError(error)) {
+      throw error
+    }
     const diagnostics =
       error?.diagnostics ||
       buildCoverStageDiagnostics({
@@ -1006,7 +1016,8 @@ async function runGeneration({
   recognitionInput,
   generationKey,
   generationSettings,
-  recognitionProvider
+  recognitionProvider,
+  cancellation
 }) {
   if (registry.generationMap.has(generationKey)) {
     const cached = registry.generationMap.get(generationKey)
@@ -1059,7 +1070,8 @@ async function runGeneration({
         targetPostId: normalizeIdValue(targetPost?._id),
         sourceLanguageCode,
         targetLanguageCode
-      }
+      },
+      cancellation
     })
     const generatedImage = await coverImagePostprocessService.resizeCoverExact({
       jobId: getJobId(job),
@@ -1118,6 +1130,9 @@ async function runGeneration({
     registry.generationMap.set(generationKey, result)
     return result
   } catch (error) {
+    if (isCancellationError(error)) {
+      throw error
+    }
     const diagnostics =
       error?.diagnostics ||
       buildCoverStageDiagnostics({
@@ -1326,7 +1341,8 @@ async function processCoverImageTranslation(options = {}) {
       sourceLanguageCode: options.sourceLanguageCode,
       targetLanguageCode: languageCode,
       recognitionKey,
-      recognitionSettings
+      recognitionSettings,
+      cancellation: options.cancellation
     })
   }
 
@@ -1419,7 +1435,8 @@ async function processCoverImageTranslation(options = {}) {
     recognitionInput: recognitionResult.recognitionInput,
     generationKey,
     generationSettings,
-    recognitionProvider: recognitionResult.provider
+    recognitionProvider: recognitionResult.provider,
+    cancellation: options.cancellation
   })
 
   if (generationResult.status !== 'generated') {
@@ -1515,7 +1532,8 @@ async function processCoverImageTranslationBatch(options = {}) {
       const coverResult = await processCoverImageTranslation({
         ...task,
         registry,
-        targetTitle: task.targetTitle
+        targetTitle: task.targetTitle,
+        cancellation: options.cancellation
       })
       results.push({
         groupKey: group.key,

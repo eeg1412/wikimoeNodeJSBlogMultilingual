@@ -171,7 +171,8 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
       targetTitle: job.target?.title,
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
-      skipRecognition: true
+      skipRecognition: true,
+      cancellation: context.cancellation
     })
   appendCoverImageResult(result, coverResult, registry, {
     job,
@@ -1102,6 +1103,7 @@ async function executeSourcePostAiImport(job, context) {
       await coverImageTranslationService.processCoverImageTranslationBatch({
         registry: coverImageRegistry,
         tasks: coverImageTasks,
+        cancellation: context.cancellation,
         onTaskStart: async ({ task, taskIndex, taskCount }) => {
           await context.updateProgress({
             currentStage: 'TranslateCoverImage',

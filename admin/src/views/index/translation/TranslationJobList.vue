@@ -279,6 +279,14 @@
                 重试
               </el-button>
               <el-button
+                v-if="canStop(row)"
+                size="small"
+                type="danger"
+                @click="stopJob(row)"
+              >
+                停止
+              </el-button>
+              <el-button
                 v-if="canReject(row)"
                 size="small"
                 type="warning"
@@ -340,6 +348,13 @@
               清理封面临时文件
             </el-button>
             <el-button
+              v-if="canStop(currentJob)"
+              type="danger"
+              @click="stopJob(currentJob)"
+            >
+              停止
+            </el-button>
+            <el-button
               v-if="canApplyCurrentJob"
               type="primary"
               :disabled="selectedEntryKeys.length === 0"
@@ -384,13 +399,7 @@
               >
                 {{ getFailureCodeLabel(currentJob.failure) }}
               </el-tag>
-              <el-tag
-                :type="
-                  currentJob.failure?.retryable === true ? 'warning' : 'info'
-                "
-                effect="plain"
-                size="small"
-              >
+              <el-tag effect="plain" size="small">
                 {{
                   currentJob.failure?.retryable === true ? '可重试' : '不可重试'
                 }}
@@ -1982,6 +1991,20 @@ export default {
       runJobAction(row, multilingualApi.retryTranslationJob, '已重试')
     }
 
+    const stopJob = row => {
+      ElMessageBox.confirm(
+        '确认停止该 AI 翻译任务？系统会断开正在进行的 AI 请求。',
+        '停止任务',
+        {
+          type: 'warning',
+          confirmButtonText: '停止',
+          cancelButtonText: '取消'
+        }
+      ).then(() => {
+        runJobAction(row, multilingualApi.stopTranslationJob, '已请求停止')
+      })
+    }
+
     const rejectJob = row => {
       ElMessageBox.confirm('确认不采纳该任务结果？', '确认操作', {
         type: 'warning'
@@ -2289,6 +2312,10 @@ export default {
       return row.failure?.retryable === true
     }
 
+    const canStop = row => {
+      return row?.status === '执行中'
+    }
+
     const canReject = row => {
       return row.status === '等待审核'
     }
@@ -2437,6 +2464,7 @@ export default {
       canDelete,
       canReject,
       canRetry,
+      canStop,
       beforeReviewEntrySelect,
       beforeReviewGroupSelect,
       conflictList,
@@ -2491,6 +2519,7 @@ export default {
       setCoverImageSelected,
       skippedReviewEntries,
       statusOptions,
+      stopJob,
       tableRef,
       toggleAiJsonViewMode,
       total,

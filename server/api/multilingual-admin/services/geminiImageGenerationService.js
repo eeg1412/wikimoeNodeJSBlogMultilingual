@@ -15,6 +15,7 @@ const {
   summarizeGeminiNativeResponse
 } = require('./geminiNativeApiService')
 const { recordGeminiUsageLog } = require('./geminiUsageLogService')
+const { ERROR_CODES } = require('../../../utils/multilingualAdminResponse')
 
 function summarizeExtractedImage(extractedImage) {
   if (!extractedImage || typeof extractedImage !== 'object') {
@@ -130,7 +131,8 @@ async function generateCoverImage(options = {}) {
     const response = await sendGeminiNativeGenerateContentRequest(
       settings,
       requestBody,
-      requestUrl
+      requestUrl,
+      { cancellation: options.cancellation }
     )
     const responseSummary = summarizeGeminiNativeResponse(response)
     const extractedImage = extractBase64FromGeminiNativeResponse(response)
@@ -191,6 +193,9 @@ async function generateCoverImage(options = {}) {
       responseSummary
     }
   } catch (error) {
+    if (error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED) {
+      throw error
+    }
     if (error?.diagnostics) {
       throw error
     }

@@ -15,6 +15,7 @@ const {
   summarizeGeminiNativeResponse
 } = require('./geminiNativeApiService')
 const { recordGeminiUsageLog } = require('./geminiUsageLogService')
+const { ERROR_CODES } = require('../../../utils/multilingualAdminResponse')
 const {
   COVER_IMAGE_RECOGNITION_SCHEMA,
   COVER_IMAGE_RECOGNITION_VERSION,
@@ -274,7 +275,8 @@ async function recognizeCoverTitle(options = {}) {
     const response = await sendGeminiNativeGenerateContentRequest(
       settings,
       requestBody,
-      requestUrl
+      requestUrl,
+      { cancellation: options.cancellation }
     )
     const responseSummary = summarizeGeminiNativeResponse(response)
     const extractedText = extractTextFromGeminiNativeResponse(response)
@@ -434,6 +436,9 @@ async function recognizeCoverTitle(options = {}) {
       responseSummary
     }
   } catch (error) {
+    if (error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED) {
+      throw error
+    }
     const providerErrorSummary = extractProviderErrorSummary(error)
     let failureCode = 'REQUEST_FAILED'
     if (/timeout|timed out/i.test(error.message || '')) {
