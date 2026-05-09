@@ -13,6 +13,10 @@ const translationEntryBuildService = require('./translationEntryBuildService')
 const translationPostService = require('./translationPostService')
 const coverImageTranslationService = require('./coverImageTranslationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const {
+  STRUCTURED_RICH_TEXT_VALUE_TYPE,
+  renderRichTextDocumentNode
+} = require('../utils/richTextDocumentUtils')
 
 const POST_RELATED_POST_FIELDS = [
   'postList',
@@ -21,7 +25,6 @@ const POST_RELATED_POST_FIELDS = [
   'contentTweetList'
 ]
 const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
-const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 
 function getJobId(job) {
   return String(job && job._id ? job._id : '')
@@ -528,7 +531,7 @@ function buildPreviewHtml(valueType, value) {
     return normalizeString(value)
   }
   if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
-    return normalizeString(value)
+    return renderRichTextDocumentNode(value)
   }
   return ''
 }

@@ -8,10 +8,26 @@ const {
 } = require('../../../utils/translationJobConstants')
 const importPostSourceService = require('./importPostSourceService')
 const translationPostService = require('./translationPostService')
+const {
+  STRUCTURED_RICH_TEXT_VALUE_TYPE,
+  getRichTextDocumentPreviewText,
+  renderRichTextDocumentNode,
+  serializeRichTextHtmlToDocument
+} = require('../utils/richTextDocumentUtils')
 
 const TRANSLATION_RECORD_KIND = 'translation'
 const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
 const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
+const DETAIL_RELATION_FIELD_SET = new Set([
+  'eventList',
+  'voteList',
+  'postList',
+  'tweetList',
+  'bangumiList',
+  'movieList',
+  'bookList',
+  'gameList'
+])
 
 const POST_TRANSLATION_FIELDS = [
   {
@@ -23,7 +39,7 @@ const POST_TRANSLATION_FIELDS = [
   {
     name: 'content',
     label: '文章内容',
-    valueType: LEGACY_RICH_TEXT_VALUE_TYPE,
+    valueType: STRUCTURED_RICH_TEXT_VALUE_TYPE,
     supportedTypes: [1, 3]
   },
   {
@@ -163,10 +179,52 @@ function cloneSerializableValue(value) {
 }
 
 function buildPreviewHtml(value, valueType) {
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return renderRichTextDocumentNode(value)
+  }
   if (valueType !== LEGACY_RICH_TEXT_VALUE_TYPE) {
     return ''
   }
   return normalizeString(value)
+}
+
+function normalizeEntryValue(value, valueType) {
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return serializeRichTextHtmlToDocument(value).document
+  }
+  return normalizeString(value)
+}
+
+function hasMeaningfulEntryValue(value, valueType) {
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    const previewText = getRichTextDocumentPreviewText(value)
+    if (previewText) {
+      return true
+    }
+    return Array.isArray(value?.children) && value.children.length > 0
+  }
+  return hasMeaningfulValue(value)
+}
+
+function buildPreviewText(value, valueType) {
+  let previewText = ''
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    previewText = getRichTextDocumentPreviewText(value)
+  } else {
+    previewText = normalizeString(value)
+  }
+
+  if (previewText.length > 120) {
+    return `${previewText.slice(0, 120)}...`
+  }
+  return previewText
+}
+
+function buildPreviewRawValue(value, valueType) {
+  if (valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return JSON.stringify(value, null, 2)
+  }
+  return value
 }
 
 function getRepositoryModel(collectionName) {
@@ -242,19 +300,16 @@ function normalizeSourceIdentity(record = {}) {
 }
 
 function buildEntry(baseData, includeEmpty) {
-  const value =
-    baseData.valueType === LEGACY_RICH_TEXT_VALUE_TYPE
-      ? normalizeString(baseData.value)
-      : normalizeString(baseData.value)
-  if (!includeEmpty && !hasMeaningfulValue(value)) {
+  const value = normalizeEntryValue(baseData.value, baseData.valueType)
+  if (!includeEmpty && !hasMeaningfulEntryValue(value, baseData.valueType)) {
     return null
   }
 
   return {
     ...baseData,
     value,
-    previewText: value.length > 120 ? `${value.slice(0, 120)}...` : value,
-    previewRawValue: value,
+    previewText: buildPreviewText(value, baseData.valueType),
+    previewRawValue: buildPreviewRawValue(value, baseData.valueType),
     previewHtml: buildPreviewHtml(value, baseData.valueType)
   }
 }
@@ -325,6 +380,51 @@ function getPostRelationRecords(detail, post, relationField) {
   return []
 }
 
+function getRelationScopeMeta(relationField = {}) {
+  if (relationField.relationScope === 'tweetContent') {
+    return {
+      relationScope: 'tweetContent',
+      relationScopeLabel: '推文内',
+      groupCategory: '推文内关联内容',
+      groupLabel: `推文内关联内容 / ${relationField.label}`
+    }
+  }
+
+  if (relationField.relationScope === 'detail') {
+    return {
+      relationScope: 'detail',
+      relationScopeLabel: '详情页',
+      groupCategory: '详情页相关内容',
+      groupLabel: `详情页相关内容 / ${relationField.label}`
+    }
+  }
+
+  if (String(relationField.field || '').startsWith('content')) {
+    return {
+      relationScope: 'tweetContent',
+      relationScopeLabel: '推文内',
+      groupCategory: '推文内关联内容',
+      groupLabel: `推文内关联内容 / ${relationField.label}`
+    }
+  }
+
+  if (DETAIL_RELATION_FIELD_SET.has(relationField.field)) {
+    return {
+      relationScope: 'detail',
+      relationScopeLabel: '详情页',
+      groupCategory: '详情页相关内容',
+      groupLabel: `详情页相关内容 / ${relationField.label}`
+    }
+  }
+
+  return {
+    relationScope: 'base',
+    relationScopeLabel: '',
+    groupCategory: '关联内容',
+    groupLabel: `关联内容 / ${relationField.label}`
+  }
+}
+
 function createVoteOptionEntries(
   relationField,
   record,
@@ -333,6 +433,7 @@ function createVoteOptionEntries(
 ) {
   const options = Array.isArray(record.options) ? record.options : []
   const recordLabel = buildDisplayName(record, relationField.collectionName)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
   return options
     .map((option, index) => {
       return buildEntry(
@@ -346,6 +447,8 @@ function createVoteOptionEntries(
           sourceRecordId: normalizeString(record._id),
           sourceId: normalizeSourceIdentity(record),
           sourceSnapshotId: normalizeString(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
           relationTypeLabel: relationField.label,
           recordLabel,
           fieldName: 'options.title',
@@ -354,8 +457,8 @@ function createVoteOptionEntries(
           optionIndex: index,
           optionList: cloneSerializableValue(options),
           label: `${recordLabel} / ${editField.label} #${index + 1}`,
-          groupLabel: `关联内容 / ${relationField.label}`,
-          groupCategory: '关联内容',
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
           groupTitle: relationField.label,
           valueType: 'plainText',
           value: option.title,
@@ -380,6 +483,7 @@ function normalizeUrlListValue(value) {
 function createUrlListEntries(relationField, record, editField, includeEmpty) {
   const urlList = normalizeUrlListValue(record[editField.name])
   const recordLabel = buildDisplayName(record, relationField.collectionName)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
   return urlList
     .map((item, index) => {
       return buildEntry(
@@ -393,6 +497,8 @@ function createUrlListEntries(relationField, record, editField, includeEmpty) {
           sourceRecordId: normalizeString(record._id),
           sourceId: normalizeSourceIdentity(record),
           sourceSnapshotId: normalizeString(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
           relationTypeLabel: relationField.label,
           recordLabel,
           fieldName: URL_LIST_TEXT_FIELD_NAME,
@@ -400,8 +506,8 @@ function createUrlListEntries(relationField, record, editField, includeEmpty) {
           urlIndex: index,
           urlList: cloneSerializableValue(urlList),
           label: `${recordLabel} / ${editField.label} #${index + 1}`,
-          groupLabel: `关联内容 / ${relationField.label}`,
-          groupCategory: '关联内容',
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
           groupTitle: relationField.label,
           valueType: 'plainText',
           value: item.text,
@@ -420,8 +526,11 @@ function createRelationFieldEntry(
   includeEmpty
 ) {
   const recordLabel = buildDisplayName(record, relationField.collectionName)
-  const valueType =
-    editField.type === 'richText' ? LEGACY_RICH_TEXT_VALUE_TYPE : 'plainText'
+  const relationScopeMeta = getRelationScopeMeta(relationField)
+  let valueType = 'plainText'
+  if (editField.type === 'richText') {
+    valueType = STRUCTURED_RICH_TEXT_VALUE_TYPE
+  }
   return buildEntry(
     {
       id: `relation.${relationField.field}.${record._id}.${editField.name}`,
@@ -434,13 +543,15 @@ function createRelationFieldEntry(
       sourceRecordId: normalizeString(record._id),
       sourceId: normalizeSourceIdentity(record),
       sourceSnapshotId: normalizeString(record.sourceSnapshotId),
+      relationScope: relationScopeMeta.relationScope,
+      relationScopeLabel: relationScopeMeta.relationScopeLabel,
       relationTypeLabel: relationField.label,
       recordLabel,
       fieldName: editField.name,
       fieldLabel: editField.label,
       label: `${recordLabel} / ${editField.label}`,
-      groupLabel: `关联内容 / ${relationField.label}`,
-      groupCategory: '关联内容',
+      groupLabel: relationScopeMeta.groupLabel,
+      groupCategory: relationScopeMeta.groupCategory,
       groupTitle: relationField.label,
       valueType,
       value: record[editField.name],

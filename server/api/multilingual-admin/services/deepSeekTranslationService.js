@@ -28,6 +28,11 @@ const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
 const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
 const MAX_AI_REQUEST_TEXT_LENGTH = 6000
 const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 3000
+const MIN_AI_REQUEST_TEXT_LENGTH = 600
+const MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH = 400
+const AI_RESPONSE_JSON_TOKEN_RESERVE = 1024
+const AI_OUTPUT_TEXT_TOKEN_RATIO = 0.55
+const RICH_TEXT_SEGMENT_TEXT_RATIO = 0.75
 const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
 const MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH = 10000
 const MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000
@@ -712,8 +717,42 @@ function splitLongText(text, maxLength) {
   return parts
 }
 
-function pushRichTextSegments(segments, path, text) {
-  const parts = splitLongText(text, MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH)
+function getConfiguredMaxTokens(settings = {}) {
+  const maxTokens = Number(settings.deepSeekMaxTokens || 0)
+  if (Number.isFinite(maxTokens) && maxTokens > 0) {
+    return maxTokens
+  }
+  return 8192
+}
+
+function getTranslationChunkTextLimit(settings = {}) {
+  const maxTokens = getConfiguredMaxTokens(settings)
+  const usableOutputTokens = Math.max(
+    MIN_AI_REQUEST_TEXT_LENGTH,
+    maxTokens - AI_RESPONSE_JSON_TOKEN_RESERVE
+  )
+  const outputTextLimit = Math.floor(
+    usableOutputTokens * AI_OUTPUT_TEXT_TOKEN_RATIO
+  )
+  return Math.max(
+    MIN_AI_REQUEST_TEXT_LENGTH,
+    Math.min(MAX_AI_REQUEST_TEXT_LENGTH, outputTextLimit)
+  )
+}
+
+function getRichTextSegmentTextLimit(settings = {}) {
+  const chunkTextLimit = getTranslationChunkTextLimit(settings)
+  const segmentTextLimit = Math.floor(
+    chunkTextLimit * RICH_TEXT_SEGMENT_TEXT_RATIO
+  )
+  return Math.max(
+    MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH,
+    Math.min(MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH, segmentTextLimit)
+  )
+}
+
+function pushRichTextSegments(segments, path, text, maxTextLength) {
+  const parts = splitLongText(text, maxTextLength)
   let offset = 0
   parts.forEach(partText => {
     if (!hasTranslatableSegmentText(partText)) {
@@ -744,14 +783,24 @@ function pushRichTextSegments(segments, path, text) {
   })
 }
 
-function collectRichTextSegments(node, path = [], segments = []) {
+function collectRichTextSegments(
+  node,
+  path = [],
+  segments = [],
+  maxTextLength = MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH
+) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) {
     return segments
   }
 
   if (node.type === 'text') {
     if (hasTranslatableSegmentText(node.text)) {
-      pushRichTextSegments(segments, path.concat('text'), node.text)
+      pushRichTextSegments(
+        segments,
+        path.concat('text'),
+        node.text,
+        maxTextLength
+      )
     }
     return segments
   }
@@ -763,7 +812,8 @@ function collectRichTextSegments(node, path = [], segments = []) {
         pushRichTextSegments(
           segments,
           path.concat(['translatableAttrs', attrName]),
-          text
+          text,
+          maxTextLength
         )
       }
     })
@@ -774,7 +824,8 @@ function collectRichTextSegments(node, path = [], segments = []) {
       collectRichTextSegments(
         childNode,
         path.concat(['children', index]),
-        segments
+        segments,
+        maxTextLength
       )
     })
   }
@@ -815,7 +866,9 @@ function getAiPromptCurrentValue(entry) {
   return entry.currentValue
 }
 
-function prepareAiInput(input) {
+function prepareAiInput(input, options = {}) {
+  const richTextSegmentTextLength =
+    options.richTextSegmentTextLength || MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH
   const entries = input.entries.map((entry, index) => {
     const indexedEntry = {
       ...entry,
@@ -825,12 +878,22 @@ function prepareAiInput(input) {
       return indexedEntry
     }
 
-    const richTextSegments = collectRichTextSegments(indexedEntry.value)
+    const richTextSegments = collectRichTextSegments(
+      indexedEntry.value,
+      [],
+      [],
+      richTextSegmentTextLength
+    )
     const currentRichTextSegments =
       indexedEntry.currentValue &&
       typeof indexedEntry.currentValue === 'object' &&
       !Array.isArray(indexedEntry.currentValue)
-        ? collectRichTextSegments(indexedEntry.currentValue)
+        ? collectRichTextSegments(
+            indexedEntry.currentValue,
+            [],
+            [],
+            richTextSegmentTextLength
+          )
         : []
     return {
       ...indexedEntry,
@@ -863,7 +926,7 @@ function isPreparedAiEntry(entry) {
   )
 }
 
-function ensurePreparedAiInput(input) {
+function ensurePreparedAiInput(input, options = {}) {
   if (
     input &&
     Array.isArray(input.entries) &&
@@ -871,7 +934,7 @@ function ensurePreparedAiInput(input) {
   ) {
     return input
   }
-  return prepareAiInput(input)
+  return prepareAiInput(input, options)
 }
 
 function getAiEntryTextLength(entry) {
@@ -888,7 +951,7 @@ function getAiEntryTextLength(entry) {
   return normalizeString(value).length + 64
 }
 
-function splitRichTextAiEntry(entry) {
+function splitRichTextAiEntry(entry, maxTextLength) {
   const value = getAiPromptValue(entry)
   if (
     !value ||
@@ -922,7 +985,7 @@ function splitRichTextAiEntry(entry) {
     const segmentLength = normalizeString(segment.text).length + 16
     if (
       currentSegments.length > 0 &&
-      currentLength + segmentLength > MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH
+      currentLength + segmentLength > maxTextLength
     ) {
       pushCurrentSlice()
     }
@@ -934,7 +997,11 @@ function splitRichTextAiEntry(entry) {
   return slices
 }
 
-function splitAiInput(input) {
+function splitAiInput(input, options = {}) {
+  const maxRequestTextLength =
+    options.maxRequestTextLength || MAX_AI_REQUEST_TEXT_LENGTH
+  const richTextSegmentTextLength =
+    options.richTextSegmentTextLength || MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH
   const chunks = []
   let currentEntries = []
   let currentLength = 0
@@ -952,7 +1019,7 @@ function splitAiInput(input) {
   }
 
   input.entries.forEach(entry => {
-    const slices = splitRichTextAiEntry(entry)
+    const slices = splitRichTextAiEntry(entry, richTextSegmentTextLength)
     slices.forEach(slice => {
       const sliceLength = getAiEntryTextLength(slice)
       const hasSameEntryInCurrentChunk = currentEntries.some(currentEntry => {
@@ -961,7 +1028,7 @@ function splitAiInput(input) {
       if (
         currentEntries.length > 0 &&
         (hasSameEntryInCurrentChunk ||
-          currentLength + sliceLength > MAX_AI_REQUEST_TEXT_LENGTH)
+          currentLength + sliceLength > maxRequestTextLength)
       ) {
         pushCurrentChunk()
       }
@@ -1884,6 +1951,19 @@ function bindCancellation(request, options = {}) {
   })
 }
 
+function createDeepSeekResponseInterruptedError(message, error = null) {
+  const detailMessage = error?.message
+    ? `${message}：${error.message}`
+    : message
+  return new ApiError(
+    ERROR_CODES.AI_TRANSLATION_FAILED,
+    detailMessage,
+    'deepSeek',
+    502,
+    { retryable: true }
+  )
+}
+
 function requestJson(url, requestBody, settings, options = {}) {
   throwIfCancellationRequested(options)
   const requestText = JSON.stringify(requestBody)
@@ -2013,6 +2093,23 @@ function requestStream(
 
   return new Promise((resolve, reject) => {
     let unbindCancellation = () => {}
+    let settled = false
+    function resolveOnce(value) {
+      if (settled) {
+        return
+      }
+      settled = true
+      unbindCancellation()
+      resolve(value)
+    }
+    function rejectOnce(error) {
+      if (settled) {
+        return
+      }
+      settled = true
+      unbindCancellation()
+      reject(error)
+    }
     const request = client.request(
       url,
       {
@@ -2026,7 +2123,7 @@ function requestStream(
       },
       response => {
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          collectNonStreamResponse(response, resolve)
+          collectNonStreamResponse(response, resolveOnce, rejectOnce)
           return
         }
 
@@ -2042,6 +2139,13 @@ function requestStream(
         let responseId = ''
         let responseModel = settings.deepSeekModel
         let finishReason = ''
+        let responseEnded = false
+        let responseStreamError = null
+
+        function rejectStream(error) {
+          responseStreamError = error
+          rejectOnce(error)
+        }
 
         function handleDataText(dataText) {
           if (!dataText || dataText === '[DONE]') {
@@ -2106,17 +2210,44 @@ function requestStream(
             buffer += chunk.toString('utf8')
             consumeBuffer()
           } catch (error) {
+            responseStreamError = error
             request.destroy(error)
           }
         })
+        response.on('aborted', () => {
+          rejectStream(
+            createDeepSeekResponseInterruptedError(
+              'DeepSeek 流式连接在完成前被上游中断'
+            )
+          )
+        })
+        response.on('error', error => {
+          rejectStream(
+            createDeepSeekResponseInterruptedError(
+              'DeepSeek 流式连接发生错误',
+              error
+            )
+          )
+        })
+        response.on('close', () => {
+          if (responseEnded) {
+            return
+          }
+          rejectStream(
+            responseStreamError ||
+              createDeepSeekResponseInterruptedError(
+                'DeepSeek 流式连接在完成前关闭'
+              )
+          )
+        })
         response.on('end', () => {
           try {
-            unbindCancellation()
+            responseEnded = true
             if (buffer.trim()) {
               const dataText = parseSseBlock(buffer)
               handleDataText(dataText)
             }
-            resolve({
+            resolveOnce({
               statusCode: response.statusCode,
               data: {
                 id: responseId,
@@ -2136,7 +2267,7 @@ function requestStream(
               }
             })
           } catch (error) {
-            reject(error)
+            rejectOnce(error)
           }
         })
       }
@@ -2164,12 +2295,11 @@ function requestStream(
       )
     })
     request.on('error', error => {
-      unbindCancellation()
       if (error && error.name === 'ApiError') {
-        reject(error)
+        rejectOnce(error)
         return
       }
-      reject(
+      rejectOnce(
         new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
           error?.message || 'DeepSeek 请求失败',
@@ -2183,12 +2313,14 @@ function requestStream(
   })
 }
 
-function collectNonStreamResponse(response, resolve) {
+function collectNonStreamResponse(response, resolve, reject) {
   const chunks = []
+  let responseEnded = false
   response.on('data', chunk => {
     chunks.push(chunk)
   })
   response.on('end', () => {
+    responseEnded = true
     const responseText = Buffer.concat(chunks).toString('utf8')
     let responseData = null
     try {
@@ -2200,6 +2332,28 @@ function collectNonStreamResponse(response, resolve) {
       statusCode: response.statusCode,
       data: responseData
     })
+  })
+  response.on('aborted', () => {
+    reject(
+      createDeepSeekResponseInterruptedError(
+        'DeepSeek 错误响应在读取完成前被上游中断'
+      )
+    )
+  })
+  response.on('error', error => {
+    reject(
+      createDeepSeekResponseInterruptedError('DeepSeek 错误响应读取失败', error)
+    )
+  })
+  response.on('close', () => {
+    if (responseEnded) {
+      return
+    }
+    reject(
+      createDeepSeekResponseInterruptedError(
+        'DeepSeek 错误响应在读取完成前关闭'
+      )
+    )
   })
 }
 
@@ -3104,14 +3258,18 @@ async function translatePostEntries(body = {}) {
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
-  let aiInput = prepareAiInput(input)
+  const splitOptions = {
+    maxRequestTextLength: getTranslationChunkTextLimit(settings),
+    richTextSegmentTextLength: getRichTextSegmentTextLimit(settings)
+  }
+  let aiInput = prepareAiInput(input, splitOptions)
   aiInput = await prepareOfficialTermGlossaryForAiInput({
     input: aiInput,
     settings,
     url,
     handlers
   })
-  const inputChunks = splitAiInput(aiInput)
+  const inputChunks = splitAiInput(aiInput, splitOptions)
   const chunkTotal = inputChunks.length
   const chunkResponses = []
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(

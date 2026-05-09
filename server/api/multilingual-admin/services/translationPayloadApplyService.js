@@ -12,10 +12,13 @@ const {
 const relationService = require('./relationService')
 const translationPostService = require('./translationPostService')
 const coverImageAdoptionService = require('./coverImageAdoptionService')
+const {
+  STRUCTURED_RICH_TEXT_VALUE_TYPE,
+  renderRichTextDocumentNode
+} = require('../utils/richTextDocumentUtils')
 
 const TRANSLATION_RECORD_KIND = 'translation'
 const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
-const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 const URL_LIST_TEXT_FIELD_NAME = 'urlList.text'
 const APPLY_ALLOWED_STATUSES = new Set([
   TRANSLATION_JOB_STATUS.WAITING_REVIEW,
@@ -23,23 +26,6 @@ const APPLY_ALLOWED_STATUSES = new Set([
   TRANSLATION_JOB_STATUS.PARTIAL_ADOPTED,
   TRANSLATION_JOB_STATUS.FULLY_ADOPTED
 ])
-const VOID_HTML_TAG_SET = new Set([
-  'area',
-  'base',
-  'br',
-  'col',
-  'embed',
-  'hr',
-  'img',
-  'input',
-  'link',
-  'meta',
-  'param',
-  'source',
-  'track',
-  'wbr'
-])
-
 function getTranslationJobModel() {
   const repository =
     global.$mongodDB?.multilingual?.repositories?.translationJobs
@@ -178,53 +164,6 @@ function createValueHash(value) {
     .createHash('sha256')
     .update(stableStringify(value))
     .digest('hex')
-}
-
-function escapeHtmlText(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-function escapeHtmlAttribute(value) {
-  return escapeHtmlText(value).replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
-}
-
-function renderRichTextDocumentNode(node) {
-  if (!node || typeof node !== 'object') {
-    return ''
-  }
-
-  if (node.type === 'root') {
-    const children = Array.isArray(node.children) ? node.children : []
-    return children.map(renderRichTextDocumentNode).join('')
-  }
-
-  if (node.type === 'text') {
-    return escapeHtmlText(node.text || '')
-  }
-
-  if (node.type !== 'element' || !node.tag) {
-    return ''
-  }
-
-  const attrs = {
-    ...(node.attrs || {}),
-    ...(node.translatableAttrs || {})
-  }
-  const attrText = Object.keys(attrs)
-    .filter(key => attrs[key] !== null && typeof attrs[key] !== 'undefined')
-    .map(key => ` ${key}="${escapeHtmlAttribute(attrs[key])}"`)
-    .join('')
-  if (VOID_HTML_TAG_SET.has(node.tag)) {
-    return `<${node.tag}${attrText}>`
-  }
-
-  const children = Array.isArray(node.children) ? node.children : []
-  return `<${node.tag}${attrText}>${children
-    .map(renderRichTextDocumentNode)
-    .join('')}</${node.tag}>`
 }
 
 function normalizeAiEntryValue(entry) {

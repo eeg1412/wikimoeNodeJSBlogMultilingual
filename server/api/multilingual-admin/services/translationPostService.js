@@ -16,6 +16,7 @@ const relationService = require('./relationService')
 const {
   COVER_IMAGE_ENTRY_TYPE
 } = require('../utils/coverImageTranslationUtils')
+const { renderRichTextDocumentNode } = require('../utils/richTextDocumentUtils')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -3237,51 +3238,6 @@ async function getSourcePostAiImportPreviewContext(query = {}) {
     targetLanguageCode: input.targetLanguageCode,
     translatedRelationCount: translationRecordMap.size
   }
-}
-
-function escapeRichTextAttribute(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-function escapeRichTextText(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-function renderRichTextDocumentNode(node) {
-  if (!node || typeof node !== 'object') {
-    return ''
-  }
-  if (node.type === 'root') {
-    return Array.isArray(node.children)
-      ? node.children.map(renderRichTextDocumentNode).join('')
-      : ''
-  }
-  if (node.type === 'text') {
-    return escapeRichTextText(node.text || '')
-  }
-  if (node.type !== 'element' || !node.tag) {
-    return ''
-  }
-
-  const attrs = {
-    ...(node.attrs || {}),
-    ...(node.translatableAttrs || {})
-  }
-  const attrText = Object.keys(attrs)
-    .filter(key => attrs[key] !== null && typeof attrs[key] !== 'undefined')
-    .map(key => ` ${key}="${escapeRichTextAttribute(attrs[key])}"`)
-    .join('')
-  const childrenText = Array.isArray(node.children)
-    ? node.children.map(renderRichTextDocumentNode).join('')
-    : ''
-  return `<${node.tag}${attrText}>${childrenText}</${node.tag}>`
 }
 
 function normalizeAiEntryValue(entry) {
