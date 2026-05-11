@@ -14,6 +14,7 @@ const utils = require('../../../utils/utils')
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 const MAX_TERM_COUNT = 10000
+const MAX_BATCH_DELETE_TERM_COUNT = 100
 const MAX_CANDIDATE_EXTRA_COUNT = 50
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 200
 const CLEANUP_DEBOUNCE_MS = 30 * 1000
@@ -309,6 +310,46 @@ function parseObjectId(value, fieldName = 'id') {
   return new mongoose.Types.ObjectId(text)
 }
 
+function parseObjectIdList(values, fieldName = 'ids') {
+  if (!Array.isArray(values)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'ids 不能为空',
+      fieldName,
+      400
+    )
+  }
+
+  const objectIdMap = new Map()
+  values.forEach(value => {
+    const objectId = parseObjectId(value, fieldName)
+    const key = String(objectId)
+    if (objectIdMap.has(key)) {
+      return
+    }
+    objectIdMap.set(key, objectId)
+  })
+
+  if (objectIdMap.size === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'ids 不能为空',
+      fieldName,
+      400
+    )
+  }
+  if (objectIdMap.size > MAX_BATCH_DELETE_TERM_COUNT) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `单次最多删除 ${MAX_BATCH_DELETE_TERM_COUNT} 个专有名词`,
+      fieldName,
+      400
+    )
+  }
+
+  return Array.from(objectIdMap.values())
+}
+
 function parsePage(value) {
   const page = Number(value || 1)
   if (!Number.isInteger(page) || page < 1) {
@@ -449,6 +490,7 @@ async function getTermList(query = {}) {
   const TermModel = getTermModel()
   const TranslationModel = getTranslationModel()
 
+  const termCount = await TermModel.countDocuments({})
   const total = await TermModel.countDocuments(match)
   const termList = await TermModel.find(match)
     .sort({ updatedAt: -1, _id: -1 })
@@ -467,6 +509,8 @@ async function getTermList(query = {}) {
   return {
     list: attachTranslationsToTerms(termList, translationList),
     total,
+    termCount,
+    maxTermCount: MAX_TERM_COUNT,
     page,
     limit
   }
@@ -549,6 +593,54 @@ async function deleteTerm(query = {}) {
   }
   await TranslationModel.deleteMany({ termId: id })
   return { deletedCount: result.deletedCount }
+}
+
+async function batchDeleteTerms(body = {}) {
+  const termIdList = parseObjectIdList(body.ids, 'ids')
+  const TermModel = getTermModel()
+  const TranslationModel = getTranslationModel()
+  const termList = await TermModel.find({
+    _id: { $in: termIdList }
+  })
+    .select('_id sourceText')
+    .lean()
+  const existingTermIdSet = new Set()
+  termList.forEach(term => {
+    existingTermIdSet.add(String(term._id))
+  })
+  const missingIds = termIdList
+    .map(termId => String(termId))
+    .filter(termId => {
+      return !existingTermIdSet.has(termId)
+    })
+  if (missingIds.length > 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      `以下专有名词不存在或已删除：${missingIds.join('、')}`,
+      'ids',
+      400,
+      { missingIds }
+    )
+  }
+
+  const termDeleteResult = await TermModel.deleteMany({
+    _id: { $in: termIdList }
+  })
+  if (
+    !termDeleteResult ||
+    termDeleteResult.deletedCount !== termIdList.length
+  ) {
+    throw new ApiError(ERROR_CODES.CONTENT_NOT_FOUND, '名词不存在', 'ids', 404)
+  }
+  const translationDeleteResult = await TranslationModel.deleteMany({
+    termId: { $in: termIdList }
+  })
+
+  return {
+    requestedCount: termIdList.length,
+    deletedCount: termDeleteResult.deletedCount || 0,
+    translationDeletedCount: translationDeleteResult.deletedCount || 0
+  }
 }
 
 async function getTranslationList(query = {}) {
@@ -999,10 +1091,7 @@ function buildGlossaryNote(sourceTextItem, term, matchedTermCount) {
   if (termNote) {
     return termNote
   }
-  return normalizeString(
-    sourceTextItem.note,
-    MAX_EXTRACTED_TERM_NOTE_LENGTH
-  )
+  return normalizeString(sourceTextItem.note, MAX_EXTRACTED_TERM_NOTE_LENGTH)
 }
 
 function findMatchedTranslationForLanguage({
@@ -1158,7 +1247,20 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
 async function resolveTermForAiSearchTerm(termItem, sourceText) {
   const termId = normalizeString(termItem?.termId, 80)
   if (termId) {
-    return await findTermById(termId)
+    const term = await findTermById(termId)
+    const note = normalizeString(termItem?.note, 2000)
+    if (note && !normalizeString(term.note, 2000)) {
+      const TermModel = getTermModel()
+      const updatedTerm = await TermModel.findOneAndUpdate(
+        { _id: term._id },
+        { $set: { note } },
+        { new: true }
+      ).lean()
+      if (updatedTerm) {
+        return updatedTerm
+      }
+    }
+    return term
   }
 
   return await createTermForSourceText(sourceText, {
@@ -1211,7 +1313,6 @@ async function upsertAiSearchTerms({ terms = [], provider = '', model = '' }) {
           translationSource: resolveAiTranslationSource(termItem),
           provider,
           model,
-          note: termItem.note || '',
           searchMetadata: termItem.searchMetadata || {},
           enabled: true
         },
@@ -1456,6 +1557,7 @@ module.exports = {
   TRANSLATION_SOURCE_VALUES,
   buildGlossaryMarkdown,
   buildNormalizedSourceText,
+  batchDeleteTerms,
   compareMatchedTermTranslationCoverage,
   compareTermTranslationCoverage,
   createTerm,

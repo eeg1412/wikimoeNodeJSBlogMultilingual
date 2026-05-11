@@ -62,26 +62,28 @@
         </el-form>
       </div>
       <div class="fr translation-actions">
-        <el-button
-          class="translation-batch-delete-button"
-          type="danger"
-          size="small"
-          :disabled="selectedDeletableJobIds.length === 0"
-          :loading="batchDeleting"
-          @click="deleteSelectedJobs"
-        >
-          批量删除
-          <span v-if="selectedDeletableJobIds.length > 0">
-            {{ selectedDeletableJobIds.length }}
-          </span>
-        </el-button>
-        <el-button
-          class="translation-refresh-button"
-          size="small"
-          @click="refreshJobPage(true)"
-        >
-          <el-icon><Refresh /></el-icon>
-        </el-button>
+        <div class="translation-action-buttons">
+          <el-button
+            class="translation-batch-delete-button"
+            type="danger"
+            size="small"
+            :disabled="selectedDeletableJobIds.length === 0"
+            :loading="batchDeleting"
+            @click="deleteSelectedJobs"
+          >
+            批量删除
+            <span v-if="selectedDeletableJobIds.length > 0">
+              {{ selectedDeletableJobIds.length }}
+            </span>
+          </el-button>
+          <el-button
+            class="translation-refresh-button"
+            size="small"
+            @click="refreshJobPage(true)"
+          >
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -2564,7 +2566,17 @@ export default {
   min-width: 0;
 }
 
-.translation-actions :deep(.el-button + .el-button) {
+.translation-action-buttons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.translation-action-buttons :deep(.el-button + .el-button) {
   margin-left: 0;
 }
 
@@ -3086,28 +3098,41 @@ html.dark .job-state-panel-meta {
 
   .translation-actions {
     display: flex;
+    flex-direction: column;
     float: none !important;
-    justify-content: flex-end;
+    justify-content: flex-start;
+    align-items: stretch;
     margin-top: 10px;
     width: 100%;
   }
 
-  .translation-actions :deep(.el-button) {
-    flex: 0 1 auto;
+  .translation-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .translation-action-buttons :deep(.el-button) {
+    flex-shrink: 0;
     margin-left: 0;
-    min-width: 0;
     width: auto;
   }
 
   .translation-batch-delete-button {
-    max-width: 126px;
+    max-width: 100%;
     padding-left: 10px;
     padding-right: 10px;
   }
 
   .translation-refresh-button {
-    flex-basis: 34px;
-    width: 34px;
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    min-width: 44px;
+    width: 44px;
+    min-height: 32px;
     padding-left: 0;
     padding-right: 0;
   }

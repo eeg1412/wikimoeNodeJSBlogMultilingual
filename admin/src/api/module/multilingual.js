@@ -142,6 +142,12 @@ export default function (api) {
         noLoading
       })
     },
+    batchDeleteProperNounTerms(data, noLoading = false) {
+      return api.post('/proper-noun/term/batch-delete', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getProperNounTranslationList(data = {}, noLoading = false) {
       return api.get('/proper-noun/translation/list', {
         params: data,

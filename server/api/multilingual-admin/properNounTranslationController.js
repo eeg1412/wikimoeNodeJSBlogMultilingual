@@ -32,6 +32,10 @@ async function deleteTerm(req) {
   return await properNounTranslationService.deleteTerm(req.query || {})
 }
 
+async function batchDeleteTerms(req) {
+  return await properNounTranslationService.batchDeleteTerms(req.body || {})
+}
+
 async function getTranslationList(req) {
   return await properNounTranslationService.getTranslationList(req.query || {})
 }
@@ -54,6 +58,10 @@ module.exports = {
   createTerm: controller(createTerm, 'proper noun term create fail'),
   updateTerm: controller(updateTerm, 'proper noun term update fail'),
   deleteTerm: controller(deleteTerm, 'proper noun term delete fail'),
+  batchDeleteTerms: controller(
+    batchDeleteTerms,
+    'proper noun term batch delete fail'
+  ),
   getTranslationList: controller(
     getTranslationList,
     'proper noun translation list get fail'

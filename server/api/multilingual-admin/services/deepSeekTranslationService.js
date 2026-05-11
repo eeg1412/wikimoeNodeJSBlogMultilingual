@@ -1882,23 +1882,7 @@ function buildCandidateIdentityNote(term) {
   if (termNote) {
     return termNote
   }
-
-  const noteList = []
-  let translations = []
-  if (Array.isArray(term.translations)) {
-    translations = term.translations
-  }
-  translations.forEach(translation => {
-    const note = normalizeString(translation.note).slice(
-      0,
-      MAX_EXTRACTED_TERM_NOTE_LENGTH
-    )
-    if (!note || noteList.includes(note)) {
-      return
-    }
-    noteList.push(note)
-  })
-  return noteList.slice(0, 2).join('；')
+  return ''
 }
 
 function buildExistingTermFilterRequestData({

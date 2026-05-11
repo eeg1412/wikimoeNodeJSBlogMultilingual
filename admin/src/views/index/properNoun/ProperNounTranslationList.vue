@@ -52,20 +52,48 @@
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" @click="getTermList(true)">
+            <el-button
+              class="proper-noun-search-button"
+              type="primary"
+              @click="getTermList(true)"
+            >
               搜索
             </el-button>
           </el-form-item>
         </el-form>
       </div>
       <div class="fr proper-noun-actions">
-        <el-button @click="getTermList(true)">
-          <el-icon><Refresh /></el-icon>
-        </el-button>
-        <el-button type="primary" @click="openCreateTermDialog">
-          <el-icon><Plus /></el-icon>
-          新增名词
-        </el-button>
+        <div class="proper-noun-limit-summary">
+          专有名词 {{ termLimitText }}
+        </div>
+        <div class="proper-noun-action-buttons">
+          <el-button
+            class="proper-noun-batch-delete-button"
+            type="danger"
+            :disabled="selectedTermIds.length === 0"
+            :loading="batchDeleting"
+            @click="deleteSelectedTerms"
+          >
+            批量删除
+            <span v-if="selectedTermIds.length > 0">
+              {{ selectedTermIds.length }}
+            </span>
+          </el-button>
+          <el-button
+            class="proper-noun-refresh-button"
+            @click="getTermList(true)"
+          >
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+          <el-button
+            class="proper-noun-create-button"
+            type="primary"
+            @click="openCreateTermDialog"
+          >
+            <el-icon><Plus /></el-icon>
+            新增名词
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -77,11 +105,12 @@
         row-key="_id"
         height="100%"
         border
+        @selection-change="handleTermSelectionChange"
       >
+        <ResponsiveTableColumn type="selection" width="48" reserve-selection />
         <ResponsiveTableColumn label="原文名词" min-width="240">
           <template #default="{ row }">
             <div class="proper-noun-source-text">{{ row.sourceText }}</div>
-            <div v-if="row.note" class="proper-noun-note">{{ row.note }}</div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="译名" min-width="260">
@@ -102,6 +131,14 @@
               </el-tag>
             </div>
             <span v-else class="table-empty-text">暂无译名</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="备注" min-width="200">
+          <template #default="{ row }">
+            <div v-if="row.note" class="proper-noun-note-cell">
+              {{ row.note }}
+            </div>
+            <span v-else class="table-empty-text">-</span>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="状态" width="110">
@@ -395,8 +432,14 @@ export default {
   setup() {
     const tableRef = ref(null)
     const loading = ref(false)
+    const batchDeleting = ref(false)
     const termList = ref([])
     const total = ref(0)
+    const selectedTermRows = ref([])
+    const termSummary = reactive({
+      count: 0,
+      maxCount: 0
+    })
     const params = reactive({
       page: 1,
       limit: 20,
@@ -432,6 +475,25 @@ export default {
       }
       return '新增译名'
     })
+    const selectedTermIds = computed(() => {
+      const idList = []
+      selectedTermRows.value.forEach(row => {
+        const id = String(row?._id || '')
+        if (!id || idList.includes(id)) {
+          return
+        }
+        idList.push(id)
+      })
+      return idList
+    })
+    const termLimitText = computed(() => {
+      const count = getCountText(termSummary.count)
+      const maxCount = getCountText(termSummary.maxCount)
+      if (maxCount === '0') {
+        return `${count}/-`
+      }
+      return `${count}/${maxCount}`
+    })
 
     function assignReactive(target, source) {
       Object.keys(target).forEach(key => {
@@ -457,6 +519,9 @@ export default {
     }
 
     function getTermList(resetPage = false) {
+      if (resetPage === true) {
+        clearTermSelection()
+      }
       if (resetPage === true && params.page !== 1) {
         params.page = 1
         return
@@ -468,6 +533,8 @@ export default {
           const data = response.data.data || {}
           termList.value = data.list || []
           total.value = data.total || 0
+          termSummary.count = data.termCount || 0
+          termSummary.maxCount = data.maxTermCount || 0
           tableRef.value?.scrollTo({ top: 0 })
         })
         .finally(() => {
@@ -534,8 +601,63 @@ export default {
       }
       multilingualApi.deleteProperNounTerm({ id: row._id }).then(() => {
         ElMessage.success('名词已删除')
+        clearTermSelection()
         getTermList()
       })
+    }
+
+    function handleTermSelectionChange(selection) {
+      if (!Array.isArray(selection)) {
+        selectedTermRows.value = []
+        return
+      }
+      selectedTermRows.value = selection
+    }
+
+    function clearTermSelection() {
+      selectedTermRows.value = []
+      tableRef.value?.clearSelection()
+    }
+
+    async function deleteSelectedTerms() {
+      const ids = selectedTermIds.value
+      if (ids.length === 0) {
+        return
+      }
+
+      try {
+        await ElMessageBox.confirm(
+          `确认删除选中的 ${ids.length} 个专有名词及其所有译名？`,
+          '批量删除',
+          {
+            type: 'warning',
+            confirmButtonText: '删除',
+            cancelButtonText: '取消'
+          }
+        )
+      } catch (error) {
+        return
+      }
+
+      batchDeleting.value = true
+      try {
+        const response = await multilingualApi.batchDeleteProperNounTerms(
+          { ids },
+          true
+        )
+        const data = response.data.data || {}
+        let deletedCount = ids.length
+        if (typeof data.deletedCount === 'number') {
+          deletedCount = data.deletedCount
+        }
+        ElMessage.success(`已删除 ${deletedCount} 个专有名词`)
+        clearTermSelection()
+        getTermList()
+      } catch (error) {
+        console.log(error)
+      } finally {
+        batchDeleting.value = false
+      }
     }
 
     function openTranslationDialog(row) {
@@ -637,6 +759,10 @@ export default {
     }
 
     function getUsedCountText(value) {
+      return getCountText(value)
+    }
+
+    function getCountText(value) {
       const count = Number(value || 0)
       if (!Number.isFinite(count) || count < 0) {
         return '0'
@@ -684,7 +810,9 @@ export default {
       Plus,
       Refresh,
       activeTerm,
+      batchDeleting,
       deleteTerm,
+      deleteSelectedTerms,
       deleteTranslation,
       getDisplayedTranslations,
       getLastUsedAtText,
@@ -693,6 +821,7 @@ export default {
       getTranslationList,
       getTranslationSourceText,
       getUsedCountText,
+      handleTermSelectionChange,
       languageOptions,
       loading,
       openCreateTermDialog,
@@ -701,12 +830,14 @@ export default {
       openEditTranslationDialog,
       openTranslationDialog,
       params,
+      selectedTermIds,
       submitTerm,
       submitTranslation,
       tableRef,
       termDialogTitle,
       termDialogVisible,
       termForm,
+      termLimitText,
       termList,
       termSaving,
       total,
@@ -739,6 +870,31 @@ export default {
 .proper-noun-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.proper-noun-action-buttons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.proper-noun-action-buttons :deep(.el-button + .el-button),
+.proper-noun-row-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.proper-noun-limit-summary {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 32px;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .proper-noun-row-actions {
@@ -761,13 +917,21 @@ export default {
   word-break: break-word;
 }
 
+.proper-noun-note-cell {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .proper-noun-translation-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 .proper-noun-translation-list :deep(.el-tag) {
-  white-space: wrap;
+  white-space: normal;
   height: auto;
   line-height: 18px;
   padding: 2px 9px;
@@ -799,20 +963,70 @@ export default {
 }
 
 @media (max-width: 767px) {
+  .common-top-search-form-body {
+    float: none !important;
+    width: 100%;
+  }
+
   .proper-noun-actions {
-    float: none;
+    display: flex;
+    flex-direction: column;
+    float: none !important;
     justify-content: flex-start;
-    margin-top: 8px;
+    align-items: stretch;
+    margin-top: 10px;
+    width: 100%;
+  }
+
+  .proper-noun-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    width: 100%;
   }
 
   .proper-noun-search-form :deep(.el-form-item) {
     display: block;
     margin-right: 0;
+    width: 100%;
   }
 
   .proper-noun-search-form :deep(.el-input),
   .proper-noun-search-form :deep(.el-select) {
     width: 100% !important;
+  }
+
+  .proper-noun-search-button {
+    width: 100%;
+  }
+
+  .proper-noun-limit-summary {
+    line-height: 1.5;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .proper-noun-action-buttons :deep(.el-button) {
+    flex-shrink: 0;
+    margin-left: 0;
+    width: auto;
+  }
+
+  .proper-noun-batch-delete-button,
+  .proper-noun-create-button {
+    max-width: 100%;
+  }
+
+  .proper-noun-refresh-button {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    min-width: 44px;
+    width: 44px;
+    min-height: 32px;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .proper-noun-form {

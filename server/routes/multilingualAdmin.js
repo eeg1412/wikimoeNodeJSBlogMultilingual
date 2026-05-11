@@ -159,6 +159,12 @@ const multilingualAdminRouteSetting = [
     controller: properNounTranslationController.deleteTerm
   },
   {
+    path: '/proper-noun/term/batch-delete',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.batchDeleteTerms
+  },
+  {
     path: '/proper-noun/translation/list',
     method: 'get',
     middleware: [checkAuth],
