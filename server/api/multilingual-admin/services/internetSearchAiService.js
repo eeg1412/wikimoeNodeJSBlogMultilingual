@@ -23,6 +23,7 @@ const OPERATION_OFFICIAL_TERM_KNOWLEDGE =
 const OPERATION_OFFICIAL_TERM_SEARCH = 'proper-noun.official-translation.search'
 const TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE = 'aiKnowledgeBase'
 const TERM_TRANSLATION_SOURCE_INTERNET_SEARCH = 'internetSearchAi'
+const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 
 const officialTermKnowledgeResponseJsonSchema = {
   type: 'object',
@@ -79,6 +80,13 @@ function normalizeString(value, maxLength = 600) {
     return ''
   }
   return String(value).replace(/\r\n?/g, '\n').trim().slice(0, maxLength)
+}
+
+function normalizeOfficialTermContextSummary(value) {
+  return normalizeString(value, MAX_TERM_CONTEXT_SUMMARY_LENGTH).replace(
+    /\s+/g,
+    ' '
+  )
 }
 
 function normalizeSourceTerms(sourceTerms) {
@@ -205,12 +213,26 @@ function buildTermRequestPromptRows(termRequests) {
 
 function buildOfficialTermKnowledgePrompt({
   termRequests,
-  sourceLanguageCode
+  sourceLanguageCode,
+  contextSummary
 }) {
-  return [
+  const normalizedContextSummary =
+    normalizeOfficialTermContextSummary(contextSummary)
+  const requestData = {
+    task: 'resolve_official_term_translations_from_model_knowledge',
+    sourceLanguageCode: sourceLanguageCode || '',
+    sourceTermRequests: buildTermRequestPromptRows(termRequests)
+  }
+  if (normalizedContextSummary) {
+    requestData.contentContextSummary = normalizedContextSummary
+  }
+
+  const promptLines = [
     '你是多语言博客 CMS 的专有名词译名整理助手。',
     '本步骤禁止联网检索，也没有任何搜索工具可用；只能使用你模型内置的可靠知识。',
     '请为每个 sourceText 在指定目标语言中给出官方译名、正式译名、权威通行译名或稳定通用译名。',
+    'sourceTermRequests 旁可能包含 contentContextSummary；它概括这些名词在本次内容中的作品、角色、主题、关系和场景。',
+    '确认译名时必须优先按 contentContextSummary 识别对象身份；短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
     '如果你已经可靠知道译名，必须直接写入 translations，不要把该语言放入 needsSearchLanguageCodes。',
     '像“江户时代”“新干线”这类历史时期、公共交通、地名、常见组织、常见作品名等通用常识词，只要你能确定目标语言里的稳定通用译名，就应使用内置知识完成。',
     '只有当你无法可靠确认某个 sourceText 在某个目标语言 code 下的正式或通行译名时，才把该 language code 放入 needsSearchLanguageCodes。',
@@ -220,23 +242,34 @@ function buildOfficialTermKnowledgePrompt({
     '只返回合法 JSON，不要使用 Markdown，不要解释。',
     'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"needsSearchLanguageCodes":["zh-HK"]}]}。',
     '',
-    JSON.stringify(
-      {
-        task: 'resolve_official_term_translations_from_model_knowledge',
-        sourceLanguageCode: sourceLanguageCode || '',
-        sourceTermRequests: buildTermRequestPromptRows(termRequests)
-      },
-      null,
-      2
-    )
-  ].join('\n')
+    JSON.stringify(requestData, null, 2)
+  ]
+
+  return promptLines.join('\n')
 }
 
-function buildOfficialTermSearchPrompt({ termRequests, sourceLanguageCode }) {
-  return [
+function buildOfficialTermSearchPrompt({
+  termRequests,
+  sourceLanguageCode,
+  contextSummary
+}) {
+  const normalizedContextSummary =
+    normalizeOfficialTermContextSummary(contextSummary)
+  const requestData = {
+    task: 'search_official_term_translations',
+    sourceLanguageCode: sourceLanguageCode || '',
+    sourceTermRequests: buildTermRequestPromptRows(termRequests)
+  }
+  if (normalizedContextSummary) {
+    requestData.contentContextSummary = normalizedContextSummary
+  }
+
+  const promptLines = [
     '你是多语言博客 CMS 的互联网检索助手。',
     '本步骤只处理前一步无法通过模型内置知识可靠确认的缺失译名。',
     '只允许为 sourceTermRequests 中列出的 sourceText 和目标语言 code 使用 Google Search，不要检索请求之外的语言或名词。',
+    'sourceTermRequests 旁可能包含 contentContextSummary；检索和筛选结果时必须优先按该上下文判断名词指向的作品、角色、组织、地点或产品。',
+    '短人名、昵称、单字名或同形异义词必须结合 contentContextSummary 检索，不要只按字面普通词或日常含义给译名。',
     '你需要为每个缺失项给出目标语言中的官方译名、正式译名、权威通行译名或稳定通用译名。',
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
     '如果目标语言确实找不到官方译名，必须给出适合该目标语言的直译或音译。',
@@ -244,16 +277,10 @@ function buildOfficialTermSearchPrompt({ termRequests, sourceLanguageCode }) {
     '只返回合法 JSON，不要使用 Markdown，不要解释。',
     'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。',
     '',
-    JSON.stringify(
-      {
-        task: 'search_official_term_translations',
-        sourceLanguageCode: sourceLanguageCode || '',
-        sourceTermRequests: buildTermRequestPromptRows(termRequests)
-      },
-      null,
-      2
-    )
-  ].join('\n')
+    JSON.stringify(requestData, null, 2)
+  ]
+
+  return promptLines.join('\n')
 }
 
 function buildGeminiKnowledgeRequest(settings, prompt) {
@@ -503,6 +530,12 @@ async function recordUsage(options = {}) {
       }
     })
   }
+  const contextSummary = normalizeOfficialTermContextSummary(
+    options.contextSummary
+  )
+  if (contextSummary) {
+    meta.contextSummary = contextSummary
+  }
   await recordGeminiUsageLog({
     settings: options.settings,
     operation: options.operation || OPERATION_OFFICIAL_TERM_SEARCH,
@@ -522,6 +555,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   settings,
   termRequests,
   sourceLanguageCode,
+  contextSummary,
   requestUrl,
   cancellation,
   skipUsageLog
@@ -529,7 +563,8 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermKnowledgePrompt({
     termRequests,
-    sourceLanguageCode
+    sourceLanguageCode,
+    contextSummary
   })
   const requestBody = buildGeminiKnowledgeRequest(settings, prompt)
   const requestSummary = summarizeGeminiNativeRequestBody(
@@ -560,6 +595,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
       targetLanguageCodes,
       termCount: termRequests.length,
       termRequests,
+      contextSummary,
       requestSummary,
       responseSummary,
       skipUsageLog
@@ -578,6 +614,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
       targetLanguageCodes,
       termCount: termRequests.length,
       termRequests,
+      contextSummary,
       requestSummary,
       failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
       failureReason: error?.message || '',
@@ -599,6 +636,7 @@ async function searchOfficialTermTranslationsWithInternet({
   settings,
   termRequests,
   sourceLanguageCode,
+  contextSummary,
   requestUrl,
   cancellation,
   skipUsageLog
@@ -606,7 +644,8 @@ async function searchOfficialTermTranslationsWithInternet({
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermSearchPrompt({
     termRequests,
-    sourceLanguageCode
+    sourceLanguageCode,
+    contextSummary
   })
   const requestBody = buildGeminiSearchRequest(settings, prompt)
   const requestSummary = summarizeGeminiNativeRequestBody(
@@ -640,6 +679,7 @@ async function searchOfficialTermTranslationsWithInternet({
       targetLanguageCodes,
       termCount: termRequests.length,
       termRequests,
+      contextSummary,
       requestSummary,
       responseSummary,
       skipUsageLog
@@ -658,6 +698,7 @@ async function searchOfficialTermTranslationsWithInternet({
       targetLanguageCodes,
       termCount: termRequests.length,
       termRequests,
+      contextSummary,
       requestSummary,
       failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
       failureReason: error?.message || '',
@@ -688,6 +729,9 @@ async function searchOfficialTermTranslations(options = {}) {
     }
   }
   const termRequests = buildTermRequests(sourceTerms, targetLanguageCodes)
+  const contextSummary = normalizeOfficialTermContextSummary(
+    options.contextSummary
+  )
 
   const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
   if (settings.provider !== 'gemini') {
@@ -704,6 +748,7 @@ async function searchOfficialTermTranslations(options = {}) {
     settings,
     termRequests,
     sourceLanguageCode: options.sourceLanguageCode,
+    contextSummary,
     requestUrl,
     cancellation: options.cancellation,
     skipUsageLog: options.skipUsageLog
@@ -718,6 +763,7 @@ async function searchOfficialTermTranslations(options = {}) {
       settings,
       termRequests: knowledgeResult.missingTermRequests,
       sourceLanguageCode: options.sourceLanguageCode,
+      contextSummary,
       requestUrl,
       cancellation: options.cancellation,
       skipUsageLog: options.skipUsageLog

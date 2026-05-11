@@ -329,6 +329,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import {
   getLanguageText,
+  sortBySupportedLanguageOrder,
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
 
@@ -527,7 +528,10 @@ export default {
         .getProperNounTranslationList({ termId: activeTerm.value._id }, true)
         .then(response => {
           const data = response.data.data || {}
-          translationList.value = data.list || []
+          translationList.value = sortBySupportedLanguageOrder(
+            data.list,
+            item => item.languageCode
+          )
         })
         .finally(() => {
           translationLoading.value = false
@@ -612,11 +616,17 @@ export default {
         ? row.translations
         : []
       if (params.languageCode) {
-        return translations.filter(
-          item => item.languageCode === params.languageCode
+        return sortBySupportedLanguageOrder(
+          translations.filter(
+            item => item.languageCode === params.languageCode
+          ),
+          item => item.languageCode
         )
       }
-      return translations.slice(0, 4)
+      return sortBySupportedLanguageOrder(
+        translations,
+        item => item.languageCode
+      )
     }
 
     watch(

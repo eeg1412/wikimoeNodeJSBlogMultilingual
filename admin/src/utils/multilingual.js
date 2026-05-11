@@ -9,6 +9,14 @@ export const SUPPORTED_LANGUAGE_OPTIONS = [
   { label: 'English', value: 'en-US' }
 ]
 
+const SUPPORTED_LANGUAGE_ORDER_MAP = SUPPORTED_LANGUAGE_OPTIONS.reduce(
+  (result, item, index) => {
+    result[item.value] = index
+    return result
+  },
+  {}
+)
+
 export const POST_TYPE_OPTIONS = [
   { label: '博文', value: 1 },
   { label: '推文', value: 2 },
@@ -145,6 +153,41 @@ export function getLanguageText(value) {
   }
 
   return value || '-'
+}
+
+export function compareSupportedLanguage(leftLanguageCode, rightLanguageCode) {
+  const leftOrder = Object.prototype.hasOwnProperty.call(
+    SUPPORTED_LANGUAGE_ORDER_MAP,
+    leftLanguageCode
+  )
+    ? SUPPORTED_LANGUAGE_ORDER_MAP[leftLanguageCode]
+    : Number.MAX_SAFE_INTEGER
+  const rightOrder = Object.prototype.hasOwnProperty.call(
+    SUPPORTED_LANGUAGE_ORDER_MAP,
+    rightLanguageCode
+  )
+    ? SUPPORTED_LANGUAGE_ORDER_MAP[rightLanguageCode]
+    : Number.MAX_SAFE_INTEGER
+
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder
+  }
+
+  const leftText = String(leftLanguageCode || '')
+  const rightText = String(rightLanguageCode || '')
+  return leftText.localeCompare(rightText)
+}
+
+export function sortBySupportedLanguageOrder(list, getLanguageCode) {
+  const resolveLanguageCode =
+    typeof getLanguageCode === 'function' ? getLanguageCode : item => item
+
+  return [...(Array.isArray(list) ? list : [])].sort((leftItem, rightItem) => {
+    return compareSupportedLanguage(
+      resolveLanguageCode(leftItem),
+      resolveLanguageCode(rightItem)
+    )
+  })
 }
 
 export function getLocalizedSidebarBuiltinTitle(type, languageCode) {

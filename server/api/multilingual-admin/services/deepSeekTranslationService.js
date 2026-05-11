@@ -37,6 +37,7 @@ const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
 const MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH = 10000
 const MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000
 const MAX_EXTRACTED_TERM_COUNT = 50
+const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
@@ -66,6 +67,13 @@ function normalizeString(value) {
 
 function normalizePrompt(value) {
   return normalizeString(value).trim().slice(0, 6000)
+}
+
+function normalizeTermContextSummary(value) {
+  return normalizeString(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_TERM_CONTEXT_SUMMARY_LENGTH)
 }
 
 function normalizeTargetLanguageCodeList({
@@ -521,14 +529,22 @@ function buildOfficialTermGlossaryPrompt(input) {
     return ''
   }
 
-  return buildPromptLayer('名词数据库层', [
+  const contextSummary = normalizeTermContextSummary(
+    input.officialTermContextSummary
+  )
+  const promptLines = [
     '以下名词数据库由本次选中的翻译内容抽取，并与站点专有名词翻译集合合并整理。',
     '这份名词数据库只包含当前目标语言，不包含其他语言的译名。',
     '翻译正文、标题、摘要、关联内容和递归关联文章时，必须优先使用表格中的译名。',
     '同一个原文名词在同一次请求的所有条目、富文本片段和关联字段中必须保持同一译法。',
-    '译名为“未收录”的名词，需要按上下文直译或音译，并在本次请求内保持一致。',
-    glossaryMarkdown
-  ])
+    '译名为“未收录”的名词，需要按上下文直译或音译，并在本次请求内保持一致。'
+  ]
+  if (contextSummary) {
+    promptLines.push(`本次内容简要上下文：${contextSummary}`)
+  }
+  promptLines.push(glossaryMarkdown)
+
+  return buildPromptLayer('名词数据库层', promptLines)
 }
 
 function buildNonLanguagePrompt() {
@@ -1295,13 +1311,17 @@ function buildTermExtractionPackages(input) {
   return packages.concat(contentPackages)
 }
 
-function buildTermExtractionRequestData(input, termPackage) {
+function buildTermExtractionRequestData(
+  input,
+  termPackage,
+  previousContextSummary
+) {
   return JSON.stringify(
     {
       task: 'extract_proper_noun_terms',
       outputContract: {
         rootType: 'object',
-        requiredFields: ['schema', 'version', 'terms'],
+        requiredFields: ['schema', 'version', 'terms', 'contextSummary'],
         schema: TERM_EXTRACTION_RESULT_SCHEMA,
         version: 1,
         terms: {
@@ -1313,12 +1333,17 @@ function buildTermExtractionRequestData(input, termPackage) {
               '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
             importance: '1-100 的整数，数值越高越需要联网确认官方译名'
           }
-        }
+        },
+        contextSummary:
+          '不超过 300 个汉字的简短上下文摘要，说明本次已读内容的主题、作品、人物关系、场景，以及专有名词出现在哪里'
       },
       sourceLanguageCode: input.sourceLanguageCode || '',
       targetLanguageCode: input.targetLanguageCode || '',
       packageType: termPackage.packageType,
       packageTitle: termPackage.title,
+      previousContextSummary: normalizeTermContextSummary(
+        previousContextSummary
+      ),
       textFormat: 'plain_text_without_html',
       text: termPackage.text
     },
@@ -1327,15 +1352,19 @@ function buildTermExtractionRequestData(input, termPackage) {
   )
 }
 
-function buildTermExtractionMessages(input, termPackage) {
+function buildTermExtractionMessages(
+  input,
+  termPackage,
+  previousContextSummary
+) {
   return [
     {
       role: 'system',
       content: buildPromptLayer('系统基础层', [
         '你是多语言博客 CMS 的官方译名联网检索候选词筛选器。',
         '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
-        `JSON 根节点必须包含 schema、version 和 terms，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
-        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","importance":90}]}。`,
+        `JSON 根节点必须包含 schema、version、terms 和 contextSummary，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
+        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","importance":90}],"contextSummary":"文章围绕某作品中的角色与事件展开，相关名词出现在标题和正文讨论中"}。`,
         '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
         '如果词条仅靠普通翻译常识、上下文直译或目标语言常规表达即可处理，不要抽取。'
       ])
@@ -1352,20 +1381,36 @@ function buildTermExtractionMessages(input, termPackage) {
         '如果你不确定一个词是否存在官方译名，只有它确实像作品、角色、品牌、组织、产品或现实地标时才抽取。',
         '同一对象出现不同写法时，可以分别返回；完全重复的字符串只返回一次。',
         'importance 必须综合判断词条对文章主题、标题摘要、关联内容和正文理解的一致性影响，以及联网确认官方译名的必要性。',
+        '必须结合 previousContextSummary 和当前包文本重新生成 contextSummary；contextSummary 只保留对专有名词译名判断有帮助的作品、人物、组织、地点、关系和场景。',
+        'contextSummary 要覆盖当前包新增信息并继承仍然重要的上文信息，删除无关细节，不要逐字复述正文，不要编造未出现的设定。',
+        '遇到短人名、昵称、单字名或同形异义词时，contextSummary 必须说明它隶属的作品、角色关系或讨论对象，便于后续按语境选择官方译名。',
         `最多返回 ${MAX_EXTRACTED_TERM_COUNT} 个对象。`
       ])
     },
     {
       role: 'user',
-      content: buildTermExtractionRequestData(input, termPackage)
+      content: buildTermExtractionRequestData(
+        input,
+        termPackage,
+        previousContextSummary
+      )
     }
   ]
 }
 
-function buildTermExtractionRequestBody(settings, input, termPackage) {
+function buildTermExtractionRequestBody(
+  settings,
+  input,
+  termPackage,
+  previousContextSummary
+) {
   const requestBody = {
     model: settings.deepSeekModel,
-    messages: buildTermExtractionMessages(input, termPackage),
+    messages: buildTermExtractionMessages(
+      input,
+      termPackage,
+      previousContextSummary
+    ),
     response_format: { type: 'json_object' },
     max_tokens: settings.deepSeekMaxTokens,
     stream: false
@@ -1396,6 +1441,18 @@ function getTermArrayFromExtractionResult(resultData) {
     return resultData.outputContract.terms
   }
   return null
+}
+
+function getTermContextSummaryFromExtractionResult(resultData) {
+  if (typeof resultData?.contextSummary !== 'string') {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      'DeepSeek 名词抽取结果缺少 contextSummary 字符串',
+      'deepSeek',
+      502
+    )
+  }
+  return normalizeTermContextSummary(resultData.contextSummary)
 }
 
 function normalizeTermImportance(value, index) {
@@ -1528,6 +1585,7 @@ async function extractTermsFromPackage({
   settings,
   url,
   termPackage,
+  previousContextSummary,
   packageIndex,
   packageCount,
   handlers
@@ -1535,7 +1593,8 @@ async function extractTermsFromPackage({
   const requestBody = buildTermExtractionRequestBody(
     settings,
     input,
-    termPackage
+    termPackage,
+    previousContextSummary
   )
   const response = await requestJson(url, requestBody, settings, handlers)
   const responseData = response.data
@@ -1579,8 +1638,10 @@ async function extractTermsFromPackage({
 
   const resultData = parseAiContent(responseData)
   const terms = normalizeExtractedTermList(resultData)
+  const contextSummary = getTermContextSummaryFromExtractionResult(resultData)
   return {
     terms,
+    contextSummary,
     aiJsonLog: translationAiJsonLogService.createAiJsonLog({
       operation: 'proper-noun.keyword.extract',
       stage: 'ProperNounKeywordExtract',
@@ -1595,11 +1656,16 @@ async function extractTermsFromPackage({
         packageType: termPackage.packageType,
         packageTitle: termPackage.title,
         textLength: termPackage.text.length,
-        normalizedTermCount: terms.length
+        normalizedTermCount: terms.length,
+        contextSummaryLength: contextSummary.length
       },
       json: {
         result: resultData,
-        normalizedTerms: terms
+        normalizedTerms: terms,
+        previousContextSummary: normalizeTermContextSummary(
+          previousContextSummary
+        ),
+        contextSummary
       }
     })
   }
@@ -1610,6 +1676,9 @@ async function extractProperNounKeywords({ input, settings, url, handlers }) {
   if (packages.length === 0) {
     return {
       keywordArray: [],
+      officialTermContextSummary: normalizeTermContextSummary(
+        input.officialTermContextSummary
+      ),
       aiJsonLogs: []
     }
   }
@@ -1617,6 +1686,9 @@ async function extractProperNounKeywords({ input, settings, url, handlers }) {
   const termMap = new Map()
   const aiJsonLogs = []
   let termOrder = 0
+  let contextSummary = normalizeTermContextSummary(
+    input.officialTermContextSummary
+  )
   for (let index = 0; index < packages.length; index += 1) {
     throwIfCancellationRequested(handlers)
     const termPackage = packages[index]
@@ -1630,10 +1702,12 @@ async function extractProperNounKeywords({ input, settings, url, handlers }) {
       settings,
       url,
       termPackage,
+      previousContextSummary: contextSummary,
       packageIndex: index + 1,
       packageCount: packages.length,
       handlers
     })
+    contextSummary = packageResult.contextSummary
     if (packageResult.aiJsonLog) {
       aiJsonLogs.push(packageResult.aiJsonLog)
     }
@@ -1658,6 +1732,7 @@ async function extractProperNounKeywords({ input, settings, url, handlers }) {
   }
   return {
     keywordArray: buildKeywordArrayFromExtractedTermMap(termMap),
+    officialTermContextSummary: contextSummary,
     aiJsonLogs
   }
 }
@@ -1696,6 +1771,9 @@ async function prepareOfficialTermGlossaryForAiInput({
     handlers
   })
   const keywordArray = extractionResult.keywordArray
+  const officialTermContextSummary = normalizeTermContextSummary(
+    extractionResult.officialTermContextSummary
+  )
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
     input.aiJsonLogs,
     extractionResult.aiJsonLogs
@@ -1706,7 +1784,8 @@ async function prepareOfficialTermGlossaryForAiInput({
     }
     return {
       ...input,
-      aiJsonLogs
+      aiJsonLogs,
+      officialTermContextSummary
     }
   }
 
@@ -1731,6 +1810,7 @@ async function prepareOfficialTermGlossaryForAiInput({
         sourceTerms: missingSourceTexts,
         targetLanguageCodes,
         sourceLanguageCode: input.sourceLanguageCode,
+        contextSummary: officialTermContextSummary,
         skipUsageLog: input.skipUsageLog,
         cancellation: handlers.cancellation
       })
@@ -1757,9 +1837,11 @@ async function prepareOfficialTermGlossaryForAiInput({
           internetSearchRequestedTermCount:
             searchResult.stats?.internetSearchRequestedTermCount || 0,
           internetSearchTargetLanguageCodes:
-            searchResult.stats?.internetSearchTargetLanguageCodes || []
+            searchResult.stats?.internetSearchTargetLanguageCodes || [],
+          contextSummaryLength: officialTermContextSummary.length
         },
         json: {
+          contextSummary: officialTermContextSummary,
           terms: searchResult.terms,
           stats: searchResult.stats,
           rawResponse: searchResult.rawResponse
@@ -1796,12 +1878,14 @@ async function prepareOfficialTermGlossaryForAiInput({
   return {
     ...input,
     aiJsonLogs,
+    officialTermContextSummary,
     officialTermGlossaryMarkdown: glossaryMarkdown,
     officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
     officialTermStats: {
       keywordCount: keywordArray.length,
       existingCount: coverage.existingTerms.length,
       missingCount: coverage.missingTerms.length,
+      contextSummaryLength: officialTermContextSummary.length,
       glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
     }
   }
