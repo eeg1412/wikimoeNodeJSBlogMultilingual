@@ -216,7 +216,6 @@
 
 <script>
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
 import { multilingualApi } from '@/api'
@@ -307,7 +306,6 @@ export default {
   },
   emits: ['update:modelValue', 'confirm'],
   setup(props, { emit }) {
-    const router = useRouter()
     const loading = ref(false)
     const translating = ref(false)
     const applying = ref(false)
@@ -781,7 +779,6 @@ export default {
         })
         ElMessage.success('后台任务已创建')
         visible.value = false
-        router.push({ name: 'TranslationJobList' })
       } catch (error) {
         console.log(error)
       }

@@ -724,6 +724,12 @@ export default {
   flex-wrap: wrap;
   gap: 6px;
 }
+.proper-noun-translation-list :deep(.el-tag) {
+  white-space: wrap;
+  height: auto;
+  line-height: 18px;
+  padding: 2px 9px;
+}
 
 .proper-noun-translation-header {
   justify-content: space-between;

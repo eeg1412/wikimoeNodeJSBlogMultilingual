@@ -3728,7 +3728,8 @@ export default {
           }
         })
         ElMessage.success('后台任务已创建')
-        router.push({ name: 'TranslationJobList' })
+        aiDialogVisible.value = false
+        resetAiTranslationState()
       } catch (error) {
         console.log(error)
       }
