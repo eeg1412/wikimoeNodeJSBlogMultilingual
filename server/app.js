@@ -21,6 +21,10 @@ const {
 global.$mongodDB = $mongodDB
 const translationJobWorker = require('./api/multilingual-admin/services/translationJobWorker')
 translationJobWorker.startTranslationJobWorker()
+const properNounTranslationService = require(
+  './api/multilingual-admin/services/properNounTranslationService'
+)
+properNounTranslationService.scheduleProperNounTermCleanup()
 var history = require('connect-history-api-fallback')
 
 var multilingualAdminRouter = require('./routes/multilingualAdmin')

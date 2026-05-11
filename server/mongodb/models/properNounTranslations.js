@@ -61,6 +61,16 @@ var properNounTranslations = new Schema(
       type: Schema.Types.Mixed,
       default: {}
     },
+    lastUsedAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    usedCount: {
+      type: Number,
+      default: 0,
+      index: true
+    },
     enabled: {
       type: Boolean,
       default: true,

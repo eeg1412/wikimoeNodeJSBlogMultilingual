@@ -24,6 +24,16 @@ var properNounTerms = new Schema(
       type: String,
       default: ''
     },
+    lastUsedAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    usedCount: {
+      type: Number,
+      default: 0,
+      index: true
+    },
     enabled: {
       type: Boolean,
       default: true,

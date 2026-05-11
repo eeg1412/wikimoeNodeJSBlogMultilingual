@@ -9,9 +9,13 @@ const {
   ApiError,
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
+const utils = require('../../../utils/utils')
 
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
+const MAX_TERM_COUNT = 10000
+const CLEANUP_DEBOUNCE_MS = 30 * 1000
+const CLEANUP_LOCK_KEY = 'properNounTermCleanup'
 const TRANSLATION_SOURCE_VALUES = [
   'manual',
   'internetSearchAi',
@@ -24,6 +28,9 @@ const TRANSLATION_SOURCE_LABEL_MAP = {
   aiKnowledgeBase: 'AI知识库',
   imported: '导入'
 }
+let cleanupTimer = null
+let isCleanupRunning = false
+let hasPendingCleanup = false
 
 function getTermModel() {
   const repository =
@@ -41,6 +48,150 @@ function getTranslationModel() {
     throw new Error('properNounTranslations repository not found')
   }
   return repository.model
+}
+
+function startCleanupTimer() {
+  if (cleanupTimer) {
+    clearTimeout(cleanupTimer)
+  }
+  cleanupTimer = setTimeout(() => {
+    runScheduledProperNounTermCleanup()
+  }, CLEANUP_DEBOUNCE_MS)
+  if (typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref()
+  }
+}
+
+function scheduleProperNounTermCleanup() {
+  hasPendingCleanup = true
+  startCleanupTimer()
+}
+
+async function runScheduledProperNounTermCleanup() {
+  cleanupTimer = null
+  if (isCleanupRunning) {
+    startCleanupTimer()
+    return
+  }
+  if (!hasPendingCleanup) {
+    return
+  }
+
+  hasPendingCleanup = false
+  isCleanupRunning = true
+  try {
+    await enforceProperNounTermLimit()
+  } catch (error) {
+    console.error('专有名词翻译库自动清理失败：', error)
+  } finally {
+    isCleanupRunning = false
+    if (hasPendingCleanup) {
+      startCleanupTimer()
+    }
+  }
+}
+
+function getCleanupSort() {
+  return {
+    lastUsedAt: 1,
+    usedCount: 1,
+    updatedAt: 1,
+    createdAt: 1,
+    _id: 1
+  }
+}
+
+async function enforceProperNounTermLimit() {
+  return await utils.executeInLock(CLEANUP_LOCK_KEY, async () => {
+    const TermModel = getTermModel()
+    const TranslationModel = getTranslationModel()
+    const total = await TermModel.countDocuments({})
+    if (total <= MAX_TERM_COUNT) {
+      return {
+        total,
+        deletedCount: 0,
+        translationDeletedCount: 0
+      }
+    }
+
+    const deleteCount = total - MAX_TERM_COUNT
+    const staleTermList = await TermModel.find({}, { _id: 1 })
+      .sort(getCleanupSort())
+      .limit(deleteCount)
+      .lean()
+    const termIdList = staleTermList.map(term => term._id)
+    if (termIdList.length === 0) {
+      return {
+        total,
+        deletedCount: 0,
+        translationDeletedCount: 0
+      }
+    }
+
+    const translationDeleteResult = await TranslationModel.deleteMany({
+      termId: { $in: termIdList }
+    })
+    const termDeleteResult = await TermModel.deleteMany({
+      _id: { $in: termIdList }
+    })
+
+    return {
+      total,
+      deletedCount: termDeleteResult.deletedCount || 0,
+      translationDeletedCount: translationDeleteResult.deletedCount || 0
+    }
+  })
+}
+
+function getUniqueObjectIdList(items, getObjectId) {
+  const objectIdMap = new Map()
+  items.forEach(item => {
+    const objectId = getObjectId(item)
+    const key = String(objectId || '')
+    if (!key || objectIdMap.has(key)) {
+      return
+    }
+    objectIdMap.set(key, objectId)
+  })
+  return Array.from(objectIdMap.values())
+}
+
+async function recordProperNounUsage(translationList) {
+  if (!Array.isArray(translationList) || translationList.length === 0) {
+    return
+  }
+
+  const usedAt = new Date()
+  const termIdList = getUniqueObjectIdList(translationList, translation => {
+    return translation.termId
+  })
+  const translationIdList = getUniqueObjectIdList(
+    translationList,
+    translation => {
+      return translation._id
+    }
+  )
+
+  const TermModel = getTermModel()
+  const TranslationModel = getTranslationModel()
+  await Promise.all([
+    TermModel.updateMany(
+      { _id: { $in: termIdList } },
+      {
+        $set: { lastUsedAt: usedAt },
+        $inc: { usedCount: 1 }
+      },
+      { timestamps: false }
+    ),
+    TranslationModel.updateMany(
+      { _id: { $in: translationIdList } },
+      {
+        $set: { lastUsedAt: usedAt },
+        $inc: { usedCount: 1 }
+      },
+      { timestamps: false }
+    )
+  ])
 }
 
 function normalizeString(value, maxLength = 600) {
@@ -332,7 +483,9 @@ async function createTerm(body = {}) {
   const payload = buildTermPayload(body)
   const TermModel = getTermModel()
   try {
-    return await TermModel.create(payload)
+    const term = await TermModel.create(payload)
+    scheduleProperNounTermCleanup()
+    return term
   } catch (error) {
     if (error && error.code === 11000) {
       throw new ApiError(
@@ -551,6 +704,7 @@ async function getTranslationsForSourceTexts({
     languageCode: { $in: languageCodes },
     enabled: true
   }).lean()
+  await recordProperNounUsage(translationList)
 
   const normalizedTextByTermId = new Map()
   termList.forEach(term => {
@@ -642,12 +796,14 @@ async function findOrCreateTermForSourceText(sourceText) {
   }
 
   try {
-    return await TermModel.create({
+    const term = await TermModel.create({
       sourceText: normalizeSourceText(sourceText),
       normalizedSourceText,
       sourceLanguageCode: '',
       enabled: true
     })
+    scheduleProperNounTermCleanup()
+    return term
   } catch (error) {
     if (error && error.code === 11000) {
       return await TermModel.findOne({ normalizedSourceText }).lean()
@@ -708,6 +864,10 @@ async function upsertAiSearchTerms({ terms = [], provider = '', model = '' }) {
         normalizedSourceText: term.normalizedSourceText
       })
     }
+  }
+
+  if (savedTranslations.length > 0) {
+    scheduleProperNounTermCleanup()
   }
 
   return savedTranslations
@@ -891,11 +1051,13 @@ module.exports = {
   createTranslation,
   deleteTerm,
   deleteTranslation,
+  enforceProperNounTermLimit,
   getTermDetail,
   getTermList,
   getTranslationList,
   getTranslationsForSourceTexts,
   normalizeSourceText,
+  scheduleProperNounTermCleanup,
   updateTerm,
   updateTranslation,
   upsertAiSearchTerms

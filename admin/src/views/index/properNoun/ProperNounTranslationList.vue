@@ -112,6 +112,18 @@
             <el-tag v-else type="info" effect="plain">停用</el-tag>
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="使用情况" width="180">
+          <template #default="{ row }">
+            <div class="proper-noun-usage">
+              <div class="proper-noun-usage-count">
+                {{ getUsedCountText(row.usedCount) }} 次
+              </div>
+              <div class="proper-noun-usage-date">
+                最后：{{ getLastUsedAtText(row.lastUsedAt) }}
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="更新时间" width="180">
           <template #default="{ row }">
             {{ row.updatedAt ? $formatDate(row.updatedAt) : '-' }}
@@ -248,6 +260,18 @@
             <el-tag v-else type="info" effect="plain">停用</el-tag>
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="使用情况" width="170">
+          <template #default="{ row }">
+            <div class="proper-noun-usage">
+              <div class="proper-noun-usage-count">
+                {{ getUsedCountText(row.usedCount) }} 次
+              </div>
+              <div class="proper-noun-usage-date">
+                最后：{{ getLastUsedAtText(row.lastUsedAt) }}
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openEditTranslationDialog(row)">
@@ -327,6 +351,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
+import { formatDate } from '@/utils/utils'
 import {
   getLanguageText,
   sortBySupportedLanguageOrder,
@@ -611,6 +636,21 @@ export default {
       return TRANSLATION_SOURCE_TEXT_MAP[value] || value || '未知'
     }
 
+    function getUsedCountText(value) {
+      const count = Number(value || 0)
+      if (!Number.isFinite(count) || count < 0) {
+        return '0'
+      }
+      return String(Math.floor(count))
+    }
+
+    function getLastUsedAtText(value) {
+      if (!value) {
+        return '未使用'
+      }
+      return formatDate(value)
+    }
+
     function getDisplayedTranslations(row) {
       const translations = Array.isArray(row.translations)
         ? row.translations
@@ -647,10 +687,12 @@ export default {
       deleteTerm,
       deleteTranslation,
       getDisplayedTranslations,
+      getLastUsedAtText,
       getLanguageText,
       getTermList,
       getTranslationList,
       getTranslationSourceText,
+      getUsedCountText,
       languageOptions,
       loading,
       openCreateTermDialog,
@@ -729,6 +771,22 @@ export default {
   height: auto;
   line-height: 18px;
   padding: 2px 9px;
+}
+
+.proper-noun-usage {
+  line-height: 1.5;
+}
+
+.proper-noun-usage-count {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+.proper-noun-usage-date {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  word-break: break-word;
 }
 
 .proper-noun-translation-header {
