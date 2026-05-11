@@ -17,6 +17,7 @@ const {
   summarizeGeminiNativeResponse
 } = require('./geminiNativeApiService')
 const { recordGeminiUsageLog } = require('./geminiUsageLogService')
+const { runAiStepWithRetry } = require('./aiStepRetryService')
 
 const OPERATION_OFFICIAL_TERM_KNOWLEDGE =
   'proper-noun.official-translation.knowledge'
@@ -573,6 +574,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   contextSummary,
   requestUrl,
   cancellation,
+  onStatus,
   skipUsageLog
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
@@ -587,64 +589,75 @@ async function resolveOfficialTermTranslationsFromKnowledge({
     requestUrl
   )
 
-  try {
-    const response = await sendGeminiNativeGenerateContentRequest(
-      settings,
-      requestBody,
-      requestUrl,
-      { cancellation }
-    )
-    const responseSummary = summarizeGeminiNativeResponse(response)
-    const extractedText = extractTextFromGeminiNativeResponse(response)
-    const resultData = parseSearchResponseText(
-      extractedText?.text || '',
-      'Gemini 名词知识库整理'
-    )
-    const result = normalizeKnowledgeTerms(resultData, termRequests)
-    await recordUsage({
-      settings,
-      operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
-      status: 'success',
-      response,
-      sourceLanguageCode,
-      targetLanguageCodes,
-      termCount: termRequests.length,
-      termRequests,
-      contextSummary,
-      requestSummary,
-      responseSummary,
-      skipUsageLog
-    })
-    return {
-      ...result,
-      rawResponse: response
+  return await runAiStepWithRetry(
+    async () => {
+      try {
+        const response = await sendGeminiNativeGenerateContentRequest(
+          settings,
+          requestBody,
+          requestUrl,
+          { cancellation }
+        )
+        const responseSummary = summarizeGeminiNativeResponse(response)
+        const extractedText = extractTextFromGeminiNativeResponse(response)
+        const resultData = parseSearchResponseText(
+          extractedText?.text || '',
+          'Gemini 名词知识库整理'
+        )
+        const result = normalizeKnowledgeTerms(resultData, termRequests)
+        await recordUsage({
+          settings,
+          operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
+          status: 'success',
+          response,
+          sourceLanguageCode,
+          targetLanguageCodes,
+          termCount: termRequests.length,
+          termRequests,
+          contextSummary,
+          requestSummary,
+          responseSummary,
+          skipUsageLog
+        })
+        return {
+          ...result,
+          rawResponse: response
+        }
+      } catch (error) {
+        await recordUsage({
+          settings,
+          operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
+          status: 'error',
+          error,
+          sourceLanguageCode,
+          targetLanguageCodes,
+          termCount: termRequests.length,
+          termRequests,
+          contextSummary,
+          requestSummary,
+          failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
+          failureReason: error?.message || '',
+          skipUsageLog
+        })
+        if (error && error.name === 'ApiError') {
+          throw error
+        }
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          error?.message || 'Gemini 名词知识库整理请求失败',
+          'geminiInternetSearch',
+          502
+        )
+      }
+    },
+    {
+      stepKey: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
+      stepLabel: '专有名词 AI 知识库译名整理',
+      field: 'geminiInternetSearch',
+      onStatus,
+      cancellation
     }
-  } catch (error) {
-    await recordUsage({
-      settings,
-      operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
-      status: 'error',
-      error,
-      sourceLanguageCode,
-      targetLanguageCodes,
-      termCount: termRequests.length,
-      termRequests,
-      contextSummary,
-      requestSummary,
-      failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
-      failureReason: error?.message || '',
-      skipUsageLog
-    })
-    if (error && error.name === 'ApiError') {
-      throw error
-    }
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      error?.message || 'Gemini 名词知识库整理请求失败',
-      'geminiInternetSearch',
-      502
-    )
-  }
+  )
 }
 
 async function searchOfficialTermTranslationsWithInternet({
@@ -654,6 +667,7 @@ async function searchOfficialTermTranslationsWithInternet({
   contextSummary,
   requestUrl,
   cancellation,
+  onStatus,
   skipUsageLog
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
@@ -668,67 +682,80 @@ async function searchOfficialTermTranslationsWithInternet({
     requestUrl
   )
 
-  try {
-    const response = await sendGeminiNativeGenerateContentRequest(
-      settings,
-      requestBody,
-      requestUrl,
-      { cancellation }
-    )
-    const responseSummary = summarizeGeminiNativeResponse(response)
-    const extractedText = extractTextFromGeminiNativeResponse(response)
-    const resultData = parseSearchResponseText(extractedText?.text || '')
-    const groundingMetadata = summarizeGroundingMetadata(response)
-    const terms = normalizeSearchTerms(resultData, termRequests).map(term => {
-      return {
-        ...term,
-        searchMetadata: groundingMetadata
+  return await runAiStepWithRetry(
+    async () => {
+      try {
+        const response = await sendGeminiNativeGenerateContentRequest(
+          settings,
+          requestBody,
+          requestUrl,
+          { cancellation }
+        )
+        const responseSummary = summarizeGeminiNativeResponse(response)
+        const extractedText = extractTextFromGeminiNativeResponse(response)
+        const resultData = parseSearchResponseText(extractedText?.text || '')
+        const groundingMetadata = summarizeGroundingMetadata(response)
+        const terms = normalizeSearchTerms(resultData, termRequests).map(
+          term => {
+            return {
+              ...term,
+              searchMetadata: groundingMetadata
+            }
+          }
+        )
+        await recordUsage({
+          settings,
+          operation: OPERATION_OFFICIAL_TERM_SEARCH,
+          status: 'success',
+          response,
+          sourceLanguageCode,
+          targetLanguageCodes,
+          termCount: termRequests.length,
+          termRequests,
+          contextSummary,
+          requestSummary,
+          responseSummary,
+          skipUsageLog
+        })
+        return {
+          terms,
+          rawResponse: response
+        }
+      } catch (error) {
+        await recordUsage({
+          settings,
+          operation: OPERATION_OFFICIAL_TERM_SEARCH,
+          status: 'error',
+          error,
+          sourceLanguageCode,
+          targetLanguageCodes,
+          termCount: termRequests.length,
+          termRequests,
+          contextSummary,
+          requestSummary,
+          failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
+          failureReason: error?.message || '',
+          skipUsageLog
+        })
+        if (error && error.name === 'ApiError') {
+          throw error
+        }
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          error?.message || 'Gemini 联网搜索请求失败',
+          'geminiInternetSearch',
+          502
+        )
       }
-    })
-    await recordUsage({
-      settings,
-      operation: OPERATION_OFFICIAL_TERM_SEARCH,
-      status: 'success',
-      response,
-      sourceLanguageCode,
-      targetLanguageCodes,
-      termCount: termRequests.length,
-      termRequests,
-      contextSummary,
-      requestSummary,
-      responseSummary,
-      skipUsageLog
-    })
-    return {
-      terms,
-      rawResponse: response
+    },
+    {
+      stepKey: OPERATION_OFFICIAL_TERM_SEARCH,
+      stepLabel: '专有名词联网检索译名整理',
+      field: 'geminiInternetSearch',
+      onStatus,
+      cancellation
     }
-  } catch (error) {
-    await recordUsage({
-      settings,
-      operation: OPERATION_OFFICIAL_TERM_SEARCH,
-      status: 'error',
-      error,
-      sourceLanguageCode,
-      targetLanguageCodes,
-      termCount: termRequests.length,
-      termRequests,
-      contextSummary,
-      requestSummary,
-      failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
-      failureReason: error?.message || '',
-      skipUsageLog
-    })
-    if (error && error.name === 'ApiError') {
-      throw error
-    }
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      error?.message || 'Gemini 联网搜索请求失败',
-      'geminiInternetSearch',
-      502
-    )
-  }
+  )
 }
 
 async function searchOfficialTermTranslations(options = {}) {
@@ -774,6 +801,7 @@ async function searchOfficialTermTranslations(options = {}) {
     contextSummary,
     requestUrl,
     cancellation: options.cancellation,
+    onStatus: options.onStatus,
     skipUsageLog: options.skipUsageLog
   })
 
@@ -789,6 +817,7 @@ async function searchOfficialTermTranslations(options = {}) {
       contextSummary,
       requestUrl,
       cancellation: options.cancellation,
+      onStatus: options.onStatus,
       skipUsageLog: options.skipUsageLog
     })
   }

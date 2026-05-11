@@ -12,6 +12,34 @@ function getErrorMessage(error) {
   return 'AI 翻译失败'
 }
 
+function buildErrorPayload(error) {
+  const payload = {
+    message: getErrorMessage(error),
+    code: error?.code || 'AI_TRANSLATION_FAILED'
+  }
+  if (error?.extra && typeof error.extra === 'object') {
+    if (typeof error.extra.retryable === 'boolean') {
+      payload.retryable = error.extra.retryable
+    }
+    if (error.extra.manualRetryRequired === true) {
+      payload.manualRetryRequired = true
+    }
+    if (error.extra.aiStepKey) {
+      payload.aiStepKey = error.extra.aiStepKey
+    }
+    if (error.extra.aiStepLabel) {
+      payload.aiStepLabel = error.extra.aiStepLabel
+    }
+    if (error.extra.aiStepAttempts) {
+      payload.aiStepAttempts = error.extra.aiStepAttempts
+    }
+    if (error.extra.aiStepMaxAttempts) {
+      payload.aiStepMaxAttempts = error.extra.aiStepMaxAttempts
+    }
+  }
+  return payload
+}
+
 function createCancellationContext() {
   let cancelled = false
   let reason = ''
@@ -88,6 +116,9 @@ module.exports = async function streamTranslatePost(req, res) {
         onChunk(chunk) {
           send('chunk', chunk)
         },
+        onChunkRollback(rollback) {
+          send('chunkRollback', rollback)
+        },
         onResult(result) {
           send('result', result)
         },
@@ -99,10 +130,7 @@ module.exports = async function streamTranslatePost(req, res) {
       model: data.model || ''
     })
   } catch (error) {
-    send('error', {
-      message: getErrorMessage(error),
-      code: error?.code || 'AI_TRANSLATION_FAILED'
-    })
+    send('error', buildErrorPayload(error))
   } finally {
     if (!closed) {
       res.end()

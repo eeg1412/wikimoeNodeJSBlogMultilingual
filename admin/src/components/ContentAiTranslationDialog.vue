@@ -612,6 +612,15 @@ export default {
           streamContent.value += data.contentDelta
         }
       }
+      if (eventData.eventName === 'chunkRollback') {
+        const contentLength = Number(data.contentLength || 0)
+        if (contentLength > 0) {
+          streamContent.value = streamContent.value.slice(
+            0,
+            Math.max(streamContent.value.length - contentLength, 0)
+          )
+        }
+      }
       if (eventData.eventName === 'result') {
         preview.value = buildPreview(data.payload || {})
         if (preview.value.changeList.length === 0) {

@@ -15,6 +15,7 @@ const coverImageTranslationService = require('./coverImageTranslationService')
 const internetSearchAiService = require('./internetSearchAiService')
 const properNounTranslationService = require('./properNounTranslationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const { runAiStepWithRetry } = require('./aiStepRetryService')
 
 const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 const TRANSLATION_JSON_VERSION = 2
@@ -1336,8 +1337,7 @@ function buildTermExtractionRequestData(
             sourceText:
               '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
             importance: '1-100 的整数，数值越高越需要联网确认官方译名',
-            note:
-              '不超过 80 个汉字的词库消歧备注，只描述该词可脱离本文单独成立的稳定身份信息，如所属作品、角色定位、组织类型、地理属性；禁止写“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，不要翻译'
+            note: '不超过 80 个汉字的词库消歧备注，只描述该词可脱离本文单独成立的稳定身份信息，如所属作品、角色定位、组织类型、地理属性；禁止写“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，不要翻译'
           }
         },
         contextSummary:
@@ -1621,85 +1621,97 @@ async function extractTermsFromPackage({
   packageCount,
   handlers
 }) {
-  const requestBody = buildTermExtractionRequestBody(
-    settings,
-    input,
-    termPackage,
-    previousContextSummary
-  )
-  const response = await requestJson(url, requestBody, settings, handlers)
-  const responseData = response.data
-  const isSuccessStatus =
-    response.statusCode >= 200 && response.statusCode < 300
-  let usageStatus = 'error'
-  if (isSuccessStatus && !response.parseError) {
-    usageStatus = 'success'
-  }
-  await recordTermExtractionUsage({
-    input,
-    settings,
-    responseData,
-    status: usageStatus,
-    httpStatusCode: response.statusCode,
-    packageIndex,
-    packageCount,
-    termPackage
-  })
-
-  if (response.parseError) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 名词抽取返回内容不是 JSON',
-      'deepSeek',
-      502
-    )
-  }
-  if (!isSuccessStatus) {
-    const message =
-      responseData.error?.message ||
-      responseData.message ||
-      `DeepSeek 名词抽取请求失败：${response.statusCode}`
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      message,
-      'deepSeek',
-      502
-    )
-  }
-
-  const resultData = parseAiContent(responseData)
-  const terms = normalizeExtractedTermList(resultData)
-  const contextSummary = getTermContextSummaryFromExtractionResult(resultData)
-  return {
-    terms,
-    contextSummary,
-    aiJsonLog: translationAiJsonLogService.createAiJsonLog({
-      operation: 'proper-noun.keyword.extract',
-      stage: 'ProperNounKeywordExtract',
-      provider: 'deepseek',
-      model: responseData.model || settings.deepSeekModel,
-      requestId: responseData.id || '',
-      sourceLanguageCode: input.sourceLanguageCode,
-      targetLanguageCode: input.targetLanguageCode,
-      meta: {
+  return await runAiStepWithRetry(
+    async () => {
+      const requestBody = buildTermExtractionRequestBody(
+        settings,
+        input,
+        termPackage,
+        previousContextSummary
+      )
+      const response = await requestJson(url, requestBody, settings, handlers)
+      const responseData = response.data
+      const isSuccessStatus =
+        response.statusCode >= 200 && response.statusCode < 300
+      let usageStatus = 'error'
+      if (isSuccessStatus && !response.parseError) {
+        usageStatus = 'success'
+      }
+      await recordTermExtractionUsage({
+        input,
+        settings,
+        responseData,
+        status: usageStatus,
+        httpStatusCode: response.statusCode,
         packageIndex,
         packageCount,
-        packageType: termPackage.packageType,
-        packageTitle: termPackage.title,
-        textLength: termPackage.text.length,
-        normalizedTermCount: terms.length,
-        contextSummaryLength: contextSummary.length
-      },
-      json: {
-        result: resultData,
-        normalizedTerms: terms,
-        previousContextSummary: normalizeTermContextSummary(
-          previousContextSummary
-        ),
-        contextSummary
+        termPackage
+      })
+
+      if (response.parseError) {
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          'DeepSeek 名词抽取返回内容不是 JSON',
+          'deepSeek',
+          502
+        )
       }
-    })
-  }
+      if (!isSuccessStatus) {
+        const message =
+          responseData.error?.message ||
+          responseData.message ||
+          `DeepSeek 名词抽取请求失败：${response.statusCode}`
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          message,
+          'deepSeek',
+          502
+        )
+      }
+
+      const resultData = parseAiContent(responseData)
+      const terms = normalizeExtractedTermList(resultData)
+      const contextSummary =
+        getTermContextSummaryFromExtractionResult(resultData)
+      return {
+        terms,
+        contextSummary,
+        aiJsonLog: translationAiJsonLogService.createAiJsonLog({
+          operation: 'proper-noun.keyword.extract',
+          stage: 'ProperNounKeywordExtract',
+          provider: 'deepseek',
+          model: responseData.model || settings.deepSeekModel,
+          requestId: responseData.id || '',
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCode: input.targetLanguageCode,
+          meta: {
+            packageIndex,
+            packageCount,
+            packageType: termPackage.packageType,
+            packageTitle: termPackage.title,
+            textLength: termPackage.text.length,
+            normalizedTermCount: terms.length,
+            contextSummaryLength: contextSummary.length
+          },
+          json: {
+            result: resultData,
+            normalizedTerms: terms,
+            previousContextSummary: normalizeTermContextSummary(
+              previousContextSummary
+            ),
+            contextSummary
+          }
+        })
+      }
+    },
+    {
+      stepKey: 'proper-noun.keyword.extract',
+      stepLabel: `专有名词抽取第 ${packageIndex}/${packageCount} 包`,
+      field: 'deepSeek',
+      onStatus: handlers?.onStatus,
+      cancellation: handlers?.cancellation
+    }
+  )
 }
 
 async function extractProperNounKeywords({ input, settings, url, handlers }) {
@@ -1794,7 +1806,10 @@ function buildMissingTermRequests(missingTerms) {
         ),
         termId: ''
       }
-      if (Array.isArray(item.matchedTermIds) && item.matchedTermIds.length > 0) {
+      if (
+        Array.isArray(item.matchedTermIds) &&
+        item.matchedTermIds.length > 0
+      ) {
         termRequest.termId = String(item.matchedTermIds[0] || '').trim()
       }
       termRequestMap.set(normalizedSourceText, termRequest)
@@ -1855,8 +1870,7 @@ function splitExistingTermCandidatesForFilter(sourceTextItems, candidateTerms) {
   const filterCandidateTerms = []
 
   sourceTextItems.forEach(sourceTextItem => {
-    const termList =
-      candidateMap.get(sourceTextItem.normalizedSourceText) || []
+    const termList = candidateMap.get(sourceTextItem.normalizedSourceText) || []
     if (termList.length === 0) {
       return
     }
@@ -2060,89 +2074,102 @@ async function filterExistingTermCandidatesWithAi({
     }
   }
 
-  const requestBody = buildExistingTermFilterRequestBody({
-    settings,
-    input,
-    sourceTextItems,
-    candidateTerms,
-    contextSummary
-  })
-  const response = await requestJson(url, requestBody, settings, handlers)
-  const responseData = response.data
-  const isSuccessStatus =
-    response.statusCode >= 200 && response.statusCode < 300
-  let usageStatus = 'error'
-  if (isSuccessStatus && !response.parseError) {
-    usageStatus = 'success'
-  }
-  if (input.skipUsageLog !== true) {
-    await aiUsageService.recordAiUsageLog({
-      provider: 'deepseek',
-      model: responseData.model || settings.deepSeekModel,
-      operation: 'proper-noun.existing-term.filter',
-      status: usageStatus,
-      requestId: responseData.id || '',
-      sourceLanguageCode: input.sourceLanguageCode,
-      targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
-      usage: responseData.usage || {},
-      rawResponse: responseData,
-      meta: {
-        httpStatusCode: response.statusCode,
-        sourceTermCount: sourceTextItems.length,
-        candidateTermCount: candidateTerms.length,
-        contextSummaryLength: normalizeTermContextSummary(contextSummary).length
+  return await runAiStepWithRetry(
+    async () => {
+      const requestBody = buildExistingTermFilterRequestBody({
+        settings,
+        input,
+        sourceTextItems,
+        candidateTerms,
+        contextSummary
+      })
+      const response = await requestJson(url, requestBody, settings, handlers)
+      const responseData = response.data
+      const isSuccessStatus =
+        response.statusCode >= 200 && response.statusCode < 300
+      let usageStatus = 'error'
+      if (isSuccessStatus && !response.parseError) {
+        usageStatus = 'success'
       }
-    })
-  }
+      if (input.skipUsageLog !== true) {
+        await aiUsageService.recordAiUsageLog({
+          provider: 'deepseek',
+          model: responseData.model || settings.deepSeekModel,
+          operation: 'proper-noun.existing-term.filter',
+          status: usageStatus,
+          requestId: responseData.id || '',
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
+          usage: responseData.usage || {},
+          rawResponse: responseData,
+          meta: {
+            httpStatusCode: response.statusCode,
+            sourceTermCount: sourceTextItems.length,
+            candidateTermCount: candidateTerms.length,
+            contextSummaryLength:
+              normalizeTermContextSummary(contextSummary).length
+          }
+        })
+      }
 
-  if (response.parseError) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 专有名词候选消歧返回内容不是 JSON',
-      'deepSeek',
-      502
-    )
-  }
-  if (!isSuccessStatus) {
-    const message =
-      responseData.error?.message ||
-      responseData.message ||
-      `DeepSeek 专有名词候选消歧请求失败：${response.statusCode}`
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      message,
-      'deepSeek',
-      502
-    )
-  }
+      if (response.parseError) {
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          'DeepSeek 专有名词候选消歧返回内容不是 JSON',
+          'deepSeek',
+          502
+        )
+      }
+      if (!isSuccessStatus) {
+        const message =
+          responseData.error?.message ||
+          responseData.message ||
+          `DeepSeek 专有名词候选消歧请求失败：${response.statusCode}`
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          message,
+          'deepSeek',
+          502
+        )
+      }
 
-  const resultData = parseAiContent(responseData)
-  const matchedTermIds = normalizeMatchedExistingTermIds(
-    resultData,
-    candidateTerms
+      const resultData = parseAiContent(responseData)
+      const matchedTermIds = normalizeMatchedExistingTermIds(
+        resultData,
+        candidateTerms
+      )
+      return {
+        matchedTermIds,
+        aiJsonLog: translationAiJsonLogService.createAiJsonLog({
+          operation: 'proper-noun.existing-term.filter',
+          stage: 'ProperNounExistingTermFilter',
+          provider: 'deepseek',
+          model: responseData.model || settings.deepSeekModel,
+          requestId: responseData.id || '',
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
+          meta: {
+            sourceTermCount: sourceTextItems.length,
+            candidateTermCount: candidateTerms.length,
+            matchedTermCount: matchedTermIds.length,
+            contextSummaryLength:
+              normalizeTermContextSummary(contextSummary).length
+          },
+          json: {
+            result: resultData,
+            matchedTermIds
+          }
+        })
+      }
+    },
+    {
+      stepKey: 'proper-noun.existing-term.filter',
+      stepLabel: '专有名词候选消歧',
+      field: 'deepSeek',
+      onStatus: handlers?.onStatus,
+      cancellation: handlers?.cancellation
+    }
   )
-  return {
-    matchedTermIds,
-    aiJsonLog: translationAiJsonLogService.createAiJsonLog({
-      operation: 'proper-noun.existing-term.filter',
-      stage: 'ProperNounExistingTermFilter',
-      provider: 'deepseek',
-      model: responseData.model || settings.deepSeekModel,
-      requestId: responseData.id || '',
-      sourceLanguageCode: input.sourceLanguageCode,
-      targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
-      meta: {
-        sourceTermCount: sourceTextItems.length,
-        candidateTermCount: candidateTerms.length,
-        matchedTermCount: matchedTermIds.length,
-        contextSummaryLength: normalizeTermContextSummary(contextSummary).length
-      },
-      json: {
-        result: resultData,
-        matchedTermIds
-      }
-    })
-  }
 }
 
 async function resolveExistingTermMatches({
@@ -2210,9 +2237,10 @@ async function prepareOfficialTermGlossaryForAiInput({
     url,
     handlers
   })
-  const extractedTerms = properNounTranslationService.normalizeExtractedTermList(
-    extractionResult.extractedTerms
-  )
+  const extractedTerms =
+    properNounTranslationService.normalizeExtractedTermList(
+      extractionResult.extractedTerms
+    )
   const keywordArray = extractedTerms.map(term => term.sourceText)
   const officialTermContextSummary = normalizeTermContextSummary(
     extractionResult.officialTermContextSummary
@@ -2277,6 +2305,7 @@ async function prepareOfficialTermGlossaryForAiInput({
         sourceLanguageCode: input.sourceLanguageCode,
         contextSummary: officialTermContextSummary,
         skipUsageLog: input.skipUsageLog,
+        onStatus: handlers.onStatus,
         cancellation: handlers.cancellation
       })
     aiJsonLogs.push(
@@ -3836,6 +3865,130 @@ async function translatePostEntries(body = {}) {
   }
 }
 
+async function translateStreamChunkWithRetry({
+  input,
+  settings,
+  url,
+  chunkInput,
+  chunkIndex,
+  chunkTotal,
+  handlers,
+  state
+}) {
+  return await runAiStepWithRetry(
+    async ({ attemptNo }) => {
+      const attemptStreamState = {
+        contentLength: 0,
+        reasoningLength: 0
+      }
+      const requestBody = buildDeepSeekStreamRequestBody(settings, chunkInput)
+      try {
+        const deepSeekResponse = await requestStream(
+          url,
+          requestBody,
+          settings,
+          {
+            onStatus: handlers.onStatus,
+            onChunk(chunk) {
+              if (chunk.contentDelta) {
+                attemptStreamState.contentLength += chunk.contentDelta.length
+              }
+              if (chunk.reasoningDelta) {
+                attemptStreamState.reasoningLength +=
+                  chunk.reasoningDelta.length
+              }
+              if (typeof handlers.onChunk === 'function') {
+                handlers.onChunk({
+                  ...chunk,
+                  chunkIndex: chunkIndex + 1,
+                  chunkCount: chunkTotal,
+                  attemptNo
+                })
+              }
+            }
+          },
+          handlers
+        )
+        state.chunkResponses.push(deepSeekResponse)
+
+        const responseData = deepSeekResponse.data
+        state.combinedUsage = mergeUsage(
+          state.combinedUsage,
+          responseData.usage || {}
+        )
+
+        const isSuccessStatus =
+          deepSeekResponse.statusCode >= 200 &&
+          deepSeekResponse.statusCode < 300
+        if (!isSuccessStatus) {
+          const message =
+            responseData.error?.message ||
+            responseData.message ||
+            `DeepSeek 请求失败：${deepSeekResponse.statusCode}`
+          throw new ApiError(
+            ERROR_CODES.AI_TRANSLATION_FAILED,
+            message,
+            'deepSeek',
+            502
+          )
+        }
+
+        const resultData = parseAiContent(responseData)
+        state.responseModel = responseData.model || state.responseModel
+        if (responseData.id && !state.responseId) {
+          state.responseId = responseData.id
+        }
+        state.aiJsonLogs.push(
+          translationAiJsonLogService.createAiJsonLog({
+            operation: input.operation || 'translation.post',
+            stage: 'TranslationChunk',
+            provider: 'deepseek',
+            model: responseData.model || state.responseModel,
+            requestId: responseData.id || '',
+            sourceLanguageCode: input.sourceLanguageCode,
+            targetLanguageCode: input.targetLanguageCode,
+            meta: {
+              stream: true,
+              chunkIndex: chunkIndex + 1,
+              chunkCount: chunkTotal,
+              attemptNo,
+              entryCount: chunkInput.entries.length
+            },
+            json: resultData
+          })
+        )
+        normalizeResultEntries(resultData).forEach(entry => {
+          mergeChunkResultEntry(state.resultMap, entry)
+        })
+        return resultData
+      } catch (error) {
+        if (
+          typeof handlers.onChunkRollback === 'function' &&
+          (attemptStreamState.contentLength > 0 ||
+            attemptStreamState.reasoningLength > 0)
+        ) {
+          handlers.onChunkRollback({
+            contentLength: attemptStreamState.contentLength,
+            reasoningLength: attemptStreamState.reasoningLength,
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunkTotal,
+            attemptNo,
+            errorMessage: error?.message || ''
+          })
+        }
+        throw error
+      }
+    },
+    {
+      stepKey: `translation.chunk.${chunkIndex + 1}`,
+      stepLabel: `翻译第 ${chunkIndex + 1}/${chunkTotal} 批`,
+      field: 'deepSeek',
+      onStatus: handlers?.onStatus,
+      cancellation: handlers?.cancellation
+    }
+  )
+}
+
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
@@ -3857,9 +4010,14 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     aiInput.aiJsonLogs
   )
   const resultMap = new Map()
-  let combinedUsage = {}
-  let responseModel = settings.deepSeekModel
-  let responseId = ''
+  const state = {
+    chunkResponses,
+    aiJsonLogs,
+    resultMap,
+    combinedUsage: {},
+    responseModel: settings.deepSeekModel,
+    responseId: ''
+  }
 
   if (handlers.onStatus) {
     handlers.onStatus({
@@ -3877,62 +4035,15 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
         })
       }
 
-      const requestBody = buildDeepSeekStreamRequestBody(settings, chunkInput)
-      const deepSeekResponse = await requestStream(
-        url,
-        requestBody,
+      await translateStreamChunkWithRetry({
+        input,
         settings,
-        {
-          onStatus: handlers.onStatus,
-          onChunk: handlers.onChunk
-        },
-        handlers
-      )
-      chunkResponses.push(deepSeekResponse)
-
-      const responseData = deepSeekResponse.data
-      responseModel = responseData.model || responseModel
-      if (responseData.id && !responseId) {
-        responseId = responseData.id
-      }
-      combinedUsage = mergeUsage(combinedUsage, responseData.usage || {})
-
-      const isSuccessStatus =
-        deepSeekResponse.statusCode >= 200 && deepSeekResponse.statusCode < 300
-      if (!isSuccessStatus) {
-        const message =
-          responseData.error?.message ||
-          responseData.message ||
-          `DeepSeek 请求失败：${deepSeekResponse.statusCode}`
-        throw new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          message,
-          'deepSeek',
-          502
-        )
-      }
-
-      const resultData = parseAiContent(responseData)
-      aiJsonLogs.push(
-        translationAiJsonLogService.createAiJsonLog({
-          operation: input.operation || 'translation.post',
-          stage: 'TranslationChunk',
-          provider: 'deepseek',
-          model: responseData.model || responseModel,
-          requestId: responseData.id || '',
-          sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: input.targetLanguageCode,
-          meta: {
-            stream: true,
-            chunkIndex: index + 1,
-            chunkCount: chunkTotal,
-            entryCount: chunkInput.entries.length
-          },
-          json: resultData
-        })
-      )
-      normalizeResultEntries(resultData).forEach(entry => {
-        mergeChunkResultEntry(resultMap, entry)
+        url,
+        chunkInput,
+        chunkIndex: index,
+        chunkTotal,
+        handlers,
+        state
       })
 
       if (handlers.onStatus) {
@@ -3946,9 +4057,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 
     const responseData = buildAggregateRawResponse({
       chunkResponses,
-      usage: combinedUsage,
-      model: responseModel,
-      requestId: responseId
+      usage: state.combinedUsage,
+      model: state.responseModel,
+      requestId: state.responseId
     })
     await recordTranslationUsage({
       post,
@@ -3965,9 +4076,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     })
     const data = {
       payload,
-      model: responseModel,
-      usage: combinedUsage,
-      requestId: responseId || null,
+      model: state.responseModel,
+      usage: state.combinedUsage,
+      requestId: state.responseId || null,
       aiJsonLogs,
       coverImagePreviewEntries: [],
       coverImageArtifacts: [],
@@ -3978,9 +4089,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     const isCancelled = error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
     const responseData = buildAggregateRawResponse({
       chunkResponses,
-      usage: combinedUsage,
-      model: responseModel,
-      requestId: responseId,
+      usage: state.combinedUsage,
+      model: state.responseModel,
+      requestId: state.responseId,
       error
     })
     await recordTranslationUsage({

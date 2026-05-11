@@ -1308,6 +1308,39 @@ function isRetryableError(error) {
   return true
 }
 
+function isManualRetryRequiredError(error) {
+  return Boolean(
+    error && error.extra && error.extra.manualRetryRequired === true
+  )
+}
+
+function getFailedStep(options = {}) {
+  const explicitStep = toTrimmedString(options.failedStep)
+  if (explicitStep) {
+    return explicitStep
+  }
+  const error = options.error
+  const aiStepLabel = toTrimmedString(error?.extra?.aiStepLabel)
+  if (aiStepLabel) {
+    return aiStepLabel
+  }
+  return toTrimmedString(error?.extra?.aiStepKey)
+}
+
+function buildFailureProgressStep({
+  errorMessage,
+  autoRetry,
+  manualRetryRequired
+}) {
+  if (manualRetryRequired) {
+    return `当前 AI 步骤连续重试失败，等待用户决定是否重试：${errorMessage}`
+  }
+  if (autoRetry) {
+    return `任务执行失败，等待后台自动重试：${errorMessage}`
+  }
+  return `任务执行失败：${errorMessage}`
+}
+
 function getAttemptStatus(error) {
   if (error && error.code === ERROR_CODES.AI_TRANSLATION_CANCELLED) {
     return 'interrupted'
@@ -1713,10 +1746,22 @@ async function failRunningTranslationJob(options = {}) {
   const now = new Date()
   const maxAttempts = Number(options.maxAttempts || 3)
   const currentAttemptNo = Number(options.attemptNo || 0)
+  const manualRetryRequired = isManualRetryRequiredError(options.error)
   let retryable = isRetryableError(options.error)
-  if (currentAttemptNo >= maxAttempts) {
+  let autoRetry = retryable
+  if (manualRetryRequired) {
+    retryable = true
+    autoRetry = false
+  } else if (currentAttemptNo >= maxAttempts) {
     retryable = false
+    autoRetry = false
   }
+  const failedStep = getFailedStep(options)
+  const progressStep = buildFailureProgressStep({
+    errorMessage: errorSummary.message,
+    autoRetry,
+    manualRetryRequired
+  })
 
   const JobModel = getTranslationJobModel()
   await JobModel.updateOne(
@@ -1728,19 +1773,19 @@ async function failRunningTranslationJob(options = {}) {
     },
     {
       $set: {
-        status: retryable
+        status: autoRetry
           ? TRANSLATION_JOB_STATUS.RUNNING
           : TRANSLATION_JOB_STATUS.FAILED,
-        'queueControl.active': retryable,
+        'queueControl.active': autoRetry,
         'runtime.lockedBy': '',
         'runtime.workerId': '',
-        'runtime.finishedAt': retryable ? null : now,
+        'runtime.finishedAt': autoRetry ? null : now,
         'runtime.heartbeatAt': now,
         'runtime.leaseExpiresAt': new Date(now.getTime() - 1000),
-        'runtime.recovering': retryable,
+        'runtime.recovering': autoRetry,
         'runtime.lastInterruptedAt': now,
         'runtime.interruptReason': errorSummary.message,
-        'failure.failedStep': options.failedStep || '',
+        'failure.failedStep': failedStep,
         'failure.errorCode': errorSummary.code,
         'failure.errorMessage': errorSummary.message,
         'failure.stackSummary': errorSummary.stackSummary,
@@ -1748,9 +1793,7 @@ async function failRunningTranslationJob(options = {}) {
         'failure.attempts': currentAttemptNo,
         'failure.lastFailedAt': now,
         'progress.currentStage': 'Failure',
-        'progress.currentStep': retryable
-          ? `任务执行失败，等待后台自动重试：${errorSummary.message}`
-          : `任务执行失败：${errorSummary.message}`,
+        'progress.currentStep': progressStep,
         'attempts.$[attempt].status': getAttemptStatus(options.error),
         'attempts.$[attempt].finishedAt': now,
         'attempts.$[attempt].error': errorSummary

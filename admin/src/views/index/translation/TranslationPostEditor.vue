@@ -3548,6 +3548,22 @@ export default {
           scrollAiStreamFeedbackToBottom()
         }
       }
+      if (eventData.eventName === 'chunkRollback') {
+        const contentLength = Number(data.contentLength || 0)
+        const reasoningLength = Number(data.reasoningLength || 0)
+        if (contentLength > 0) {
+          aiStreamContent.value = aiStreamContent.value.slice(
+            0,
+            Math.max(aiStreamContent.value.length - contentLength, 0)
+          )
+        }
+        if (reasoningLength > 0) {
+          aiStreamReasoning.value = aiStreamReasoning.value.slice(
+            0,
+            Math.max(aiStreamReasoning.value.length - reasoningLength, 0)
+          )
+        }
+      }
       if (eventData.eventName === 'result') {
         const preview = buildAiImportPreview(data, referenceEntries)
         aiImportPreview.value = preview

@@ -2158,6 +2158,15 @@ export default {
           scrollAiStreamFeedbackToBottom()
         }
       }
+      if (eventData.eventName === 'chunkRollback') {
+        const contentLength = Number(data.contentLength || 0)
+        if (contentLength > 0) {
+          aiStreamContent.value = aiStreamContent.value.slice(
+            0,
+            Math.max(aiStreamContent.value.length - contentLength, 0)
+          )
+        }
+      }
       if (eventData.eventName === 'result') {
         const preview = buildAiImportPreview({
           data,
