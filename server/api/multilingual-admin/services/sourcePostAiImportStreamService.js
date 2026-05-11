@@ -71,6 +71,23 @@ function createEmptyTranslatedResult() {
   }
 }
 
+function normalizeTargetLanguageCodeList(body, targetLanguageCode) {
+  const languageCodes = []
+  if (targetLanguageCode) {
+    languageCodes.push(targetLanguageCode)
+  }
+  if (Array.isArray(body.targetLanguageCodes)) {
+    body.targetLanguageCodes.forEach(value => {
+      const languageCode = normalizeLanguageCode(value)
+      if (!languageCode || languageCodes.includes(languageCode)) {
+        return
+      }
+      languageCodes.push(languageCode)
+    })
+  }
+  return languageCodes
+}
+
 function parseInput(body = {}) {
   const sourceId = String(body.sourceId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
@@ -118,6 +135,10 @@ function parseInput(body = {}) {
     sourceId,
     sourceLanguageCode,
     targetLanguageCode,
+    targetLanguageCodes: normalizeTargetLanguageCodeList(
+      body,
+      targetLanguageCode
+    ),
     prompt: normalizePrompt(body.prompt),
     entries,
     translateCoverImage,
@@ -145,8 +166,10 @@ async function translateSourcePostAiImportEntriesStream(
       {
         contentId: String(previewContext.targetPost?._id || input.sourceId),
         contentType: 'sourcePostImport',
+        properNounScopeKey: `sourcePostImport:${input.sourceId}`,
         sourceLanguageCode: input.sourceLanguageCode,
         targetLanguageCode: input.targetLanguageCode,
+        targetLanguageCodes: input.targetLanguageCodes,
         prompt: input.prompt,
         skipUsageLog: input.skipUsageLog,
         searchOfficialTermTranslations: input.searchOfficialTermTranslations,

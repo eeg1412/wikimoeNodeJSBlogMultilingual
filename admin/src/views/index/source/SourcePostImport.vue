@@ -2507,6 +2507,7 @@ export default {
             sourceId: sourcePostId,
             sourceLanguageCode: aiForm.sourceLanguageCode,
             targetLanguageCode: languageCode,
+            targetLanguageCodes: aiForm.targetLanguageCodes,
             prompt: aiForm.prompt,
             skipUsageLog: true,
             searchOfficialTermTranslations:

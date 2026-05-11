@@ -964,6 +964,7 @@ async function translateSourcePostForLanguage({
       {
         contentId: String(previewContext.targetPost._id),
         contentType: 'sourcePostImport',
+        properNounScopeKey: `sourcePostImport:${sourcePostId}`,
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: languageCode,
         targetLanguageCodes,

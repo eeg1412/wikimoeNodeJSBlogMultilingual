@@ -1,5 +1,6 @@
 const http = require('http')
 const https = require('https')
+const crypto = require('crypto')
 const mongoose = require('mongoose')
 const {
   normalizeLanguageCode,
@@ -47,6 +48,10 @@ const MAX_TERM_FILTER_TOKENS = 2048
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
+const OFFICIAL_TERM_GLOSSARY_CACHE_TTL_MS = 10 * 60 * 1000
+const MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE = 50
+
+const officialTermGlossaryCache = new Map()
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -345,6 +350,7 @@ function parseGenericInput(body = {}) {
     entries: body.entries,
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
+    properNounScopeKey: String(body.properNounScopeKey || '').trim(),
     skipUsageLog: body.skipUsageLog === true,
     searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
@@ -1083,6 +1089,87 @@ function getTermTargetLanguageCodes(input) {
     })
   }
   return languageCodes
+}
+
+function buildOfficialTermGlossaryCacheHash(value) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(value))
+    .digest('hex')
+}
+
+function getOfficialTermGlossaryScopeKey(input) {
+  const explicitScopeKey = String(input.properNounScopeKey || '').trim()
+  if (explicitScopeKey) {
+    return explicitScopeKey
+  }
+  const sourceSnapshotId = String(input.sourceSnapshotId || '').trim()
+  if (sourceSnapshotId) {
+    return `sourceSnapshot:${sourceSnapshotId}`
+  }
+  const contentId = String(input.contentId || input.postId || '').trim()
+  if (contentId) {
+    return `content:${contentId}`
+  }
+  return ''
+}
+
+function buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes) {
+  const packages = buildTermExtractionPackages(input).map(termPackage => {
+    return {
+      packageType: termPackage.packageType,
+      title: termPackage.title,
+      text: termPackage.text
+    }
+  })
+  return buildOfficialTermGlossaryCacheHash({
+    scopeKey: getOfficialTermGlossaryScopeKey(input),
+    sourceLanguageCode: input.sourceLanguageCode || '',
+    targetLanguageCodes: targetLanguageCodes.slice().sort(),
+    searchOfficialTermTranslations: input.searchOfficialTermTranslations === true,
+    packages
+  })
+}
+
+function pruneOfficialTermGlossaryCache(now) {
+  for (const [cacheKey, cacheItem] of officialTermGlossaryCache.entries()) {
+    if (cacheItem.expiresAt <= now) {
+      officialTermGlossaryCache.delete(cacheKey)
+    }
+  }
+  while (officialTermGlossaryCache.size > MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE) {
+    const firstKey = officialTermGlossaryCache.keys().next().value
+    if (!firstKey) {
+      return
+    }
+    officialTermGlossaryCache.delete(firstKey)
+  }
+}
+
+function getOfficialTermGlossaryCache(cacheKey) {
+  const now = Date.now()
+  pruneOfficialTermGlossaryCache(now)
+  const cacheItem = officialTermGlossaryCache.get(cacheKey)
+  if (!cacheItem || cacheItem.expiresAt <= now) {
+    officialTermGlossaryCache.delete(cacheKey)
+    return null
+  }
+  return cacheItem.promise
+}
+
+function setOfficialTermGlossaryCache(cacheKey, promise) {
+  officialTermGlossaryCache.set(cacheKey, {
+    promise,
+    expiresAt: Date.now() + OFFICIAL_TERM_GLOSSARY_CACHE_TTL_MS
+  })
+  promise.catch(() => {
+    const cacheItem = officialTermGlossaryCache.get(cacheKey)
+    if (cacheItem && cacheItem.promise === promise) {
+      officialTermGlossaryCache.delete(cacheKey)
+    }
+  })
+  pruneOfficialTermGlossaryCache(Date.now())
+  return promise
 }
 
 function buildOfficialTermGlossaryMarkdownMap({
@@ -2331,23 +2418,13 @@ async function resolveExistingTermMatches({
   }
 }
 
-async function prepareOfficialTermGlossaryForAiInput({
+async function resolveOfficialTermGlossaryCacheData({
   input,
   settings,
   url,
-  handlers
+  handlers,
+  targetLanguageCodes
 }) {
-  const targetLanguageCodes = getTermTargetLanguageCodes(input)
-  if (!Array.isArray(input.entries) || input.entries.length === 0) {
-    return input
-  }
-  if (targetLanguageCodes.length === 0) {
-    return input
-  }
-
-  if (handlers.onStatus) {
-    handlers.onStatus({ message: '正在准备专有名词翻译数据库' })
-  }
   const extractionResult = await extractProperNounKeywords({
     input,
     settings,
@@ -2363,7 +2440,6 @@ async function prepareOfficialTermGlossaryForAiInput({
     extractionResult.officialTermContextSummary
   )
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
-    input.aiJsonLogs,
     extractionResult.aiJsonLogs
   )
   if (extractedTerms.length === 0) {
@@ -2371,9 +2447,19 @@ async function prepareOfficialTermGlossaryForAiInput({
       handlers.onStatus({ message: '未抽取到需要检索的专有名词' })
     }
     return {
-      ...input,
       aiJsonLogs,
-      officialTermContextSummary
+      officialTermContextSummary,
+      officialTermGlossaryMarkdownMap: {},
+      officialTermStats: {
+        keywordCount: 0,
+        candidateCount: 0,
+        matchedTermCount: 0,
+        existingCount: 0,
+        missingCount: 0,
+        missingRequestCount: 0,
+        contextSummaryLength: officialTermContextSummary.length,
+        glossaryLanguageCodes: []
+      }
     }
   }
 
@@ -2492,10 +2578,6 @@ async function prepareOfficialTermGlossaryForAiInput({
     targetLanguageCodes,
     coverage
   })
-  const glossaryMarkdown = getCurrentOfficialTermGlossaryMarkdown({
-    input,
-    glossaryMarkdownMap
-  })
   if (handlers.onStatus) {
     handlers.onStatus({
       message: `已整理 ${keywordArray.length} 个专有名词用于本次翻译`
@@ -2503,10 +2585,8 @@ async function prepareOfficialTermGlossaryForAiInput({
   }
 
   return {
-    ...input,
     aiJsonLogs,
     officialTermContextSummary,
-    officialTermGlossaryMarkdown: glossaryMarkdown,
     officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
     officialTermStats: {
       keywordCount: keywordArray.length,
@@ -2518,6 +2598,78 @@ async function prepareOfficialTermGlossaryForAiInput({
       contextSummaryLength: officialTermContextSummary.length,
       glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
     }
+  }
+}
+
+async function getOfficialTermGlossaryCacheData({
+  input,
+  settings,
+  url,
+  handlers,
+  targetLanguageCodes
+}) {
+  const cacheKey = buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes)
+  const cachedPromise = getOfficialTermGlossaryCache(cacheKey)
+  if (cachedPromise) {
+    const cachedData = await cachedPromise
+    if (handlers.onStatus) {
+      handlers.onStatus({
+        message: `复用已整理的 ${cachedData.officialTermStats.keywordCount} 个专有名词词库`
+      })
+    }
+    return cachedData
+  }
+
+  const promise = resolveOfficialTermGlossaryCacheData({
+    input,
+    settings,
+    url,
+    handlers,
+    targetLanguageCodes
+  })
+  return await setOfficialTermGlossaryCache(cacheKey, promise)
+}
+
+async function prepareOfficialTermGlossaryForAiInput({
+  input,
+  settings,
+  url,
+  handlers
+}) {
+  const targetLanguageCodes = getTermTargetLanguageCodes(input)
+  if (!Array.isArray(input.entries) || input.entries.length === 0) {
+    return input
+  }
+  if (targetLanguageCodes.length === 0) {
+    return input
+  }
+
+  if (handlers.onStatus) {
+    handlers.onStatus({ message: '正在准备专有名词翻译数据库' })
+  }
+  const glossaryData = await getOfficialTermGlossaryCacheData({
+    input,
+    settings,
+    url,
+    handlers,
+    targetLanguageCodes
+  })
+  const glossaryMarkdown = getCurrentOfficialTermGlossaryMarkdown({
+    input,
+    glossaryMarkdownMap: glossaryData.officialTermGlossaryMarkdownMap
+  })
+
+  return {
+    ...input,
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(
+      input.aiJsonLogs,
+      glossaryData.aiJsonLogs
+    ),
+    officialTermContextSummary: glossaryData.officialTermContextSummary,
+    officialTermGlossaryMarkdown: glossaryMarkdown,
+    officialTermGlossaryMarkdownMap:
+      glossaryData.officialTermGlossaryMarkdownMap,
+    officialTermStats: glossaryData.officialTermStats
   }
 }
 
