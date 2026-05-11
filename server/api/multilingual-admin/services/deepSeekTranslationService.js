@@ -1091,6 +1091,14 @@ function getTermTargetLanguageCodes(input) {
   return languageCodes
 }
 
+function getStableTermTargetLanguageCodes(input) {
+  return getTermTargetLanguageCodes(input).slice().sort()
+}
+
+function getTermTargetLanguageCodeLogValue(input) {
+  return getStableTermTargetLanguageCodes(input).join(',')
+}
+
 function buildOfficialTermGlossaryCacheHash(value) {
   return crypto
     .createHash('sha256')
@@ -1434,7 +1442,7 @@ function buildTermExtractionRequestData(
           '不超过 300 个汉字的简短上下文摘要，只说明本次已读内容涉及的主题、作品、人物关系、组织、地点和场景；不要描述名词出现在标题、正文或段落中的位置'
       },
       sourceLanguageCode: input.sourceLanguageCode || '',
-      targetLanguageCode: input.targetLanguageCode || '',
+      targetLanguageCodes: getStableTermTargetLanguageCodes(input),
       packageType: termPackage.packageType,
       packageTitle: termPackage.title,
       previousContextSummary: normalizeTermContextSummary(
@@ -1793,7 +1801,7 @@ async function recordTermExtractionUsage({
     status,
     requestId: responseData.id || '',
     sourceLanguageCode: input.sourceLanguageCode,
-    targetLanguageCode: input.targetLanguageCode,
+    targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
     usage: responseData.usage || {},
     rawResponse: responseData,
     meta: {
@@ -1879,7 +1887,7 @@ async function extractTermsFromPackage({
           model: responseData.model || settings.deepSeekModel,
           requestId: responseData.id || '',
           sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: input.targetLanguageCode,
+          targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
           meta: {
             packageIndex,
             packageCount,
@@ -2110,7 +2118,7 @@ function buildExistingTermFilterRequestData({
           '数据库候选 termId 字符串数组，只包含确认属于本次文章同一对象的候选'
       },
       sourceLanguageCode: input.sourceLanguageCode || '',
-      targetLanguageCodes: getTermTargetLanguageCodes(input),
+      targetLanguageCodes: getStableTermTargetLanguageCodes(input),
       contentContextSummary: normalizeTermContextSummary(contextSummary),
       extractedTerms: sourceTextItems.map(item => {
         return {
@@ -2303,7 +2311,7 @@ async function filterExistingTermCandidatesWithAi({
           status: usageStatus,
           requestId: responseData.id || '',
           sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
+          targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
           usage: responseData.usage || {},
           rawResponse: responseData,
           meta: {
@@ -2351,7 +2359,7 @@ async function filterExistingTermCandidatesWithAi({
           model: responseData.model || settings.deepSeekModel,
           requestId: responseData.id || '',
           sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: getTermTargetLanguageCodes(input).join(','),
+          targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
           meta: {
             sourceTermCount: sourceTextItems.length,
             candidateTermCount: candidateTerms.length,
@@ -2636,7 +2644,7 @@ async function prepareOfficialTermGlossaryForAiInput({
   url,
   handlers
 }) {
-  const targetLanguageCodes = getTermTargetLanguageCodes(input)
+  const targetLanguageCodes = getStableTermTargetLanguageCodes(input)
   if (!Array.isArray(input.entries) || input.entries.length === 0) {
     return input
   }
