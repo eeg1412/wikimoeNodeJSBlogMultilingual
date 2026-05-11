@@ -40,6 +40,7 @@
               />
             </el-select>
           </el-form-item>
+          <!--
           <el-form-item>
             <el-select
               v-model="params.enabled"
@@ -51,6 +52,7 @@
               <el-option label="停用" value="false" />
             </el-select>
           </el-form-item>
+          -->
           <el-form-item>
             <el-button
               class="proper-noun-search-button"
@@ -119,10 +121,11 @@
               v-if="getDisplayedTranslations(row).length > 0"
               class="proper-noun-translation-list"
             >
+              <!-- 暂时关闭译名 enabled 视觉区分：:type="translation.enabled ? 'primary' : 'info'" -->
               <el-tag
                 v-for="translation in getDisplayedTranslations(row)"
                 :key="translation._id"
-                :type="translation.enabled ? 'primary' : 'info'"
+                type="primary"
                 effect="plain"
               >
                 {{ getLanguageText(translation.languageCode) }}：{{
@@ -141,6 +144,7 @@
             <span v-else class="table-empty-text">-</span>
           </template>
         </ResponsiveTableColumn>
+        <!--
         <ResponsiveTableColumn label="状态" width="110">
           <template #default="{ row }">
             <el-tag v-if="row.enabled" type="success" effect="plain">
@@ -149,6 +153,7 @@
             <el-tag v-else type="info" effect="plain">停用</el-tag>
           </template>
         </ResponsiveTableColumn>
+        -->
         <ResponsiveTableColumn label="使用情况" width="180">
           <template #default="{ row }">
             <div class="proper-noun-usage">
@@ -232,9 +237,11 @@
             />
           </el-select>
         </el-form-item>
+        <!--
         <el-form-item label="启用">
           <el-switch v-model="termForm.enabled" />
         </el-form-item>
+        -->
         <el-form-item label="备注">
           <el-input v-model="termForm.note" type="textarea" :rows="4" />
         </el-form-item>
@@ -289,6 +296,7 @@
             }}</el-tag>
           </template>
         </ResponsiveTableColumn>
+        <!--
         <ResponsiveTableColumn label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.enabled" type="success" effect="plain"
@@ -297,6 +305,7 @@
             <el-tag v-else type="info" effect="plain">停用</el-tag>
           </template>
         </ResponsiveTableColumn>
+        -->
         <ResponsiveTableColumn label="使用情况" width="170">
           <template #default="{ row }">
             <div class="proper-noun-usage">
@@ -360,9 +369,11 @@
             show-word-limit
           />
         </el-form-item>
+        <!--
         <el-form-item label="启用">
           <el-switch v-model="translationForm.enabled" />
         </el-form-item>
+        -->
         <el-form-item label="备注">
           <el-input v-model="translationForm.note" type="textarea" :rows="4" />
         </el-form-item>
@@ -407,8 +418,8 @@ function getInitialTermForm() {
     id: '',
     sourceText: '',
     sourceLanguageCode: '',
-    note: '',
-    enabled: true
+    note: ''
+    // enabled: true
   }
 }
 
@@ -418,8 +429,8 @@ function getInitialTranslationForm() {
     termId: '',
     languageCode: 'zh-CN',
     translatedText: '',
-    note: '',
-    enabled: true
+    note: ''
+    // enabled: true
   }
 }
 
@@ -444,8 +455,8 @@ export default {
       page: 1,
       limit: 20,
       keyword: '',
-      languageCode: '',
-      enabled: ''
+      languageCode: ''
+      // enabled: ''
     })
 
     const termDialogVisible = ref(false)
@@ -512,9 +523,11 @@ export default {
       if (params.languageCode) {
         requestParams.languageCode = params.languageCode
       }
+      /*
       if (params.enabled !== '') {
         requestParams.enabled = params.enabled
       }
+      */
       return requestParams
     }
 
@@ -559,8 +572,8 @@ export default {
         id: row._id,
         sourceText: row.sourceText || '',
         sourceLanguageCode: row.sourceLanguageCode || '',
-        note: row.note || '',
-        enabled: row.enabled !== false
+        note: row.note || ''
+        // enabled: row.enabled !== false
       })
       termDialogVisible.value = true
     }
@@ -706,8 +719,8 @@ export default {
         termId: row.termId,
         languageCode: row.languageCode,
         translatedText: row.translatedText || '',
-        note: row.note || '',
-        enabled: row.enabled !== false
+        note: row.note || ''
+        // enabled: row.enabled !== false
       })
       translationEditDialogVisible.value = true
     }

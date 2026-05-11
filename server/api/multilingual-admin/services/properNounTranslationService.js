@@ -385,12 +385,14 @@ function buildTermSearchMatch(query = {}) {
     ]
   }
 
+  /*
   if (query.enabled === 'true' || query.enabled === true) {
     match.enabled = true
   }
   if (query.enabled === 'false' || query.enabled === false) {
     match.enabled = false
   }
+  */
 
   return match
 }
@@ -411,7 +413,8 @@ function buildTermPayload(data = {}) {
     normalizedSourceText: buildNormalizedSourceText(sourceText),
     sourceLanguageCode: normalizeOptionalLanguageCode(data.sourceLanguageCode),
     note: normalizeString(data.note, 2000),
-    enabled: normalizeBoolean(data.enabled, true)
+    enabled: true
+    // enabled: normalizeBoolean(data.enabled, true)
   }
 }
 
@@ -442,7 +445,8 @@ function buildTranslationPayload(data = {}, term) {
       data.searchMetadata && typeof data.searchMetadata === 'object'
         ? data.searchMetadata
         : {},
-    enabled: normalizeBoolean(data.enabled, true)
+    enabled: true
+    // enabled: normalizeBoolean(data.enabled, true)
   }
 }
 
