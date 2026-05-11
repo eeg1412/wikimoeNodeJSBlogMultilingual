@@ -12,7 +12,6 @@ var properNounTerms = new Schema(
     normalizedSourceText: {
       type: String,
       required: true,
-      unique: true,
       index: true
     },
     sourceLanguageCode: {

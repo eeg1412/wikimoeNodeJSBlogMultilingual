@@ -153,9 +153,18 @@ function normalizeTermRequestList(termRequests) {
       termRequest = {
         sourceText,
         normalizedSourceText,
-        targetLanguageCodes: []
+        targetLanguageCodes: [],
+        termId: normalizeString(item?.termId, 80),
+        note: normalizeString(item?.note, 200)
       }
       termRequestMap.set(normalizedSourceText, termRequest)
+    } else {
+      if (!termRequest.termId) {
+        termRequest.termId = normalizeString(item?.termId, 80)
+      }
+      if (!termRequest.note) {
+        termRequest.note = normalizeString(item?.note, 200)
+      }
     }
     targetLanguageCodes.forEach(languageCode => {
       if (!termRequest.targetLanguageCodes.includes(languageCode)) {
@@ -421,6 +430,8 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
     })
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
+      termId: termRequest.termId || '',
+      note: termRequest.note || '',
       translations,
       translationSource: TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE
     })
@@ -443,6 +454,8 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
     if (missingLanguageCodes.length > 0) {
       missingTermRequests.push({
         sourceText: termRequest.sourceText,
+        termId: termRequest.termId || '',
+        note: termRequest.note || '',
         targetLanguageCodes: missingLanguageCodes
       })
     }
@@ -482,6 +495,8 @@ function normalizeSearchTerms(resultData, termRequests) {
     })
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
+      termId: termRequest.termId || '',
+      note: termRequest.note || '',
       translations,
       translationSource: TERM_TRANSLATION_SOURCE_INTERNET_SEARCH
     })
@@ -717,21 +732,29 @@ async function searchOfficialTermTranslationsWithInternet({
 }
 
 async function searchOfficialTermTranslations(options = {}) {
-  const sourceTerms = normalizeSourceTerms(options.sourceTerms)
+  let sourceTerms = normalizeSourceTerms(options.sourceTerms)
   const targetLanguageCodes = normalizeTargetLanguageCodes(
     options.targetLanguageCodes
   )
-  if (sourceTerms.length === 0 || targetLanguageCodes.length === 0) {
+  let termRequests = normalizeTermRequestList(options.termRequests)
+  if (termRequests.length === 0) {
+    termRequests = buildTermRequests(sourceTerms, targetLanguageCodes)
+  }
+  if (sourceTerms.length === 0) {
+    sourceTerms = termRequests.map(termRequest => termRequest.sourceText)
+  }
+  if (termRequests.length === 0) {
     return {
       provider: '',
       model: '',
       terms: []
     }
   }
-  const termRequests = buildTermRequests(sourceTerms, targetLanguageCodes)
   const contextSummary = normalizeOfficialTermContextSummary(
     options.contextSummary
   )
+  const requestTargetLanguageCodes =
+    getTermRequestTargetLanguageCodes(termRequests)
 
   const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
   if (settings.provider !== 'gemini') {
@@ -776,7 +799,7 @@ async function searchOfficialTermTranslations(options = {}) {
     terms: knowledgeResult.terms.concat(searchResult.terms),
     stats: {
       sourceTermCount: sourceTerms.length,
-      targetLanguageCodes,
+      targetLanguageCodes: requestTargetLanguageCodes,
       aiKnowledgeBaseTermCount: knowledgeResult.terms.length,
       aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
         knowledgeResult.terms
