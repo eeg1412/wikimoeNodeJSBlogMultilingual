@@ -16,6 +16,8 @@ const MAX_PAGE_SIZE = 100
 const MAX_TERM_COUNT = 10000
 const MAX_BATCH_DELETE_TERM_COUNT = 100
 const MAX_CANDIDATE_EXTRA_COUNT = 50
+const MAX_CANDIDATE_QUERY_LIMIT = 100
+const MAX_CANDIDATE_KEYWORD_COUNT = 8
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 200
 const CLEANUP_DEBOUNCE_MS = 30 * 1000
 const CLEANUP_LOCK_KEY = 'properNounTermCleanup'
@@ -210,6 +212,57 @@ function normalizeSourceText(value) {
 
 function buildNormalizedSourceText(value) {
   return normalizeSourceText(value).toLocaleLowerCase()
+}
+
+function buildLooseSourceTextIdentity(value) {
+  return buildNormalizedSourceText(value)
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[!！?？。．.、，,：:；;"'“”‘’《》〈〉「」『』【】\[\]()（）×✕＆&＋+／/]/g, '')
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getCompactTextLength(value) {
+  return Array.from(normalizeSourceText(value).replace(/\s+/g, '')).length
+}
+
+function addCandidateKeyword(keywordList, value) {
+  const keyword = buildNormalizedSourceText(value).slice(0, 120)
+  if (!keyword || getCompactTextLength(keyword) < 2) {
+    return
+  }
+  if (!keywordList.includes(keyword)) {
+    keywordList.push(keyword)
+  }
+
+  const looseKeyword = buildLooseSourceTextIdentity(keyword).slice(0, 120)
+  if (!looseKeyword || getCompactTextLength(looseKeyword) < 2) {
+    return
+  }
+  if (!keywordList.includes(looseKeyword)) {
+    keywordList.push(looseKeyword)
+  }
+}
+
+function normalizeCandidateKeywordList(value, sourceText) {
+  const keywordList = []
+  if (Array.isArray(value)) {
+    value.forEach(item => addCandidateKeyword(keywordList, item))
+  }
+  addCandidateKeyword(keywordList, sourceText)
+  return keywordList.slice(0, MAX_CANDIDATE_KEYWORD_COUNT)
+}
+
+function mergeCandidateKeywordList(targetList, sourceList) {
+  if (!Array.isArray(sourceList)) {
+    return targetList
+  }
+  sourceList.forEach(keyword => {
+    addCandidateKeyword(targetList, keyword)
+  })
+  return targetList.slice(0, MAX_CANDIDATE_KEYWORD_COUNT)
 }
 
 function normalizeBoolean(value, defaultValue = true) {
@@ -758,12 +811,18 @@ function normalizeExtractedTermList(terms) {
     let sourceText = ''
     let note = ''
     let importance = 0
+    let searchKeywords = []
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       sourceText = normalizeSourceText(value.sourceText)
       note = normalizeString(value.note, MAX_EXTRACTED_TERM_NOTE_LENGTH)
       importance = Number(value.importance || 0)
+      searchKeywords = normalizeCandidateKeywordList(
+        value.searchKeywords,
+        sourceText
+      )
     } else {
       sourceText = normalizeSourceText(value)
+      searchKeywords = normalizeCandidateKeywordList([], sourceText)
     }
 
     const normalizedSourceText = buildNormalizedSourceText(sourceText)
@@ -771,13 +830,16 @@ function normalizeExtractedTermList(terms) {
       return
     }
 
-    const existingTerm = normalizedMap.get(normalizedSourceText)
+    const identityKey = buildLooseSourceTextIdentity(sourceText)
+    const normalizedKey = identityKey || normalizedSourceText
+    const existingTerm = normalizedMap.get(normalizedKey)
     if (!existingTerm) {
-      normalizedMap.set(normalizedSourceText, {
+      normalizedMap.set(normalizedKey, {
         sourceText,
         normalizedSourceText,
         note,
-        importance
+        importance,
+        searchKeywords
       })
       return
     }
@@ -785,8 +847,13 @@ function normalizeExtractedTermList(terms) {
     if (!existingTerm.note && note) {
       existingTerm.note = note
     }
+    existingTerm.searchKeywords = mergeCandidateKeywordList(
+      existingTerm.searchKeywords,
+      searchKeywords
+    )
     if (importance > existingTerm.importance) {
       existingTerm.sourceText = sourceText
+      existingTerm.normalizedSourceText = normalizedSourceText
       existingTerm.importance = importance
     }
   })
@@ -827,7 +894,81 @@ function getCandidateQueryLimit(sourceTextItems) {
   if (sourceTermCount <= 0) {
     return 0
   }
-  return sourceTermCount + MAX_CANDIDATE_EXTRA_COUNT
+  return Math.min(
+    sourceTermCount + MAX_CANDIDATE_EXTRA_COUNT,
+    MAX_CANDIDATE_QUERY_LIMIT
+  )
+}
+
+function buildCandidateKeywordQueryList(sourceTextItems) {
+  const keywordList = []
+  sourceTextItems.forEach(item => {
+    normalizeCandidateKeywordList(item.searchKeywords, item.sourceText).forEach(
+      keyword => {
+        if (!keywordList.includes(keyword)) {
+          keywordList.push(keyword)
+        }
+      }
+    )
+  })
+  return keywordList.map(keyword => {
+    return {
+      normalizedSourceText: {
+        $regex: escapeRegExp(keyword),
+        $options: 'i'
+      }
+    }
+  })
+}
+
+function isCandidateMatchedByKeyword(term, sourceTextItem) {
+  const termText = buildNormalizedSourceText(term?.sourceText || '')
+  const normalizedTermText = buildNormalizedSourceText(
+    term?.normalizedSourceText || termText
+  )
+  const looseTermText = buildLooseSourceTextIdentity(
+    term?.normalizedSourceText || termText
+  )
+  const keywordList = normalizeCandidateKeywordList(
+    sourceTextItem.searchKeywords,
+    sourceTextItem.sourceText
+  )
+
+  for (const keyword of keywordList) {
+    if (normalizedTermText.includes(keyword) || keyword.includes(normalizedTermText)) {
+      return true
+    }
+    const looseKeyword = buildLooseSourceTextIdentity(keyword)
+    if (!looseKeyword) {
+      continue
+    }
+    if (looseTermText.includes(looseKeyword)) {
+      return true
+    }
+    if (looseKeyword.includes(looseTermText)) {
+      return true
+    }
+  }
+  return false
+}
+
+function attachMatchedSourceTextItems(termList, sourceTextItems) {
+  return termList.map(term => {
+    const matchedSourceTextItems = sourceTextItems.filter(sourceTextItem => {
+      return isCandidateMatchedByKeyword(term, sourceTextItem)
+    })
+    return {
+      ...term,
+      matchedSourceTextItems: matchedSourceTextItems.map(item => {
+        return {
+          sourceText: item.sourceText,
+          normalizedSourceText: item.normalizedSourceText,
+          note: item.note || '',
+          importance: item.importance || 0
+        }
+      })
+    }
+  })
 }
 
 function getCandidateSort() {
@@ -963,12 +1104,14 @@ async function getTranslationCandidatesForExtractedTerms({
   }
 
   const candidateLimit = getCandidateQueryLimit(sourceTextItems)
+  const keywordQueryList = buildCandidateKeywordQueryList(sourceTextItems)
+  if (keywordQueryList.length === 0) {
+    return emptyResult
+  }
   const TermModel = getTermModel()
   const TranslationModel = getTranslationModel()
   const termList = await TermModel.find({
-    normalizedSourceText: {
-      $in: sourceTextItems.map(item => item.normalizedSourceText)
-    },
+    $or: keywordQueryList,
     enabled: true
   })
     .sort(getCandidateSort())
@@ -988,7 +1131,10 @@ async function getTranslationCandidatesForExtractedTerms({
   return {
     sourceTextItems,
     languageCodes,
-    candidateTerms: attachCandidateTranslations(termList, translationList),
+    candidateTerms: attachCandidateTranslations(
+      attachMatchedSourceTextItems(termList, sourceTextItems),
+      translationList
+    ),
     translations: translationList
   }
 }
@@ -1062,21 +1208,23 @@ function groupMatchedCandidateTerms(candidateTerms, matchedTermIds) {
     if (!matchedTermIdSet.has(termId)) {
       return
     }
-    const normalizedSourceText = String(term.normalizedSourceText || '')
-    if (!normalizedSourceText) {
-      return
+    const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
+      ? term.matchedSourceTextItems
+      : []
+    const normalizedSourceTextList = matchedSourceTextItems
+      .map(item => String(item?.normalizedSourceText || ''))
+      .filter(Boolean)
+    if (normalizedSourceTextList.length === 0 && term.normalizedSourceText) {
+      normalizedSourceTextList.push(String(term.normalizedSourceText))
     }
-    if (!matchedTermMap.has(normalizedSourceText)) {
-      matchedTermMap.set(normalizedSourceText, [])
-    }
-    matchedTermMap.get(normalizedSourceText).push(term)
+    normalizedSourceTextList.forEach(normalizedSourceText => {
+      if (!matchedTermMap.has(normalizedSourceText)) {
+        matchedTermMap.set(normalizedSourceText, [])
+      }
+      matchedTermMap.get(normalizedSourceText).push(term)
+    })
   })
   return matchedTermMap
-}
-
-function getCompactTextLength(value) {
-  const text = normalizeSourceText(value).replace(/\s+/g, '')
-  return Array.from(text).length
 }
 
 function shouldIncludeGlossaryNote(sourceText, matchedTermCount) {
@@ -1560,6 +1708,7 @@ module.exports = {
   SUPPORTED_LANGUAGE_CODES,
   TRANSLATION_SOURCE_VALUES,
   buildGlossaryMarkdown,
+  buildLooseSourceTextIdentity,
   buildNormalizedSourceText,
   batchDeleteTerms,
   compareMatchedTermTranslationCoverage,

@@ -42,6 +42,7 @@ const MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000
 const MAX_EXTRACTED_TERM_COUNT = 50
 const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 120
+const MAX_TERM_SEARCH_KEYWORD_COUNT = 6
 const MAX_TERM_FILTER_TOKENS = 2048
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
@@ -1332,10 +1333,12 @@ function buildTermExtractionRequestData(
         terms: {
           type: 'array',
           itemType: 'object',
-          requiredFields: ['sourceText', 'importance', 'note'],
+          requiredFields: ['sourceText', 'searchKeywords', 'importance', 'note'],
           itemSchema: {
             sourceText:
               '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
+            searchKeywords:
+              '1-6 个用于数据库模糊查询同一实体的原文核心关键词数组；去掉书名号、引号、感叹号等装饰标点，包含常见简称或无标点写法；不要放普通词或过宽关键词',
             importance: '1-100 的整数，数值越高越需要联网确认官方译名',
             note: '不超过 80 个汉字的词库消歧备注，只描述该词可脱离本文单独成立的稳定身份信息，如所属作品、角色定位、组织类型、地理属性；禁止写“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，不要翻译'
           }
@@ -1370,7 +1373,7 @@ function buildTermExtractionMessages(
         '你是多语言博客 CMS 的官方译名联网检索候选词筛选器。',
         '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
         `JSON 根节点必须包含 schema、version、terms 和 contextSummary，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
-        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","importance":90,"note":"某作品主角所属乐队成员"}],"contextSummary":"内容围绕某作品乐队成员的演出准备与人物关系展开"}。`,
+        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"某作品主角所属乐队成员"}],"contextSummary":"内容围绕某作品乐队成员的演出准备与人物关系展开"}。`,
         '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
         '如果词条仅靠普通翻译常识、上下文直译或目标语言常规表达即可处理，不要抽取。'
       ])
@@ -1380,13 +1383,18 @@ function buildTermExtractionMessages(
       content: buildPromptLayer('抽取规则层', [
         '优先抽取作品名称、系列名称、角色名称、真实组织、品牌产品、游戏/书籍/影视/番剧标题、现实地标、官方活动名等需要核对正式译名的词条。',
         '必须保留原文表面形式，不要自行翻译、改写、解释或添加括号。',
+        '同一实体不要因为书名号、引号、空格、全半角、感叹号、问号、句点等标点差异拆成多个 terms；例如“孤独摇滚”和“孤独摇滚！”只返回一个。',
+        'searchKeywords 必须由你生成，用于数据库模糊查询同一实体；写原文核心名、常见简称、无装饰标点写法，例如“孤独摇滚！”的 searchKeywords 应包含“孤独摇滚”。',
+        'searchKeywords 不要使用“动画”“角色”“乐园”“停车场”这类过宽普通词，也不要使用目标语言译名。',
+        '不要抽取由多个已可独立识别的实体用“×”“x”“X”“&”“＋”“+”“/”连接形成的临时组合名、联名展示名或宣传短语；如果确有翻译价值，只抽取其中需要查译名的独立实体。',
+        '例如“孤独摇滚 × 海岛乐园”如果只是作品名与地点/活动名的组合，不要返回“孤独摇滚 × 海岛乐园”这个组合词条；只返回确实需要确认译名的独立实体。',
         '输入正文已移除 HTML 标签；不要根据标签、属性或结构推测词条。',
         '不要抽取普通形容词、通用名词、完整句子、URL、代码、纯数字、日期、文件路径或随机 ID。',
         '不要抽取可以直接按目标语言常规表达翻译的道路、楼层、房间、编号路线、普通设施、泛称地点或行政区划组合。',
         '例如“1号路”“2号路”“第3层”“A区入口”“北门”“停车场”这类不需要联网确认官方译名的词条必须排除。',
         '不要把“某地的停车场”“某地的路口”“某作品拍照场景里的楼梯”这类由普通地点加描述性修饰组成、没有稳定正式名称的短语当成专有名词；即使它与作品巡礼、拍照打卡或剧情场景有关，也不代表它需要联网确认官方译名。',
         '如果你不确定一个词是否存在官方译名，只有它确实像作品、角色、品牌、组织、产品或现实地标时才抽取。',
-        '同一对象出现不同写法时，可以分别返回；完全重复的字符串只返回一次。',
+        '只有当不同写法确实指向不同官方实体或不同作品版本时才分别返回；同一对象的标点、简称、全半角或装饰符差异不要拆分。',
         'importance 必须综合判断词条对文章主题、标题摘要、关联内容和正文理解的一致性影响，以及联网确认官方译名的必要性。',
         '每个 terms 项都必须写 note；note 只用于数据库同名词消歧，不用于生成译名。',
         'note 要短，只写可脱离本文单独成立的稳定身份线索，例如所属作品、角色定位、组织属性、产品类型、地理属性；不要解释翻译方法，不要写目标语言译名。',
@@ -1483,6 +1491,82 @@ function normalizeTermImportance(value, index) {
   return importance
 }
 
+function normalizeTermSearchKeywordList(item, index) {
+  if (!Array.isArray(item.searchKeywords)) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 必须是数组`,
+      'deepSeek',
+      502
+    )
+  }
+
+  const keywordList = []
+  item.searchKeywords.forEach(value => {
+    const keyword = properNounTranslationService.normalizeSourceText(value)
+    const normalizedKeyword = properNounTranslationService
+      .buildNormalizedSourceText(keyword)
+      .trim()
+    if (!keyword || !normalizedKeyword) {
+      return
+    }
+    if (keywordList.includes(keyword)) {
+      return
+    }
+    keywordList.push(keyword)
+  })
+  if (keywordList.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 不能为空`,
+      'deepSeek',
+      502
+    )
+  }
+  return keywordList.slice(0, MAX_TERM_SEARCH_KEYWORD_COUNT)
+}
+
+function getExtractedTermIdentityKey(term) {
+  return (
+    properNounTranslationService.buildLooseSourceTextIdentity(term.sourceText) ||
+    term.normalizedSourceText
+  )
+}
+
+function hasCompositeTermSeparator(sourceText) {
+  return /[×✕＆&＋+／/]|\s[xX]\s/.test(String(sourceText || ''))
+}
+
+function shouldRemoveCompositeExtractedTerm(term, termList) {
+  if (!hasCompositeTermSeparator(term.sourceText)) {
+    return false
+  }
+  const termIdentity = getExtractedTermIdentityKey(term)
+  if (!termIdentity) {
+    return false
+  }
+  let matchedPartCount = 0
+  termList.forEach(candidate => {
+    if (candidate === term) {
+      return
+    }
+    const candidateIdentity = getExtractedTermIdentityKey(candidate)
+    if (!candidateIdentity || candidateIdentity.length < 2) {
+      return
+    }
+    if (termIdentity.includes(candidateIdentity)) {
+      matchedPartCount += 1
+    }
+  })
+  return matchedPartCount >= 2
+}
+
+function removeCompositeExtractedTerms(termList) {
+  return termList.filter(term => {
+    return !shouldRemoveCompositeExtractedTerm(term, termList)
+  })
+}
+
 function normalizeExtractedTermItem(item, index) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) {
     throw new ApiError(
@@ -1523,6 +1607,7 @@ function normalizeExtractedTermItem(item, index) {
   return {
     sourceText,
     normalizedSourceText,
+    searchKeywords: normalizeTermSearchKeywordList(item, index),
     importance: normalizeTermImportance(item.importance, index),
     note
   }
@@ -1543,13 +1628,36 @@ function normalizeExtractedTermList(resultData) {
   const termMap = new Map()
   termList.forEach((item, index) => {
     const termItem = normalizeExtractedTermItem(item, index)
-    const existingTerm = termMap.get(termItem.normalizedSourceText)
-    if (!existingTerm || termItem.importance > existingTerm.importance) {
-      termMap.set(termItem.normalizedSourceText, termItem)
+    const identityKey = getExtractedTermIdentityKey(termItem)
+    const termKey = identityKey || termItem.normalizedSourceText
+    const existingTerm = termMap.get(termKey)
+    if (!existingTerm) {
+      termMap.set(termKey, termItem)
+      return
+    }
+    if (termItem.importance > existingTerm.importance) {
+      existingTerm.searchKeywords.forEach(keyword => {
+        if (!termItem.searchKeywords.includes(keyword)) {
+          termItem.searchKeywords.push(keyword)
+        }
+      })
+      if (!termItem.note && existingTerm.note) {
+        termItem.note = existingTerm.note
+      }
+      termMap.set(termKey, termItem)
+      return
+    }
+    termItem.searchKeywords.forEach(keyword => {
+      if (!existingTerm.searchKeywords.includes(keyword)) {
+        existingTerm.searchKeywords.push(keyword)
+      }
+    })
+    if (!existingTerm.note && termItem.note) {
+      existingTerm.note = termItem.note
     }
   })
 
-  return Array.from(termMap.values())
+  return removeCompositeExtractedTerms(Array.from(termMap.values()))
 }
 
 function buildSelectedExtractedTermsFromMap(termMap) {
@@ -1571,6 +1679,7 @@ function buildSelectedExtractedTermsFromMap(termMap) {
     return {
       sourceText: item.sourceText,
       normalizedSourceText: item.normalizedSourceText,
+      searchKeywords: item.searchKeywords || [],
       importance: item.importance,
       note: item.note
     }
@@ -1831,36 +1940,30 @@ function buildMissingTermRequests(missingTerms) {
   })
 }
 
-function getCompactSourceTextLength(value) {
-  const text = properNounTranslationService
-    .normalizeSourceText(value)
-    .replace(/\s+/g, '')
-  return Array.from(text).length
-}
-
 function groupCandidateTermsByNormalizedSourceText(candidateTerms) {
   const candidateMap = new Map()
   candidateTerms.forEach(term => {
-    const normalizedSourceText = String(term.normalizedSourceText || '')
-    if (!normalizedSourceText) {
-      return
+    const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
+      ? term.matchedSourceTextItems
+      : []
+    const normalizedSourceTextList = matchedSourceTextItems
+      .map(item => String(item?.normalizedSourceText || ''))
+      .filter(Boolean)
+    if (normalizedSourceTextList.length === 0 && term.normalizedSourceText) {
+      normalizedSourceTextList.push(String(term.normalizedSourceText))
     }
-    if (!candidateMap.has(normalizedSourceText)) {
-      candidateMap.set(normalizedSourceText, [])
-    }
-    candidateMap.get(normalizedSourceText).push(term)
+    normalizedSourceTextList.forEach(normalizedSourceText => {
+      if (!candidateMap.has(normalizedSourceText)) {
+        candidateMap.set(normalizedSourceText, [])
+      }
+      candidateMap.get(normalizedSourceText).push(term)
+    })
   })
   return candidateMap
 }
 
 function shouldFilterExistingTermWithAi(sourceTextItem, candidateTerms) {
-  if (!Array.isArray(candidateTerms) || candidateTerms.length === 0) {
-    return false
-  }
-  if (candidateTerms.length > 1) {
-    return true
-  }
-  return getCompactSourceTextLength(sourceTextItem.sourceText) <= 2
+  return Array.isArray(candidateTerms) && candidateTerms.length > 0
 }
 
 function splitExistingTermCandidatesForFilter(sourceTextItems, candidateTerms) {
@@ -1936,6 +2039,17 @@ function buildExistingTermFilterRequestData({
           termId: String(term._id || ''),
           sourceText: term.sourceText || ''
         }
+        if (Array.isArray(term.matchedSourceTextItems)) {
+          row.matchedExtractedTerms = term.matchedSourceTextItems.map(item => {
+            return {
+              sourceText: item.sourceText || '',
+              note: normalizeString(item.note).slice(
+                0,
+                MAX_EXTRACTED_TERM_NOTE_LENGTH
+              )
+            }
+          })
+        }
         const note = buildCandidateIdentityNote(term)
         if (note) {
           row.note = note
@@ -1967,8 +2081,11 @@ function buildExistingTermFilterMessages({
     {
       role: 'system',
       content: buildPromptLayer('消歧规则层', [
-        '必须结合 contentContextSummary、extractedTerms.note 和 databaseCandidates.note 判断。',
+        '数据库候选来自 AI 生成关键词的模糊查询，候选 sourceText 不一定与 extractedTerms.sourceText 完全相同。',
+        '必须结合 contentContextSummary、extractedTerms.note、databaseCandidates.matchedExtractedTerms 和 databaseCandidates.note 判断。',
         '短人名、昵称、单字名、同形异义词不能只按字面匹配。',
+        '标点、书名号、感叹号、全半角或简称差异不应阻止同一实体匹配，例如“孤独摇滚”和“孤独摇滚！”可以属于同一作品。',
+        '临时组合名、联名展示名或宣传短语不能因为包含数据库里的作品名就整体匹配，必须确认候选本身就是 extractedTerms 中需要的实体。',
         '只有数据库候选明确指向本文同一作品、角色、组织、地点、产品或讨论对象时，才能把 termId 放入 matchedTermIds。',
         '如果候选备注缺失或信息不足以确认同一对象，必须剔除该候选。',
         '不要输出理由、译名、备注或候选之外的 termId。'
