@@ -44,11 +44,38 @@ function isValidObjectId(value) {
 }
 
 function shouldTranslateCoverImage(job, defaultValue) {
-  const options = job?.request?.options || {}
-  if (typeof options.translateCoverImage === 'boolean') {
-    return options.translateCoverImage
+  let defaultMode = 'never'
+  if (defaultValue === true) {
+    defaultMode = 'auto'
   }
-  return defaultValue === true
+  const mode = getCoverImageTranslationMode(job, defaultMode)
+  return coverImageTranslationService.shouldTranslateCoverImageForMode(mode)
+}
+
+function getCoverImageTranslationMode(job, defaultMode = 'never') {
+  const options = job?.request?.options || {}
+  if (typeof options.coverImageTranslationMode === 'string') {
+    return coverImageTranslationService.normalizeCoverImageTranslationMode(
+      options.coverImageTranslationMode,
+      defaultMode
+    )
+  }
+  if (typeof options.translateCoverImage === 'boolean') {
+    if (options.translateCoverImage) {
+      return 'auto'
+    }
+    return 'never'
+  }
+  return coverImageTranslationService.normalizeCoverImageTranslationMode(
+    defaultMode,
+    'never'
+  )
+}
+
+function shouldSkipCoverImageRecognition(job) {
+  return coverImageTranslationService.shouldSkipCoverImageRecognitionForMode(
+    getCoverImageTranslationMode(job, 'never')
+  )
 }
 
 function shouldSearchOfficialTermTranslations(job) {
@@ -1017,6 +1044,7 @@ async function translateSourcePostForLanguage({
       previewEntries: result.previewEntries,
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: languageCode,
+      skipRecognition: shouldSkipCoverImageRecognition(job),
       result
     })
   }

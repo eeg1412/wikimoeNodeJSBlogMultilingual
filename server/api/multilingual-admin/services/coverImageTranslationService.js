@@ -39,6 +39,35 @@ const {
 
 const SOURCE_ASSET_FETCH_TIMEOUT_MS = 30000
 const SOURCE_ASSET_FETCH_REDIRECT_LIMIT = 5
+const COVER_IMAGE_TRANSLATION_MODE_AUTO = 'auto'
+const COVER_IMAGE_TRANSLATION_MODE_ALWAYS = 'always'
+const COVER_IMAGE_TRANSLATION_MODE_NEVER = 'never'
+const COVER_IMAGE_TRANSLATION_MODES = [
+  COVER_IMAGE_TRANSLATION_MODE_AUTO,
+  COVER_IMAGE_TRANSLATION_MODE_ALWAYS,
+  COVER_IMAGE_TRANSLATION_MODE_NEVER
+]
+
+function normalizeCoverImageTranslationMode(value, defaultMode) {
+  const mode = String(value || '').trim()
+  if (COVER_IMAGE_TRANSLATION_MODES.includes(mode)) {
+    return mode
+  }
+  if (COVER_IMAGE_TRANSLATION_MODES.includes(defaultMode)) {
+    return defaultMode
+  }
+  return COVER_IMAGE_TRANSLATION_MODE_AUTO
+}
+
+function shouldTranslateCoverImageForMode(mode) {
+  const normalizedMode = normalizeCoverImageTranslationMode(mode)
+  return normalizedMode !== COVER_IMAGE_TRANSLATION_MODE_NEVER
+}
+
+function shouldSkipCoverImageRecognitionForMode(mode) {
+  const normalizedMode = normalizeCoverImageTranslationMode(mode)
+  return normalizedMode === COVER_IMAGE_TRANSLATION_MODE_ALWAYS
+}
 
 function getRepositoryModel(collectionName) {
   const repository =
@@ -1617,11 +1646,17 @@ function buildRegistrySnapshot(registry) {
 }
 
 module.exports = {
+  COVER_IMAGE_TRANSLATION_MODE_ALWAYS,
+  COVER_IMAGE_TRANSLATION_MODE_AUTO,
+  COVER_IMAGE_TRANSLATION_MODE_NEVER,
   buildCoverImagePreviewEntry,
   buildRegistrySnapshot,
   createCoverImageRegistry,
+  normalizeCoverImageTranslationMode,
   processCoverImageTranslationBatch,
   processCoverImageTranslation,
   resolveSourceCover,
-  resolveTargetTitle
+  resolveTargetTitle,
+  shouldSkipCoverImageRecognitionForMode,
+  shouldTranslateCoverImageForMode
 }

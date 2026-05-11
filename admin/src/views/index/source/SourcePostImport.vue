@@ -343,6 +343,20 @@
                 active-text="联网检索官方译名"
               />
             </el-form-item>
+            <el-form-item label="翻译封面图">
+              <el-radio-group
+                v-model="aiForm.coverImageTranslationMode"
+                :disabled="isAiImportBusy"
+              >
+                <el-radio
+                  v-for="item in coverImageTranslationModeOptions"
+                  :key="item.value"
+                  :value="item.value"
+                >
+                  {{ item.label }}
+                </el-radio>
+              </el-radio-group>
+            </el-form-item>
           </el-form>
         </template>
 
@@ -1054,6 +1068,14 @@ const AI_IMPORT_SOURCE_LANGUAGE_STORAGE_KEY =
 const AI_IMPORT_TARGET_LANGUAGES_STORAGE_KEY =
   'wikimoe-ai-import-target-languages'
 const AI_COVER_IMAGE_ENTRY_TYPE = 'coverImageTranslation'
+const AI_COVER_IMAGE_TRANSLATION_MODE_AUTO = 'auto'
+const AI_COVER_IMAGE_TRANSLATION_MODE_ALWAYS = 'always'
+const AI_COVER_IMAGE_TRANSLATION_MODE_NEVER = 'never'
+const AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS = [
+  { label: '自动判断', value: AI_COVER_IMAGE_TRANSLATION_MODE_AUTO },
+  { label: '是', value: AI_COVER_IMAGE_TRANSLATION_MODE_ALWAYS },
+  { label: '否', value: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER }
+]
 const POST_RELATION_FIELD_LIST = [
   'postList',
   'tweetList',
@@ -1103,6 +1125,7 @@ export default {
       sourceLanguageCode: 'zh-CN',
       targetLanguageCodes: [],
       prompt: '',
+      coverImageTranslationMode: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER,
       searchOfficialTermTranslations: false
     })
     const params = reactive({
@@ -1324,6 +1347,7 @@ export default {
       aiProgressList.value = []
       aiStreamContent.value = ''
       aiForm.prompt = ''
+      aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -1374,6 +1398,7 @@ export default {
         aiForm.sourceLanguageCode
       )
       aiForm.prompt = ''
+      aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
@@ -2693,10 +2718,20 @@ export default {
       })
     }
 
+    const shouldTranslateAiCoverImage = () => {
+      return (
+        aiForm.coverImageTranslationMode !==
+        AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
+      )
+    }
+
     const requestAiImportCoverTranslations = async ({
       resultList,
       abortSignal
     }) => {
+      if (!shouldTranslateAiCoverImage()) {
+        return
+      }
       const items = collectAiImportCoverRequestItems(resultList)
       if (items.length === 0) {
         return
@@ -2713,6 +2748,7 @@ export default {
           signal: abortSignal,
           body: JSON.stringify({
             sourceLanguageCode: aiForm.sourceLanguageCode,
+            coverImageTranslationMode: aiForm.coverImageTranslationMode,
             items
           })
         }
@@ -2921,7 +2957,8 @@ export default {
           request: {
             prompt: aiForm.prompt,
             options: {
-              translateCoverImage: true,
+              coverImageTranslationMode: aiForm.coverImageTranslationMode,
+              translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
                 aiForm.searchOfficialTermTranslations
             },
@@ -3160,6 +3197,8 @@ export default {
       aiApplying,
       aiDialogVisible,
       aiForm,
+      coverImageTranslationModeOptions:
+        AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS,
       aiProgressList,
       aiPublishLanguageCodes,
       aiResultList,

@@ -88,6 +88,22 @@ function normalizeTargetLanguageCodeList(body, targetLanguageCode) {
   return languageCodes
 }
 
+function normalizeCoverImageTranslationMode(body = {}, defaultMode = 'auto') {
+  return coverImageTranslationService.normalizeCoverImageTranslationMode(
+    body.coverImageTranslationMode,
+    defaultMode
+  )
+}
+
+function resolveTranslateCoverImage(body, coverImageTranslationMode) {
+  if (typeof body.coverImageTranslationMode === 'string') {
+    return coverImageTranslationService.shouldTranslateCoverImageForMode(
+      coverImageTranslationMode
+    )
+  }
+  return body.translateCoverImage !== false
+}
+
 function parseInput(body = {}) {
   const sourceId = String(body.sourceId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
@@ -120,7 +136,11 @@ function parseInput(body = {}) {
   }
 
   const entries = Array.isArray(body.entries) ? body.entries : []
-  const translateCoverImage = body.translateCoverImage !== false
+  const coverImageTranslationMode = normalizeCoverImageTranslationMode(body)
+  const translateCoverImage = resolveTranslateCoverImage(
+    body,
+    coverImageTranslationMode
+  )
   const allowEmptyEntries = body.allowEmptyEntries === true
   if (entries.length === 0 && !translateCoverImage && !allowEmptyEntries) {
     throw new ApiError(
@@ -141,6 +161,7 @@ function parseInput(body = {}) {
     ),
     prompt: normalizePrompt(body.prompt),
     entries,
+    coverImageTranslationMode,
     translateCoverImage,
     allowEmptyEntries,
     skipUsageLog: body.skipUsageLog === true,
@@ -200,6 +221,10 @@ async function translateSourcePostAiImportEntriesStream(
           : [],
         sourceLanguageCode: input.sourceLanguageCode,
         targetLanguageCode: input.targetLanguageCode,
+        skipRecognition:
+          coverImageTranslationService.shouldSkipCoverImageRecognitionForMode(
+            input.coverImageTranslationMode
+          ),
         cancellation: handlers.cancellation
       })
     data = appendCoverImageResultToStreamData(data, coverResult, registry)
@@ -274,6 +299,7 @@ function parseCoverBatchInput(body = {}) {
 
   return {
     sourceLanguageCode,
+    coverImageTranslationMode: normalizeCoverImageTranslationMode(body),
     items: items.map((item, index) => {
       return normalizeCoverBatchItem(item, index)
     })
@@ -345,7 +371,11 @@ async function buildCoverBatchTasks(input) {
       targetPost: previewContext.targetPost,
       previewEntries: item.previewEntries,
       sourceLanguageCode: input.sourceLanguageCode,
-      targetLanguageCode: item.targetLanguageCode
+      targetLanguageCode: item.targetLanguageCode,
+      skipRecognition:
+        coverImageTranslationService.shouldSkipCoverImageRecognitionForMode(
+          input.coverImageTranslationMode
+        )
     })
   }
   return tasks
@@ -353,6 +383,23 @@ async function buildCoverBatchTasks(input) {
 
 async function translateSourcePostAiImportCoverImages(body = {}) {
   const input = parseCoverBatchInput(body)
+  if (
+    !coverImageTranslationService.shouldTranslateCoverImageForMode(
+      input.coverImageTranslationMode
+    )
+  ) {
+    return {
+      items: [],
+      coverImageArtifacts: [],
+      coverImageGenerationMap: {},
+      coverImageRecognitionMap: {},
+      dedupe: {
+        taskCount: 0,
+        groupCount: 0,
+        duplicateTitleCount: 0
+      }
+    }
+  }
   const registry = coverImageTranslationService.createCoverImageRegistry()
   const tasks = await buildCoverBatchTasks(input)
   const batchResult =
