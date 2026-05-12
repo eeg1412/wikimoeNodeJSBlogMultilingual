@@ -54,10 +54,6 @@ const MIN_TERM_KNOWLEDGE_TRANSLATION_CONFIDENCE = 80
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
-const OFFICIAL_TERM_GLOSSARY_CACHE_TTL_MS = 10 * 60 * 1000
-const MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE = 50
-
-const officialTermGlossaryCache = new Map()
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -1157,46 +1153,25 @@ function buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes) {
   })
 }
 
-function pruneOfficialTermGlossaryCache(now) {
-  for (const [cacheKey, cacheItem] of officialTermGlossaryCache.entries()) {
-    if (cacheItem.expiresAt <= now) {
-      officialTermGlossaryCache.delete(cacheKey)
-    }
-  }
-  while (
-    officialTermGlossaryCache.size > MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE
-  ) {
-    const firstKey = officialTermGlossaryCache.keys().next().value
-    if (!firstKey) {
-      return
-    }
-    officialTermGlossaryCache.delete(firstKey)
-  }
-}
-
-function getOfficialTermGlossaryCache(cacheKey) {
-  const now = Date.now()
-  pruneOfficialTermGlossaryCache(now)
-  const cacheItem = officialTermGlossaryCache.get(cacheKey)
-  if (!cacheItem || cacheItem.expiresAt <= now) {
-    officialTermGlossaryCache.delete(cacheKey)
+function getOfficialTermGlossaryCache(taskCache, cacheKey) {
+  if (!(taskCache instanceof Map)) {
     return null
   }
-  return cacheItem.promise
+  return taskCache.get(cacheKey) || null
 }
 
-function setOfficialTermGlossaryCache(cacheKey, promise) {
-  officialTermGlossaryCache.set(cacheKey, {
-    promise,
-    expiresAt: Date.now() + OFFICIAL_TERM_GLOSSARY_CACHE_TTL_MS
-  })
+function setOfficialTermGlossaryCache(taskCache, cacheKey, promise) {
+  if (!(taskCache instanceof Map)) {
+    return promise
+  }
+
+  taskCache.set(cacheKey, promise)
   promise.catch(() => {
-    const cacheItem = officialTermGlossaryCache.get(cacheKey)
-    if (cacheItem && cacheItem.promise === promise) {
-      officialTermGlossaryCache.delete(cacheKey)
+    const cachedPromise = taskCache.get(cacheKey)
+    if (cachedPromise === promise) {
+      taskCache.delete(cacheKey)
     }
   })
-  pruneOfficialTermGlossaryCache(Date.now())
   return promise
 }
 
@@ -3274,10 +3249,11 @@ async function getOfficialTermGlossaryCacheData({
   settings,
   url,
   handlers,
-  targetLanguageCodes
+  targetLanguageCodes,
+  taskCache
 }) {
   const cacheKey = buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes)
-  const cachedPromise = getOfficialTermGlossaryCache(cacheKey)
+  const cachedPromise = getOfficialTermGlossaryCache(taskCache, cacheKey)
   if (cachedPromise) {
     const cachedData = await cachedPromise
     if (handlers.onStatus) {
@@ -3298,14 +3274,15 @@ async function getOfficialTermGlossaryCacheData({
     handlers,
     targetLanguageCodes
   })
-  return await setOfficialTermGlossaryCache(cacheKey, promise)
+  return await setOfficialTermGlossaryCache(taskCache, cacheKey, promise)
 }
 
 async function prepareOfficialTermGlossaryForAiInput({
   input,
   settings,
   url,
-  handlers
+  handlers,
+  taskCache
 }) {
   const targetLanguageCodes = getStableTermTargetLanguageCodes(input)
   if (!Array.isArray(input.entries) || input.entries.length === 0) {
@@ -3323,7 +3300,8 @@ async function prepareOfficialTermGlossaryForAiInput({
     settings,
     url,
     handlers,
-    targetLanguageCodes
+    targetLanguageCodes,
+    taskCache
   })
   const glossaryMarkdown = getCurrentOfficialTermGlossaryMarkdown({
     input,
@@ -4717,12 +4695,14 @@ async function translatePostEntries(body = {}) {
   const post = await getTranslationPost(input)
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
+  const officialTermGlossaryTaskCache = new Map()
   let aiInput = prepareAiInput(input)
   aiInput = await prepareOfficialTermGlossaryForAiInput({
     input: aiInput,
     settings,
     url,
-    handlers: {}
+    handlers: {},
+    taskCache: officialTermGlossaryTaskCache
   })
   const requestBody = buildDeepSeekRequestBody(settings, aiInput)
   const deepSeekResponse = await requestJson(url, requestBody, settings)
@@ -4939,6 +4919,7 @@ async function translateStreamChunkWithRetry({
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
+  const officialTermGlossaryTaskCache = new Map()
   const splitOptions = {
     maxRequestTextLength: getTranslationChunkTextLimit(settings),
     richTextSegmentTextLength: getRichTextSegmentTextLimit(settings)
@@ -4948,7 +4929,8 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     input: aiInput,
     settings,
     url,
-    handlers
+    handlers,
+    taskCache: officialTermGlossaryTaskCache
   })
   const inputChunks = splitAiInput(aiInput, splitOptions)
   const chunkTotal = inputChunks.length
