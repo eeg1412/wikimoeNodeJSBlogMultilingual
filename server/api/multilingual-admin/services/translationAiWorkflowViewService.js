@@ -11,7 +11,9 @@ const WORKFLOW_STEP_STATUS_TEXT_MAP = {
   pending: '待执行',
   running: '正在执行',
   retrying: '重试中',
+  recorded: '已记录',
   completed: '已完成',
+  warning: '日志警告',
   failed: '执行失败',
   stopping: '正在停止',
   skipped: '已跳过'
@@ -309,27 +311,136 @@ function getWorkflowStepStatusText(status) {
   return WORKFLOW_STEP_STATUS_TEXT_MAP[normalizedStatus] || normalizedStatus
 }
 
-function shouldBuildRuntimeWorkflowSteps(job, aiJsonLogs) {
+function isKnownWorkflowStatus(status) {
+  return Boolean(WORKFLOW_STEP_STATUS_TEXT_MAP[normalizeText(status)])
+}
+
+function normalizeKnownWorkflowStatus(status) {
+  const normalizedStatus = normalizeText(status)
+  if (!normalizedStatus || !isKnownWorkflowStatus(normalizedStatus)) {
+    return ''
+  }
+  return normalizedStatus
+}
+
+function createWorkflowIntegrityWarning(code, message, meta = []) {
+  return {
+    code: normalizeText(code),
+    message: normalizeText(message),
+    meta: Array.isArray(meta)
+      ? meta.map(item => normalizeText(item)).filter(Boolean)
+      : []
+  }
+}
+
+function buildWorkflowIntegrityWarningSection(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) {
+    return null
+  }
+  return createSection({
+    title: '工作流日志完整性警告',
+    description: '这些问题会影响工作流审计，请优先确认日志来源是否完整。',
+    tone: 'warning',
+    items: warnings.map(warning => {
+      return createItem(warning.code || '日志异常', warning.message, {
+        meta: warning.meta,
+        tone: 'warning'
+      })
+    })
+  })
+}
+
+function attachWorkflowIntegrityWarnings(step) {
+  if (!step || !Array.isArray(step.integrityWarnings)) {
+    return
+  }
+  if (step.integrityWarnings.length === 0) {
+    return
+  }
+  const warningSection = buildWorkflowIntegrityWarningSection(
+    step.integrityWarnings
+  )
+  if (warningSection) {
+    step.outputSections = [warningSection].concat(step.outputSections || [])
+  }
+  if (!Array.isArray(step.badges)) {
+    step.badges = []
+  }
+  step.badges.push({
+    label: '日志警告',
+    value: step.integrityWarnings.length,
+    type: 'warning'
+  })
+  if (step.status === 'completed') {
+    step.status = 'warning'
+    step.statusText = getWorkflowStepStatusText('warning')
+  }
+}
+
+function shouldBuildRuntimeWorkflowSteps(job) {
   const events = getAiWorkflowEvents(job)
   if (events.length > 0) {
     return true
   }
   return false
 }
+
+function normalizeWorkflowMajorKey(value) {
+  const stepKey = normalizeText(value)
+  if (/^translation\.chunk\.\d+$/.test(stepKey)) {
+    return 'translation.chunk'
+  }
+  if (stepKey === 'translation.post' || stepKey === 'translation.content') {
+    return 'translation.chunk'
+  }
+  return stepKey
+}
+
+function buildWorkflowEventGroupId(event) {
+  const stage = normalizeText(event?.stage)
+  const stepKey = normalizeText(event?.stepKey)
+  return `${stage}::${stepKey}`
+}
+
 function getAiWorkflowEvents(job) {
   const events = job?.progress?.stageState?.aiWorkflow?.events
   if (!Array.isArray(events)) {
     return []
   }
-  return events.filter(event => normalizeText(event?.stepKey))
+  return events.map((event, index) => {
+    if (!isPlainObject(event)) {
+      return {
+        stepKey: 'workflow.event.invalid',
+        stepLabel: '工作流事件格式异常',
+        stage: 'WorkflowEventInvalid',
+        status: 'warning',
+        message: '运行时工作流事件不是对象格式。',
+        createdAt: null,
+        isMalformedEvent: true,
+        rawEvent: event,
+        eventIndex: index + 1
+      }
+    }
+    const stepKey = normalizeText(event.stepKey)
+    if (stepKey) {
+      return event
+    }
+    return {
+      ...event,
+      stepKey: 'workflow.event.invalid',
+      stepLabel: '工作流事件缺少 stepKey',
+      stage: normalizeText(event.stage) || 'WorkflowEventInvalid',
+      status: normalizeText(event.status),
+      message: normalizeText(event.message) || '运行时工作流事件缺少 stepKey。',
+      isMalformedEvent: true,
+      missingStepKey: true,
+      eventIndex: index + 1
+    }
+  })
 }
 
 function normalizeAiWorkflowEventStatus(status) {
-  const normalizedStatus = normalizeText(status)
-  if (normalizedStatus) {
-    return normalizedStatus
-  }
-  return 'running'
+  return normalizeKnownWorkflowStatus(status)
 }
 
 function collectAiWorkflowEventSteps(events) {
@@ -337,27 +448,75 @@ function collectAiWorkflowEventSteps(events) {
   const stepList = []
   events.forEach(event => {
     const stepKey = normalizeText(event.stepKey)
-    if (!stepKey) {
-      return
-    }
-    let stepEntry = stepMap.get(stepKey)
+    const majorKey = normalizeWorkflowMajorKey(stepKey)
+    const groupId = buildWorkflowEventGroupId(event)
+    let stepEntry = stepMap.get(groupId)
     if (!stepEntry) {
       stepEntry = {
-        stepKey,
+        groupId,
+        stepKey: majorKey,
+        majorKey,
         stepLabel: '',
         status: 'running',
         events: [],
+        stepKeys: [],
+        integrityWarnings: [],
         firstAt: null,
         latestAt: null,
-        latestMessage: ''
+        latestMessage: '',
+        stage: normalizeText(event.stage)
       }
-      stepMap.set(stepKey, stepEntry)
+      stepMap.set(groupId, stepEntry)
       stepList.push(stepEntry)
+    }
+    if (!stepEntry.stepKeys.includes(stepKey)) {
+      stepEntry.stepKeys.push(stepKey)
     }
     if (event.stepLabel) {
       stepEntry.stepLabel = normalizeText(event.stepLabel)
     }
-    stepEntry.status = normalizeAiWorkflowEventStatus(event.status)
+    const eventStatus = normalizeAiWorkflowEventStatus(event.status)
+    if (eventStatus) {
+      stepEntry.status = eventStatus
+    } else {
+      stepEntry.integrityWarnings.push(
+        createWorkflowIntegrityWarning(
+          'missing-runtime-status',
+          '运行时工作流事件缺失或使用了未知状态。',
+          [
+            `stepKey：${stepKey || '未记录'}`,
+            `原始状态：${normalizeText(event.status) || '未记录'}`
+          ]
+        )
+      )
+      if (!stepEntry.status) {
+        stepEntry.status = 'warning'
+      }
+    }
+    if (event.isMalformedEvent) {
+      let warningCode = 'invalid-runtime-event'
+      let warningMessage = '运行时工作流事件格式异常。'
+      if (event.missingStepKey) {
+        warningCode = 'missing-step-key'
+        warningMessage = '运行时工作流事件缺少 stepKey。'
+      }
+      stepEntry.integrityWarnings.push(
+        createWorkflowIntegrityWarning(warningCode, warningMessage, [
+          `事件序号：${event.eventIndex || '-'}`
+        ])
+      )
+      stepEntry.status = 'warning'
+    }
+    if (!normalizeText(event.stage)) {
+      stepEntry.integrityWarnings.push(
+        createWorkflowIntegrityWarning(
+          'missing-runtime-stage',
+          '运行时工作流事件缺少 stage。',
+          [`stepKey：${stepKey || '未记录'}`]
+        )
+      )
+      stepEntry.status = 'warning'
+    }
     stepEntry.latestMessage = normalizeText(event.message)
     if (!stepEntry.firstAt) {
       stepEntry.firstAt = event.createdAt || null
@@ -369,20 +528,35 @@ function collectAiWorkflowEventSteps(events) {
 }
 
 function getAiWorkflowEventStepDisplay(stepEntry) {
-  if (stepEntry.stepLabel) {
+  if (stepEntry.majorKey === 'translation.chunk') {
+    if (stepEntry.stepLabel) {
+      return {
+        title: stepEntry.stepLabel,
+        description: 'DeepSeek 按批次处理当前语言的正文或通用内容翻译。',
+        isKnownOperation: true,
+        isUnknownOperation: false
+      }
+    }
     return {
-      title: stepEntry.stepLabel,
-      description: 'AI 翻译服务正在执行的真实工作流步骤。'
+      title: '翻译内容批次',
+      description: 'DeepSeek 按批次处理当前语言的正文或通用内容翻译。'
     }
   }
-  const chunkMatch = stepEntry.stepKey.match(/^translation\.chunk\.(\d+)$/)
-  if (chunkMatch) {
+  if (stepEntry.majorKey === 'proper-noun.keyword.extract') {
     return {
-      title: `翻译正文第 ${chunkMatch[1]} 批`,
-      description: 'DeepSeek 正在处理当前正文翻译批次。'
+      title: '抽取需要确认的专有名词',
+      description:
+        'DeepSeek 阅读本次内容并抽取需要进入名词库匹配或联网确认的专有名词。'
     }
   }
-  return getOperationDisplay({ operation: stepEntry.stepKey })
+  const display = getOperationDisplay({ operation: stepEntry.majorKey })
+  if (stepEntry.stepLabel && !display.isUnknownOperation) {
+    return {
+      ...display,
+      title: stepEntry.stepLabel
+    }
+  }
+  return display
 }
 
 function getLatestAiWorkflowEvent(stepEntry) {
@@ -415,7 +589,32 @@ function buildAiWorkflowEventStatusSection(stepEntry) {
 
 function buildAiWorkflowEventLogSection(stepEntry) {
   const items = []
-  stepEntry.events.slice(-10).forEach((event, index) => {
+  const orderedEvents = stepEntry.events
+    .map((event, index) => {
+      const createdAtTime = Date.parse(event.createdAt || '')
+      let normalizedCreatedAtTime = createdAtTime
+      if (Number.isNaN(createdAtTime)) {
+        normalizedCreatedAtTime = 0
+      }
+      return {
+        event,
+        index,
+        createdAtTime: normalizedCreatedAtTime
+      }
+    })
+    .sort((left, right) => {
+      if (left.createdAtTime !== right.createdAtTime) {
+        return left.createdAtTime - right.createdAtTime
+      }
+      return left.index - right.index
+    })
+  const visibleEvents = orderedEvents.slice(-10)
+  let description = '这个 AI 步骤在执行、重试和完成时写入的事件。'
+  if (stepEntry.events.length > visibleEvents.length) {
+    description = `仅展示最近 ${visibleEvents.length} 条事件，实际共有 ${stepEntry.events.length} 条。`
+  }
+  visibleEvents.forEach((eventEntry, index) => {
+    const event = eventEntry.event
     const meta = []
     if (event.status) {
       meta.push(`状态：${getWorkflowStepStatusText(event.status)}`)
@@ -426,17 +625,21 @@ function buildAiWorkflowEventLogSection(stepEntry) {
     if (event.createdAt) {
       meta.push(`时间：${event.createdAt}`)
     }
+    let tone = 'output'
+    if (event.status === 'failed') {
+      tone = 'warning'
+    }
     pushItem(
       items,
       createItem(`事件 ${index + 1}`, event.message, {
         meta,
-        tone: event.status === 'failed' ? 'warning' : 'output'
+        tone
       })
     )
   })
   return createSection({
     title: '步骤事件',
-    description: '这个 AI 步骤在执行、重试和完成时写入的事件。',
+    description,
     kind: 'list',
     tone: 'output',
     items,
@@ -470,24 +673,53 @@ function buildAiWorkflowEventFailureSection(stepEntry) {
 function buildAiWorkflowEventStep(stepEntry, order) {
   const display = getAiWorkflowEventStepDisplay(stepEntry)
   const latestEvent = getLatestAiWorkflowEvent(stepEntry) || {}
-  return {
+  const integrityWarnings = Array.isArray(stepEntry.integrityWarnings)
+    ? stepEntry.integrityWarnings.slice()
+    : []
+  let status = normalizeKnownWorkflowStatus(stepEntry.status) || 'warning'
+  if (display.isUnknownOperation) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'unknown-runtime-step',
+        '运行时工作流 stepKey 尚未被工作流视图识别。',
+        [
+          `stepKey：${stepEntry.majorKey || '未记录'}`,
+          `阶段：${normalizeText(latestEvent.stage || stepEntry.stage) || '未记录'}`
+        ]
+      )
+    )
+    if (status === 'completed') {
+      status = 'warning'
+    }
+  }
+  let stepKeys = []
+  if (Array.isArray(stepEntry.stepKeys)) {
+    stepKeys = stepEntry.stepKeys
+  }
+  const step = {
     id: `runtime-step-${order}`,
     order,
     title: display.title,
     description: display.description,
-    status: stepEntry.status,
-    statusText: getWorkflowStepStatusText(stepEntry.status),
+    status,
+    statusText: getWorkflowStepStatusText(status),
     kind: 'runtime',
-    operation: stepEntry.stepKey,
-    stage: normalizeText(latestEvent.stage),
+    majorKey: stepEntry.majorKey,
+    stepKeys,
+    displayLevel: 0,
+    operation: stepEntry.majorKey,
+    stage: normalizeText(latestEvent.stage || stepEntry.stage),
     provider: '',
     model: '',
     requestId: '',
     createdAt: stepEntry.latestAt || stepEntry.firstAt || null,
     currentStep: normalizeText(latestEvent.message),
-    badges: [
-      { label: '状态', value: getWorkflowStepStatusText(stepEntry.status) }
-    ],
+    badges: [{ label: '状态', value: getWorkflowStepStatusText(status) }],
+    integrityWarnings,
+    children: [],
+    childCount: 0,
+    aiCallCount: 0,
+    serviceStepCount: 0,
     inputSections: [buildAiWorkflowEventStatusSection(stepEntry)].filter(
       Boolean
     ),
@@ -496,6 +728,7 @@ function buildAiWorkflowEventStep(stepEntry, order) {
       buildAiWorkflowEventFailureSection(stepEntry)
     ].filter(Boolean)
   }
+  return step
 }
 
 function buildRuntimeWorkflowSteps(job) {
@@ -1607,26 +1840,261 @@ function getOperationDisplay(log) {
     'cover-image.artifact': {
       title: '整理封面图产物',
       description: '服务端保存封面图生成、跳过或失败的结果。'
+    },
+    'workflow.log.invalid': {
+      title: 'AI 工作流日志格式异常',
+      description:
+        '服务端保存了无法解析为对象的 AI JSON 日志，需要检查日志写入来源。'
+    },
+    'workflow.event.invalid': {
+      title: '运行时工作流事件异常',
+      description: '服务端保存了缺少 stepKey 或格式异常的运行时工作流事件。'
     }
   }
   if (displayMap[operation]) {
-    return displayMap[operation]
+    return {
+      ...displayMap[operation],
+      isKnownOperation: true,
+      isUnknownOperation: false
+    }
   }
   if (stage === 'TranslationChunk') {
-    return displayMap['translation.post']
+    return {
+      ...displayMap['translation.post'],
+      isKnownOperation: true,
+      isUnknownOperation: false
+    }
   }
+  const unknownLabel = operation || stage || '未记录操作'
   return {
-    title: operation || stage || 'AI 调用',
-    description: '服务端记录的一次 AI 处理步骤。'
+    title: `未知工作流操作：${unknownLabel}`,
+    description: '服务端保存了这条 AI 日志，但展示层尚未识别它的业务含义。',
+    isKnownOperation: false,
+    isUnknownOperation: true
   }
 }
 
-function buildStepBadges(log) {
+function isAiProviderCallLog(log) {
+  const operation = normalizeText(log?.operation)
+  const provider = normalizeText(log?.provider)
+  const serviceOnlyOperations = new Set([
+    'proper-noun.official-translation.resolve',
+    'cover-image.artifact',
+    'translation.review-preview'
+  ])
+  if (serviceOnlyOperations.has(operation)) {
+    return false
+  }
+  if (provider) {
+    return true
+  }
+  return Boolean(
+    normalizeText(log?.model) ||
+    normalizeText(log?.requestId) ||
+    getObjectFieldCount(log?.input) > 0 ||
+    getObjectFieldCount(log?.json) > 0
+  )
+}
+
+function shouldWarnMissingProvider(log, isAiCall) {
+  if (!isAiCall) {
+    return false
+  }
+  return !normalizeText(log?.provider)
+}
+
+function getLogMajorKey(log) {
+  if (log?.isMalformedLog) {
+    return 'workflow.log.invalid'
+  }
+  const operation = normalizeText(log?.operation)
+  if (operation === 'proper-noun.official-translation.resolve') {
+    return 'proper-noun.official-translation.search'
+  }
+  if (operation === 'cover-image.artifact') {
+    return 'cover-image.generation'
+  }
+  if (operation === 'translation.post' || operation === 'translation.content') {
+    return 'translation.chunk'
+  }
+  return normalizeWorkflowMajorKey(operation)
+}
+
+function getLogRuntimeStepKey(log) {
+  const majorKey = getLogMajorKey(log)
+  if (majorKey !== 'translation.chunk') {
+    return majorKey
+  }
+  const chunkIndex = log?.meta?.chunkIndex
+  if (typeof chunkIndex === 'undefined' || chunkIndex === null) {
+    return majorKey
+  }
+  return `translation.chunk.${chunkIndex}`
+}
+
+function parseLanguageCodeList(value) {
+  return normalizeText(value)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+function doesStageMatchLanguage(stage, languageCodes) {
+  const stageText = normalizeText(stage).toLowerCase()
+  if (
+    !stageText ||
+    !Array.isArray(languageCodes) ||
+    languageCodes.length === 0
+  ) {
+    return false
+  }
+  return languageCodes.some(languageCode => {
+    const normalizedLanguageCode = normalizeText(languageCode).toLowerCase()
+    if (!normalizedLanguageCode) {
+      return false
+    }
+    return (
+      stageText.endsWith(`:${normalizedLanguageCode}`) ||
+      stageText.endsWith(`-${normalizedLanguageCode}`) ||
+      stageText.endsWith(`_${normalizedLanguageCode}`) ||
+      stageText === normalizedLanguageCode
+    )
+  })
+}
+
+function buildWorkflowParentMatch(steps, log) {
+  const majorKey = getLogMajorKey(log)
+  const candidates = steps.filter(step => step.majorKey === majorKey)
+  const integrityWarnings = []
+  if (candidates.length === 0) {
+    return {
+      parentStep: null,
+      integrityWarnings
+    }
+  }
+  const runtimeStepKey = getLogRuntimeStepKey(log)
+  const stepKeyMatchedStep = candidates.find(step => {
+    return (
+      Array.isArray(step.stepKeys) && step.stepKeys.includes(runtimeStepKey)
+    )
+  })
+  if (stepKeyMatchedStep) {
+    return {
+      parentStep: stepKeyMatchedStep,
+      integrityWarnings
+    }
+  }
+  const languageCodes = parseLanguageCodeList(log?.targetLanguageCode)
+  const languageMatchedStep = candidates.find(step => {
+    return doesStageMatchLanguage(step.stage, languageCodes)
+  })
+  if (languageMatchedStep) {
+    return {
+      parentStep: languageMatchedStep,
+      integrityWarnings
+    }
+  }
+  if (candidates.length > 1) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        languageCodes.length > 0
+          ? 'unmatched-parent-language'
+          : 'missing-target-language-for-parent-match',
+        languageCodes.length > 0
+          ? 'AI 日志的目标语言没有匹配到明确的运行时父步骤。'
+          : 'AI 日志缺少目标语言，且存在多个同类运行时父步骤。',
+        [
+          `操作：${normalizeText(log?.operation) || majorKey}`,
+          `目标语言：${formatLanguageList(languageCodes) || '缺失'}`,
+          `候选父步骤：${candidates.length}`
+        ]
+      )
+    )
+    return {
+      parentStep: null,
+      integrityWarnings
+    }
+  }
+  const onlyCandidate = candidates[0]
+  const isWeakLanguageMatch =
+    languageCodes.length > 0 &&
+    !doesStageMatchLanguage(onlyCandidate.stage, languageCodes)
+  if (isWeakLanguageMatch) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'weak-parent-language-match',
+        'AI 日志只找到一个同类父步骤，但语言信息没有明确匹配。',
+        [
+          `目标语言：${formatLanguageList(languageCodes)}`,
+          `父步骤阶段：${onlyCandidate.stage || '缺失'}`
+        ]
+      )
+    )
+  }
+  return {
+    parentStep: onlyCandidate,
+    integrityWarnings
+  }
+}
+
+function buildSyntheticWorkflowParentStep(log, order, extraWarnings = []) {
+  const majorKey = getLogMajorKey(log)
+  const display = getOperationDisplay(log)
+  let warningList = []
+  if (Array.isArray(extraWarnings)) {
+    warningList = extraWarnings
+  }
+  const integrityWarnings = [
+    createWorkflowIntegrityWarning(
+      'missing-runtime-parent',
+      'AI 日志没有匹配到运行时主工作流步骤。',
+      [
+        `操作：${normalizeText(log?.operation) || majorKey || '未记录'}`,
+        `阶段：${normalizeText(log?.stage) || '未记录'}`
+      ]
+    )
+  ].concat(warningList)
+  return {
+    id: `workflow-step-${order}`,
+    order,
+    title: display.title,
+    description: display.description,
+    status: 'warning',
+    statusText: getWorkflowStepStatusText('warning'),
+    kind: 'workflow',
+    majorKey,
+    isSyntheticParent: true,
+    displayLevel: 0,
+    operation: majorKey,
+    stage: normalizeText(log?.stage),
+    provider: '',
+    model: '',
+    requestId: '',
+    createdAt: log?.createdAt || null,
+    currentStep: '',
+    badges: [
+      {
+        label: '日志异常',
+        value: '缺失主步骤',
+        type: 'warning'
+      }
+    ],
+    integrityWarnings,
+    children: [],
+    childCount: 0,
+    aiCallCount: 0,
+    serviceStepCount: 0,
+    inputSections: [],
+    outputSections: []
+  }
+}
+
+function buildStepBadges(log, options = {}) {
   const badges = []
-  if (log?.provider) {
+  if (options.includeProviderModel && log?.provider) {
     badges.push({ label: '服务商', value: log.provider })
   }
-  if (log?.model) {
+  if (options.includeProviderModel && log?.model) {
     badges.push({ label: '模型', value: log.model })
   }
   if (log?.targetLanguageCode) {
@@ -1635,13 +2103,19 @@ function buildStepBadges(log) {
       value: formatLanguageList(log.targetLanguageCode)
     })
   }
-  if (log?.meta?.chunkIndex && log?.meta?.chunkCount) {
+  if (
+    typeof log?.meta?.chunkIndex !== 'undefined' &&
+    typeof log?.meta?.chunkCount !== 'undefined'
+  ) {
     badges.push({
       label: '批次',
       value: `${log.meta.chunkIndex}/${log.meta.chunkCount}`
     })
   }
-  if (log?.meta?.packageIndex && log?.meta?.packageCount) {
+  if (
+    typeof log?.meta?.packageIndex !== 'undefined' &&
+    typeof log?.meta?.packageCount !== 'undefined'
+  ) {
     badges.push({
       label: '分包',
       value: `${log.meta.packageIndex}/${log.meta.packageCount}`
@@ -1650,32 +2124,241 @@ function buildStepBadges(log) {
   return badges
 }
 
-function buildWorkflowStep(log, index, order) {
+function buildWorkflowStep(log, index, order, options = {}) {
   if (!isPlainObject(log)) {
     return null
   }
   const stepOrder = Number(order || index + 1)
   const display = getOperationDisplay(log)
-  const inputSections = buildInputSections(log)
-  const outputSections = buildOutputSections(log)
-  return {
-    id: `ai-step-${stepOrder}`,
+  let inputSections = buildInputSections(log)
+  let outputSections = buildOutputSections(log)
+  const isAiCall = isAiProviderCallLog(log)
+  let kind = 'service'
+  if (isAiCall) {
+    kind = 'ai'
+  }
+  const badges = buildStepBadges(log, {
+    includeProviderModel: isAiCall
+  })
+  const integrityWarnings = Array.isArray(options.integrityWarnings)
+    ? options.integrityWarnings.slice()
+    : []
+  const hasStatusField = Object.prototype.hasOwnProperty.call(log, 'status')
+  const statusFromLog = normalizeKnownWorkflowStatus(log.status)
+  let status = statusFromLog || 'recorded'
+  if (hasStatusField && !statusFromLog) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'unknown-ai-log-status',
+        'AI JSON 日志使用了空状态或未知状态。',
+        [`原始状态：${normalizeText(log.status) || '未记录'}`]
+      )
+    )
+    status = 'warning'
+  }
+  if (!normalizeText(log.operation)) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'missing-operation',
+        'AI JSON 日志缺少 operation 字段。',
+        [`阶段：${normalizeText(log.stage) || '未记录'}`]
+      )
+    )
+    status = 'warning'
+  }
+  if (!normalizeText(log.stage)) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'missing-stage',
+        'AI JSON 日志缺少 stage 字段。',
+        [`操作：${normalizeText(log.operation) || '未记录'}`]
+      )
+    )
+    status = 'warning'
+  }
+  if (shouldWarnMissingProvider(log, isAiCall)) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'missing-provider',
+        '这条日志具备 AI 调用信号，但缺少 provider 字段。',
+        [
+          `操作：${normalizeText(log.operation) || '未记录'}`,
+          `模型：${normalizeText(log.model) || '未记录'}`
+        ]
+      )
+    )
+    badges.push({ label: '服务商', value: '缺失', type: 'warning' })
+    status = 'warning'
+  }
+  if (isAiCall && !normalizeText(log.targetLanguageCode)) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'missing-target-language',
+        'AI 调用日志缺少 targetLanguageCode。',
+        [`操作：${normalizeText(log.operation) || '未记录'}`]
+      )
+    )
+    status = 'warning'
+  }
+  if (log.isMalformedLog) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'invalid-ai-json-log',
+        '这条 AI JSON 日志不是对象格式，无法解析为有效工作流步骤。',
+        [`原始类型：${typeof log.rawLog}`]
+      )
+    )
+    inputSections = []
+    outputSections = [
+      createSection({
+        title: '异常日志原始内容',
+        description: '服务端保存的日志格式异常，不能作为正常 AI 调用审计。',
+        tone: 'warning',
+        items: [
+          createItem('原始日志', log.rawLog, {
+            tone: 'warning'
+          })
+        ]
+      })
+    ].filter(Boolean)
+    status = 'warning'
+  }
+  if (display.isUnknownOperation) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'unknown-operation',
+        '这条 AI 日志的 operation 尚未被工作流视图识别。',
+        [
+          `操作：${normalizeText(log.operation) || '未记录'}`,
+          `阶段：${normalizeText(log.stage) || '未记录'}`
+        ]
+      )
+    )
+    status = 'warning'
+  }
+  if (!isAiCall) {
+    badges.push({ label: '类型', value: '服务端整理' })
+  }
+  let displayProvider = ''
+  let displayModel = ''
+  let displayRequestId = ''
+  if (isAiCall) {
+    displayProvider = normalizeText(log.provider)
+    displayModel = normalizeText(log.model)
+    displayRequestId = normalizeText(log.requestId)
+  }
+  const step = {
+    id: options.id || `ai-step-${stepOrder}`,
     order: stepOrder,
+    displayOrder: normalizeText(options.displayOrder) || String(stepOrder),
     title: display.title,
     description: display.description,
-    status: 'completed',
-    statusText: getWorkflowStepStatusText('completed'),
-    kind: 'ai',
+    status,
+    statusText: getWorkflowStepStatusText(status),
+    kind,
+    parentId: normalizeText(options.parentId),
+    parentTitle: normalizeText(options.parentTitle),
+    displayLevel: Number(options.displayLevel || 0),
+    majorKey: getLogMajorKey(log),
+    isAiCall,
     operation: normalizeText(log.operation),
     stage: normalizeText(log.stage),
-    provider: normalizeText(log.provider),
-    model: normalizeText(log.model),
-    requestId: normalizeText(log.requestId),
+    provider: displayProvider,
+    model: displayModel,
+    requestId: displayRequestId,
     createdAt: log.createdAt || null,
-    badges: buildStepBadges(log),
+    badges,
+    integrityWarnings,
     inputSections,
     outputSections
   }
+  attachWorkflowIntegrityWarnings(step)
+  return step
+}
+
+function buildChildStepSummaryItem(step, index) {
+  const meta = []
+  let tone = 'input'
+  if (step.isAiCall) {
+    meta.push('真实 AI 调用')
+    tone = 'output'
+  } else {
+    meta.push('服务端整理')
+  }
+  if (step.provider) {
+    meta.push(`服务商：${step.provider}`)
+  }
+  if (step.model) {
+    meta.push(`模型：${step.model}`)
+  }
+  if (step.stage) {
+    meta.push(`阶段：${step.stage}`)
+  }
+  return createItem(
+    `${step.displayOrder || index + 1} ${step.title}`,
+    step.description || step.operation || step.title,
+    {
+      meta,
+      tone
+    }
+  )
+}
+
+function finalizeWorkflowParentStep(step) {
+  if (!Array.isArray(step.children)) {
+    step.children = []
+  }
+  step.childCount = step.children.length
+  step.aiCallCount = step.children.filter(child => child.isAiCall).length
+  step.serviceStepCount = step.children.filter(child => !child.isAiCall).length
+  const childWarningCount = step.children.reduce((total, child) => {
+    if (!Array.isArray(child.integrityWarnings)) {
+      return total
+    }
+    return total + child.integrityWarnings.length
+  }, 0)
+  const badges = Array.isArray(step.badges) ? step.badges.slice() : []
+  if (step.childCount > 0) {
+    badges.push({ label: '子步骤', value: step.childCount })
+  }
+  if (step.aiCallCount > 0) {
+    badges.push({ label: 'AI 调用', value: step.aiCallCount })
+  }
+  if (childWarningCount > 0) {
+    badges.push({
+      label: '子步骤警告',
+      value: childWarningCount,
+      type: 'warning'
+    })
+    if (step.status === 'completed') {
+      step.status = 'warning'
+      step.statusText = getWorkflowStepStatusText('warning')
+    }
+  }
+  step.badges = badges
+
+  const childSection = buildArraySection(
+    '下级步骤',
+    '这些是归属于当前主工作流步骤的 AI 调用或服务端整理记录。',
+    step.children,
+    buildChildStepSummaryItem,
+    'output'
+  )
+  if (childSection) {
+    step.outputSections = [childSection].concat(step.outputSections || [])
+  }
+  attachWorkflowIntegrityWarnings(step)
+  return step
+}
+
+function appendWorkflowChildStep(parentStep, childStep) {
+  if (!parentStep || !childStep) {
+    return
+  }
+  if (!Array.isArray(parentStep.children)) {
+    parentStep.children = []
+  }
+  parentStep.children.push(childStep)
 }
 
 function buildReviewPreviewItem(entry, index) {
@@ -1769,7 +2452,7 @@ function buildReviewStep(job, order, aiCallCount) {
     '这些内容不会直接进入采纳列表，原因会显示在条目中。',
     aiSkipList,
     buildReviewPreviewItem,
-    'warning'
+    'output'
   )
   if (skipSection) {
     outputSections.push(skipSection)
@@ -1787,14 +2470,28 @@ function buildReviewStep(job, order, aiCallCount) {
   if (warningSection) {
     outputSections.push(warningSection)
   }
+  const integrityWarnings = []
+  if (warningList.length > 0) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'review-warning-list',
+        '审核预览包含需要人工注意的问题。',
+        [`警告数量：${warningList.length}`]
+      )
+    )
+  }
+  let status = 'completed'
+  if (integrityWarnings.length > 0) {
+    status = 'warning'
+  }
 
-  return {
+  const step = {
     id: `ai-step-${order}`,
     order,
     title: '生成审核预览',
     description: '服务端把 AI 的输出整理成人工可以勾选、对比和采纳的结果。',
-    status: 'completed',
-    statusText: getWorkflowStepStatusText('completed'),
+    status,
+    statusText: getWorkflowStepStatusText(status),
     kind: 'review',
     operation: 'translation.review-preview',
     stage: 'FinalizeReview',
@@ -1803,6 +2500,7 @@ function buildReviewStep(job, order, aiCallCount) {
     requestId: result.requestId || '',
     createdAt: result.completedAt || null,
     badges: [],
+    integrityWarnings,
     inputSections: [
       createSection({
         title: '整理前的任务结果',
@@ -1814,6 +2512,8 @@ function buildReviewStep(job, order, aiCallCount) {
     ].filter(Boolean),
     outputSections
   }
+  attachWorkflowIntegrityWarnings(step)
+  return step
 }
 
 function buildRelatedResultItem(item, index) {
@@ -1846,39 +2546,66 @@ function buildRelatedResultItem(item, index) {
     tone: 'output'
   })
 }
-function buildWorkflowLogDeduplicationKey(log) {
-  if (!isPlainObject(log)) {
-    return ''
-  }
-  return JSON.stringify({
-    operation: log.operation || '',
-    stage: log.stage || '',
-    provider: log.provider || '',
-    model: log.model || '',
-    requestId: log.requestId || '',
-    sourceLanguageCode: log.sourceLanguageCode || '',
-    targetLanguageCode: log.targetLanguageCode || '',
-    meta: log.meta || {},
-    input: log.input || {},
-    json: log.json || log.output || {}
-  })
-}
-
-function getUniqueWorkflowAiJsonLogs(aiJsonLogs) {
+function getWorkflowAiJsonLogs(aiJsonLogs) {
   if (!Array.isArray(aiJsonLogs)) {
     return []
   }
-  const seenKeys = new Set()
   const logs = []
-  aiJsonLogs.forEach(log => {
-    const deduplicationKey = buildWorkflowLogDeduplicationKey(log)
-    if (!deduplicationKey || seenKeys.has(deduplicationKey)) {
+  aiJsonLogs.forEach((log, index) => {
+    if (!isPlainObject(log)) {
+      logs.push({
+        operation: 'workflow.log.invalid',
+        stage: 'WorkflowLogInvalid',
+        provider: '',
+        model: '',
+        requestId: '',
+        createdAt: null,
+        isMalformedLog: true,
+        rawLog: log,
+        meta: {
+          logIndex: index + 1
+        }
+      })
       return
     }
-    seenKeys.add(deduplicationKey)
     logs.push(log)
   })
   return logs
+}
+
+function collectWorkflowIntegrityWarnings(steps) {
+  const warnings = []
+  if (!Array.isArray(steps)) {
+    return warnings
+  }
+  steps.forEach(step => {
+    if (Array.isArray(step.integrityWarnings)) {
+      step.integrityWarnings.forEach(warning => {
+        warnings.push({
+          ...warning,
+          stepId: step.id,
+          stepTitle: step.title
+        })
+      })
+    }
+    if (Array.isArray(step.children)) {
+      step.children.forEach(child => {
+        if (!Array.isArray(child.integrityWarnings)) {
+          return
+        }
+        child.integrityWarnings.forEach(warning => {
+          warnings.push({
+            ...warning,
+            stepId: child.id,
+            stepTitle: child.title,
+            parentId: step.id,
+            parentTitle: step.title
+          })
+        })
+      })
+    }
+  })
+  return warnings
 }
 
 function getCurrentWorkflowStep(steps) {
@@ -1900,6 +2627,12 @@ function getCurrentWorkflowStep(steps) {
   })
   if (failedStep) {
     return failedStep
+  }
+  const warningStep = steps.find(step => {
+    return step.status === 'warning'
+  })
+  if (warningStep) {
+    return warningStep
   }
   const completedSteps = steps.filter(step => {
     return step.status === 'completed'
@@ -1930,6 +2663,7 @@ function summarizeWorkflow(job, steps, aiCallCount) {
   const aiSkipList = Array.isArray(result.aiSkipList) ? result.aiSkipList : []
   const progress = job?.progress || {}
   const currentWorkflowStep = getCurrentWorkflowStep(steps)
+  const workflowWarnings = collectWorkflowIntegrityWarnings(steps)
   return {
     jobId: normalizeText(job?._id),
     jobType: normalizeText(job?.jobType),
@@ -1938,6 +2672,13 @@ function summarizeWorkflow(job, steps, aiCallCount) {
     sourceLanguage: formatLanguage(source.languageCode),
     targetLanguage: targetLanguageText,
     stepCount: steps.length,
+    majorStepCount: steps.length,
+    childStepCount: steps.reduce((total, step) => {
+      if (!Array.isArray(step.children)) {
+        return total
+      }
+      return total + step.children.length
+    }, 0),
     aiCallCount,
     runtimeStepCount: steps.filter(step => step.kind === 'runtime').length,
     currentStepId: currentWorkflowStep?.id || '',
@@ -1949,32 +2690,77 @@ function summarizeWorkflow(job, steps, aiCallCount) {
     percent: Number(progress.percent || 0),
     previewEntryCount: previewEntries.length,
     skippedEntryCount: aiSkipList.length,
+    workflowWarningCount: workflowWarnings.length,
+    workflowWarnings: workflowWarnings.slice(0, MAX_SECTION_ITEMS),
     warningCount: warningList.length,
+    totalWarningCount: warningList.length + workflowWarnings.length,
     completedAt: result.completedAt || null
   }
 }
 
 function buildTranslationJobWorkflow(job) {
   const result = job?.result || {}
-  const aiJsonLogs = getUniqueWorkflowAiJsonLogs(result.aiJsonLogs)
+  const aiJsonLogs = getWorkflowAiJsonLogs(result.aiJsonLogs)
   const steps = []
-  if (shouldBuildRuntimeWorkflowSteps(job, aiJsonLogs)) {
+  if (shouldBuildRuntimeWorkflowSteps(job)) {
     buildRuntimeWorkflowSteps(job).forEach(step => {
       steps.push(step)
     })
   }
   let aiCallCount = 0
   aiJsonLogs.forEach((log, index) => {
-    const step = buildWorkflowStep(log, index, steps.length + 1)
-    if (step) {
-      steps.push(step)
-      aiCallCount += 1
+    const parentMatch = buildWorkflowParentMatch(steps, log)
+    let parentStep = parentMatch.parentStep
+    if (!parentStep) {
+      parentStep = buildSyntheticWorkflowParentStep(
+        log,
+        steps.length + 1,
+        parentMatch.integrityWarnings
+      )
+      steps.push(parentStep)
     }
+    const childIndex = parentStep.children.length + 1
+    const step = buildWorkflowStep(log, index, childIndex, {
+      id: `${parentStep.id}-child-${childIndex}`,
+      parentId: parentStep.id,
+      parentTitle: parentStep.title,
+      displayLevel: 1,
+      displayOrder: `${parentStep.order}.${childIndex}`,
+      integrityWarnings: parentMatch.integrityWarnings
+    })
+    if (step) {
+      appendWorkflowChildStep(parentStep, step)
+      if (step.isAiCall) {
+        aiCallCount += 1
+      }
+    }
+  })
+  steps.forEach(step => {
+    finalizeWorkflowParentStep(step)
   })
   const reviewStep = buildReviewStep(job, steps.length + 1, aiCallCount)
   if (reviewStep) {
+    reviewStep.majorKey = 'translation.review-preview'
+    reviewStep.displayLevel = 0
+    reviewStep.children = []
+    reviewStep.childCount = 0
+    reviewStep.aiCallCount = 0
+    reviewStep.serviceStepCount = 0
     steps.push(reviewStep)
   }
+  steps.forEach((step, index) => {
+    step.order = index + 1
+    step.displayOrder = String(index + 1)
+    if (!Array.isArray(step.children)) {
+      step.children = []
+    }
+    step.children.forEach((child, childIndex) => {
+      child.order = childIndex + 1
+      child.displayOrder = `${step.order}.${childIndex + 1}`
+      child.parentId = step.id
+      child.parentTitle = step.title
+    })
+  })
   return {
     schema: WORKFLOW_SCHEMA,
     version: WORKFLOW_VERSION,

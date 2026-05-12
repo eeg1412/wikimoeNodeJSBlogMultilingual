@@ -32,14 +32,16 @@
       <div class="ai-workflow-body">
         <div class="ai-workflow-step-list" aria-label="AI 工作流步骤">
           <button
-            v-for="step in steps"
+            v-for="step in visibleSteps"
             :key="step.id"
             type="button"
             class="ai-workflow-step-button"
             :class="getStepButtonClass(step)"
             @click="selectStep(step.id)"
           >
-            <span class="ai-workflow-step-index">{{ step.order }}</span>
+            <span class="ai-workflow-step-index">
+              {{ getStepOrderText(step) }}
+            </span>
             <span class="ai-workflow-step-copy">
               <span class="ai-workflow-step-title-row">
                 <span class="ai-workflow-step-title">{{ step.title }}</span>
@@ -62,7 +64,7 @@
           <div class="ai-workflow-detail-header">
             <div>
               <div class="ai-workflow-detail-title">
-                第 {{ activeStep.order }} 步：{{ activeStep.title }}
+                {{ getDetailTitle(activeStep) }}
               </div>
               <div class="ai-workflow-detail-description">
                 {{ activeStep.description }}
@@ -78,10 +80,11 @@
                 {{ getStepStatusText(activeStep) }}
               </el-tag>
               <el-tag
-                v-for="badge in activeStep.badges"
-                :key="badge.label + badge.value"
+                v-for="badge in getDisplayBadges(activeStep)"
+                :key="badge.key"
                 size="small"
                 effect="plain"
+                :type="badge.type || ''"
               >
                 {{ badge.label }}：{{ badge.value }}
               </el-tag>
@@ -100,8 +103,8 @@
                 {{ getInputEmptyText(activeStep) }}
               </div>
               <div
-                v-for="section in activeStep.inputSections"
-                :key="section.id || section.title"
+                v-for="(section, sectionIndex) in activeStep.inputSections"
+                :key="getSectionKey(section, sectionIndex, 'input')"
                 class="ai-workflow-section"
                 :class="getSectionClass(section)"
               >
@@ -122,8 +125,8 @@
                   </el-tag>
                 </div>
                 <div
-                  v-for="block in section.textBlocks"
-                  :key="block.title"
+                  v-for="(block, blockIndex) in section.textBlocks"
+                  :key="getBlockKey(block, blockIndex, sectionIndex, 'input')"
                   class="ai-workflow-text-block"
                 >
                   <div class="ai-workflow-text-title">{{ block.title }}</div>
@@ -135,8 +138,8 @@
                 </div>
                 <div v-if="section.items.length" class="ai-workflow-item-list">
                   <div
-                    v-for="item in section.items"
-                    :key="item.label + item.value"
+                    v-for="(item, itemIndex) in section.items"
+                    :key="getItemKey(item, itemIndex, sectionIndex, 'input')"
                     class="ai-workflow-item"
                   >
                     <div class="ai-workflow-item-label">{{ item.label }}</div>
@@ -162,8 +165,8 @@
                 {{ getOutputEmptyText(activeStep) }}
               </div>
               <div
-                v-for="section in activeStep.outputSections"
-                :key="section.id || section.title"
+                v-for="(section, sectionIndex) in activeStep.outputSections"
+                :key="getSectionKey(section, sectionIndex, 'output')"
                 class="ai-workflow-section"
                 :class="getSectionClass(section)"
               >
@@ -184,8 +187,8 @@
                   </el-tag>
                 </div>
                 <div
-                  v-for="block in section.textBlocks"
-                  :key="block.title"
+                  v-for="(block, blockIndex) in section.textBlocks"
+                  :key="getBlockKey(block, blockIndex, sectionIndex, 'output')"
                   class="ai-workflow-text-block"
                 >
                   <div class="ai-workflow-text-title">{{ block.title }}</div>
@@ -197,8 +200,8 @@
                 </div>
                 <div v-if="section.items.length" class="ai-workflow-item-list">
                   <div
-                    v-for="item in section.items"
-                    :key="item.label + item.value"
+                    v-for="(item, itemIndex) in section.items"
+                    :key="getItemKey(item, itemIndex, sectionIndex, 'output')"
                     class="ai-workflow-item"
                   >
                     <div class="ai-workflow-item-label">{{ item.label }}</div>
@@ -243,23 +246,54 @@ export default {
       }
       return this.workflow.steps
     },
+    visibleSteps() {
+      const list = []
+      this.steps.forEach(step => {
+        list.push({ ...step, displayLevel: 0 })
+        if (!Array.isArray(step.children)) {
+          return
+        }
+        step.children.forEach(child => {
+          const hasMissingParentMetadata = !child.parentId || !child.parentTitle
+          list.push({
+            ...child,
+            displayLevel: 1,
+            parentId: child.parentId || step.id,
+            parentTitle: child.parentTitle || step.title,
+            hasMissingParentMetadata
+          })
+        })
+      })
+      return list
+    },
     hasWorkflow() {
-      return this.steps.length > 0
+      return this.visibleSteps.length > 0
     },
     activeStep() {
       return (
-        this.steps.find(step => step.id === this.activeStepId) ||
-        this.steps[0] ||
+        this.visibleSteps.find(step => step.id === this.activeStepId) ||
+        this.visibleSteps[0] ||
         null
       )
     },
     metricList() {
       return [
         {
-          label: '工作步骤',
-          value: this.summary.stepCount || this.steps.length
+          label: '大步骤',
+          value: this.getRequiredSummaryMetric('majorStepCount')
         },
-        { label: 'AI 调用', value: this.summary.aiCallCount || 0 },
+        {
+          label: '子步骤',
+          value: this.getRequiredSummaryMetric('childStepCount')
+        },
+        {
+          label: 'AI 调用',
+          value: this.getRequiredSummaryMetric('aiCallCount')
+        },
+        {
+          label: '流程警告',
+          value: this.summary.workflowWarningCount || 0
+        },
         { label: '审核条目', value: this.summary.previewEntryCount || 0 },
         { label: '跳过内容', value: this.summary.skippedEntryCount || 0 },
         { label: '警告', value: this.summary.warningCount || 0 }
@@ -270,13 +304,16 @@ export default {
     steps: {
       immediate: true,
       handler(steps) {
-        if (!Array.isArray(steps) || steps.length === 0) {
+        const visibleSteps = this.visibleSteps
+        if (!Array.isArray(visibleSteps) || visibleSteps.length === 0) {
           this.activeStepId = ''
           return
         }
-        const hasActiveStep = steps.some(step => step.id === this.activeStepId)
+        const hasActiveStep = visibleSteps.some(
+          step => step.id === this.activeStepId
+        )
         if (!hasActiveStep) {
-          this.activeStepId = this.getPreferredActiveStep(steps).id
+          this.activeStepId = this.getPreferredActiveStep(visibleSteps).id
         }
       }
     }
@@ -284,6 +321,59 @@ export default {
   methods: {
     selectStep(stepId) {
       this.activeStepId = stepId
+    },
+    getSectionKey(section, index, area) {
+      if (section?.id) {
+        return `${area}-section-${section.id}`
+      }
+      return `${area}-section-${index}-${section?.title || 'untitled'}`
+    },
+    getBlockKey(block, blockIndex, sectionIndex, area) {
+      return `${area}-block-${sectionIndex}-${blockIndex}-${
+        block?.title || 'untitled'
+      }`
+    },
+    getItemKey(item, itemIndex, sectionIndex, area) {
+      return `${area}-item-${sectionIndex}-${itemIndex}-${
+        item?.label || 'unlabeled'
+      }`
+    },
+    getDisplayBadges(step) {
+      const displayBadges = []
+      if (!Array.isArray(step?.badges)) {
+        return displayBadges
+      }
+      step.badges.forEach((badge, badgeIndex) => {
+        const label = badge?.label || ''
+        const value = badge?.value || ''
+        if (label === '目标语言' && typeof value === 'string') {
+          const languageValues = value
+            .split('、')
+            .map(item => item.trim())
+            .filter(Boolean)
+          if (languageValues.length > 1) {
+            languageValues.forEach((languageValue, languageIndex) => {
+              displayBadges.push({
+                ...badge,
+                value: languageValue,
+                key: `${badgeIndex}-${languageIndex}-${label}-${languageValue}`
+              })
+            })
+            return
+          }
+        }
+        displayBadges.push({
+          ...badge,
+          key: `${badgeIndex}-${label}-${value}`
+        })
+      })
+      return displayBadges
+    },
+    getRequiredSummaryMetric(key) {
+      if (Object.prototype.hasOwnProperty.call(this.summary, key)) {
+        return this.summary[key]
+      }
+      return '缺失'
     },
     getPreferredActiveStep(steps) {
       const stoppingStep = steps.find(step => step.status === 'stopping')
@@ -300,6 +390,10 @@ export default {
       if (failedStep) {
         return failedStep
       }
+      const warningStep = steps.find(step => step.status === 'warning')
+      if (warningStep) {
+        return warningStep
+      }
       const completedSteps = steps.filter(step => step.status === 'completed')
       if (completedSteps.length > 0) {
         return completedSteps[completedSteps.length - 1]
@@ -309,13 +403,28 @@ export default {
     getStepButtonClass(step) {
       return {
         'is-active': step.id === this.activeStepId,
+        'is-child': Number(step.displayLevel || 0) > 0,
+        'is-service': step.kind === 'service',
+        'is-ai-call': step.isAiCall === true,
+        'is-recorded': step.status === 'recorded',
         'is-completed': step.status === 'completed',
         'is-running': step.status === 'running',
         'is-retrying': step.status === 'retrying',
         'is-stopping': step.status === 'stopping',
         'is-failed': step.status === 'failed',
+        'is-warning': step.status === 'warning',
         'is-pending': step.status === 'pending'
       }
+    },
+    getStepOrderText(step) {
+      return step?.displayOrder || step?.order || ''
+    },
+    getDetailTitle(step) {
+      const orderText = this.getStepOrderText(step)
+      if (Number(step?.displayLevel || 0) > 0) {
+        return `子步骤 ${orderText}：${step.title}`
+      }
+      return `第 ${orderText} 步：${step.title}`
     },
     getStepStatusText(step) {
       if (step?.statusText) {
@@ -325,8 +434,10 @@ export default {
         pending: '待执行',
         running: '正在执行',
         retrying: '重试中',
+        recorded: '已记录',
         completed: '已完成',
         failed: '执行失败',
+        warning: '日志警告',
         stopping: '正在停止',
         skipped: '已跳过'
       }
@@ -346,6 +457,12 @@ export default {
       if (step?.status === 'retrying') {
         return 'warning'
       }
+      if (step?.status === 'recorded') {
+        return 'info'
+      }
+      if (step?.status === 'warning') {
+        return 'warning'
+      }
       if (step?.status === 'stopping') {
         return 'danger'
       }
@@ -356,6 +473,18 @@ export default {
     },
     getStepSubtitle(step) {
       const parts = []
+      if (Number(step?.displayLevel || 0) > 0 && step.parentTitle) {
+        parts.push(`上级：${step.parentTitle}`)
+      }
+      if (step.hasMissingParentMetadata) {
+        parts.push('日志缺少父级信息')
+      }
+      if (Number(step?.displayLevel || 0) === 0 && step.childCount) {
+        parts.push(`${step.childCount} 个子步骤`)
+      }
+      if (Number(step?.displayLevel || 0) === 0 && step.aiCallCount) {
+        parts.push(`${step.aiCallCount} 次 AI 调用`)
+      }
       if (step.currentStep) {
         parts.push(step.currentStep)
       }
@@ -368,7 +497,7 @@ export default {
       if (step.stage) {
         parts.push(step.stage)
       }
-      return parts.join(' / ') || '服务端处理步骤'
+      return parts.join(' / ') || '日志缺少摘要信息'
     },
     getInputHeading(step) {
       if (step?.kind === 'runtime') {
@@ -443,7 +572,7 @@ export default {
 .ai-workflow-metrics {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
 }
 
 .ai-workflow-metric {
@@ -499,6 +628,32 @@ export default {
   padding: 10px;
   text-align: left;
   width: 100%;
+}
+
+.ai-workflow-step-button.is-child {
+  border-left: 2px solid var(--el-border-color-lighter);
+  grid-template-columns: 34px minmax(0, 1fr);
+  margin-left: 18px;
+  padding-bottom: 8px;
+  padding-top: 8px;
+  width: calc(100% - 18px);
+}
+
+.ai-workflow-step-button.is-child .ai-workflow-step-index {
+  border-radius: 6px;
+  font-size: 11px;
+  height: 24px;
+  width: 34px;
+}
+
+.ai-workflow-step-button.is-child .ai-workflow-step-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-workflow-step-button.is-service .ai-workflow-step-index {
+  border-color: var(--el-color-info-light-5);
+  color: var(--el-color-info);
 }
 
 .ai-workflow-step-button:hover,
@@ -565,7 +720,8 @@ export default {
 }
 
 .ai-workflow-step-status.is-running,
-.ai-workflow-step-status.is-retrying {
+.ai-workflow-step-status.is-retrying,
+.ai-workflow-step-status.is-warning {
   border-color: var(--el-color-warning-light-5);
   color: var(--el-color-warning);
 }
@@ -576,7 +732,8 @@ export default {
   color: var(--el-color-danger);
 }
 
-.ai-workflow-step-status.is-pending {
+.ai-workflow-step-status.is-pending,
+.ai-workflow-step-status.is-recorded {
   border-color: var(--el-border-color-light);
   color: var(--el-text-color-secondary);
 }
@@ -596,7 +753,8 @@ export default {
 }
 
 .ai-workflow-step-button.is-running .ai-workflow-step-index,
-.ai-workflow-step-button.is-retrying .ai-workflow-step-index {
+.ai-workflow-step-button.is-retrying .ai-workflow-step-index,
+.ai-workflow-step-button.is-warning .ai-workflow-step-index {
   border-color: var(--el-color-warning-light-5);
   color: var(--el-color-warning);
 }
@@ -629,6 +787,10 @@ export default {
   padding-bottom: 14px;
 }
 
+.ai-workflow-detail-header > div:first-child {
+  min-width: 0;
+}
+
 .ai-workflow-detail-title {
   color: var(--el-text-color-primary);
   font-size: 16px;
@@ -645,9 +807,25 @@ export default {
 
 .ai-workflow-badges {
   display: flex;
+  flex: 0 1 min(420px, 48%);
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+  max-width: 48%;
+  min-width: 0;
+}
+
+.ai-workflow-badges :deep(.el-tag) {
+  height: auto;
+  max-width: 100%;
+  min-height: 24px;
+  white-space: normal;
+}
+
+.ai-workflow-badges :deep(.el-tag__content) {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .ai-workflow-io-grid {
@@ -831,12 +1009,19 @@ export default {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .ai-workflow-step-button.is-child {
+    margin-left: 10px;
+    width: calc(100% - 10px);
+  }
+
   .ai-workflow-detail-header {
     flex-direction: column;
   }
 
   .ai-workflow-badges {
     justify-content: flex-start;
+    max-width: 100%;
+    width: 100%;
   }
 }
 </style>
