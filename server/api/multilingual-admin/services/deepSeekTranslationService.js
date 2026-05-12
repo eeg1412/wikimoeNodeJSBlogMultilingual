@@ -50,6 +50,7 @@ const MAX_EXTRACTED_TERM_NOTE_LENGTH = 120
 const MAX_TERM_SEARCH_KEYWORD_COUNT = 6
 const MAX_TERM_FILTER_TOKENS = 2048
 const MAX_TERM_KNOWLEDGE_TRANSLATION_TOKENS = 4096
+const MIN_TERM_KNOWLEDGE_TRANSLATION_CONFIDENCE = 80
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
@@ -540,7 +541,8 @@ function buildNameTranslationPrompt() {
   return buildPromptLayer('名称与专有名词层', [
     '不要因为内容是专有名词就原样保留。有意义的昵称、作者名、分类名、标签名、地名、媒体标题、选项文案、包含可读词语的文件名，都属于可翻译内容。',
     '翻译专有名词、昵称、地名、名称或标题时，要保留指代对象身份，同时产出目标语言表达。',
-    '优先使用目标语言既有译名；没有既有译名时，根据语境翻译可读部分、音译，或用简洁的目标语言注释表达。',
+    '优先使用目标语言既有译名；疑似需要官方译名、权威译名或稳定通用译名的名称，如果名词数据库没有提供译名，不得凭记忆、直译、音译、意译或本地化习惯创造译名。',
+    '对名词数据库标记为未确认官方译名的名称，必须保留原文表面形式；只有明显不是稳定实体、只是普通可读词语或描述性短语时，才按目标语言常规表达翻译。',
     '禁止用专有名词、昵称、作者名、分类名、标签名、地名、中文地名、媒体标题、无需翻译、字段类型不需要翻译等理由保留 v。'
   ])
 }
@@ -561,8 +563,14 @@ function buildOfficialTermGlossaryPrompt(input) {
     '这份名词数据库只包含当前目标语言，不包含其他语言的译名。',
     '翻译正文、标题、摘要、关联内容和递归关联文章时，必须优先使用表格中的译名。',
     '同一个原文名词在同一次请求的所有条目、富文本片段和关联字段中必须保持同一译法。',
-    '译名为“未收录”的名词，需要按上下文直译或音译，并在本次请求内保持一致。'
+    '译名为“未收录”的名词表示本次没有可验证译名；不得把它当成已确认的官方译名、权威译名或稳定通用译名处理。',
+    '处理“未收录”名词时，必须保留原文表面形式；禁止凭空直译、音译、意译、本地化、改写或声称官方用法。'
   ]
+  if (input.searchOfficialTermTranslations === true) {
+    promptLines.push(
+      '本次已开启官方译名搜索；如果表格仍显示“未收录”，说明数据库和联网流程没有取得可验证译名，不能再用模型记忆补造译名。'
+    )
+  }
   if (contextSummary) {
     promptLines.push(`本次内容简要上下文：${contextSummary}`)
   }
@@ -1112,10 +1120,7 @@ function getTermTargetLanguageCodeLogValue(input) {
 }
 
 function buildOfficialTermGlossaryCacheHash(value) {
-  return crypto
-    .createHash('sha256')
-    .update(JSON.stringify(value))
-    .digest('hex')
+  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
 function getOfficialTermGlossaryScopeKey(input) {
@@ -1146,7 +1151,8 @@ function buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes) {
     scopeKey: getOfficialTermGlossaryScopeKey(input),
     sourceLanguageCode: input.sourceLanguageCode || '',
     targetLanguageCodes: targetLanguageCodes.slice().sort(),
-    searchOfficialTermTranslations: input.searchOfficialTermTranslations === true,
+    searchOfficialTermTranslations:
+      input.searchOfficialTermTranslations === true,
     packages
   })
 }
@@ -1157,7 +1163,9 @@ function pruneOfficialTermGlossaryCache(now) {
       officialTermGlossaryCache.delete(cacheKey)
     }
   }
-  while (officialTermGlossaryCache.size > MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE) {
+  while (
+    officialTermGlossaryCache.size > MAX_OFFICIAL_TERM_GLOSSARY_CACHE_SIZE
+  ) {
     const firstKey = officialTermGlossaryCache.keys().next().value
     if (!firstKey) {
       return
@@ -1440,7 +1448,12 @@ function buildTermExtractionRequestData(
         terms: {
           type: 'array',
           itemType: 'object',
-          requiredFields: ['sourceText', 'searchKeywords', 'importance', 'note'],
+          requiredFields: [
+            'sourceText',
+            'searchKeywords',
+            'importance',
+            'note'
+          ],
           itemSchema: {
             sourceText:
               '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
@@ -1482,13 +1495,15 @@ function buildTermExtractionMessages(
         `JSON 根节点必须包含 schema、version、terms 和 contextSummary，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
         `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"某作品主角所属乐队成员"}],"contextSummary":"内容围绕某作品乐队成员的演出准备与人物关系展开"}。`,
         '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
-        '如果词条仅靠普通翻译常识、上下文直译或目标语言常规表达即可处理，不要抽取。'
+        '抽取阶段必须把疑似需要官方译名的专有名词交给词库或联网流程；不要把它留给正文翻译阶段自由处理。',
+        '如果词条只是普通词、普通地点描述、通用设施或无稳定实体指向的短语，且不需要核对既有译名，才不要抽取。'
       ])
     },
     {
       role: 'system',
       content: buildPromptLayer('抽取规则层', [
         '优先抽取作品名称、系列名称、角色名称、真实组织、品牌产品、游戏/书籍/影视/番剧标题、现实地标、官方活动名等需要核对正式译名的词条。',
+        '只要词条像作品、角色、声优/作者、游戏、书籍、影视、番剧、出版社、平台、品牌、组织、活动、联名企划、小众地点、新近内容或标题标点敏感名称，就必须抽取；禁止因为你觉得可以直译、音译或意译而跳过。',
         '必须保留原文表面形式，不要自行翻译、改写、解释或添加括号。',
         '同一实体不要因为书名号、引号、空格、全半角、感叹号、问号、句点等标点差异拆成多个 terms；例如“孤独摇滚”和“孤独摇滚！”只返回一个。',
         'searchKeywords 必须由你生成，用于数据库模糊查询同一实体；写原文核心名、常见简称、无装饰标点写法，例如“孤独摇滚！”的 searchKeywords 应包含“孤独摇滚”。',
@@ -1500,7 +1515,7 @@ function buildTermExtractionMessages(
         '不要抽取可以直接按目标语言常规表达翻译的道路、楼层、房间、编号路线、普通设施、泛称地点或行政区划组合。',
         '例如“1号路”“2号路”“第3层”“A区入口”“北门”“停车场”这类不需要联网确认官方译名的词条必须排除。',
         '不要把“某地的停车场”“某地的路口”“某作品拍照场景里的楼梯”这类由普通地点加描述性修饰组成、没有稳定正式名称的短语当成专有名词；即使它与作品巡礼、拍照打卡或剧情场景有关，也不代表它需要联网确认官方译名。',
-        '如果你不确定一个词是否存在官方译名，只有它确实像作品、角色、品牌、组织、产品或现实地标时才抽取。',
+        '如果你不确定一个词是否存在官方译名，只要它确实像作品、角色、品牌、组织、产品、现实地标、小众地点、活动或标题，就抽取并交给后续流程确认；只有明显是普通描述性短语时才排除。',
         '只有当不同写法确实指向不同官方实体或不同作品版本时才分别返回；同一对象的标点、简称、全半角或装饰符差异不要拆分。',
         'importance 必须综合判断词条对文章主题、标题摘要、关联内容和正文理解的一致性影响，以及联网确认官方译名的必要性。',
         '每个 terms 项都必须写 note；note 只用于数据库同名词消歧，不用于生成译名。',
@@ -1635,8 +1650,9 @@ function normalizeTermSearchKeywordList(item, index) {
 
 function getExtractedTermIdentityKey(term) {
   return (
-    properNounTranslationService.buildLooseSourceTextIdentity(term.sourceText) ||
-    term.normalizedSourceText
+    properNounTranslationService.buildLooseSourceTextIdentity(
+      term.sourceText
+    ) || term.normalizedSourceText
   )
 }
 
@@ -1909,6 +1925,9 @@ async function extractTermsFromPackage({
             normalizedTermCount: terms.length,
             contextSummaryLength: contextSummary.length
           },
+          input: {
+            requestBody
+          },
           json: {
             result: resultData,
             normalizedTerms: terms,
@@ -2099,7 +2118,7 @@ function buildTermKnowledgeTranslationRequestData({
 }) {
   return JSON.stringify(
     {
-      task: '用抽取 AI 自身知识翻译缺失专有名词',
+      task: '用抽取 AI 自身知识判断缺失专有名词是否必须联网检索',
       outputContract: {
         rootType: 'object',
         requiredFields: ['schema', 'version', 'terms'],
@@ -2111,14 +2130,17 @@ function buildTermKnowledgeTranslationRequestData({
           requiredFields: [
             'sourceText',
             'translations',
+            'translationConfidence',
             'needsSearchLanguageCodes'
           ],
           itemSchema: {
             sourceText: '请求中的原文名词，必须原样返回',
             translations:
-              '以目标语言代码为键的对象；只写入你能完美确认的官方译名、权威译名或稳定通用译名',
+              '以目标语言代码为键的对象；默认留空；只有名词满足低风险白名单的名词时才填写，禁止擅自填写白名单以外的译名。',
+            translationConfidence:
+              '以目标语言代码为键的对象；每个 translations 中出现的语言都必须填写 1-100 的整数可信度',
             needsSearchLanguageCodes:
-              '你无法仅凭自身知识完美确认、需要联网检索的目标语言代码'
+              '默认应写在这里；只要不能完美确认，就把对应语言 code 写在这里'
           }
         }
       },
@@ -2150,12 +2172,13 @@ function buildTermKnowledgeTranslationMessages({
       role: 'system',
       content: buildPromptLayer('译名判定规则层', [
         ...translationPromptPolicyService.getTermTranslationQualityPolicyLines(),
-        '你需要逐一判断每个 sourceText 在每个目标语言中，是否能仅凭自身知识完美对应到官方、规范、稳定或广泛接受的译名。',
-        '只有高度确定时，才把对应语言代码写入 translations。',
-        '如果 sourceText 存在歧义、地区差异、发布时间较新、领域过窄、活动限定，或可能存在多个官方名称，不要猜测。',
-        '如果无法仅凭自身知识完美确认某个目标语言译名，必须把该语言代码放入 needsSearchLanguageCodes。',
-        '需要官方命名的名词，不要创造普通直译或音译。',
-        '同一个名词可以同时包含 translations 和 needsSearchLanguageCodes：确定的语言写入 translations，不确定的语言交给检索。',
+        ...translationPromptPolicyService.getDeepSeekTermKnowledgeSearchHandoffPolicyLines(),
+        '你需要逐一判断每个 sourceText 在每个目标语言中，是否必须交给联网检索。',
+        '优先让 needsSearchLanguageCodes 充分覆盖，不要为了完整率补 translations。',
+        '如果 sourceText 含中文汉字且目标语言也是中文地区变体，不要把字形转换或地区常用字替换当作地区译名知识。',
+        `每个写入 translations 的语言都必须同时写入 translationConfidence，分数必须是 1-100 的整数。`,
+        `如果某个译名的可信度低，不要假装确定；可以写出候选译名和分数，但必须把该语言同时放入 needsSearchLanguageCodes。`,
+        '同一个名词可以同时包含 translations 和 needsSearchLanguageCodes：只有完美确认的语言写入 translations，其余语言交给检索。',
         '每个返回项必须使用请求中的一个 sourceText，且不要返回请求之外的名词。'
       ])
     },
@@ -2226,6 +2249,31 @@ function normalizeTermLanguageCodeList(values) {
   return languageCodes
 }
 
+function normalizeTermKnowledgeTranslationConfidence(value) {
+  const confidence = Number(value)
+  if (!Number.isInteger(confidence)) {
+    return 0
+  }
+  if (confidence < 1 || confidence > 100) {
+    return 0
+  }
+  return confidence
+}
+
+function getTermKnowledgeTranslationConfidence(termItem, languageCode) {
+  const confidenceMap = termItem?.translationConfidence
+  if (
+    !confidenceMap ||
+    typeof confidenceMap !== 'object' ||
+    Array.isArray(confidenceMap)
+  ) {
+    return 0
+  }
+  return normalizeTermKnowledgeTranslationConfidence(
+    confidenceMap[languageCode]
+  )
+}
+
 function buildTermRequestMap(termRequests) {
   const termRequestMap = new Map()
   termRequests.forEach(termRequest => {
@@ -2282,6 +2330,7 @@ function normalizeTermKnowledgeTranslationResult(resultData, termRequests) {
         termId: termRequest.termId || '',
         note: termRequest.note || '',
         translations: {},
+        translationConfidence: {},
         translationSource: TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE
       }
       resultTermMap.set(normalizedSourceText, resultTerm)
@@ -2299,7 +2348,15 @@ function normalizeTermKnowledgeTranslationResult(resultData, termRequests) {
       if (!translatedText) {
         return
       }
+      const confidence = getTermKnowledgeTranslationConfidence(
+        termItem,
+        languageCode
+      )
+      if (confidence < MIN_TERM_KNOWLEDGE_TRANSLATION_CONFIDENCE) {
+        return
+      }
       resultTerm.translations[languageCode] = translatedText
+      resultTerm.translationConfidence[languageCode] = confidence
     })
   })
 
@@ -2364,9 +2421,8 @@ async function recordTermKnowledgeTranslationUsage({
     status,
     requestId: responseData.id || '',
     sourceLanguageCode: input.sourceLanguageCode,
-    targetLanguageCode: getTermRequestTargetLanguageCodes(termRequests).join(
-      ','
-    ),
+    targetLanguageCode:
+      getTermRequestTargetLanguageCodes(termRequests).join(','),
     usage: responseData.usage || {},
     rawResponse: responseData,
     meta: {
@@ -2460,22 +2516,24 @@ async function translateMissingTermsWithExtractorKnowledge({
           model: responseData.model || settings.deepSeekModel,
           requestId: responseData.id || '',
           sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: getTermRequestTargetLanguageCodes(
-            termRequests
-          ).join(','),
+          targetLanguageCode:
+            getTermRequestTargetLanguageCodes(termRequests).join(','),
           meta: {
             sourceTermCount: termRequests.length,
-            targetLanguageCodes: getTermRequestTargetLanguageCodes(
-              termRequests
-            ),
+            targetLanguageCodes:
+              getTermRequestTargetLanguageCodes(termRequests),
             aiKnowledgeBaseTermCount: result.terms.length,
-            aiKnowledgeBaseTranslationCount:
-              countTermTranslationLanguagePairs(result.terms),
+            aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
+              result.terms
+            ),
             needsInternetSearchTermCount: result.missingTermRequests.length,
             needsInternetSearchTargetLanguageCodes:
               getTermRequestTargetLanguageCodes(result.missingTermRequests),
             contextSummaryLength:
               normalizeTermContextSummary(contextSummary).length
+          },
+          input: {
+            requestBody
           },
           json: {
             result: resultData,
@@ -2487,7 +2545,7 @@ async function translateMissingTermsWithExtractorKnowledge({
     },
     {
       stepKey: 'proper-noun.keyword.knowledge-translate',
-      stepLabel: 'DeepSeek 专有名词知识库翻译',
+      stepLabel: 'DeepSeek 专有名词联网检索分流',
       field: 'deepSeek',
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
@@ -2890,6 +2948,9 @@ async function filterExistingTermCandidatesWithAi({
             contextSummaryLength:
               normalizeTermContextSummary(contextSummary).length
           },
+          input: {
+            requestBody
+          },
           json: {
             result: resultData,
             matchedTermIds
@@ -3046,7 +3107,7 @@ async function resolveOfficialTermGlossaryCacheData({
   ) {
     if (handlers.onStatus) {
       handlers.onStatus({
-        message: `正在用抽取 AI 自身知识库翻译 ${missingTermRequests.length} 个缺失专有名词`
+        message: `正在判断 ${missingTermRequests.length} 个缺失专有名词是否需要联网检索`
       })
     }
     const extractorKnowledgeResult =
@@ -3113,6 +3174,11 @@ async function resolveOfficialTermGlossaryCacheData({
         searchResult.stats?.internetSearchRequestedTermCount || 0
       internetSearchTargetLanguageCodes =
         searchResult.stats?.internetSearchTargetLanguageCodes || []
+      translationAiJsonLogService
+        .mergeAiJsonLogs(searchResult.aiJsonLogs)
+        .forEach(aiJsonLog => {
+          aiJsonLogs.push(aiJsonLog)
+        })
       aiJsonLogs.push(
         translationAiJsonLogService.createAiJsonLog({
           operation: 'proper-noun.official-translation.resolve',
@@ -3134,6 +3200,10 @@ async function resolveOfficialTermGlossaryCacheData({
             internetSearchRequestedTermCount,
             internetSearchTargetLanguageCodes,
             contextSummaryLength: officialTermContextSummary.length
+          },
+          input: {
+            termRequests: missingTermRequests,
+            contextSummary: officialTermContextSummary
           },
           json: {
             contextSummary: officialTermContextSummary,
@@ -3215,7 +3285,10 @@ async function getOfficialTermGlossaryCacheData({
         message: `复用已整理的 ${cachedData.officialTermStats.keywordCount} 个专有名词词库`
       })
     }
-    return cachedData
+    return {
+      ...cachedData,
+      aiJsonLogs: []
+    }
   }
 
   const promise = resolveOfficialTermGlossaryCacheData({
@@ -4719,6 +4792,9 @@ async function translatePostEntries(body = {}) {
           stream: false,
           entryCount: input.entries.length
         },
+        input: {
+          requestBody
+        },
         json: resultData
       })
     ]
@@ -4821,6 +4897,9 @@ async function translateStreamChunkWithRetry({
               chunkCount: chunkTotal,
               attemptNo,
               entryCount: chunkInput.entries.length
+            },
+            input: {
+              requestBody
             },
             json: resultData
           })

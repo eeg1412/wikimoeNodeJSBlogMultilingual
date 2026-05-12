@@ -19,6 +19,7 @@ const {
 const { recordGeminiUsageLog } = require('./geminiUsageLogService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
 const translationPromptPolicyService = require('./translationPromptPolicyService')
+const translationAiJsonLogService = require('./translationAiJsonLogService')
 
 const OPERATION_OFFICIAL_TERM_KNOWLEDGE =
   'proper-noun.official-translation.knowledge'
@@ -267,15 +268,11 @@ function buildOfficialTermKnowledgePrompt({
   const promptLines = [
     '你是多语言博客 CMS 的专有名词译名整理助手。',
     '本步骤禁止联网检索，也没有任何搜索工具可用；只能使用你模型内置的可靠知识。',
-    '请为每个 sourceText 在指定目标语言中给出官方译名、正式译名、权威通行译名或稳定通用译名。',
-    'sourceTermRequests 旁可能包含 contentContextSummary；它概括这些名词在本次内容中的作品、角色、主题、关系和场景。',
-    '确认译名时必须优先按 contentContextSummary 识别对象身份；短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
-    '只有当译名属于世界级通用常识、长期稳定且你能确定对象身份时，才直接写入 translations。',
-    '像“江户时代”“新干线”“东京塔”这类历史时期、公共交通或现实地标，如果目标语言里的稳定通用译名非常明确，可以使用内置知识完成。',
-    '对于 ACG 作品、角色、声优、游戏、出版社、活动名、联名企划、地区性品牌、小众地点、新近作品、标题标点存在差异的词条，只要缺少可确信的正式来源，就必须把对应 language code 放入 needsSearchLanguageCodes。',
-    '不要凭模糊印象、常见译法或可能的直译音译直接补 translations；不确定时交给后续互联网检索。',
-    '如果目标语言确实没有固定译名，但这一结论需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。',
-    '必须返回每一个输入 sourceText；translations 可以只包含你确定的语言。',
+    ...translationPromptPolicyService.getGeminiTermKnowledgePromptLines(),
+    'sourceTermRequests 旁可能包含 contentContextSummary；确认译名时必须优先按它和 note 识别对象身份，短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
+    '必须优先让 needsSearchLanguageCodes 覆盖所有不确定语言，不要为了完整率补 translations。',
+    '如果目标语言确实没有固定译名，但这一结论仍需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。',
+    '必须返回每一个输入 sourceText；translations 只包含你完美确认的语言。',
     '只返回合法 JSON，不要使用 Markdown，不要解释。',
     'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"needsSearchLanguageCodes":["zh-HK"]}]}。',
     '',
@@ -311,7 +308,8 @@ function buildOfficialTermSearchPrompt({
     '短人名、昵称、单字名或同形异义词必须结合 contentContextSummary 检索，不要只按字面普通词或日常含义给译名。',
     '你需要为每个缺失项给出目标语言中的官方译名、正式译名、权威通行译名或稳定通用译名。',
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
-    '如果目标语言确实找不到官方译名，必须给出适合该目标语言的直译或音译。',
+    '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
+    '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
     '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。',
     '只返回合法 JSON，不要使用 Markdown，不要解释。',
     'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。',
@@ -650,7 +648,34 @@ async function resolveOfficialTermTranslationsFromKnowledge({
         })
         return {
           ...result,
-          rawResponse: response
+          rawResponse: response,
+          aiJsonLog: translationAiJsonLogService.createAiJsonLog({
+            operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
+            stage: 'ProperNounOfficialTranslationKnowledge',
+            provider: settings.provider,
+            model: settings.model,
+            requestId: '',
+            sourceLanguageCode,
+            targetLanguageCode: targetLanguageCodes.join(','),
+            meta: {
+              sourceTermCount: termRequests.length,
+              targetLanguageCodes,
+              contextSummaryLength:
+                normalizeOfficialTermContextSummary(contextSummary).length,
+              confirmedTermCount: result.terms.length,
+              needsSearchTermCount: result.missingTermRequests.length
+            },
+            input: {
+              requestBody,
+              requestSummary
+            },
+            json: {
+              result: resultData,
+              normalizedTerms: result.terms,
+              missingTermRequests: result.missingTermRequests,
+              responseSummary
+            }
+          })
         }
       } catch (error) {
         await recordUsage({
@@ -748,7 +773,33 @@ async function searchOfficialTermTranslationsWithInternet({
         })
         return {
           terms,
-          rawResponse: response
+          rawResponse: response,
+          aiJsonLog: translationAiJsonLogService.createAiJsonLog({
+            operation: OPERATION_OFFICIAL_TERM_SEARCH,
+            stage: 'ProperNounOfficialTranslationSearch',
+            provider: settings.provider,
+            model: settings.model,
+            requestId: '',
+            sourceLanguageCode,
+            targetLanguageCode: targetLanguageCodes.join(','),
+            meta: {
+              sourceTermCount: termRequests.length,
+              targetLanguageCodes,
+              contextSummaryLength:
+                normalizeOfficialTermContextSummary(contextSummary).length,
+              translatedTermCount: terms.length
+            },
+            input: {
+              requestBody,
+              requestSummary
+            },
+            json: {
+              result: resultData,
+              terms,
+              groundingMetadata,
+              responseSummary
+            }
+          })
         }
       } catch (error) {
         await recordUsage({
@@ -826,7 +877,8 @@ async function searchOfficialTermTranslations(options = {}) {
   let knowledgeResult = {
     terms: [],
     missingTermRequests: termRequests,
-    rawResponse: null
+    rawResponse: null,
+    aiJsonLog: null
   }
   if (options.skipKnowledgeBase !== true) {
     knowledgeResult = await resolveOfficialTermTranslationsFromKnowledge({
@@ -843,7 +895,8 @@ async function searchOfficialTermTranslations(options = {}) {
 
   let searchResult = {
     terms: [],
-    rawResponse: null
+    rawResponse: null,
+    aiJsonLog: null
   }
   if (knowledgeResult.missingTermRequests.length > 0) {
     searchResult = await searchOfficialTermTranslationsWithInternet({
@@ -883,7 +936,11 @@ async function searchOfficialTermTranslations(options = {}) {
     rawResponse: {
       knowledge: knowledgeResult.rawResponse,
       search: searchResult.rawResponse
-    }
+    },
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(
+      [knowledgeResult.aiJsonLog],
+      [searchResult.aiJsonLog]
+    )
   }
 }
 

@@ -339,8 +339,8 @@
           </div>
           <div class="detail-header-actions">
             <el-button @click="refreshDetail"> 刷新 </el-button>
-            <el-button v-if="hasAiResultJson" @click="openAiJsonDialog">
-              查看 AI JSON
+            <el-button v-if="hasAiWorkflow" @click="openAiWorkflowDialog">
+              查看 AI 工作流
             </el-button>
             <el-button
               v-if="canCleanupCoverImages"
@@ -624,39 +624,14 @@
     </el-drawer>
 
     <el-dialog
-      v-model="aiJsonDialogVisible"
-      title="AI JSON"
-      width="min(920px, 96vw)"
+      v-model="aiWorkflowDialogVisible"
+      title="AI 翻译工作流"
+      width="min(1160px, 96vw)"
+      align-center
       append-to-body
       destroy-on-close
     >
-      <div class="ai-json-toolbar">
-        <el-select
-          v-if="isAiJsonTableView"
-          v-model="aiJsonTableFilters"
-          class="ai-json-filter-select"
-          clearable
-          collapse-tags
-          collapse-tags-tooltip
-          multiple
-          placeholder="筛选内容"
-          size="small"
-        >
-          <el-option
-            v-for="option in aiJsonTableFilterOptions"
-            :key="option.value"
-            :label="option.label"
-            :value="option.value"
-          />
-        </el-select>
-        <el-button size="small" @click="toggleAiJsonViewMode">
-          {{ aiJsonFormatButtonText }}
-        </el-button>
-      </div>
-      <div v-if="isAiJsonTableView" class="ai-json-table-wrapper">
-        <AiJsonNestedTable :nodes="visibleAiJsonTableTree" />
-      </div>
-      <pre v-else class="ai-json-preview">{{ aiResultJsonText }}</pre>
+      <AiTranslationWorkflowViewer :workflow="aiWorkflow" />
     </el-dialog>
   </div>
 </template>
@@ -665,7 +640,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import AiJsonNestedTable from '@/components/AiJsonNestedTable.vue'
+import AiTranslationWorkflowViewer from '@/components/AiTranslationWorkflowViewer.vue'
 import ResponsiveTable from '@/components/ResponsiveTable.vue'
 import ResponsiveTableColumn from '@/components/ResponsiveTableColumn.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
@@ -1417,7 +1392,7 @@ function filterAiJsonTableTree(nodes, selectedFilters) {
 export default {
   name: 'TranslationJobList',
   components: {
-    AiJsonNestedTable,
+    AiTranslationWorkflowViewer,
     Refresh,
     ResponsiveTable,
     ResponsiveTableColumn,
@@ -1438,9 +1413,7 @@ export default {
     const selectedEntryKeys = ref([])
     const conflictList = ref([])
     const coverImageCleanupLoading = ref(false)
-    const aiJsonDialogVisible = ref(false)
-    const aiJsonViewMode = ref('json')
-    const aiJsonTableFilters = ref([])
+    const aiWorkflowDialogVisible = ref(false)
     const params = reactive({
       keyword: '',
       jobType: '',
@@ -1458,100 +1431,22 @@ export default {
       return currentJob.value?.result?.previewEntries || []
     })
 
-    const aiResultJsonPayload = computed(() => {
-      const job = currentJob.value
-      const result = job?.result
-      if (!result || typeof result !== 'object') {
-        return null
-      }
-      return {
-        job: {
-          id: job._id || '',
-          jobType: job.jobType || '',
-          status: job.status || '',
-          source: job.source || {},
-          target: job.target || {}
-        },
-        result: {
-          payload: result.payload || null,
-          aiJsonLogs: Array.isArray(result.aiJsonLogs) ? result.aiJsonLogs : [],
-          previewEntries: Array.isArray(result.previewEntries)
-            ? result.previewEntries
-            : [],
-          warningList: Array.isArray(result.warningList)
-            ? result.warningList
-            : [],
-          aiSkipList: Array.isArray(result.aiSkipList) ? result.aiSkipList : [],
-          relatedResults: Array.isArray(result.relatedResults)
-            ? result.relatedResults
-            : [],
-          languageResults: Array.isArray(result.languageResults)
-            ? result.languageResults
-            : [],
-          translationPostMap: result.translationPostMap || {},
-          coverImageArtifacts: Array.isArray(result.coverImageArtifacts)
-            ? result.coverImageArtifacts
-            : [],
-          coverImageGenerationMap: result.coverImageGenerationMap || {},
-          coverImageRecognitionMap: result.coverImageRecognitionMap || {},
-          aiUsage: result.aiUsage || {},
-          model: result.model || '',
-          requestId: result.requestId || null,
-          sourceSnapshotId: result.sourceSnapshotId || null,
-          completedAt: result.completedAt || null
-        }
-      }
+    const aiWorkflow = computed(() => {
+      return currentJob.value?.result?.aiWorkflow || null
     })
 
-    const aiJsonTableTree = computed(() => {
-      if (!aiResultJsonPayload.value) {
-        return []
-      }
-      return [buildAiJsonTableNode('$', aiResultJsonPayload.value)]
-    })
-
-    const visibleAiJsonTableTree = computed(() => {
-      return filterAiJsonTableTree(
-        aiJsonTableTree.value,
-        aiJsonTableFilters.value
+    const hasAiWorkflow = computed(() => {
+      return (
+        Array.isArray(aiWorkflow.value?.steps) &&
+        aiWorkflow.value.steps.length > 0
       )
     })
 
-    const isAiJsonTableView = computed(() => {
-      return aiJsonViewMode.value === 'table'
-    })
-
-    const aiJsonFormatButtonText = computed(() => {
-      if (isAiJsonTableView.value) {
-        return '查看原始 JSON'
-      }
-      return '格式化为表格'
-    })
-
-    const hasAiResultJson = computed(() => {
-      return Boolean(aiResultJsonPayload.value)
-    })
-
-    const aiResultJsonText = computed(() => {
-      if (!aiResultJsonPayload.value) {
-        return ''
-      }
-      return JSON.stringify(aiResultJsonPayload.value, null, 2)
-    })
-
-    const openAiJsonDialog = () => {
-      if (!hasAiResultJson.value) {
+    const openAiWorkflowDialog = () => {
+      if (!hasAiWorkflow.value) {
         return
       }
-      aiJsonDialogVisible.value = true
-    }
-
-    const toggleAiJsonViewMode = () => {
-      if (isAiJsonTableView.value) {
-        aiJsonViewMode.value = 'json'
-        return
-      }
-      aiJsonViewMode.value = 'table'
+      aiWorkflowDialogVisible.value = true
     }
 
     const adoptionEntryMap = computed(() => {
@@ -2472,11 +2367,8 @@ export default {
     })
 
     return {
-      aiJsonFormatButtonText,
-      aiJsonDialogVisible,
-      aiJsonTableFilterOptions: AI_JSON_TABLE_FILTER_OPTIONS,
-      aiJsonTableFilters,
-      aiResultJsonText,
+      aiWorkflow,
+      aiWorkflowDialogVisible,
       applyForm,
       activeReviewLanguageCode,
       batchDeleting,
@@ -2514,9 +2406,8 @@ export default {
       getSelectedEntryCount,
       getStatusTagType,
       handleJobSelectionChange,
-      hasAiResultJson,
+      hasAiWorkflow,
       isJobSelectable,
-      isAiJsonTableView,
       jobList,
       jobStorageFileCaches,
       jobStorageTables,
@@ -2524,7 +2415,7 @@ export default {
       jobStorageSummaryLoading,
       jobStorageUpdatedText,
       jobTypeOptions,
-      openAiJsonDialog,
+      openAiWorkflowDialog,
       openDetail,
       params,
       previewEntries,
@@ -2543,9 +2434,7 @@ export default {
       statusOptions,
       stopJob,
       tableRef,
-      toggleAiJsonViewMode,
       total,
-      visibleAiJsonTableTree,
       applySelectedEntries
     }
   }
@@ -2746,41 +2635,6 @@ html.dark .translation-job-storage-panel {
   color: var(--el-text-color-secondary);
   margin-bottom: 16px;
   padding: 14px 0;
-}
-
-.ai-json-toolbar {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-bottom: 10px;
-}
-
-.ai-json-filter-select {
-  max-width: 420px;
-  width: min(420px, 62vw);
-}
-
-.ai-json-preview {
-  max-height: min(68vh, 680px);
-  margin: 0;
-  overflow: auto;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--el-fill-color-lighter);
-  color: var(--el-text-color-primary);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.ai-json-table-wrapper {
-  max-height: min(68vh, 680px);
-  overflow: auto;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
 }
 
 .apply-toolbar {

@@ -138,9 +138,10 @@ function createAiJsonLog({
   sourceLanguageCode,
   targetLanguageCode,
   meta,
+  input,
   json
 }) {
-  return {
+  const log = {
     schema: AI_JSON_LOG_SCHEMA,
     version: AI_JSON_LOG_VERSION,
     operation: normalizeString(operation),
@@ -154,6 +155,16 @@ function createAiJsonLog({
     meta: sanitizeAiJsonValue(meta || {}),
     json: sanitizeAiJsonValue(json || {})
   }
+  const sanitizedInput = sanitizeAiJsonValue(input || {})
+  if (
+    sanitizedInput &&
+    typeof sanitizedInput === 'object' &&
+    !Array.isArray(sanitizedInput) &&
+    Object.keys(sanitizedInput).length > 0
+  ) {
+    log.input = sanitizedInput
+  }
+  return log
 }
 
 function mergeAiJsonLogs(...logLists) {

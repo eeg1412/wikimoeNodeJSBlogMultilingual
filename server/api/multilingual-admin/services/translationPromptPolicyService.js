@@ -4,8 +4,30 @@ const GENERAL_TRANSLATION_QUALITY_POLICY_LINES = [
 ]
 
 const TERM_TRANSLATION_QUALITY_POLICY_LINES = [
-  '名词和名称翻译必须符合“信、达、雅”：保持对象身份和官方用法，优先使用官方译名、权威译名或稳定通用译名。',
+  '名词和名称翻译必须符合“信、达、雅”：保持对象身份和官方用法，优先使用可验证的官方译名、权威译名或稳定通用译名。',
+  '专有名词译名必须以可验证的既有译名为准；不要把直译、音译、意译、风格化改写或模糊印象当作官方译名、权威译名或稳定通用译名。',
   '不要凭直译、音译或模糊印象猜测译名；原文有意保留的异语名称或已经是目标语言的名称，不要强行翻译。'
+]
+
+const DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES = [
+  '默认把所有名词视为需要联网检索；自身知识阶段的任务是分流，不是补全 translations。',
+  '只有低风险白名单，才允许写入 translations。绝对不可擅自翻译！这个错误会严重污染后续检索结果，导致整个系统崩盘！',
+  '低风险白名单：历史时期或朝代年号、世界级稳定现实地标、广为人知且正式名称长期稳定的公共交通系统或线路类别。',
+  '不在白名单内，必须把对应语言写入 needsSearchLanguageCodes，translations 留空。',
+  '中文地区变体不能仅凭简繁转换、地区常用字替换或表面接近的转写判断译名；不能确认现实命名时，必须写入 needsSearchLanguageCodes。',
+  '禁止把原文表面形式、罗马字、直译、音译、意译或占位译名写进 translations 来规避联网检索。',
+  '只要对象身份、地区写法、官方别名、标点、字形、发布时间或命名状态存在不确定性，就写入 needsSearchLanguageCodes。'
+]
+
+const GEMINI_TERM_KNOWLEDGE_PROMPT_LINES = [
+  '请为每个 sourceText 在指定目标语言中给出官方译名、正式译名、权威通行译名或稳定通用译名。',
+  'sourceTermRequests 旁可能包含 contentContextSummary；它概括这些名词在本次内容中的作品、角色、主题、关系和场景。',
+  '确认译名时必须优先按 contentContextSummary 识别对象身份；短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
+  '只有当译名属于世界级通用常识、长期稳定且你能确定对象身份时，才直接写入 translations。',
+  '像“江户时代”“新干线”“东京塔”这类历史时期、公共交通或现实地标，如果目标语言里的稳定通用译名非常明确，可以使用内置知识完成。',
+  '对于 ACG 作品、角色、声优、游戏、出版社、活动名、联名企划、地区性品牌、小众地点、新近作品、标题标点存在差异的词条，只要缺少可确信的正式来源，就必须把对应 language code 放入 needsSearchLanguageCodes。',
+  '不要凭模糊印象、常见译法或可能的直译音译直接补 translations；不确定时交给后续互联网检索。',
+  '如果目标语言确实没有固定译名，但这一结论需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。'
 ]
 
 function cloneLines(lines) {
@@ -32,9 +54,29 @@ function getTermTranslationQualityPolicyText() {
   return joinLines(TERM_TRANSLATION_QUALITY_POLICY_LINES)
 }
 
+function getDeepSeekTermKnowledgeSearchHandoffPolicyLines() {
+  return cloneLines(DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES)
+}
+
+function getDeepSeekTermKnowledgeSearchHandoffPolicyText() {
+  return joinLines(DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES)
+}
+
+function getGeminiTermKnowledgePromptLines() {
+  return cloneLines(GEMINI_TERM_KNOWLEDGE_PROMPT_LINES)
+}
+
+function getGeminiTermKnowledgePromptText() {
+  return joinLines(GEMINI_TERM_KNOWLEDGE_PROMPT_LINES)
+}
+
 module.exports = {
   getGeneralTranslationQualityPolicyLines,
   getGeneralTranslationQualityPolicyText,
   getTermTranslationQualityPolicyLines,
-  getTermTranslationQualityPolicyText
+  getTermTranslationQualityPolicyText,
+  getDeepSeekTermKnowledgeSearchHandoffPolicyLines,
+  getDeepSeekTermKnowledgeSearchHandoffPolicyText,
+  getGeminiTermKnowledgePromptLines,
+  getGeminiTermKnowledgePromptText
 }

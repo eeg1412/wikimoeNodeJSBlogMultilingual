@@ -1,6 +1,7 @@
 const mongoose = require('mongoose')
 const coverImageTempFileService = require('./coverImageTempFileService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const translationAiWorkflowViewService = require('./translationAiWorkflowViewService')
 const {
   normalizeLanguageCode,
   SUPPORTED_LANGUAGE_CODES
@@ -905,7 +906,54 @@ async function getTranslationJobDetail(query = {}) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
-  return attachRuntimeDisplay(job, {})
+  return attachRuntimeDisplay(buildTranslationJobDetailResponse(job), {})
+}
+
+function buildPayloadSummary(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      entryCount: 0,
+      fieldCount: 0
+    }
+  }
+  let entryCount = 0
+  if (Array.isArray(payload.entries)) {
+    entryCount = payload.entries.length
+  }
+  return {
+    entryCount,
+    fieldCount: Object.keys(payload).length
+  }
+}
+
+function buildTranslationJobDetailResponse(job) {
+  const result = job.result || {}
+  const aiJsonLogs = Array.isArray(result.aiJsonLogs) ? result.aiJsonLogs : []
+  const workflowJob = {
+    ...job,
+    result: {
+      ...result,
+      aiJsonLogCount: aiJsonLogs.length
+    }
+  }
+  const aiWorkflow =
+    translationAiWorkflowViewService.buildTranslationJobWorkflow(workflowJob)
+  return {
+    ...job,
+    result: {
+      ...result,
+      payload: null,
+      payloadSummary: buildPayloadSummary(result.payload),
+      aiJsonLogs: [],
+      aiJsonLogCount: aiJsonLogs.length,
+      aiWorkflow,
+      relatedResults: [],
+      languageResults: [],
+      translationPostMap: {},
+      coverImageGenerationMap: {},
+      coverImageRecognitionMap: {}
+    }
+  }
 }
 
 function appendLog(job, message, level = 'info', stage = '') {

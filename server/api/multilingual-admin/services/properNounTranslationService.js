@@ -33,6 +33,8 @@ const TRANSLATION_SOURCE_LABEL_MAP = {
   aiKnowledgeBase: 'AI知识库',
   imported: '导入'
 }
+const MISSING_TRANSLATION_INSTRUCTION =
+  '未确认官方译名，请保留原文表面形式；不得自行直译、音译、本地化或改写为看似正式译名'
 let cleanupTimer = null
 let isCleanupRunning = false
 let hasPendingCleanup = false
@@ -1541,7 +1543,7 @@ function pushSingleLanguageGlossaryRow({
     if (includeNoteColumn) {
       cells.push(missingTerm?.glossaryNote || '')
     }
-    cells.push('未收录，请按上下文直译或音译，并在本次翻译中保持一致')
+    cells.push(MISSING_TRANSLATION_INSTRUCTION)
     cells.push('missing')
     lines.push(buildMarkdownTableRow(cells))
   }
@@ -1694,7 +1696,7 @@ function buildGlossaryMarkdown({
           cells.push(missingTerm?.glossaryNote || '')
         }
         cells.push(`${getLanguageText(languageCode)}（${languageCode}）`)
-        cells.push('未收录，请按上下文直译或音译，并在本次翻译中保持一致')
+        cells.push(MISSING_TRANSLATION_INSTRUCTION)
         cells.push('missing')
         lines.push(buildMarkdownTableRow(cells))
       }
