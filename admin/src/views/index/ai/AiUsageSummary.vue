@@ -255,6 +255,7 @@ const OPERATION_TEXT_MAP = {
   'cover.image.generation': '封面图生成',
   'proper-noun.keyword.extract': '专有名词抽取',
   'proper-noun.existing-term.filter': '专有名词库候选消歧',
+  'proper-noun.official-translation.knowledge': '专有名词官方译名知识确认',
   'proper-noun.official-translation.search': '专有名词官方译名联网翻译'
 }
 

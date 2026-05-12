@@ -9,16 +9,6 @@ const TERM_TRANSLATION_QUALITY_POLICY_LINES = [
   '不要凭直译、音译或模糊印象猜测译名；原文有意保留的异语名称或已经是目标语言的名称，不要强行翻译。'
 ]
 
-const DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES = [
-  '默认把所有名词视为需要联网检索；自身知识阶段的任务是分流，不是补全 translations。',
-  '只有低风险白名单，才允许写入 translations。绝对不可擅自翻译！这个错误会严重污染后续检索结果，导致整个系统崩盘！',
-  '低风险白名单：历史时期或朝代年号、世界级稳定现实地标、广为人知且正式名称长期稳定的公共交通系统或线路类别。',
-  '不在白名单内，必须把对应语言写入 needsSearchLanguageCodes，translations 留空。',
-  '中文地区变体不能仅凭简繁转换、地区常用字替换或表面接近的转写判断译名；不能确认现实命名时，必须写入 needsSearchLanguageCodes。',
-  '禁止把原文表面形式、罗马字、直译、音译、意译或占位译名写进 translations 来规避联网检索。',
-  '只要对象身份、地区写法、官方别名、标点、字形、发布时间或命名状态存在不确定性，就写入 needsSearchLanguageCodes。'
-]
-
 const GEMINI_TERM_KNOWLEDGE_PROMPT_LINES = [
   '请为每个 sourceText 在指定目标语言中给出官方译名、正式译名、权威通行译名或稳定通用译名。',
   'sourceTermRequests 旁可能包含 contentContextSummary；它概括这些名词在本次内容中的作品、角色、主题、关系和场景。',
@@ -54,14 +44,6 @@ function getTermTranslationQualityPolicyText() {
   return joinLines(TERM_TRANSLATION_QUALITY_POLICY_LINES)
 }
 
-function getDeepSeekTermKnowledgeSearchHandoffPolicyLines() {
-  return cloneLines(DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES)
-}
-
-function getDeepSeekTermKnowledgeSearchHandoffPolicyText() {
-  return joinLines(DEEPSEEK_TERM_KNOWLEDGE_SEARCH_HANDOFF_POLICY_LINES)
-}
-
 function getGeminiTermKnowledgePromptLines() {
   return cloneLines(GEMINI_TERM_KNOWLEDGE_PROMPT_LINES)
 }
@@ -75,8 +57,6 @@ module.exports = {
   getGeneralTranslationQualityPolicyText,
   getTermTranslationQualityPolicyLines,
   getTermTranslationQualityPolicyText,
-  getDeepSeekTermKnowledgeSearchHandoffPolicyLines,
-  getDeepSeekTermKnowledgeSearchHandoffPolicyText,
   getGeminiTermKnowledgePromptLines,
   getGeminiTermKnowledgePromptText
 }

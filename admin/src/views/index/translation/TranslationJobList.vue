@@ -908,7 +908,7 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   aiUsage: ['AI用量', '当前任务汇总的 AI 用量信息。'],
   input: ['输入', '服务端提交给该阶段的输入内容。'],
   output: ['输出', '该阶段产生的输出内容。'],
-  terms: ['官方译名结果', '联网检索 AI 输出的原文名词和多语言译名。'],
+  terms: ['官方译名结果', '名词搜索翻译 AI 输出的原文名词和多语言译名。'],
   normalizedTerms: [
     '规范化关键词',
     '默认 AI 抽词后经服务端清洗、去重、排序的关键词。'
@@ -979,7 +979,31 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   keywordCount: ['关键词数量', '默认 AI 抽取出的关键词数量。'],
   coveredTermCount: ['已覆盖名词数', '数据库已有译名覆盖的名词数量。'],
   missingTermCount: ['缺失名词数', '数据库缺少目标语言译名的名词数量。'],
-  searchedTermCount: ['已检索名词数', '实际提交给联网检索 AI 的名词数量。'],
+  aiKnowledgeBaseTermCount: [
+    '模型知识确认名词数',
+    '名词搜索翻译 AI 通过模型知识直接确认的名词数量。'
+  ],
+  aiKnowledgeBaseTranslationCount: [
+    '模型知识确认译名数',
+    '名词搜索翻译 AI 通过模型知识直接确认的译名数量。'
+  ],
+  searchedTermCount: ['已检索名词数', '实际提交给名词搜索翻译 AI 的名词数量。'],
+  internetSearchTermCount: [
+    '联网检索确认名词数',
+    '名词搜索翻译 AI 通过联网检索确认的名词数量。'
+  ],
+  internetSearchTranslationCount: [
+    '联网检索译名数',
+    '名词搜索翻译 AI 通过联网检索确认的译名数量。'
+  ],
+  internetSearchRequestedTermCount: [
+    '联网检索请求名词数',
+    '模型知识无法确认后继续提交给联网检索的名词数量。'
+  ],
+  internetSearchTargetLanguageCodes: [
+    '联网检索目标语言',
+    '实际提交给联网检索的目标语言列表。'
+  ],
   skippedByNoTranslationCount: [
     '无译名跳过数',
     '因为没有可用译名而未写入术语库的名词数量。'
@@ -1114,7 +1138,7 @@ function getArrayItemMeta(path) {
   if (parentPath.endsWith('terms')) {
     return [
       '官方译名项 ' + itemNumber,
-      '联网检索 AI 整理出的一条原文名词及多语言译名。'
+      '名词搜索翻译 AI 整理出的一条原文名词及多语言译名。'
     ]
   }
   if (parentPath.endsWith('normalizedTerms')) {

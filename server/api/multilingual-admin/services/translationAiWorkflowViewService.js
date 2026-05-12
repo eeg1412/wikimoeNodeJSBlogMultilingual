@@ -469,8 +469,12 @@ function describeTask(task) {
   const taskText = normalizeText(task)
   const taskMap = {
     translate_wikimoe_entries: '翻译本次选中的文章字段',
+    extract_proper_noun_terms: '抽取需要确认的专有名词',
     search_official_term_translations: '联网检索专有名词正式译名',
-    knowledge_official_term_translations: '用模型内置知识确认专有名词译名'
+    knowledge_official_term_translations:
+      '名词搜索翻译 AI 用模型知识确认专有名词译名',
+    resolve_official_term_translations_from_model_knowledge:
+      '名词搜索翻译 AI 用模型知识确认专有名词译名'
   }
   return taskMap[taskText] || taskText
 }
@@ -645,7 +649,7 @@ function buildPromptDataSections(data) {
   })
   const termSection = buildArraySection(
     'AI 需要判断的专有名词',
-    '这些名词会用于候选消歧、知识库确认或联网检索。',
+    '这些名词会用于候选消歧，或交给名词搜索翻译 AI 确认译名。',
     termList,
     buildTermInputItem,
     'input'
@@ -811,7 +815,14 @@ function getMetaLabel(key) {
     targetLanguageCodes: '目标语言',
     sourceTermCount: '名词数量',
     candidateTermCount: '候选名词数量',
-    contextSummaryLength: '上下文摘要长度'
+    contextSummaryLength: '上下文摘要长度',
+    aiKnowledgeBaseTermCount: '模型知识确认名词数',
+    aiKnowledgeBaseTranslationCount: '模型知识确认译名数',
+    internetSearchTermCount: '联网检索确认名词数',
+    internetSearchTranslationCount: '联网检索译名数',
+    internetSearchRequestedTermCount: '联网检索请求名词数',
+    internetSearchTargetLanguageCodes: '联网检索目标语言',
+    skipKnowledgeBase: '跳过模型知识确认'
   }
   return labelMap[key] || key
 }
@@ -1157,9 +1168,57 @@ function buildAdditionalOutputSection(root, result) {
   })
 }
 
+function getNormalizedTermSectionConfig(operation) {
+  if (operation === 'proper-noun.official-translation.knowledge') {
+    return {
+      title: '名词搜索翻译 AI 确认的译名',
+      description:
+        '这些译名由 Gemini 模型知识确认，会写入或参与本次翻译的专有名词词库。'
+    }
+  }
+  return {
+    title: 'AI 抽取出的专有名词',
+    description: '这些名词会进入后续名词库匹配或名词搜索翻译 AI。'
+  }
+}
+
+function getTermSectionConfig(operation) {
+  if (operation === 'proper-noun.keyword.extract') {
+    return {
+      title: 'AI 抽取出的专有名词',
+      description: '这些名词会进入后续名词库匹配或名词搜索翻译 AI。'
+    }
+  }
+  if (operation === 'proper-noun.official-translation.search') {
+    return {
+      title: '名词搜索翻译 AI 联网确认的译名',
+      description:
+        '这些译名由 Gemini 联网检索确认，会写入或参与本次翻译的专有名词词库。'
+    }
+  }
+  return {
+    title: 'AI 确认的专有名词译名',
+    description: '这些译名会写入或参与本次翻译的专有名词词库。'
+  }
+}
+
+function shouldShowRawTermSection(operation, normalizedTerms) {
+  if (operation === 'proper-noun.official-translation.knowledge') {
+    return false
+  }
+  if (!Array.isArray(normalizedTerms) || normalizedTerms.length === 0) {
+    return true
+  }
+  if (operation === 'proper-noun.keyword.extract') {
+    return false
+  }
+  return true
+}
+
 function buildOutputSections(log) {
   const root = getOutputRoot(log)
   const result = isPlainObject(root.result) ? root.result : {}
+  const operation = normalizeText(log?.operation)
   const sections = []
   const entries = getFirstArray(
     root.entries,
@@ -1181,9 +1240,10 @@ function buildOutputSections(log) {
     root.normalizedTerms,
     result.normalizedTerms
   )
+  const normalizedTermConfig = getNormalizedTermSectionConfig(operation)
   const normalizedTermSection = buildArraySection(
-    'AI 抽取出的专有名词',
-    '这些名词会进入后续名词库匹配、知识库确认或联网检索。',
+    normalizedTermConfig.title,
+    normalizedTermConfig.description,
     normalizedTerms,
     buildTermOutputItem,
     'output'
@@ -1193,15 +1253,18 @@ function buildOutputSections(log) {
   }
 
   const terms = getFirstArray(root.terms, result.terms)
-  const termSection = buildArraySection(
-    'AI 确认的专有名词译名',
-    '这些译名会写入或参与本次翻译的专有名词词库。',
-    terms,
-    buildTermOutputItem,
-    'output'
-  )
-  if (termSection) {
-    sections.push(termSection)
+  if (shouldShowRawTermSection(operation, normalizedTerms)) {
+    const termConfig = getTermSectionConfig(operation)
+    const termSection = buildArraySection(
+      termConfig.title,
+      termConfig.description,
+      terms,
+      buildTermOutputItem,
+      'output'
+    )
+    if (termSection) {
+      sections.push(termSection)
+    }
   }
 
   const missingTerms = getFirstArray(
@@ -1210,7 +1273,7 @@ function buildOutputSections(log) {
   )
   const missingSection = buildArraySection(
     'AI 认为还需要继续确认的名词',
-    '这些内容会进入下一步知识库或联网检索。',
+    '这些内容会继续交给名词搜索翻译 AI 的后续确认步骤。',
     missingTerms,
     buildTermInputItem,
     'warning'
@@ -1295,16 +1358,13 @@ function getOperationDisplay(log) {
       title: '匹配已有专有名词库',
       description: 'AI 根据上下文从候选词库中挑出真正对应的记录。'
     },
-    'proper-noun.keyword.knowledge-translate': {
-      title: '用 AI 知识库确认译名',
-      description: 'AI 只使用模型内置知识，确认足够稳定的官方译名。'
-    },
     'proper-noun.official-translation.knowledge': {
-      title: '用 Gemini 知识库确认译名',
-      description: 'Gemini 不联网，先判断哪些译名可以直接确认，哪些需要检索。'
+      title: '名词搜索翻译 AI 知识确认',
+      description:
+        'Gemini 不联网，先判断哪些译名可以直接确认，哪些需要交给联网检索。'
     },
     'proper-noun.official-translation.search': {
-      title: '联网检索官方译名',
+      title: '名词搜索翻译 AI 联网检索',
       description: 'Gemini 使用搜索结果确认缺失语言的正式译名或通行译名。'
     },
     'proper-noun.official-translation.resolve': {

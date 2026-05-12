@@ -25,9 +25,6 @@ const AI_RESULT_SCHEMA = 'wikimoe.ai.translation.result'
 const TERM_EXTRACTION_RESULT_SCHEMA = 'wikimoe.ai.proper_noun.term_extract'
 const TERM_EXISTING_FILTER_RESULT_SCHEMA =
   'wikimoe.ai.proper_noun.existing_filter'
-const TERM_KNOWLEDGE_TRANSLATION_RESULT_SCHEMA =
-  'wikimoe.ai.proper_noun.knowledge_translation'
-const TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE = 'aiKnowledgeBase'
 const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
   'plainText',
   'richTextLite',
@@ -49,8 +46,6 @@ const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 120
 const MAX_TERM_SEARCH_KEYWORD_COUNT = 6
 const MAX_TERM_FILTER_TOKENS = 2048
-const MAX_TERM_KNOWLEDGE_TRANSLATION_TOKENS = 4096
-const MIN_TERM_KNOWLEDGE_TRANSLATION_CONFIDENCE = 80
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
@@ -2041,493 +2036,6 @@ function buildMissingTermRequests(missingTerms) {
   })
 }
 
-function getTermRequestTargetLanguageCodes(termRequests) {
-  const languageCodes = []
-  termRequests.forEach(termRequest => {
-    if (!Array.isArray(termRequest.targetLanguageCodes)) {
-      return
-    }
-    termRequest.targetLanguageCodes.forEach(value => {
-      const languageCode = normalizeLanguageCode(value)
-      if (!languageCode || languageCodes.includes(languageCode)) {
-        return
-      }
-      languageCodes.push(languageCode)
-    })
-  })
-  return languageCodes
-}
-
-function buildTermRequestTargetLanguageRows(languageCodes) {
-  return languageCodes.map(languageCode => {
-    return {
-      code: languageCode,
-      label: getLanguageText(languageCode)
-    }
-  })
-}
-
-function buildKnowledgeTranslationTermRows(termRequests) {
-  return termRequests.map(termRequest => {
-    const row = {
-      sourceText: termRequest.sourceText,
-      targetLanguages: buildTermRequestTargetLanguageRows(
-        termRequest.targetLanguageCodes
-      )
-    }
-    const note = normalizeString(termRequest.note)
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, MAX_EXTRACTED_TERM_NOTE_LENGTH)
-    if (note) {
-      row.note = note
-    }
-    return row
-  })
-}
-
-function buildTermKnowledgeTranslationRequestData({
-  input,
-  termRequests,
-  contextSummary
-}) {
-  return JSON.stringify(
-    {
-      task: '用抽取 AI 自身知识判断缺失专有名词是否必须联网检索',
-      outputContract: {
-        rootType: 'object',
-        requiredFields: ['schema', 'version', 'terms'],
-        schema: TERM_KNOWLEDGE_TRANSLATION_RESULT_SCHEMA,
-        version: 1,
-        terms: {
-          type: 'array',
-          itemType: 'object',
-          requiredFields: [
-            'sourceText',
-            'translations',
-            'translationConfidence',
-            'needsSearchLanguageCodes'
-          ],
-          itemSchema: {
-            sourceText: '请求中的原文名词，必须原样返回',
-            translations:
-              '以目标语言代码为键的对象；默认留空；只有名词满足低风险白名单的名词时才填写，禁止擅自填写白名单以外的译名。',
-            translationConfidence:
-              '以目标语言代码为键的对象；每个 translations 中出现的语言都必须填写 1-100 的整数可信度',
-            needsSearchLanguageCodes:
-              '默认应写在这里；只要不能完美确认，就把对应语言 code 写在这里'
-          }
-        }
-      },
-      sourceLanguageCode: input.sourceLanguageCode || '',
-      contentContextSummary: normalizeTermContextSummary(contextSummary),
-      sourceTermRequests: buildKnowledgeTranslationTermRows(termRequests)
-    },
-    null,
-    2
-  )
-}
-
-function buildTermKnowledgeTranslationMessages({
-  input,
-  termRequests,
-  contextSummary
-}) {
-  return [
-    {
-      role: 'system',
-      content: buildPromptLayer('系统基础层', [
-        '你是多语言博客 CMS 的专有名词抽取与译名整理 AI。',
-        '本步骤禁止联网检索，禁止使用外部工具，只能使用你自身的模型知识和给定上下文。',
-        '只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
-        `JSON 根节点必须包含 schema、version 和 terms，schema 固定为 ${TERM_KNOWLEDGE_TRANSLATION_RESULT_SCHEMA}。`
-      ])
-    },
-    {
-      role: 'system',
-      content: buildPromptLayer('译名判定规则层', [
-        ...translationPromptPolicyService.getTermTranslationQualityPolicyLines(),
-        ...translationPromptPolicyService.getDeepSeekTermKnowledgeSearchHandoffPolicyLines(),
-        '你需要逐一判断每个 sourceText 在每个目标语言中，是否必须交给联网检索。',
-        '优先让 needsSearchLanguageCodes 充分覆盖，不要为了完整率补 translations。',
-        '如果 sourceText 含中文汉字且目标语言也是中文地区变体，不要把字形转换或地区常用字替换当作地区译名知识。',
-        `每个写入 translations 的语言都必须同时写入 translationConfidence，分数必须是 1-100 的整数。`,
-        `如果某个译名的可信度低，不要假装确定；可以写出候选译名和分数，但必须把该语言同时放入 needsSearchLanguageCodes。`,
-        '同一个名词可以同时包含 translations 和 needsSearchLanguageCodes：只有完美确认的语言写入 translations，其余语言交给检索。',
-        '每个返回项必须使用请求中的一个 sourceText，且不要返回请求之外的名词。'
-      ])
-    },
-    {
-      role: 'user',
-      content: buildTermKnowledgeTranslationRequestData({
-        input,
-        termRequests,
-        contextSummary
-      })
-    }
-  ]
-}
-
-function getTermKnowledgeTranslationMaxTokens(settings) {
-  const configuredMaxTokens = Number(settings.deepSeekMaxTokens || 0)
-  if (
-    Number.isFinite(configuredMaxTokens) &&
-    configuredMaxTokens > 0 &&
-    configuredMaxTokens < MAX_TERM_KNOWLEDGE_TRANSLATION_TOKENS
-  ) {
-    return configuredMaxTokens
-  }
-  return MAX_TERM_KNOWLEDGE_TRANSLATION_TOKENS
-}
-
-function buildTermKnowledgeTranslationRequestBody({
-  settings,
-  input,
-  termRequests,
-  contextSummary
-}) {
-  const requestBody = {
-    model: settings.deepSeekModel,
-    messages: buildTermKnowledgeTranslationMessages({
-      input,
-      termRequests,
-      contextSummary
-    }),
-    response_format: { type: 'json_object' },
-    max_tokens: getTermKnowledgeTranslationMaxTokens(settings),
-    stream: false
-  }
-
-  if (settings.deepSeekThinkingType === 'enabled') {
-    requestBody.thinking = { type: 'enabled' }
-    requestBody.reasoning_effort = settings.deepSeekReasoningEffort
-    return requestBody
-  }
-
-  requestBody.thinking = { type: 'disabled' }
-  requestBody.temperature = 0
-  return requestBody
-}
-
-function normalizeTermLanguageCodeList(values) {
-  const languageCodes = []
-  if (!Array.isArray(values)) {
-    return languageCodes
-  }
-  values.forEach(value => {
-    const languageCode = normalizeLanguageCode(value)
-    if (!languageCode || languageCodes.includes(languageCode)) {
-      return
-    }
-    languageCodes.push(languageCode)
-  })
-  return languageCodes
-}
-
-function normalizeTermKnowledgeTranslationConfidence(value) {
-  const confidence = Number(value)
-  if (!Number.isInteger(confidence)) {
-    return 0
-  }
-  if (confidence < 1 || confidence > 100) {
-    return 0
-  }
-  return confidence
-}
-
-function getTermKnowledgeTranslationConfidence(termItem, languageCode) {
-  const confidenceMap = termItem?.translationConfidence
-  if (
-    !confidenceMap ||
-    typeof confidenceMap !== 'object' ||
-    Array.isArray(confidenceMap)
-  ) {
-    return 0
-  }
-  return normalizeTermKnowledgeTranslationConfidence(
-    confidenceMap[languageCode]
-  )
-}
-
-function buildTermRequestMap(termRequests) {
-  const termRequestMap = new Map()
-  termRequests.forEach(termRequest => {
-    const normalizedSourceText =
-      properNounTranslationService.buildNormalizedSourceText(
-        termRequest.sourceText
-      )
-    if (!normalizedSourceText) {
-      return
-    }
-    termRequestMap.set(normalizedSourceText, termRequest)
-  })
-  return termRequestMap
-}
-
-function normalizeTermKnowledgeTranslationResult(resultData, termRequests) {
-  if (!resultData || typeof resultData !== 'object') {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek proper noun knowledge result root must be an object',
-      'deepSeek',
-      502
-    )
-  }
-  if (!Array.isArray(resultData.terms)) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek proper noun knowledge result must contain terms array',
-      'deepSeek',
-      502
-    )
-  }
-
-  const requestedTermMap = buildTermRequestMap(termRequests)
-  const resultTermMap = new Map()
-  resultData.terms.forEach(termItem => {
-    const sourceText = properNounTranslationService.normalizeSourceText(
-      termItem?.sourceText
-    )
-    const normalizedSourceText =
-      properNounTranslationService.buildNormalizedSourceText(sourceText)
-    const termRequest = requestedTermMap.get(normalizedSourceText)
-    if (!sourceText || !termRequest) {
-      return
-    }
-
-    const needsSearchLanguageCodes = normalizeTermLanguageCodeList(
-      termItem?.needsSearchLanguageCodes
-    )
-    let resultTerm = resultTermMap.get(normalizedSourceText)
-    if (!resultTerm) {
-      resultTerm = {
-        sourceText: termRequest.sourceText,
-        termId: termRequest.termId || '',
-        note: termRequest.note || '',
-        translations: {},
-        translationConfidence: {},
-        translationSource: TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE
-      }
-      resultTermMap.set(normalizedSourceText, resultTerm)
-    }
-
-    termRequest.targetLanguageCodes.forEach(languageCode => {
-      if (needsSearchLanguageCodes.includes(languageCode)) {
-        return
-      }
-      const translatedText = normalizeString(
-        termItem?.translations?.[languageCode]
-      )
-        .trim()
-        .slice(0, 300)
-      if (!translatedText) {
-        return
-      }
-      const confidence = getTermKnowledgeTranslationConfidence(
-        termItem,
-        languageCode
-      )
-      if (confidence < MIN_TERM_KNOWLEDGE_TRANSLATION_CONFIDENCE) {
-        return
-      }
-      resultTerm.translations[languageCode] = translatedText
-      resultTerm.translationConfidence[languageCode] = confidence
-    })
-  })
-
-  const terms = []
-  const missingTermRequests = []
-  requestedTermMap.forEach((termRequest, normalizedSourceText) => {
-    const resultTerm = resultTermMap.get(normalizedSourceText)
-    const translations = resultTerm?.translations || {}
-    const missingLanguageCodes = []
-    termRequest.targetLanguageCodes.forEach(languageCode => {
-      if (!translations[languageCode]) {
-        missingLanguageCodes.push(languageCode)
-      }
-    })
-    if (Object.keys(translations).length > 0) {
-      terms.push(resultTerm)
-    }
-    if (missingLanguageCodes.length > 0) {
-      missingTermRequests.push({
-        sourceText: termRequest.sourceText,
-        normalizedSourceText,
-        targetLanguageCodes: missingLanguageCodes,
-        note: termRequest.note || '',
-        termId: termRequest.termId || ''
-      })
-    }
-  })
-
-  return {
-    terms,
-    missingTermRequests
-  }
-}
-
-function countTermTranslationLanguagePairs(terms) {
-  let count = 0
-  terms.forEach(term => {
-    if (!term?.translations || typeof term.translations !== 'object') {
-      return
-    }
-    count += Object.keys(term.translations).length
-  })
-  return count
-}
-
-async function recordTermKnowledgeTranslationUsage({
-  input,
-  settings,
-  responseData,
-  status,
-  httpStatusCode,
-  termRequests,
-  contextSummary
-}) {
-  if (input.skipUsageLog === true) {
-    return
-  }
-  await aiUsageService.recordAiUsageLog({
-    provider: 'deepseek',
-    model: responseData.model || settings.deepSeekModel,
-    operation: 'proper-noun.keyword.knowledge-translate',
-    status,
-    requestId: responseData.id || '',
-    sourceLanguageCode: input.sourceLanguageCode,
-    targetLanguageCode:
-      getTermRequestTargetLanguageCodes(termRequests).join(','),
-    usage: responseData.usage || {},
-    rawResponse: responseData,
-    meta: {
-      httpStatusCode,
-      sourceTermCount: termRequests.length,
-      targetLanguageCodes: getTermRequestTargetLanguageCodes(termRequests),
-      contextSummaryLength: normalizeTermContextSummary(contextSummary).length
-    }
-  })
-}
-
-async function translateMissingTermsWithExtractorKnowledge({
-  input,
-  settings,
-  url,
-  termRequests,
-  contextSummary,
-  handlers
-}) {
-  if (termRequests.length === 0) {
-    return {
-      provider: 'deepseek',
-      model: settings.deepSeekModel,
-      terms: [],
-      missingTermRequests: [],
-      aiJsonLog: null
-    }
-  }
-
-  return await runAiStepWithRetry(
-    async () => {
-      const requestBody = buildTermKnowledgeTranslationRequestBody({
-        settings,
-        input,
-        termRequests,
-        contextSummary
-      })
-      const response = await requestJson(url, requestBody, settings, handlers)
-      const responseData = response.data
-      const isSuccessStatus =
-        response.statusCode >= 200 && response.statusCode < 300
-      let usageStatus = 'error'
-      if (isSuccessStatus && !response.parseError) {
-        usageStatus = 'success'
-      }
-      await recordTermKnowledgeTranslationUsage({
-        input,
-        settings,
-        responseData,
-        status: usageStatus,
-        httpStatusCode: response.statusCode,
-        termRequests,
-        contextSummary
-      })
-
-      if (response.parseError) {
-        throw new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          'DeepSeek proper noun knowledge response is not valid JSON',
-          'deepSeek',
-          502
-        )
-      }
-      if (!isSuccessStatus) {
-        const message =
-          responseData.error?.message ||
-          responseData.message ||
-          `DeepSeek proper noun knowledge request failed: ${response.statusCode}`
-        throw new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          message,
-          'deepSeek',
-          502
-        )
-      }
-
-      const resultData = parseAiContent(responseData)
-      const result = normalizeTermKnowledgeTranslationResult(
-        resultData,
-        termRequests
-      )
-      return {
-        provider: 'deepseek',
-        model: responseData.model || settings.deepSeekModel,
-        terms: result.terms,
-        missingTermRequests: result.missingTermRequests,
-        aiJsonLog: translationAiJsonLogService.createAiJsonLog({
-          operation: 'proper-noun.keyword.knowledge-translate',
-          stage: 'ProperNounKeywordKnowledgeTranslate',
-          provider: 'deepseek',
-          model: responseData.model || settings.deepSeekModel,
-          requestId: responseData.id || '',
-          sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode:
-            getTermRequestTargetLanguageCodes(termRequests).join(','),
-          meta: {
-            sourceTermCount: termRequests.length,
-            targetLanguageCodes:
-              getTermRequestTargetLanguageCodes(termRequests),
-            aiKnowledgeBaseTermCount: result.terms.length,
-            aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
-              result.terms
-            ),
-            needsInternetSearchTermCount: result.missingTermRequests.length,
-            needsInternetSearchTargetLanguageCodes:
-              getTermRequestTargetLanguageCodes(result.missingTermRequests),
-            contextSummaryLength:
-              normalizeTermContextSummary(contextSummary).length
-          },
-          input: {
-            requestBody
-          },
-          json: {
-            result: resultData,
-            normalizedTerms: result.terms,
-            missingTermRequests: result.missingTermRequests
-          }
-        })
-      }
-    },
-    {
-      stepKey: 'proper-noun.keyword.knowledge-translate',
-      stepLabel: 'DeepSeek 专有名词联网检索分流',
-      field: 'deepSeek',
-      onStatus: handlers?.onStatus,
-      cancellation: handlers?.cancellation
-    }
-  )
-}
-
 function mergeMatchedTermIds(matchedTermIds, savedTranslations) {
   const termIdList = matchedTermIds.slice()
   savedTranslations.forEach(translation => {
@@ -3024,10 +2532,8 @@ async function resolveOfficialTermGlossaryCacheData({
         existingCount: 0,
         missingCount: 0,
         missingRequestCount: 0,
-        extractorAiKnowledgeTermCount: 0,
-        extractorAiKnowledgeTranslationCount: 0,
-        extractorAiKnowledgeNeedsSearchTermCount: 0,
-        extractorAiKnowledgeNeedsSearchTargetLanguageCodes: [],
+        aiKnowledgeBaseTermCount: 0,
+        aiKnowledgeBaseTranslationCount: 0,
         internetSearchTermCount: 0,
         internetSearchTranslationCount: 0,
         internetSearchRequestedTermCount: 0,
@@ -3068,10 +2574,8 @@ async function resolveOfficialTermGlossaryCacheData({
     })
 
   let missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
-  let extractorAiKnowledgeTermCount = 0
-  let extractorAiKnowledgeTranslationCount = 0
-  let extractorAiKnowledgeNeedsSearchTermCount = 0
-  let extractorAiKnowledgeNeedsSearchTargetLanguageCodes = []
+  let aiKnowledgeBaseTermCount = 0
+  let aiKnowledgeBaseTranslationCount = 0
   let internetSearchTermCount = 0
   let internetSearchTranslationCount = 0
   let internetSearchRequestedTermCount = 0
@@ -3082,130 +2586,83 @@ async function resolveOfficialTermGlossaryCacheData({
   ) {
     if (handlers.onStatus) {
       handlers.onStatus({
-        message: `正在判断 ${missingTermRequests.length} 个缺失专有名词是否需要联网检索`
+        message: `正在交给名词搜索翻译 AI 处理 ${missingTermRequests.length} 个缺失专有名词`
       })
     }
-    const extractorKnowledgeResult =
-      await translateMissingTermsWithExtractorKnowledge({
-        input,
-        settings,
-        url,
-        termRequests: missingTermRequests,
+    const searchRequestedTermRequests = missingTermRequests
+    const searchResult =
+      await internetSearchAiService.searchOfficialTermTranslations({
+        termRequests: searchRequestedTermRequests,
+        sourceLanguageCode: input.sourceLanguageCode,
         contextSummary: officialTermContextSummary,
-        handlers
+        skipUsageLog: input.skipUsageLog,
+        onStatus: handlers.onStatus,
+        cancellation: handlers.cancellation
       })
-    if (extractorKnowledgeResult.aiJsonLog) {
-      aiJsonLogs.push(extractorKnowledgeResult.aiJsonLog)
-    }
-    extractorAiKnowledgeTermCount = extractorKnowledgeResult.terms.length
-    extractorAiKnowledgeTranslationCount = countTermTranslationLanguagePairs(
-      extractorKnowledgeResult.terms
+    aiKnowledgeBaseTermCount = searchResult.stats?.aiKnowledgeBaseTermCount || 0
+    aiKnowledgeBaseTranslationCount =
+      searchResult.stats?.aiKnowledgeBaseTranslationCount || 0
+    internetSearchTermCount = searchResult.stats?.internetSearchTermCount || 0
+    internetSearchTranslationCount =
+      searchResult.stats?.internetSearchTranslationCount || 0
+    internetSearchRequestedTermCount =
+      searchResult.stats?.internetSearchRequestedTermCount || 0
+    internetSearchTargetLanguageCodes =
+      searchResult.stats?.internetSearchTargetLanguageCodes || []
+    translationAiJsonLogService
+      .mergeAiJsonLogs(searchResult.aiJsonLogs)
+      .forEach(aiJsonLog => {
+        aiJsonLogs.push(aiJsonLog)
+      })
+    aiJsonLogs.push(
+      translationAiJsonLogService.createAiJsonLog({
+        operation: 'proper-noun.official-translation.resolve',
+        stage: 'ProperNounOfficialTranslationResolve',
+        provider: searchResult.provider,
+        model: searchResult.model,
+        requestId: '',
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCode: targetLanguageCodes.join(','),
+        meta: {
+          sourceTermCount: searchRequestedTermRequests.length,
+          targetLanguageCodes,
+          aiKnowledgeBaseTermCount,
+          aiKnowledgeBaseTranslationCount,
+          internetSearchTermCount,
+          internetSearchTranslationCount,
+          internetSearchRequestedTermCount,
+          internetSearchTargetLanguageCodes,
+          contextSummaryLength: officialTermContextSummary.length
+        },
+        input: {
+          termRequests: searchRequestedTermRequests,
+          contextSummary: officialTermContextSummary
+        },
+        json: {
+          contextSummary: officialTermContextSummary,
+          terms: searchResult.terms,
+          stats: searchResult.stats,
+          rawResponse: searchResult.rawResponse
+        }
+      })
     )
-    extractorAiKnowledgeNeedsSearchTermCount =
-      extractorKnowledgeResult.missingTermRequests.length
-    extractorAiKnowledgeNeedsSearchTargetLanguageCodes =
-      getTermRequestTargetLanguageCodes(
-        extractorKnowledgeResult.missingTermRequests
-      )
-
-    const extractorSaveResult =
+    const searchSaveResult =
       await saveResolvedTermTranslationsAndRefreshCoverage({
-        terms: extractorKnowledgeResult.terms,
-        provider: extractorKnowledgeResult.provider,
-        model: extractorKnowledgeResult.model,
+        terms: searchResult.terms,
+        provider: searchResult.provider,
+        model: searchResult.model,
         matchedTermIds,
         extractedTerms,
         targetLanguageCodes
       })
-    matchedTermIds = extractorSaveResult.matchedTermIds
-    if (extractorSaveResult.candidateCoverage) {
-      candidateCoverage = extractorSaveResult.candidateCoverage
+    matchedTermIds = searchSaveResult.matchedTermIds
+    if (searchSaveResult.candidateCoverage) {
+      candidateCoverage = searchSaveResult.candidateCoverage
     }
-    if (extractorSaveResult.coverage) {
-      coverage = extractorSaveResult.coverage
+    if (searchSaveResult.coverage) {
+      coverage = searchSaveResult.coverage
     }
     missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
-
-    if (missingTermRequests.length > 0) {
-      if (handlers.onStatus) {
-        handlers.onStatus({
-          message: `正在联网检索 ${missingTermRequests.length} 个抽取 AI 无法确认的专有名词`
-        })
-      }
-      const searchResult =
-        await internetSearchAiService.searchOfficialTermTranslations({
-          termRequests: missingTermRequests,
-          sourceLanguageCode: input.sourceLanguageCode,
-          contextSummary: officialTermContextSummary,
-          skipKnowledgeBase: true,
-          skipUsageLog: input.skipUsageLog,
-          onStatus: handlers.onStatus,
-          cancellation: handlers.cancellation
-        })
-      internetSearchTermCount = searchResult.stats?.internetSearchTermCount || 0
-      internetSearchTranslationCount =
-        searchResult.stats?.internetSearchTranslationCount || 0
-      internetSearchRequestedTermCount =
-        searchResult.stats?.internetSearchRequestedTermCount || 0
-      internetSearchTargetLanguageCodes =
-        searchResult.stats?.internetSearchTargetLanguageCodes || []
-      translationAiJsonLogService
-        .mergeAiJsonLogs(searchResult.aiJsonLogs)
-        .forEach(aiJsonLog => {
-          aiJsonLogs.push(aiJsonLog)
-        })
-      aiJsonLogs.push(
-        translationAiJsonLogService.createAiJsonLog({
-          operation: 'proper-noun.official-translation.resolve',
-          stage: 'ProperNounOfficialTranslationResolve',
-          provider: searchResult.provider,
-          model: searchResult.model,
-          requestId: '',
-          sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCode: targetLanguageCodes.join(','),
-          meta: {
-            sourceTermCount: missingTermRequests.length,
-            targetLanguageCodes,
-            extractorAiKnowledgeTermCount,
-            extractorAiKnowledgeTranslationCount,
-            extractorAiKnowledgeNeedsSearchTermCount,
-            extractorAiKnowledgeNeedsSearchTargetLanguageCodes,
-            internetSearchTermCount,
-            internetSearchTranslationCount,
-            internetSearchRequestedTermCount,
-            internetSearchTargetLanguageCodes,
-            contextSummaryLength: officialTermContextSummary.length
-          },
-          input: {
-            termRequests: missingTermRequests,
-            contextSummary: officialTermContextSummary
-          },
-          json: {
-            contextSummary: officialTermContextSummary,
-            terms: searchResult.terms,
-            stats: searchResult.stats,
-            rawResponse: searchResult.rawResponse
-          }
-        })
-      )
-      const searchSaveResult =
-        await saveResolvedTermTranslationsAndRefreshCoverage({
-          terms: searchResult.terms,
-          provider: searchResult.provider,
-          model: searchResult.model,
-          matchedTermIds,
-          extractedTerms,
-          targetLanguageCodes
-        })
-      matchedTermIds = searchSaveResult.matchedTermIds
-      if (searchSaveResult.candidateCoverage) {
-        candidateCoverage = searchSaveResult.candidateCoverage
-      }
-      if (searchSaveResult.coverage) {
-        coverage = searchSaveResult.coverage
-      }
-      missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
-    }
   }
 
   const glossaryMarkdownMap = buildOfficialTermGlossaryMarkdownMap({
@@ -3230,10 +2687,8 @@ async function resolveOfficialTermGlossaryCacheData({
       existingCount: coverage.existingTerms.length,
       missingCount: coverage.missingTerms.length,
       missingRequestCount: missingTermRequests.length,
-      extractorAiKnowledgeTermCount,
-      extractorAiKnowledgeTranslationCount,
-      extractorAiKnowledgeNeedsSearchTermCount,
-      extractorAiKnowledgeNeedsSearchTargetLanguageCodes,
+      aiKnowledgeBaseTermCount,
+      aiKnowledgeBaseTranslationCount,
       internetSearchTermCount,
       internetSearchTranslationCount,
       internetSearchRequestedTermCount,
