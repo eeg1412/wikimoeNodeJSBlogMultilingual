@@ -36,12 +36,21 @@
             :key="step.id"
             type="button"
             class="ai-workflow-step-button"
-            :class="{ 'is-active': step.id === activeStepId }"
+            :class="getStepButtonClass(step)"
             @click="selectStep(step.id)"
           >
             <span class="ai-workflow-step-index">{{ step.order }}</span>
             <span class="ai-workflow-step-copy">
-              <span class="ai-workflow-step-title">{{ step.title }}</span>
+              <span class="ai-workflow-step-title-row">
+                <span class="ai-workflow-step-title">{{ step.title }}</span>
+                <span
+                  v-if="getStepStatusText(step)"
+                  class="ai-workflow-step-status"
+                  :class="getStepStatusClass(step)"
+                >
+                  {{ getStepStatusText(step) }}
+                </span>
+              </span>
               <span class="ai-workflow-step-subtitle">
                 {{ getStepSubtitle(step) }}
               </span>
@@ -61,6 +70,14 @@
             </div>
             <div class="ai-workflow-badges">
               <el-tag
+                v-if="getStepStatusText(activeStep)"
+                size="small"
+                effect="plain"
+                :type="getStepStatusTagType(activeStep)"
+              >
+                {{ getStepStatusText(activeStep) }}
+              </el-tag>
+              <el-tag
                 v-for="badge in activeStep.badges"
                 :key="badge.label + badge.value"
                 size="small"
@@ -73,12 +90,14 @@
 
           <div class="ai-workflow-io-grid">
             <section class="ai-workflow-io-panel is-input">
-              <div class="ai-workflow-io-heading">给 AI 的内容</div>
+              <div class="ai-workflow-io-heading">
+                {{ getInputHeading(activeStep) }}
+              </div>
               <div
                 v-if="activeStep.inputSections.length === 0"
                 class="ai-workflow-empty-text"
               >
-                这一步没有保存可展示的输入内容。
+                {{ getInputEmptyText(activeStep) }}
               </div>
               <div
                 v-for="section in activeStep.inputSections"
@@ -133,12 +152,14 @@
             </section>
 
             <section class="ai-workflow-io-panel is-output">
-              <div class="ai-workflow-io-heading">AI 输出的内容</div>
+              <div class="ai-workflow-io-heading">
+                {{ getOutputHeading(activeStep) }}
+              </div>
               <div
                 v-if="activeStep.outputSections.length === 0"
                 class="ai-workflow-empty-text"
               >
-                这一步没有保存可展示的输出内容。
+                {{ getOutputEmptyText(activeStep) }}
               </div>
               <div
                 v-for="section in activeStep.outputSections"
@@ -255,7 +276,7 @@ export default {
         }
         const hasActiveStep = steps.some(step => step.id === this.activeStepId)
         if (!hasActiveStep) {
-          this.activeStepId = steps[0].id
+          this.activeStepId = this.getPreferredActiveStep(steps).id
         }
       }
     }
@@ -264,8 +285,80 @@ export default {
     selectStep(stepId) {
       this.activeStepId = stepId
     },
+    getPreferredActiveStep(steps) {
+      const stoppingStep = steps.find(step => step.status === 'stopping')
+      if (stoppingStep) {
+        return stoppingStep
+      }
+      const runningStep = steps.find(step => {
+        return step.status === 'running' || step.status === 'retrying'
+      })
+      if (runningStep) {
+        return runningStep
+      }
+      const failedStep = steps.find(step => step.status === 'failed')
+      if (failedStep) {
+        return failedStep
+      }
+      const completedSteps = steps.filter(step => step.status === 'completed')
+      if (completedSteps.length > 0) {
+        return completedSteps[completedSteps.length - 1]
+      }
+      return steps[0]
+    },
+    getStepButtonClass(step) {
+      return {
+        'is-active': step.id === this.activeStepId,
+        'is-completed': step.status === 'completed',
+        'is-running': step.status === 'running',
+        'is-retrying': step.status === 'retrying',
+        'is-stopping': step.status === 'stopping',
+        'is-failed': step.status === 'failed',
+        'is-pending': step.status === 'pending'
+      }
+    },
+    getStepStatusText(step) {
+      if (step?.statusText) {
+        return step.statusText
+      }
+      const statusTextMap = {
+        pending: '待执行',
+        running: '正在执行',
+        retrying: '重试中',
+        completed: '已完成',
+        failed: '执行失败',
+        stopping: '正在停止',
+        skipped: '已跳过'
+      }
+      return statusTextMap[step?.status] || step?.status || ''
+    },
+    getStepStatusClass(step) {
+      const status = step?.status || ''
+      return `is-${status}`
+    },
+    getStepStatusTagType(step) {
+      if (step?.status === 'completed') {
+        return 'success'
+      }
+      if (step?.status === 'running') {
+        return 'warning'
+      }
+      if (step?.status === 'retrying') {
+        return 'warning'
+      }
+      if (step?.status === 'stopping') {
+        return 'danger'
+      }
+      if (step?.status === 'failed') {
+        return 'danger'
+      }
+      return 'info'
+    },
     getStepSubtitle(step) {
       const parts = []
+      if (step.currentStep) {
+        parts.push(step.currentStep)
+      }
       if (step.provider) {
         parts.push(step.provider)
       }
@@ -276,6 +369,30 @@ export default {
         parts.push(step.stage)
       }
       return parts.join(' / ') || '服务端处理步骤'
+    },
+    getInputHeading(step) {
+      if (step?.kind === 'runtime') {
+        return '执行状态'
+      }
+      return '给 AI 的内容'
+    },
+    getOutputHeading(step) {
+      if (step?.kind === 'runtime') {
+        return '执行结果'
+      }
+      return 'AI 输出的内容'
+    },
+    getInputEmptyText(step) {
+      if (step?.kind === 'runtime') {
+        return '这一步没有保存可展示的执行状态。'
+      }
+      return '这一步没有保存可展示的输入内容。'
+    },
+    getOutputEmptyText(step) {
+      if (step?.kind === 'runtime') {
+        return '这一步还没有保存完成结果。'
+      }
+      return '这一步没有保存可展示的输出内容。'
     },
     getSectionClass(section) {
       return {
@@ -413,13 +530,55 @@ export default {
   min-width: 0;
 }
 
+.ai-workflow-step-title-row {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
 .ai-workflow-step-title {
   color: var(--el-text-color-primary);
   display: block;
+  flex: 1;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
+  min-width: 120px;
   overflow-wrap: anywhere;
+}
+
+.ai-workflow-step-status {
+  border: 1px solid var(--el-border-color);
+  border-radius: 999px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 1px 7px;
+}
+
+.ai-workflow-step-status.is-completed {
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+
+.ai-workflow-step-status.is-running,
+.ai-workflow-step-status.is-retrying {
+  border-color: var(--el-color-warning-light-5);
+  color: var(--el-color-warning);
+}
+
+.ai-workflow-step-status.is-stopping,
+.ai-workflow-step-status.is-failed {
+  border-color: var(--el-color-danger-light-5);
+  color: var(--el-color-danger);
+}
+
+.ai-workflow-step-status.is-pending {
+  border-color: var(--el-border-color-light);
+  color: var(--el-text-color-secondary);
 }
 
 .ai-workflow-step-subtitle {
@@ -429,6 +588,29 @@ export default {
   line-height: 1.5;
   margin-top: 2px;
   overflow-wrap: anywhere;
+}
+
+.ai-workflow-step-button.is-completed .ai-workflow-step-index {
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+
+.ai-workflow-step-button.is-running .ai-workflow-step-index,
+.ai-workflow-step-button.is-retrying .ai-workflow-step-index {
+  border-color: var(--el-color-warning-light-5);
+  color: var(--el-color-warning);
+}
+
+.ai-workflow-step-button.is-stopping .ai-workflow-step-index,
+.ai-workflow-step-button.is-failed .ai-workflow-step-index {
+  border-color: var(--el-color-danger-light-5);
+  color: var(--el-color-danger);
+}
+
+.ai-workflow-step-button.is-active .ai-workflow-step-index {
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  color: #fff;
 }
 
 .ai-workflow-detail {

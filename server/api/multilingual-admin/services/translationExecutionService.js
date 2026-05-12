@@ -403,14 +403,16 @@ function createHandlers(context, stage, progressRange) {
       if (!context || typeof context.updateProgress !== 'function') {
         return
       }
-      runWithoutAwait(
-        context.updateProgress({
-          currentStage: stage,
-          currentStep:
-            status && status.message ? status.message : 'AI 翻译执行中',
-          percent: getStatusProgressPercent(status?.message, progressRange)
-        })
-      )
+      const progress = {
+        currentStage: stage,
+        currentStep:
+          status && status.message ? status.message : 'AI 翻译执行中',
+        percent: getStatusProgressPercent(status?.message, progressRange)
+      }
+      if (status && status.workflow) {
+        progress.aiWorkflow = status.workflow
+      }
+      runWithoutAwait(context.updateProgress(progress))
     },
     onResult(result) {
       if (!context || typeof context.saveCheckpoint !== 'function') {

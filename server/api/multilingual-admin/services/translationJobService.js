@@ -1103,6 +1103,33 @@ async function requestStopRunningTranslationJob(body = {}, options = {}) {
   job.updatedBy = adminSnapshot
   job.progress = job.progress || {}
   job.progress.currentStep = '正在停止任务，已请求断开 AI 连接'
+  const aiWorkflowState = job.progress.stageState?.aiWorkflow
+  const currentAiWorkflow = aiWorkflowState?.current
+  if (currentAiWorkflow?.stepKey) {
+    const stopEvent = {
+      stepKey: toTrimmedString(currentAiWorkflow.stepKey),
+      stepLabel: toTrimmedString(currentAiWorkflow.stepLabel),
+      status: 'stopping',
+      message: job.progress.currentStep,
+      stage: toTrimmedString(job.progress.currentStage),
+      attemptNo: currentAiWorkflow.attemptNo || null,
+      nextAttemptNo: null,
+      maxAttempts: currentAiWorkflow.maxAttempts || null,
+      errorCode: '',
+      errorMessage: '',
+      createdAt: new Date()
+    }
+    job.progress.stageState.aiWorkflow.current = stopEvent
+    let events = []
+    if (Array.isArray(job.progress.stageState.aiWorkflow.events)) {
+      events = job.progress.stageState.aiWorkflow.events
+    }
+    events.push(stopEvent)
+    job.progress.stageState.aiWorkflow.events = events.slice(-120)
+    if (typeof job.markModified === 'function') {
+      job.markModified('progress.stageState')
+    }
+  }
   appendLog(job, reason, 'warning', 'stop')
   await job.save()
 
@@ -1548,8 +1575,10 @@ async function renewTranslationJobLease(options = {}) {
 
 async function updateRunningTranslationJobProgress(options = {}) {
   const progress = normalizeObject(options.progress, 'progress')
+  const now = new Date()
   const setData = {}
   const maxData = {}
+  const pushData = {}
   if (progress.currentStep !== undefined) {
     setData['progress.currentStep'] = toTrimmedString(progress.currentStep)
   }
@@ -1595,18 +1624,47 @@ async function updateRunningTranslationJobProgress(options = {}) {
     update.$max = maxData
   }
   if (logMessage) {
-    update.$push = {
-      'progress.recentLogs': {
-        $each: [
-          buildRecentLog(
-            logMessage,
-            toTrimmedString(progress.logLevel) || 'info',
-            toTrimmedString(progress.currentStage)
-          )
-        ],
-        $slice: -MAX_RECENT_LOGS
-      }
+    pushData['progress.recentLogs'] = {
+      $each: [
+        buildRecentLog(
+          logMessage,
+          toTrimmedString(progress.logLevel) || 'info',
+          toTrimmedString(progress.currentStage)
+        )
+      ],
+      $slice: -MAX_RECENT_LOGS
     }
+  }
+  const aiWorkflow = normalizeObject(progress.aiWorkflow, 'progress.aiWorkflow')
+  const aiWorkflowStepKey = toTrimmedString(aiWorkflow.stepKey)
+  if (aiWorkflowStepKey) {
+    const aiWorkflowEvent = {
+      stepKey: aiWorkflowStepKey,
+      stepLabel: toTrimmedString(aiWorkflow.stepLabel),
+      status: toTrimmedString(aiWorkflow.status) || 'running',
+      message: logMessage,
+      stage: toTrimmedString(progress.currentStage),
+      attemptNo: normalizeOptionalNumber(aiWorkflow.attemptNo, 'attemptNo'),
+      nextAttemptNo: normalizeOptionalNumber(
+        aiWorkflow.nextAttemptNo,
+        'nextAttemptNo'
+      ),
+      maxAttempts: normalizeOptionalNumber(
+        aiWorkflow.maxAttempts,
+        'maxAttempts'
+      ),
+      errorCode: toTrimmedString(aiWorkflow.errorCode),
+      errorMessage: toTrimmedString(aiWorkflow.errorMessage),
+      createdAt: now
+    }
+    setData['progress.stageState.aiWorkflow.current'] = aiWorkflowEvent
+    pushData['progress.stageState.aiWorkflow.events'] = {
+      $each: [aiWorkflowEvent],
+      $slice: -120
+    }
+  }
+  if (Object.keys(pushData).length > 0) {
+    update.$push = pushData
   }
 
   const JobModel = getTranslationJobModel()
@@ -1653,7 +1711,7 @@ async function saveRunningTranslationJobCheckpoint(options = {}) {
     {
       $set: {
         'progress.currentStage': stage,
-        'progress.stageState': normalizeObject(
+        'progress.stageState.currentCheckpoint': normalizeObject(
           checkpoint.stageState,
           'checkpoint.stageState'
         )

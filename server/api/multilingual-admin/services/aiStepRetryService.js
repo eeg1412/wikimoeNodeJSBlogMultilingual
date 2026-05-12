@@ -116,13 +116,27 @@ function buildRetryExhaustedError(error, options, attempts, maxAttempts) {
   )
 }
 
+function buildWorkflowStatus(options, payload = {}) {
+  return {
+    stepKey: normalizeText(payload.stepKey) || getStepKey(options),
+    stepLabel: normalizeText(payload.stepLabel) || getStepLabel(options),
+    status: normalizeText(payload.status),
+    attemptNo: payload.attemptNo || null,
+    nextAttemptNo: payload.nextAttemptNo || null,
+    maxAttempts: payload.maxAttempts || null,
+    errorCode: normalizeText(payload.errorCode),
+    errorMessage: normalizeText(payload.errorMessage)
+  }
+}
+
 function notifyStatus(options, message, payload = {}) {
   if (!options || typeof options.onStatus !== 'function') {
     return
   }
   options.onStatus({
     message,
-    retry: payload
+    retry: payload,
+    workflow: buildWorkflowStatus(options, payload)
   })
 }
 
@@ -167,6 +181,17 @@ async function runAiStepWithRetry(operation, options = {}) {
 
   while (attemptNo <= maxAttempts) {
     throwIfCancellationRequested(options.cancellation)
+    notifyStatus(
+      options,
+      `正在执行${stepLabel}（${attemptNo}/${maxAttempts}）`,
+      {
+        stepKey: getStepKey(options),
+        stepLabel,
+        status: 'running',
+        attemptNo,
+        maxAttempts
+      }
+    )
     if (attemptNo > 1) {
       notifyStatus(
         options,
@@ -174,6 +199,7 @@ async function runAiStepWithRetry(operation, options = {}) {
         {
           stepKey: getStepKey(options),
           stepLabel,
+          status: 'retrying',
           attemptNo,
           maxAttempts
         }
@@ -181,12 +207,46 @@ async function runAiStepWithRetry(operation, options = {}) {
     }
 
     try {
-      return await operation({ attemptNo, maxAttempts })
+      const result = await operation({ attemptNo, maxAttempts })
+      notifyStatus(options, `${stepLabel}已完成`, {
+        stepKey: getStepKey(options),
+        stepLabel,
+        status: 'completed',
+        attemptNo,
+        maxAttempts
+      })
+      return result
     } catch (error) {
       if (!isRetryableAiStepError(error)) {
+        notifyStatus(
+          options,
+          `${stepLabel}执行失败：${getErrorMessage(error)}`,
+          {
+            stepKey: getStepKey(options),
+            stepLabel,
+            status: 'failed',
+            attemptNo,
+            maxAttempts,
+            errorCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
+            errorMessage: getErrorMessage(error)
+          }
+        )
         throw error
       }
       if (attemptNo >= maxAttempts) {
+        notifyStatus(
+          options,
+          `${stepLabel}连续 ${maxAttempts} 次执行失败：${getErrorMessage(error)}`,
+          {
+            stepKey: getStepKey(options),
+            stepLabel,
+            status: 'failed',
+            attemptNo,
+            maxAttempts,
+            errorCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
+            errorMessage: getErrorMessage(error)
+          }
+        )
         throw buildRetryExhaustedError(error, options, attemptNo, maxAttempts)
       }
 
@@ -196,6 +256,7 @@ async function runAiStepWithRetry(operation, options = {}) {
         {
           stepKey: getStepKey(options),
           stepLabel,
+          status: 'retrying',
           attemptNo,
           nextAttemptNo: attemptNo + 1,
           maxAttempts,

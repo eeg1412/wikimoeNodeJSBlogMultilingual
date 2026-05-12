@@ -7,6 +7,16 @@ const MAX_SECTION_ITEMS = 80
 const MAX_META_ITEMS = 8
 const MAX_RECURSIVE_DEPTH = 6
 
+const WORKFLOW_STEP_STATUS_TEXT_MAP = {
+  pending: '待执行',
+  running: '正在执行',
+  retrying: '重试中',
+  completed: '已完成',
+  failed: '执行失败',
+  stopping: '正在停止',
+  skipped: '已跳过'
+}
+
 function toText(value) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -152,12 +162,14 @@ function collectReadableText(value, parts, depth = 0) {
     }
   })
   if (isPlainObject(value.translations)) {
-    Object.entries(value.translations).forEach(([languageCode, translatedText]) => {
-      const text = formatDisplayValue(translatedText)
-      if (text) {
-        parts.push(`${formatLanguage(languageCode)}：${text}`)
+    Object.entries(value.translations).forEach(
+      ([languageCode, translatedText]) => {
+        const text = formatDisplayValue(translatedText)
+        if (text) {
+          parts.push(`${formatLanguage(languageCode)}：${text}`)
+        }
       }
-    })
+    )
   }
   const recursiveKeys = ['children', 'items', 'entries', 'terms', 'parts']
   recursiveKeys.forEach(key => {
@@ -213,10 +225,10 @@ function formatDisplayValue(value) {
         value.text || value.title || value.label || value.name
       )
     }
-        const readableText = extractReadableText(value)
-        if (readableText) {
-          return readableText
-        }
+    const readableText = extractReadableText(value)
+    if (readableText) {
+      return readableText
+    }
     const fieldCount = getObjectFieldCount(value)
     if (fieldCount > 0) {
       return `结构化内容，包含 ${fieldCount} 个字段`
@@ -290,6 +302,208 @@ function createSection(options = {}) {
     textBlocks,
     total: Number(options.total || items.length || textBlocks.length || 0)
   }
+}
+
+function getWorkflowStepStatusText(status) {
+  const normalizedStatus = normalizeText(status)
+  return WORKFLOW_STEP_STATUS_TEXT_MAP[normalizedStatus] || normalizedStatus
+}
+
+function shouldBuildRuntimeWorkflowSteps(job, aiJsonLogs) {
+  const events = getAiWorkflowEvents(job)
+  if (events.length > 0) {
+    return true
+  }
+  return false
+}
+function getAiWorkflowEvents(job) {
+  const events = job?.progress?.stageState?.aiWorkflow?.events
+  if (!Array.isArray(events)) {
+    return []
+  }
+  return events.filter(event => normalizeText(event?.stepKey))
+}
+
+function normalizeAiWorkflowEventStatus(status) {
+  const normalizedStatus = normalizeText(status)
+  if (normalizedStatus) {
+    return normalizedStatus
+  }
+  return 'running'
+}
+
+function collectAiWorkflowEventSteps(events) {
+  const stepMap = new Map()
+  const stepList = []
+  events.forEach(event => {
+    const stepKey = normalizeText(event.stepKey)
+    if (!stepKey) {
+      return
+    }
+    let stepEntry = stepMap.get(stepKey)
+    if (!stepEntry) {
+      stepEntry = {
+        stepKey,
+        stepLabel: '',
+        status: 'running',
+        events: [],
+        firstAt: null,
+        latestAt: null,
+        latestMessage: ''
+      }
+      stepMap.set(stepKey, stepEntry)
+      stepList.push(stepEntry)
+    }
+    if (event.stepLabel) {
+      stepEntry.stepLabel = normalizeText(event.stepLabel)
+    }
+    stepEntry.status = normalizeAiWorkflowEventStatus(event.status)
+    stepEntry.latestMessage = normalizeText(event.message)
+    if (!stepEntry.firstAt) {
+      stepEntry.firstAt = event.createdAt || null
+    }
+    stepEntry.latestAt = event.createdAt || stepEntry.latestAt
+    stepEntry.events.push(event)
+  })
+  return stepList
+}
+
+function getAiWorkflowEventStepDisplay(stepEntry) {
+  if (stepEntry.stepLabel) {
+    return {
+      title: stepEntry.stepLabel,
+      description: 'AI 翻译服务正在执行的真实工作流步骤。'
+    }
+  }
+  const chunkMatch = stepEntry.stepKey.match(/^translation\.chunk\.(\d+)$/)
+  if (chunkMatch) {
+    return {
+      title: `翻译正文第 ${chunkMatch[1]} 批`,
+      description: 'DeepSeek 正在处理当前正文翻译批次。'
+    }
+  }
+  return getOperationDisplay({ operation: stepEntry.stepKey })
+}
+
+function getLatestAiWorkflowEvent(stepEntry) {
+  if (!Array.isArray(stepEntry.events) || stepEntry.events.length === 0) {
+    return null
+  }
+  return stepEntry.events[stepEntry.events.length - 1]
+}
+
+function buildAiWorkflowEventStatusSection(stepEntry) {
+  const latestEvent = getLatestAiWorkflowEvent(stepEntry) || {}
+  const items = []
+  pushItem(
+    items,
+    createItem('状态', getWorkflowStepStatusText(stepEntry.status))
+  )
+  pushItem(items, createItem('当前消息', latestEvent.message))
+  pushItem(items, createItem('执行阶段', latestEvent.stage))
+  pushItem(items, createItem('尝试次数', latestEvent.attemptNo))
+  pushItem(items, createItem('最大尝试次数', latestEvent.maxAttempts))
+  pushItem(items, createItem('更新时间', latestEvent.createdAt))
+  return createSection({
+    title: 'AI 工作流状态',
+    description: '这里展示当前真实 AI 步骤的运行状态。',
+    kind: 'metric',
+    tone: 'input',
+    items
+  })
+}
+
+function buildAiWorkflowEventLogSection(stepEntry) {
+  const items = []
+  stepEntry.events.slice(-10).forEach((event, index) => {
+    const meta = []
+    if (event.status) {
+      meta.push(`状态：${getWorkflowStepStatusText(event.status)}`)
+    }
+    if (event.attemptNo) {
+      meta.push(`尝试：${event.attemptNo}/${event.maxAttempts || '-'}`)
+    }
+    if (event.createdAt) {
+      meta.push(`时间：${event.createdAt}`)
+    }
+    pushItem(
+      items,
+      createItem(`事件 ${index + 1}`, event.message, {
+        meta,
+        tone: event.status === 'failed' ? 'warning' : 'output'
+      })
+    )
+  })
+  return createSection({
+    title: '步骤事件',
+    description: '这个 AI 步骤在执行、重试和完成时写入的事件。',
+    kind: 'list',
+    tone: 'output',
+    items,
+    total: stepEntry.events.length
+  })
+}
+
+function buildAiWorkflowEventFailureSection(stepEntry) {
+  const failedEvent = stepEntry.events.find(event => event.status === 'failed')
+  if (!failedEvent) {
+    return null
+  }
+  const items = []
+  pushItem(
+    items,
+    createItem('错误码', failedEvent.errorCode, { tone: 'warning' })
+  )
+  pushItem(
+    items,
+    createItem('错误信息', failedEvent.errorMessage, { tone: 'warning' })
+  )
+  return createSection({
+    title: '失败信息',
+    description: '当前 AI 步骤失败时记录的错误摘要。',
+    kind: 'metric',
+    tone: 'warning',
+    items
+  })
+}
+
+function buildAiWorkflowEventStep(stepEntry, order) {
+  const display = getAiWorkflowEventStepDisplay(stepEntry)
+  const latestEvent = getLatestAiWorkflowEvent(stepEntry) || {}
+  return {
+    id: `runtime-step-${order}`,
+    order,
+    title: display.title,
+    description: display.description,
+    status: stepEntry.status,
+    statusText: getWorkflowStepStatusText(stepEntry.status),
+    kind: 'runtime',
+    operation: stepEntry.stepKey,
+    stage: normalizeText(latestEvent.stage),
+    provider: '',
+    model: '',
+    requestId: '',
+    createdAt: stepEntry.latestAt || stepEntry.firstAt || null,
+    currentStep: normalizeText(latestEvent.message),
+    badges: [
+      { label: '状态', value: getWorkflowStepStatusText(stepEntry.status) }
+    ],
+    inputSections: [buildAiWorkflowEventStatusSection(stepEntry)].filter(
+      Boolean
+    ),
+    outputSections: [
+      buildAiWorkflowEventLogSection(stepEntry),
+      buildAiWorkflowEventFailureSection(stepEntry)
+    ].filter(Boolean)
+  }
+}
+
+function buildRuntimeWorkflowSteps(job) {
+  return collectAiWorkflowEventSteps(getAiWorkflowEvents(job)).map(
+    (stepEntry, index) => {
+      return buildAiWorkflowEventStep(stepEntry, index + 1)
+    }
+  )
 }
 
 function tryParseJsonText(text) {
@@ -1433,19 +1647,22 @@ function buildStepBadges(log) {
   return badges
 }
 
-function buildWorkflowStep(log, index) {
+function buildWorkflowStep(log, index, order) {
   if (!isPlainObject(log)) {
     return null
   }
+  const stepOrder = Number(order || index + 1)
   const display = getOperationDisplay(log)
   const inputSections = buildInputSections(log)
   const outputSections = buildOutputSections(log)
   return {
-    id: `ai-step-${index + 1}`,
-    order: index + 1,
+    id: `ai-step-${stepOrder}`,
+    order: stepOrder,
     title: display.title,
     description: display.description,
     status: 'completed',
+    statusText: getWorkflowStepStatusText('completed'),
+    kind: 'ai',
     operation: normalizeText(log.operation),
     stage: normalizeText(log.stage),
     provider: normalizeText(log.provider),
@@ -1574,6 +1791,8 @@ function buildReviewStep(job, order, aiCallCount) {
     title: '生成审核预览',
     description: '服务端把 AI 的输出整理成人工可以勾选、对比和采纳的结果。',
     status: 'completed',
+    statusText: getWorkflowStepStatusText('completed'),
+    kind: 'review',
     operation: 'translation.review-preview',
     stage: 'FinalizeReview',
     provider: '',
@@ -1659,6 +1878,35 @@ function getUniqueWorkflowAiJsonLogs(aiJsonLogs) {
   return logs
 }
 
+function getCurrentWorkflowStep(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return null
+  }
+  const stoppingStep = steps.find(step => step.status === 'stopping')
+  if (stoppingStep) {
+    return stoppingStep
+  }
+  const runningStep = steps.find(step => {
+    return step.status === 'running' || step.status === 'retrying'
+  })
+  if (runningStep) {
+    return runningStep
+  }
+  const failedStep = steps.find(step => {
+    return step.status === 'failed'
+  })
+  if (failedStep) {
+    return failedStep
+  }
+  const completedSteps = steps.filter(step => {
+    return step.status === 'completed'
+  })
+  if (completedSteps.length > 0) {
+    return completedSteps[completedSteps.length - 1]
+  }
+  return steps[0]
+}
+
 function summarizeWorkflow(job, steps, aiCallCount) {
   const result = job?.result || {}
   const source = job?.source || {}
@@ -1677,6 +1925,8 @@ function summarizeWorkflow(job, steps, aiCallCount) {
     ? result.warningList
     : []
   const aiSkipList = Array.isArray(result.aiSkipList) ? result.aiSkipList : []
+  const progress = job?.progress || {}
+  const currentWorkflowStep = getCurrentWorkflowStep(steps)
   return {
     jobId: normalizeText(job?._id),
     jobType: normalizeText(job?.jobType),
@@ -1686,6 +1936,14 @@ function summarizeWorkflow(job, steps, aiCallCount) {
     targetLanguage: targetLanguageText,
     stepCount: steps.length,
     aiCallCount,
+    runtimeStepCount: steps.filter(step => step.kind === 'runtime').length,
+    currentStepId: currentWorkflowStep?.id || '',
+    currentStepTitle: currentWorkflowStep?.title || '',
+    currentStepStatus: currentWorkflowStep?.status || '',
+    currentStepStatusText: currentWorkflowStep?.statusText || '',
+    currentStage: normalizeText(progress.currentStage),
+    currentProgressText: normalizeText(progress.currentStep),
+    percent: Number(progress.percent || 0),
     previewEntryCount: previewEntries.length,
     skippedEntryCount: aiSkipList.length,
     warningCount: warningList.length,
@@ -1697,13 +1955,19 @@ function buildTranslationJobWorkflow(job) {
   const result = job?.result || {}
   const aiJsonLogs = getUniqueWorkflowAiJsonLogs(result.aiJsonLogs)
   const steps = []
+  if (shouldBuildRuntimeWorkflowSteps(job, aiJsonLogs)) {
+    buildRuntimeWorkflowSteps(job).forEach(step => {
+      steps.push(step)
+    })
+  }
+  let aiCallCount = 0
   aiJsonLogs.forEach((log, index) => {
-    const step = buildWorkflowStep(log, index)
+    const step = buildWorkflowStep(log, index, steps.length + 1)
     if (step) {
       steps.push(step)
+      aiCallCount += 1
     }
   })
-  const aiCallCount = steps.length
   const reviewStep = buildReviewStep(job, steps.length + 1, aiCallCount)
   if (reviewStep) {
     steps.push(reviewStep)

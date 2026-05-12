@@ -378,6 +378,103 @@
           </span>
         </div>
 
+        <div v-if="hasExecutionWorkflow" class="job-workflow-panel">
+          <div class="job-workflow-panel-header">
+            <div>
+              <div class="job-workflow-panel-title">执行工作流</div>
+              <div class="job-workflow-panel-subtitle">
+                <span v-if="currentJob.runtimeState">
+                  {{ currentJob.runtimeState }}
+                </span>
+                <span v-if="currentJob.progress?.currentStage">
+                  {{ getProgressStageText(currentJob.progress.currentStage) }}
+                </span>
+                <span v-if="currentJob.runtime?.heartbeatAt">
+                  心跳：{{ formatDate(currentJob.runtime.heartbeatAt) }}
+                </span>
+              </div>
+            </div>
+            <div class="job-workflow-panel-tags">
+              <el-tag
+                v-if="currentWorkflowStep"
+                size="small"
+                effect="plain"
+                :type="getWorkflowStepStatusTagType(currentWorkflowStep)"
+              >
+                {{ getWorkflowStepStatusText(currentWorkflowStep) }}
+              </el-tag>
+              <el-tag
+                v-if="currentJob.runtime?.attempts"
+                size="small"
+                effect="plain"
+              >
+                第 {{ currentJob.runtime.attempts }} 次执行
+              </el-tag>
+            </div>
+          </div>
+          <el-progress
+            class="job-workflow-progress"
+            :percentage="workflowProgressPercent"
+            :stroke-width="8"
+          />
+          <div v-if="currentWorkflowStep" class="job-workflow-current">
+            <div class="job-workflow-current-label">当前工作流</div>
+            <div class="job-workflow-current-title">
+              {{ currentWorkflowStep.title }}
+            </div>
+            <div class="job-workflow-current-step">
+              {{ getWorkflowStepCurrentText(currentWorkflowStep) }}
+            </div>
+            <div class="job-workflow-current-meta">
+              <span v-if="currentWorkflowStep.stage">
+                阶段：{{ getProgressStageText(currentWorkflowStep.stage) }}
+              </span>
+              <span v-if="currentJob.runtime?.workerId">
+                Worker：{{ currentJob.runtime.workerId }}
+              </span>
+              <span v-if="currentJob.runtime?.leaseExpiresAt">
+                租约到期：{{ formatDate(currentJob.runtime.leaseExpiresAt) }}
+              </span>
+            </div>
+          </div>
+          <div class="job-workflow-timeline">
+            <div
+              v-for="step in executionWorkflowSteps"
+              :key="step.id"
+              class="job-workflow-step"
+              :class="getWorkflowStepClass(step)"
+            >
+              <div class="job-workflow-step-index">{{ step.order }}</div>
+              <div class="job-workflow-step-content">
+                <div class="job-workflow-step-title-row">
+                  <div class="job-workflow-step-title">{{ step.title }}</div>
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    :type="getWorkflowStepStatusTagType(step)"
+                  >
+                    {{ getWorkflowStepStatusText(step) }}
+                  </el-tag>
+                </div>
+                <div class="job-workflow-step-subtitle">
+                  {{ getWorkflowStepSubtitle(step) }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="workflowRecentLogs.length" class="job-workflow-log-list">
+            <div class="job-workflow-log-title">最近日志</div>
+            <div
+              v-for="log in workflowRecentLogs"
+              :key="log.createdAt + log.message"
+              class="job-workflow-log-item"
+            >
+              <span>{{ formatDate(log.createdAt) }}</span>
+              <span>{{ log.message }}</span>
+            </div>
+          </div>
+        </div>
+
         <div
           v-if="
             currentJob.status === '执行失败' &&
@@ -1466,11 +1563,156 @@ export default {
       )
     })
 
+    const executionWorkflowSteps = computed(() => {
+      if (!Array.isArray(aiWorkflow.value?.steps)) {
+        return []
+      }
+      return aiWorkflow.value.steps
+    })
+
+    const getCurrentWorkflowStepFromList = steps => {
+      if (!Array.isArray(steps) || steps.length === 0) {
+        return null
+      }
+      const stoppingStep = steps.find(step => step.status === 'stopping')
+      if (stoppingStep) {
+        return stoppingStep
+      }
+      const runningStep = steps.find(step => {
+        return step.status === 'running' || step.status === 'retrying'
+      })
+      if (runningStep) {
+        return runningStep
+      }
+      const failedStep = steps.find(step => step.status === 'failed')
+      if (failedStep) {
+        return failedStep
+      }
+      const completedSteps = steps.filter(step => step.status === 'completed')
+      if (completedSteps.length > 0) {
+        return completedSteps[completedSteps.length - 1]
+      }
+      return steps[0]
+    }
+
+    const currentWorkflowStep = computed(() => {
+      return getCurrentWorkflowStepFromList(executionWorkflowSteps.value)
+    })
+
+    const hasExecutionWorkflow = computed(() => {
+      if (!currentJob.value) {
+        return false
+      }
+      if (executionWorkflowSteps.value.length === 0) {
+        return false
+      }
+      if (currentJob.value.status === '执行中') {
+        return true
+      }
+      return currentJob.value.status === '执行失败'
+    })
+
+    const workflowProgressPercent = computed(() => {
+      const percent = Number(currentJob.value?.progress?.percent || 0)
+      if (!Number.isFinite(percent) || percent < 0) {
+        return 0
+      }
+      if (percent > 100) {
+        return 100
+      }
+      return percent
+    })
+
+    const workflowRecentLogs = computed(() => {
+      const recentLogs = currentJob.value?.progress?.recentLogs || []
+      if (!Array.isArray(recentLogs)) {
+        return []
+      }
+      return recentLogs.slice(-6).reverse()
+    })
+
     const openAiWorkflowDialog = () => {
       if (!hasAiWorkflow.value) {
         return
       }
       aiWorkflowDialogVisible.value = true
+    }
+
+    const getWorkflowStepStatusText = step => {
+      if (step?.statusText) {
+        return step.statusText
+      }
+      const statusTextMap = {
+        pending: '待执行',
+        running: '正在执行',
+        retrying: '重试中',
+        completed: '已完成',
+        failed: '执行失败',
+        stopping: '正在停止',
+        skipped: '已跳过'
+      }
+      return statusTextMap[step?.status] || step?.status || ''
+    }
+
+    const getWorkflowStepStatusTagType = step => {
+      if (step?.status === 'completed') {
+        return 'success'
+      }
+      if (step?.status === 'running') {
+        return 'warning'
+      }
+      if (step?.status === 'retrying') {
+        return 'warning'
+      }
+      if (step?.status === 'stopping') {
+        return 'danger'
+      }
+      if (step?.status === 'failed') {
+        return 'danger'
+      }
+      return 'info'
+    }
+
+    const getWorkflowStepClass = step => {
+      return {
+        'is-current': step?.id === currentWorkflowStep.value?.id,
+        'is-completed': step?.status === 'completed',
+        'is-running': step?.status === 'running',
+        'is-retrying': step?.status === 'retrying',
+        'is-stopping': step?.status === 'stopping',
+        'is-failed': step?.status === 'failed',
+        'is-pending': step?.status === 'pending'
+      }
+    }
+
+    const getWorkflowStepSubtitle = step => {
+      const parts = []
+      if (step?.currentStep) {
+        parts.push(step.currentStep)
+      }
+      if (step?.provider) {
+        parts.push(step.provider)
+      }
+      if (step?.model) {
+        parts.push(step.model)
+      }
+      if (step?.stage) {
+        parts.push(getProgressStageText(step.stage))
+      }
+      if (parts.length > 0) {
+        return parts.join(' / ')
+      }
+      return step?.description || '-'
+    }
+
+    const getWorkflowStepCurrentText = step => {
+      if (step?.currentStep) {
+        return step.currentStep
+      }
+      if (currentJob.value?.progress?.currentStep) {
+        return currentJob.value.progress.currentStep
+      }
+      return step?.description || '-'
     }
 
     const adoptionEntryMap = computed(() => {
@@ -1861,28 +2103,43 @@ export default {
       getJobStorageSummary()
     }
 
-    const openDetail = row => {
-      detailDrawerVisible.value = true
-      selectedEntryKeys.value = []
-      conflictList.value = []
-      multilingualApi
-        .getTranslationJobDetail({ id: row._id })
+    const loadTranslationJobDetail = (id, options = {}) => {
+      if (!id) {
+        return Promise.resolve()
+      }
+      return multilingualApi
+        .getTranslationJobDetail({ id })
         .then(response => {
+          if (!detailDrawerVisible.value) {
+            return
+          }
           currentJob.value = response.data.data || null
-          selectedEntryKeys.value = buildDefaultSelectedEntryKeys(
-            currentJob.value
-          )
+          if (options.resetSelection === true) {
+            selectedEntryKeys.value = buildDefaultSelectedEntryKeys(
+              currentJob.value
+            )
+          }
         })
         .catch(error => {
           console.log(error)
         })
     }
 
+    const openDetail = row => {
+      detailDrawerVisible.value = true
+      currentJob.value = null
+      selectedEntryKeys.value = []
+      conflictList.value = []
+      loadTranslationJobDetail(row._id, { resetSelection: true })
+    }
+
     const refreshDetail = () => {
       if (!currentJob.value?._id) {
-        return
+        return Promise.resolve()
       }
-      openDetail(currentJob.value)
+      return loadTranslationJobDetail(currentJob.value._id, {
+        resetSelection: false
+      })
     }
 
     const closeCurrentDetail = () => {
@@ -2407,6 +2664,7 @@ export default {
       beforeReviewGroupSelect,
       conflictList,
       currentJob,
+      currentWorkflowStep,
       cleanupCoverImages,
       clearReviewEntries,
       coverImageCleanupLoading,
@@ -2414,6 +2672,7 @@ export default {
       deleteJob,
       deleteSelectedJobs,
       detailDrawerVisible,
+      executionWorkflowSteps,
       formatBytes,
       formatDate,
       getJobStorageSummary,
@@ -2429,8 +2688,14 @@ export default {
       getProgressStageText,
       getSelectedEntryCount,
       getStatusTagType,
+      getWorkflowStepClass,
+      getWorkflowStepCurrentText,
+      getWorkflowStepStatusTagType,
+      getWorkflowStepStatusText,
+      getWorkflowStepSubtitle,
       handleJobSelectionChange,
       hasAiWorkflow,
+      hasExecutionWorkflow,
       isJobSelectable,
       jobList,
       jobStorageFileCaches,
@@ -2459,6 +2724,8 @@ export default {
       stopJob,
       tableRef,
       total,
+      workflowProgressPercent,
+      workflowRecentLogs,
       applySelectedEntries
     }
   }
@@ -2659,6 +2926,213 @@ html.dark .translation-job-storage-panel {
   color: var(--el-text-color-secondary);
   margin-bottom: 16px;
   padding: 14px 0;
+}
+
+.job-workflow-panel {
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.job-workflow-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.job-workflow-panel-title {
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.job-workflow-panel-subtitle,
+.job-workflow-panel-tags,
+.job-workflow-current-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-workflow-panel-subtitle {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 2px;
+}
+
+.job-workflow-panel-tags {
+  justify-content: flex-end;
+}
+
+.job-workflow-progress {
+  margin-top: 12px;
+}
+
+.job-workflow-current {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.job-workflow-current-label {
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.job-workflow-current-title {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.job-workflow-current-step {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.job-workflow-current-meta {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.job-workflow-timeline {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 12px;
+}
+
+.job-workflow-step {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-width: 0;
+  padding: 10px;
+}
+
+.job-workflow-step.is-current {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.job-workflow-step-index {
+  align-items: center;
+  border: 1px solid var(--el-border-color);
+  border-radius: 999px;
+  color: var(--el-text-color-secondary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  width: 30px;
+}
+
+.job-workflow-step.is-completed .job-workflow-step-index {
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+
+.job-workflow-step.is-running .job-workflow-step-index,
+.job-workflow-step.is-retrying .job-workflow-step-index {
+  border-color: var(--el-color-warning-light-5);
+  color: var(--el-color-warning);
+}
+
+.job-workflow-step.is-stopping .job-workflow-step-index,
+.job-workflow-step.is-failed .job-workflow-step-index {
+  border-color: var(--el-color-danger-light-5);
+  color: var(--el-color-danger);
+}
+
+.job-workflow-step.is-current .job-workflow-step-index {
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  color: #fff;
+}
+
+.job-workflow-step-content {
+  min-width: 0;
+}
+
+.job-workflow-step-title-row {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.job-workflow-step-title {
+  color: var(--el-text-color-primary);
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  min-width: 120px;
+  word-break: break-word;
+}
+
+.job-workflow-step-subtitle {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 4px;
+  word-break: break-word;
+}
+
+.job-workflow-log-list {
+  border-top: 1px solid var(--el-border-color-lighter);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.job-workflow-log-title {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.job-workflow-log-item {
+  color: var(--el-text-color-secondary);
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  line-height: 1.6;
+}
+
+.job-workflow-log-item span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+html.dark .job-workflow-panel {
+  background: var(--el-fill-color-blank);
 }
 
 .apply-toolbar {
@@ -3042,6 +3516,22 @@ html.dark .job-state-panel-meta {
 
   .job-state-panel-header {
     flex-direction: column;
+  }
+
+  .job-workflow-panel-header {
+    flex-direction: column;
+  }
+
+  .job-workflow-panel-tags {
+    justify-content: flex-start;
+  }
+
+  .job-workflow-timeline {
+    grid-template-columns: 1fr;
+  }
+
+  .job-workflow-log-item {
+    grid-template-columns: 1fr;
   }
 
   .cover-image-review-grid {
