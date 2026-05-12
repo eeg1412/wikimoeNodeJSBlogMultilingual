@@ -1038,20 +1038,20 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   byteLength: ['字节长度', '被省略二进制内容的字节数。'],
   webSearchQueries: [
     '搜索查询',
-    'Gemini grounding 实际使用或建议的 Google 搜索查询。'
+    'AI grounding 实际使用或建议的 Google 搜索查询。'
   ],
-  groundingChunks: ['网页依据', 'Gemini grounding 返回的网页标题和链接依据。'],
+  groundingChunks: ['网页依据', 'AI grounding 返回的网页标题和链接依据。'],
   title: ['标题', '文章、网页依据或媒体内容标题。'],
   uri: ['链接', '网页依据或资源的 URI。'],
   url: ['URL', '资源访问地址。'],
   note: ['备注', '人工或服务端保存的补充说明。'],
   noteNeedsUpdate: [
     '备注需要修订',
-    'Gemini 联网检索后判断当前名词备注是否需要改写。'
+    'AI 联网检索后判断当前名词备注是否需要改写。'
   ],
   shouldUpdateTermNote: [
     '写入修订备注',
-    '服务端是否会把 Gemini 修订后的备注写入专有名词库。'
+    '服务端是否会把 AI 修订后的备注写入专有名词库。'
   ],
   enabled: ['启用状态', '该记录或配置是否启用。'],
   importance: ['重要度', 'AI 抽词阶段给出的 1 到 100 重要度评分。'],
@@ -1255,14 +1255,11 @@ function getArrayItemMeta(path) {
   if (parentPath.endsWith('groundingChunks')) {
     return [
       '网页依据 ' + itemNumber,
-      'Gemini grounding 返回的一条网页标题和链接依据。'
+      'AI grounding 返回的一条网页标题和链接依据。'
     ]
   }
   if (parentPath.endsWith('webSearchQueries')) {
-    return [
-      '搜索查询 ' + itemNumber,
-      'Gemini grounding 使用或建议的一条搜索查询。'
-    ]
+    return ['搜索查询 ' + itemNumber, 'AI grounding 使用或建议的一条搜索查询。']
   }
   if (parentPath.endsWith('targetLanguageCodes')) {
     return ['目标语言 ' + itemNumber, '本次任务覆盖的一个目标语言 code。']
