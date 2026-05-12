@@ -105,6 +105,23 @@ function normalizeTargetLanguageCodeList({
   return languageCodes
 }
 
+function normalizeOfficialTermGlossaryTaskCache(value) {
+  if (value instanceof Map) {
+    return value
+  }
+  return null
+}
+
+function getOfficialTermGlossaryTaskCache(input) {
+  const taskCache = normalizeOfficialTermGlossaryTaskCache(
+    input?.officialTermGlossaryTaskCache
+  )
+  if (taskCache) {
+    return taskCache
+  }
+  return new Map()
+}
+
 function cloneSerializableValue(value) {
   if (typeof value === 'undefined') {
     return value
@@ -299,6 +316,9 @@ function parseInput(body = {}) {
     entries,
     targetTitle,
     translateCoverImage,
+    officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
+      body.officialTermGlossaryTaskCache
+    ),
     searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
 }
@@ -348,6 +368,9 @@ function parseGenericInput(body = {}) {
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
     properNounScopeKey: String(body.properNounScopeKey || '').trim(),
+    officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
+      body.officialTermGlossaryTaskCache
+    ),
     skipUsageLog: body.skipUsageLog === true,
     searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
   }
@@ -2054,7 +2077,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   model,
   matchedTermIds,
   extractedTerms,
-  targetLanguageCodes
+  targetLanguageCodes,
+  usageTracker
 }) {
   if (!Array.isArray(terms) || terms.length === 0) {
     return {
@@ -2088,7 +2112,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
       targetLanguageCodes,
       candidateTerms: candidateCoverage.candidateTerms,
       translations: candidateCoverage.translations,
-      matchedTermIds: nextMatchedTermIds
+      matchedTermIds: nextMatchedTermIds,
+      usageTracker
     })
 
   return {
@@ -2517,6 +2542,7 @@ async function resolveOfficialTermGlossaryCacheData({
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
     extractionResult.aiJsonLogs
   )
+  const usageTracker = new Map()
   if (extractedTerms.length === 0) {
     if (handlers.onStatus) {
       handlers.onStatus({ message: '未抽取到需要检索的专有名词' })
@@ -2570,7 +2596,8 @@ async function resolveOfficialTermGlossaryCacheData({
       targetLanguageCodes,
       candidateTerms: candidateCoverage.candidateTerms,
       translations: candidateCoverage.translations,
-      matchedTermIds
+      matchedTermIds,
+      usageTracker
     })
 
   let missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
@@ -2653,7 +2680,8 @@ async function resolveOfficialTermGlossaryCacheData({
         model: searchResult.model,
         matchedTermIds,
         extractedTerms,
-        targetLanguageCodes
+        targetLanguageCodes,
+        usageTracker
       })
     matchedTermIds = searchSaveResult.matchedTermIds
     if (searchSaveResult.candidateCoverage) {
@@ -4150,7 +4178,7 @@ async function translatePostEntries(body = {}) {
   const post = await getTranslationPost(input)
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
-  const officialTermGlossaryTaskCache = new Map()
+  const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
   let aiInput = prepareAiInput(input)
   aiInput = await prepareOfficialTermGlossaryForAiInput({
     input: aiInput,
@@ -4374,7 +4402,7 @@ async function translateStreamChunkWithRetry({
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
-  const officialTermGlossaryTaskCache = new Map()
+  const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
   const splitOptions = {
     maxRequestTextLength: getTranslationChunkTextLimit(settings),
     richTextSegmentTextLength: getRichTextSegmentTextLimit(settings)

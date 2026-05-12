@@ -913,6 +913,7 @@ async function translateSourcePostForLanguage({
   sourceId,
   languageCode,
   targetLanguageCodes,
+  officialTermGlossaryTaskCache,
   progressRange,
   isRoot,
   depth,
@@ -1000,6 +1001,7 @@ async function translateSourcePostForLanguage({
         prompt: getPrompt(job),
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),
+        officialTermGlossaryTaskCache,
         entries
       },
       createHandlers(context, `TranslatePost:${languageCode}`, progressRange)
@@ -1078,6 +1080,7 @@ async function executeSourcePostLanguageDag({
   context,
   languageCode,
   targetLanguageCodes,
+  officialTermGlossaryTaskCache,
   progressRange,
   maxDepth,
   coverImageTasks
@@ -1107,6 +1110,7 @@ async function executeSourcePostLanguageDag({
       sourceId,
       languageCode,
       targetLanguageCodes,
+      officialTermGlossaryTaskCache,
       progressRange,
       isRoot: task.isRoot,
       depth: task.depth,
@@ -1149,6 +1153,7 @@ async function executeSourcePostAiImport(job, context) {
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
   const coverImageTasks = []
   const languageResults = []
+  const officialTermGlossaryTaskCache = new Map()
   for (
     let languageIndex = 0;
     languageIndex < languageCodes.length;
@@ -1161,6 +1166,7 @@ async function executeSourcePostAiImport(job, context) {
         context,
         languageCode,
         targetLanguageCodes: languageCodes,
+        officialTermGlossaryTaskCache,
         progressRange: buildLanguageProgressRange(
           languageIndex,
           languageCodes.length

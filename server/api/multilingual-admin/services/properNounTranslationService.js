@@ -201,6 +201,96 @@ async function recordProperNounUsage(translationList) {
   ])
 }
 
+function getUsageTracker(options = {}) {
+  if (options.usageTracker instanceof Map) {
+    return options.usageTracker
+  }
+  return null
+}
+
+function appendTrackedObjectId(targetList, tracker, trackerKey, objectId) {
+  const objectIdKey = String(objectId || '')
+  if (!objectIdKey) {
+    return
+  }
+  if (tracker && tracker.has(trackerKey)) {
+    return
+  }
+  if (tracker) {
+    tracker.set(trackerKey, true)
+  }
+  if (!targetList.some(item => String(item || '') === objectIdKey)) {
+    targetList.push(objectId)
+  }
+}
+
+async function recordTrackedProperNounUsage(translationList, options = {}) {
+  if (!Array.isArray(translationList) || translationList.length === 0) {
+    return
+  }
+
+  const tracker = getUsageTracker(options)
+  if (!tracker) {
+    await recordProperNounUsage(translationList)
+    return
+  }
+
+  const termIdList = []
+  const translationIdList = []
+  translationList.forEach(translation => {
+    const termId = translation?.termId
+    const termIdKey = String(termId || '')
+    if (termIdKey) {
+      appendTrackedObjectId(termIdList, tracker, `term:${termIdKey}`, termId)
+    }
+
+    const translationId = translation?._id
+    const translationIdKey = String(translationId || '')
+    if (translationIdKey) {
+      appendTrackedObjectId(
+        translationIdList,
+        tracker,
+        `translation:${translationIdKey}`,
+        translationId
+      )
+    }
+  })
+
+  if (termIdList.length === 0 && translationIdList.length === 0) {
+    return
+  }
+
+  const usedAt = new Date()
+  const updateTasks = []
+  const TermModel = getTermModel()
+  const TranslationModel = getTranslationModel()
+  if (termIdList.length > 0) {
+    updateTasks.push(
+      TermModel.updateMany(
+        { _id: { $in: termIdList } },
+        {
+          $set: { lastUsedAt: usedAt },
+          $inc: { usedCount: 1 }
+        },
+        { timestamps: false }
+      )
+    )
+  }
+  if (translationIdList.length > 0) {
+    updateTasks.push(
+      TranslationModel.updateMany(
+        { _id: { $in: translationIdList } },
+        {
+          $set: { lastUsedAt: usedAt },
+          $inc: { usedCount: 1 }
+        },
+        { timestamps: false }
+      )
+    )
+  }
+  await Promise.all(updateTasks)
+}
+
 function normalizeString(value, maxLength = 600) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -219,7 +309,10 @@ function buildNormalizedSourceText(value) {
 function buildLooseSourceTextIdentity(value) {
   return buildNormalizedSourceText(value)
     .replace(/[\s\u3000]/g, '')
-    .replace(/[!！?？。．.、，,：:；;"'“”‘’《》〈〉「」『』【】\[\]()（）×✕＆&＋+／/]/g, '')
+    .replace(
+      /[!！?？。．.、，,：:；;"'“”‘’《》〈〉「」『』【】\[\]()（）×✕＆&＋+／/]/g,
+      ''
+    )
 }
 
 function escapeRegExp(value) {
@@ -937,7 +1030,10 @@ function isCandidateMatchedByKeyword(term, sourceTextItem) {
   )
 
   for (const keyword of keywordList) {
-    if (normalizedTermText.includes(keyword) || keyword.includes(normalizedTermText)) {
+    if (
+      normalizedTermText.includes(keyword) ||
+      keyword.includes(normalizedTermText)
+    ) {
       return true
     }
     const looseKeyword = buildLooseSourceTextIdentity(keyword)
@@ -1271,7 +1367,8 @@ async function compareMatchedTermTranslationCoverage({
   targetLanguageCodes = [],
   candidateTerms = [],
   translations = [],
-  matchedTermIds = []
+  matchedTermIds = [],
+  usageTracker = null
 } = {}) {
   const sourceTextItems = normalizeExtractedTermList(terms)
   const languageCodes = normalizeLanguageCodeList(targetLanguageCodes)
@@ -1350,7 +1447,7 @@ async function compareMatchedTermTranslationCoverage({
     }
   })
 
-  await recordProperNounUsage(selectedTranslations)
+  await recordTrackedProperNounUsage(selectedTranslations, { usageTracker })
 
   return {
     sourceTextItems,
@@ -1379,23 +1476,51 @@ async function createTermForSourceText(sourceText, options = {}) {
 async function findOrCreateTermForSourceText(sourceText, options = {}) {
   const normalizedSourceText = buildNormalizedSourceText(sourceText)
   const TermModel = getTermModel()
-  const existing = await TermModel.findOne({ normalizedSourceText })
-    .sort(getCandidateSort())
-    .lean()
-  if (existing) {
-    return existing
-  }
-
-  try {
-    return await createTermForSourceText(sourceText, options)
-  } catch (error) {
-    if (error && error.code === 11000) {
-      return await TermModel.findOne({ normalizedSourceText })
+  return await utils.executeInLock(
+    `properNounTerm:${normalizedSourceText}`,
+    async () => {
+      const existing = await TermModel.findOne({ normalizedSourceText })
         .sort(getCandidateSort())
         .lean()
+      if (existing) {
+        const note = normalizeString(options.note, 2000)
+        const currentNote = normalizeString(existing.note, 2000)
+        let shouldUpdateNote = false
+        if (note && !currentNote) {
+          shouldUpdateNote = true
+        }
+        if (
+          note &&
+          options.shouldUpdateTermNote === true &&
+          currentNote !== note
+        ) {
+          shouldUpdateNote = true
+        }
+        if (shouldUpdateNote) {
+          const updatedTerm = await TermModel.findOneAndUpdate(
+            { _id: existing._id },
+            { $set: { note } },
+            { new: true }
+          ).lean()
+          if (updatedTerm) {
+            return updatedTerm
+          }
+        }
+        return existing
+      }
+
+      try {
+        return await createTermForSourceText(sourceText, options)
+      } catch (error) {
+        if (error && error.code === 11000) {
+          return await TermModel.findOne({ normalizedSourceText })
+            .sort(getCandidateSort())
+            .lean()
+        }
+        throw error
+      }
     }
-    throw error
-  }
+  )
 }
 
 async function resolveTermForAiSearchTerm(termItem, sourceText) {
@@ -1429,8 +1554,9 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
     return term
   }
 
-  return await createTermForSourceText(sourceText, {
-    note: termItem?.note
+  return await findOrCreateTermForSourceText(sourceText, {
+    note: termItem?.note,
+    shouldUpdateTermNote: termItem?.shouldUpdateTermNote === true
   })
 }
 
