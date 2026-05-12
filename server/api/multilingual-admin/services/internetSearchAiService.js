@@ -18,6 +18,7 @@ const {
 } = require('./geminiNativeApiService')
 const { recordGeminiUsageLog } = require('./geminiUsageLogService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
+const translationPromptPolicyService = require('./translationPromptPolicyService')
 
 const OPERATION_OFFICIAL_TERM_KNOWLEDGE =
   'proper-noun.official-translation.knowledge'
@@ -212,13 +213,37 @@ function countTermTranslationLanguagePairs(terms) {
 
 function buildTermRequestPromptRows(termRequests) {
   return termRequests.map(termRequest => {
-    return {
+    const row = {
       sourceText: termRequest.sourceText,
       targetLanguages: buildTargetLanguagePromptRows(
         termRequest.targetLanguageCodes
       )
     }
+    const note = normalizeString(termRequest.note, 200)
+    if (note) {
+      row.note = note
+    }
+    return row
   })
+}
+
+function hasTermRequestNote(termRequests) {
+  return termRequests.some(termRequest => {
+    return Boolean(normalizeString(termRequest.note, 200))
+  })
+}
+
+function attachTermNoteInstruction(requestData, termRequests) {
+  if (!hasTermRequestNote(termRequests)) {
+    return
+  }
+  requestData['名词备注使用要求'] =
+    'sourceTermRequests[].note 是名词抽取 AI 为对应 sourceText 生成的实体识别上下文。整理或检索官方译名时，必须先用 note 确认名词指向。'
+}
+
+function attachTermTranslationQualityPolicy(requestData) {
+  requestData['翻译质量约束'] =
+    translationPromptPolicyService.getTermTranslationQualityPolicyText()
 }
 
 function buildOfficialTermKnowledgePrompt({
@@ -233,6 +258,8 @@ function buildOfficialTermKnowledgePrompt({
     sourceLanguageCode: sourceLanguageCode || '',
     sourceTermRequests: buildTermRequestPromptRows(termRequests)
   }
+  attachTermTranslationQualityPolicy(requestData)
+  attachTermNoteInstruction(requestData, termRequests)
   if (normalizedContextSummary) {
     requestData.contentContextSummary = normalizedContextSummary
   }
@@ -270,6 +297,8 @@ function buildOfficialTermSearchPrompt({
     sourceLanguageCode: sourceLanguageCode || '',
     sourceTermRequests: buildTermRequestPromptRows(termRequests)
   }
+  attachTermTranslationQualityPolicy(requestData)
+  attachTermNoteInstruction(requestData, termRequests)
   if (normalizedContextSummary) {
     requestData.contentContextSummary = normalizedContextSummary
   }
@@ -794,16 +823,23 @@ async function searchOfficialTermTranslations(options = {}) {
   }
 
   const requestUrl = buildGeminiNativeGenerateContentUrl(settings)
-  const knowledgeResult = await resolveOfficialTermTranslationsFromKnowledge({
-    settings,
-    termRequests,
-    sourceLanguageCode: options.sourceLanguageCode,
-    contextSummary,
-    requestUrl,
-    cancellation: options.cancellation,
-    onStatus: options.onStatus,
-    skipUsageLog: options.skipUsageLog
-  })
+  let knowledgeResult = {
+    terms: [],
+    missingTermRequests: termRequests,
+    rawResponse: null
+  }
+  if (options.skipKnowledgeBase !== true) {
+    knowledgeResult = await resolveOfficialTermTranslationsFromKnowledge({
+      settings,
+      termRequests,
+      sourceLanguageCode: options.sourceLanguageCode,
+      contextSummary,
+      requestUrl,
+      cancellation: options.cancellation,
+      onStatus: options.onStatus,
+      skipUsageLog: options.skipUsageLog
+    })
+  }
 
   let searchResult = {
     terms: [],
@@ -829,6 +865,7 @@ async function searchOfficialTermTranslations(options = {}) {
     stats: {
       sourceTermCount: sourceTerms.length,
       targetLanguageCodes: requestTargetLanguageCodes,
+      skipKnowledgeBase: options.skipKnowledgeBase === true,
       aiKnowledgeBaseTermCount: knowledgeResult.terms.length,
       aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
         knowledgeResult.terms

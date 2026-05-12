@@ -87,10 +87,10 @@ function buildCoverRecognitionPrompt(options = {}) {
 
 function buildProviderGenerationSuffix(provider) {
   if (provider === 'gemini') {
-    return `The source cover image is the reference image.
-Keep the same composition and visual identity.
-Edit only the title text area.
-Do not redesign the cover.`
+    return `源封面图是参考图。
+保持原有构图和视觉识别。
+只编辑标题文字区域。
+不要重新设计封面。`
   }
   return ''
 }
@@ -107,7 +107,7 @@ ${titleRegionText}
 3. 不得在标题区域以外新增第二份标题。
 4. 如果 titleRegion 全部为 0，表示识别模型无法定位标题区域；此时应根据输入图中的主标题视觉位置进行替换。`
 
-  return `任务名称：封面图标题翻译图片编辑
+  return `任务名称：封面图标题文字替换图片编辑
 
 你将基于输入封面图生成一张新的封面图。
 目标：只把封面图中的文章标题文字替换为目标语言标题，并对标题区域重新排版。
