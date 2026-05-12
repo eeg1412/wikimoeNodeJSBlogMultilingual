@@ -1633,7 +1633,7 @@ export default {
       if (!Array.isArray(recentLogs)) {
         return []
       }
-      return recentLogs.slice(-6).reverse()
+      return recentLogs.slice(-6)
     })
 
     const openAiWorkflowDialog = () => {
