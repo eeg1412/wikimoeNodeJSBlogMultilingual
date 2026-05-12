@@ -65,13 +65,20 @@ const officialTermSearchResponseJsonSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['sourceText', 'translations'],
+        required: [
+          'sourceText',
+          'translations',
+          'noteNeedsUpdate',
+          'note'
+        ],
         properties: {
           sourceText: { type: 'string' },
           translations: {
             type: 'object',
             additionalProperties: { type: 'string' }
-          }
+          },
+          noteNeedsUpdate: { type: 'boolean' },
+          note: { type: 'string' }
         }
       }
     }
@@ -242,6 +249,14 @@ function attachTermNoteInstruction(requestData, termRequests) {
     'sourceTermRequests[].note 是名词抽取 AI 为对应 sourceText 生成的实体识别上下文。整理或检索官方译名时，必须先用 note 确认名词指向。'
 }
 
+function attachSearchTermNoteRevisionInstruction(requestData, termRequests) {
+  if (!hasTermRequestNote(termRequests)) {
+    return
+  }
+  requestData['联网检索后的备注修订要求'] =
+    'Gemini 使用 Google Search 确认对象身份后，需要判断 sourceTermRequests[].note 是否存在实体误判、过宽、过窄、依赖正文临时语境或包含译名的问题。需要修订时返回 noteNeedsUpdate=true，并在 note 写入新的中文词库消歧备注；不需要修订时返回 noteNeedsUpdate=false，并在 note 保持原备注。'
+}
+
 function attachTermTranslationQualityPolicy(requestData) {
   requestData['翻译质量约束'] =
     translationPromptPolicyService.getTermTranslationQualityPolicyText()
@@ -296,6 +311,7 @@ function buildOfficialTermSearchPrompt({
   }
   attachTermTranslationQualityPolicy(requestData)
   attachTermNoteInstruction(requestData, termRequests)
+  attachSearchTermNoteRevisionInstruction(requestData, termRequests)
   if (normalizedContextSummary) {
     requestData.contentContextSummary = normalizedContextSummary
   }
@@ -310,9 +326,13 @@ function buildOfficialTermSearchPrompt({
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
     '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
     '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
+    '在确认译名的同时，必须根据 Google Search 结果判断 sourceTermRequests[].note 是否需要修订。',
+    '如果 note 对实体身份、作品归属、角色定位、组织类型、产品类型或地理属性的描述有误，或者含有“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，noteNeedsUpdate 必须为 true。',
+    '修订后的 note 必须是中文词库消歧备注，只写可脱离本文单独成立的稳定身份线索；不要写翻译方法，不要写目标语言译名，不要写搜索过程。',
+    '如果原 note 已准确可用，noteNeedsUpdate 必须为 false，note 返回原 note。',
     '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。',
     '只返回合法 JSON，不要使用 Markdown，不要解释。',
-    'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。',
+    'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。',
     '',
     JSON.stringify(requestData, null, 2)
   ]
@@ -521,10 +541,32 @@ function normalizeSearchTerms(resultData, termRequests) {
         translations[languageCode] = translatedText
       }
     })
+    if (typeof termItem?.noteNeedsUpdate !== 'boolean') {
+      throw new ApiError(
+        ERROR_CODES.AI_TRANSLATION_FAILED,
+        `Gemini 联网搜索结果 ${sourceText} 缺少 noteNeedsUpdate 布尔值`,
+        'geminiInternetSearch',
+        502
+      )
+    }
+    const revisedNote = normalizeString(termItem?.note, 200)
+    if (termItem.noteNeedsUpdate === true && !revisedNote) {
+      throw new ApiError(
+        ERROR_CODES.AI_TRANSLATION_FAILED,
+        `Gemini 联网搜索结果 ${sourceText} 标记需要修订备注但没有返回 note`,
+        'geminiInternetSearch',
+        502
+      )
+    }
+    let termNote = termRequest.note || ''
+    if (termItem.noteNeedsUpdate === true) {
+      termNote = revisedNote
+    }
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
       termId: termRequest.termId || '',
-      note: termRequest.note || '',
+      note: termNote,
+      shouldUpdateTermNote: termItem.noteNeedsUpdate === true,
       translations,
       translationSource: TERM_TRANSLATION_SOURCE_INTERNET_SEARCH
     })

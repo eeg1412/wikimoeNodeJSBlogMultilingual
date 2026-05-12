@@ -1045,6 +1045,14 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   uri: ['链接', '网页依据或资源的 URI。'],
   url: ['URL', '资源访问地址。'],
   note: ['备注', '人工或服务端保存的补充说明。'],
+  noteNeedsUpdate: [
+    '备注需要修订',
+    'Gemini 联网检索后判断当前名词备注是否需要改写。'
+  ],
+  shouldUpdateTermNote: [
+    '写入修订备注',
+    '服务端是否会把 Gemini 修订后的备注写入专有名词库。'
+  ],
   enabled: ['启用状态', '该记录或配置是否启用。'],
   importance: ['重要度', 'AI 抽词阶段给出的 1 到 100 重要度评分。'],
   confidence: ['置信度', 'AI 或服务端判断结果的可信程度。'],

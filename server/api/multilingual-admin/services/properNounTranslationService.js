@@ -1403,7 +1403,19 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
   if (termId) {
     const term = await findTermById(termId)
     const note = normalizeString(termItem?.note, 2000)
-    if (note && !normalizeString(term.note, 2000)) {
+    const currentNote = normalizeString(term.note, 2000)
+    let shouldUpdateNote = false
+    if (note && !currentNote) {
+      shouldUpdateNote = true
+    }
+    if (
+      note &&
+      termItem?.shouldUpdateTermNote === true &&
+      currentNote !== note
+    ) {
+      shouldUpdateNote = true
+    }
+    if (shouldUpdateNote) {
       const TermModel = getTermModel()
       const updatedTerm = await TermModel.findOneAndUpdate(
         { _id: term._id },

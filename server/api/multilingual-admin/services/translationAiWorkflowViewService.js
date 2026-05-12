@@ -1122,6 +1122,9 @@ function buildTermOutputItem(term, index) {
   if (term.note) {
     meta.push(`备注：${term.note}`)
   }
+  if (term.shouldUpdateTermNote === true) {
+    meta.push('备注已由 Gemini 修订')
+  }
   return createItem(
     label,
     formatTranslations(term.translations) || term.note || label,
