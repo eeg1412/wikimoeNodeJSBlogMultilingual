@@ -974,6 +974,7 @@ export default {
   gap: 6px 10px;
   line-height: 1.5;
   margin-top: 6px;
+  word-break: break-all;
 }
 
 .ai-workflow-empty-text {
