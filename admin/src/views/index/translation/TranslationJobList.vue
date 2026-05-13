@@ -486,7 +486,7 @@
             <div>
               <div class="job-state-panel-title">任务执行失败</div>
               <div class="job-state-panel-subtitle">
-                任务已停止，请根据下面的错误信息修复后再重新发起或重试。
+                {{ getFailureSubtitle(currentJob.failure) }}
               </div>
             </div>
             <div class="job-state-panel-tags">
@@ -2476,6 +2476,13 @@ export default {
       return failureCodeMeaningMap[errorCode] || ''
     }
 
+    const getFailureSubtitle = failure => {
+      if (failure?.retryable === true) {
+        return '任务已停止，请根据下面的错误信息修复后重试。'
+      }
+      return '任务已停止，请根据下面的错误信息修复后重新发起。'
+    }
+
     const formatBytes = value => {
       const bytes = Number(value || 0)
       if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -2687,6 +2694,7 @@ export default {
       getCoverImageStatusText,
       getFailureCodeLabel,
       getFailureCodeMeaning,
+      getFailureSubtitle,
       getFailureReasonText,
       getLanguageText,
       getAppliedEntryCount,

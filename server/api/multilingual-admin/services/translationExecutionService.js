@@ -376,7 +376,7 @@ function getStatusProgressPercent(message, progressRange) {
   if (/准备\s*\d+\s*个翻译批次/.test(text)) {
     return getRangePercent(progressRange, 0.46, 0.5)
   }
-  if (/翻译第|已完成第/.test(text)) {
+  if (/翻译第|已完成第|已读取第/.test(text)) {
     return getRangePercent(progressRange, 0.5, 0.95, fraction || 0)
   }
   if (/封面图/.test(text)) {
@@ -429,6 +429,18 @@ function createHandlers(context, stage, progressRange) {
         })
       )
     },
+    async readAiChunkCache(cacheOptions) {
+      if (!context || typeof context.readAiChunkCache !== 'function') {
+        return null
+      }
+      return await context.readAiChunkCache(cacheOptions)
+    },
+    async writeAiChunkCache(cacheRecord) {
+      if (!context || typeof context.writeAiChunkCache !== 'function') {
+        return null
+      }
+      return await context.writeAiChunkCache(cacheRecord)
+    },
     cancellation: context.cancellation
   }
 }
@@ -479,6 +491,8 @@ async function executePostAiTranslation(job, context) {
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: job.target.languageCode,
         targetLanguageCodes: getJobTargetLanguageCodes(job),
+        cacheKey: getJobId(job),
+        cacheScopeKey: 'post',
         prompt: getPrompt(job),
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),
@@ -528,6 +542,8 @@ async function executeContentAiTranslation(job, context) {
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
       targetLanguageCodes: getJobTargetLanguageCodes(job),
+      cacheKey: getJobId(job),
+      cacheScopeKey: `content:${contentType}`,
       prompt: getPrompt(job),
       searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
       entries,
@@ -998,6 +1014,8 @@ async function translateSourcePostForLanguage({
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: languageCode,
         targetLanguageCodes,
+        cacheKey: getJobId(job),
+        cacheScopeKey: `sourcePostImport:${languageCode}`,
         prompt: getPrompt(job),
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),

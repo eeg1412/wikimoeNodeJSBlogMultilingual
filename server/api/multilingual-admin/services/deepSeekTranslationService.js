@@ -316,6 +316,8 @@ function parseInput(body = {}) {
     entries,
     targetTitle,
     translateCoverImage,
+    cacheKey: String(body.cacheKey || '').trim(),
+    cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
       body.officialTermGlossaryTaskCache
     ),
@@ -368,6 +370,8 @@ function parseGenericInput(body = {}) {
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
     properNounScopeKey: String(body.properNounScopeKey || '').trim(),
+    cacheKey: String(body.cacheKey || '').trim(),
+    cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
       body.officialTermGlossaryTaskCache
     ),
@@ -1135,6 +1139,23 @@ function getTermTargetLanguageCodeLogValue(input) {
 
 function buildOfficialTermGlossaryCacheHash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+function buildTranslationChunkInputHash(chunkInput) {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        sourceLanguageCode: chunkInput?.sourceLanguageCode || '',
+        targetLanguageCode: chunkInput?.targetLanguageCode || '',
+        targetLanguageCodes: chunkInput?.targetLanguageCodes || [],
+        entries: chunkInput?.entries || [],
+        officialTermGlossaryMarkdown:
+          chunkInput?.officialTermGlossaryMarkdown || '',
+        prompt: chunkInput?.prompt || ''
+      })
+    )
+    .digest('hex')
 }
 
 function getOfficialTermGlossaryScopeKey(input) {
@@ -3873,6 +3894,9 @@ function mergeTranslatedRichTextNode(originalNode, translatedNode) {
 }
 
 function setRichTextValueByPath(documentValue, path, text) {
+  if (!Array.isArray(path) || path.length === 0) {
+    return false
+  }
   let current = documentValue
   for (let index = 0; index < path.length - 1; index += 1) {
     current = current?.[path[index]]
@@ -4045,8 +4069,38 @@ function findTranslatedEntry(
   return null
 }
 
+function getRichTextSegmentsForTranslation(entry) {
+  let richTextSegments = []
+  if (Array.isArray(entry.richTextSegments)) {
+    richTextSegments = entry.richTextSegments
+  }
+  const aiSegments = entry.aiValue?.segments
+  if (
+    !entry.aiValue ||
+    entry.aiValue.type !== RICH_TEXT_INDEXED_VALUE_TYPE ||
+    !Array.isArray(aiSegments)
+  ) {
+    return richTextSegments
+  }
+
+  const aiSegmentIndexSet = new Set()
+  aiSegments.forEach(segment => {
+    const segmentIndex = normalizeString(segment?.index).trim()
+    if (segmentIndex) {
+      aiSegmentIndexSet.add(segmentIndex)
+    }
+  })
+  if (aiSegmentIndexSet.size === 0) {
+    return richTextSegments
+  }
+
+  return richTextSegments.filter(segment => {
+    return aiSegmentIndexSet.has(normalizeString(segment.index).trim())
+  })
+}
+
 function applyIndexedRichTextTranslation(entry, value) {
-  const richTextSegments = entry.richTextSegments || []
+  const richTextSegments = getRichTextSegmentsForTranslation(entry)
   if (richTextSegments.length === 0) {
     return cloneSerializableValue(entry.value)
   }
@@ -4135,8 +4189,7 @@ function normalizeTranslatedValue(entry, value) {
   return value
 }
 
-function buildTranslatedPayload(input, post, resultData) {
-  const preparedInput = ensurePreparedAiInput(input)
+function buildTranslatedEntries(preparedInput, resultData) {
   const resultEntries = normalizeResultEntries(resultData)
   const resultMap = new Map()
   resultEntries.forEach(item => {
@@ -4154,7 +4207,7 @@ function buildTranslatedPayload(input, post, resultData) {
     getInputEntryCandidateKeys
   )
 
-  const entries = preparedInput.entries.map(entry => {
+  return preparedInput.entries.map(entry => {
     const translatedEntry = findTranslatedEntry(
       entry,
       resultMap,
@@ -4268,6 +4321,11 @@ function buildTranslatedPayload(input, post, resultData) {
 
     return outputEntry
   })
+}
+
+function buildTranslatedPayload(input, post, resultData) {
+  const preparedInput = ensurePreparedAiInput(input)
+  const entries = buildTranslatedEntries(preparedInput, resultData)
 
   return {
     schema: TRANSLATION_JSON_SCHEMA,
@@ -4358,6 +4416,131 @@ function mergeChunkResultEntry(resultMap, entry) {
   }
 
   resultMap.set(entryKey, entry)
+}
+
+function getTranslationChunkCacheScope(input) {
+  const explicitScope = normalizeString(input.cacheScopeKey)
+  if (explicitScope) {
+    return explicitScope
+  }
+  return [
+    input.operation || 'translation.post',
+    input.contentType || 'post',
+    input.contentId || input.postId || '',
+    input.targetLanguageCode || ''
+  ]
+    .filter(Boolean)
+    .join(':')
+}
+
+function getTranslationChunkCacheOptions({ input, chunkInput, chunkIndex }) {
+  const cacheKey = normalizeString(input.cacheKey)
+  if (!cacheKey) {
+    return null
+  }
+  return {
+    cacheKey,
+    scopeKey: getTranslationChunkCacheScope(input),
+    chunkIndex,
+    chunkInputHash: buildTranslationChunkInputHash(chunkInput)
+  }
+}
+
+function buildTranslationChunkAiJsonLog({
+  input,
+  responseData,
+  responseModel,
+  requestBody,
+  resultData,
+  chunkInput,
+  chunkIndex,
+  chunkTotal,
+  attemptNo
+}) {
+  return translationAiJsonLogService.createAiJsonLog({
+    operation: input.operation || 'translation.post',
+    stage: 'TranslationChunk',
+    provider: 'deepseek',
+    model: responseData.model || responseModel,
+    requestId: responseData.id || '',
+    sourceLanguageCode: input.sourceLanguageCode,
+    targetLanguageCode: input.targetLanguageCode,
+    meta: {
+      stream: true,
+      chunkIndex: chunkIndex + 1,
+      chunkCount: chunkTotal,
+      attemptNo,
+      entryCount: chunkInput.entries.length
+    },
+    input: {
+      requestBody
+    },
+    json: resultData
+  })
+}
+
+function appendCachedAiJsonLog(aiJsonLogs, aiJsonLog) {
+  if (!aiJsonLog) {
+    return
+  }
+  const nextLog = cloneSerializableValue(aiJsonLog)
+  nextLog.meta = {
+    ...(nextLog.meta || {}),
+    cacheHit: true
+  }
+  aiJsonLogs.push(nextLog)
+}
+
+function buildTranslationChunkCacheResponse(response) {
+  const responseData = response?.data || {}
+  return {
+    statusCode: response?.statusCode || 200,
+    data: {
+      id: responseData.id || '',
+      model: responseData.model || '',
+      object: responseData.object || 'chat.completion.stream',
+      choices: [
+        {
+          finish_reason: null,
+          message: {
+            content: '',
+            reasoning_content: ''
+          }
+        }
+      ],
+      usage: responseData.usage || {},
+      cacheSnapshot: true
+    }
+  }
+}
+
+function appendTranslationChunkState({
+  state,
+  response,
+  resultData,
+  aiJsonLog,
+  cached
+}) {
+  if (response) {
+    state.chunkResponses.push(response)
+    const responseData = response.data || {}
+    state.combinedUsage = mergeUsage(
+      state.combinedUsage,
+      responseData.usage || {}
+    )
+    state.responseModel = responseData.model || state.responseModel
+    if (responseData.id && !state.responseId) {
+      state.responseId = responseData.id
+    }
+  }
+  if (cached) {
+    appendCachedAiJsonLog(state.aiJsonLogs, aiJsonLog)
+  } else if (aiJsonLog) {
+    state.aiJsonLogs.push(aiJsonLog)
+  }
+  normalizeResultEntries(resultData).forEach(entry => {
+    mergeChunkResultEntry(state.resultMap, entry)
+  })
 }
 
 function buildAggregateRawResponse({
@@ -4529,6 +4712,34 @@ async function translateStreamChunkWithRetry({
   handlers,
   state
 }) {
+  const cacheOptions = getTranslationChunkCacheOptions({
+    input,
+    chunkInput,
+    chunkIndex
+  })
+  if (cacheOptions && typeof handlers.readAiChunkCache === 'function') {
+    const cachedChunk = await handlers.readAiChunkCache(cacheOptions)
+    if (cachedChunk) {
+      buildTranslatedEntries(chunkInput, cachedChunk.resultData)
+      const cachedResponse = buildTranslationChunkCacheResponse(
+        cachedChunk.response
+      )
+      appendTranslationChunkState({
+        state,
+        response: cachedResponse,
+        resultData: cachedChunk.resultData,
+        aiJsonLog: cachedChunk.aiJsonLog,
+        cached: true
+      })
+      if (handlers.onStatus) {
+        handlers.onStatus({
+          message: `已读取第 ${chunkIndex + 1}/${chunkTotal} 批翻译缓存`
+        })
+      }
+      return cachedChunk.resultData
+    }
+  }
+
   return await runAiStepWithRetry(
     async ({ attemptNo }) => {
       const attemptStreamState = {
@@ -4563,14 +4774,7 @@ async function translateStreamChunkWithRetry({
           },
           handlers
         )
-        state.chunkResponses.push(deepSeekResponse)
-
         const responseData = deepSeekResponse.data
-        state.combinedUsage = mergeUsage(
-          state.combinedUsage,
-          responseData.usage || {}
-        )
-
         const isSuccessStatus =
           deepSeekResponse.statusCode >= 200 &&
           deepSeekResponse.statusCode < 300
@@ -4588,34 +4792,31 @@ async function translateStreamChunkWithRetry({
         }
 
         const resultData = parseAiContent(responseData)
-        state.responseModel = responseData.model || state.responseModel
-        if (responseData.id && !state.responseId) {
-          state.responseId = responseData.id
-        }
-        state.aiJsonLogs.push(
-          translationAiJsonLogService.createAiJsonLog({
-            operation: input.operation || 'translation.post',
-            stage: 'TranslationChunk',
-            provider: 'deepseek',
-            model: responseData.model || state.responseModel,
-            requestId: responseData.id || '',
-            sourceLanguageCode: input.sourceLanguageCode,
-            targetLanguageCode: input.targetLanguageCode,
-            meta: {
-              stream: true,
-              chunkIndex: chunkIndex + 1,
-              chunkCount: chunkTotal,
-              attemptNo,
-              entryCount: chunkInput.entries.length
-            },
-            input: {
-              requestBody
-            },
-            json: resultData
+        buildTranslatedEntries(chunkInput, resultData)
+        const aiJsonLog = buildTranslationChunkAiJsonLog({
+          input,
+          responseData,
+          responseModel: state.responseModel,
+          requestBody,
+          resultData,
+          chunkInput,
+          chunkIndex,
+          chunkTotal,
+          attemptNo
+        })
+        if (cacheOptions && typeof handlers.writeAiChunkCache === 'function') {
+          await handlers.writeAiChunkCache({
+            ...cacheOptions,
+            response: buildTranslationChunkCacheResponse(deepSeekResponse),
+            resultData,
+            aiJsonLog
           })
-        )
-        normalizeResultEntries(resultData).forEach(entry => {
-          mergeChunkResultEntry(state.resultMap, entry)
+        }
+        appendTranslationChunkState({
+          state,
+          response: deepSeekResponse,
+          resultData,
+          aiJsonLog
         })
         return resultData
       } catch (error) {

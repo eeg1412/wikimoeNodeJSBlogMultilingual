@@ -23,6 +23,8 @@ const MAX_LIST_LIMIT = 100
 const DEFAULT_LIST_LIMIT = 20
 const MAX_RECENT_LOGS = 20
 const MAX_BATCH_DELETE_COUNT = 100
+const AI_CHUNK_CACHE_SCHEMA = 'wikimoe.translation.ai.chunk.cache'
+const AI_CHUNK_CACHE_VERSION = 1
 
 function buildRecentLog(message, level = 'info', stage = '') {
   return {
@@ -259,6 +261,91 @@ function normalizeObject(value, field) {
   }
 
   return value
+}
+
+function normalizeAiChunkCacheOptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const scopeKey = toTrimmedString(value.scopeKey)
+  const chunkIndex = Number(value.chunkIndex)
+  const chunkInputHash = toTrimmedString(value.chunkInputHash)
+  if (!scopeKey || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+    return null
+  }
+  if (!chunkInputHash) {
+    return null
+  }
+
+  return {
+    scopeKey,
+    chunkIndex,
+    chunkInputHash
+  }
+}
+
+function normalizeAiChunkCacheState(value) {
+  const now = new Date()
+  let records = []
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (Array.isArray(value.records)) {
+      records = value.records.filter(record => {
+        return record && typeof record === 'object' && !Array.isArray(record)
+      })
+    }
+  }
+
+  return {
+    schema: AI_CHUNK_CACHE_SCHEMA,
+    version: AI_CHUNK_CACHE_VERSION,
+    createdAt: value?.createdAt || now,
+    updatedAt: now,
+    records
+  }
+}
+
+function isSameAiChunkCacheRecord(record, cacheOptions) {
+  if (!record || !cacheOptions) {
+    return false
+  }
+  return (
+    toTrimmedString(record.scopeKey) === cacheOptions.scopeKey &&
+    Number(record.chunkIndex) === cacheOptions.chunkIndex
+  )
+}
+
+function isMatchedAiChunkCacheRecord(record, cacheOptions) {
+  if (!isSameAiChunkCacheRecord(record, cacheOptions)) {
+    return false
+  }
+  if (record.schema !== AI_CHUNK_CACHE_SCHEMA) {
+    return false
+  }
+  if (Number(record.version) !== AI_CHUNK_CACHE_VERSION) {
+    return false
+  }
+  return toTrimmedString(record.chunkInputHash) === cacheOptions.chunkInputHash
+}
+
+function buildAiChunkCacheRecord(cacheRecord, cacheOptions) {
+  return {
+    schema: AI_CHUNK_CACHE_SCHEMA,
+    version: AI_CHUNK_CACHE_VERSION,
+    scopeKey: cacheOptions.scopeKey,
+    chunkIndex: cacheOptions.chunkIndex,
+    chunkInputHash: cacheOptions.chunkInputHash,
+    createdAt: new Date(),
+    response: translationAiJsonLogService.sanitizeAiJsonValue(
+      cacheRecord.response || null
+    ),
+    resultData: translationAiJsonLogService.sanitizeAiJsonValue(
+      cacheRecord.resultData || null
+    ),
+    aiJsonLog: translationAiJsonLogService.sanitizeAiJsonValue(
+      cacheRecord.aiJsonLog || null
+    )
+  }
 }
 
 function normalizeJobType(value) {
@@ -815,7 +902,7 @@ function buildListItemSummary(item, queuePositionMap) {
     failure: {
       errorCode: failure.errorCode || '',
       errorMessage: failure.errorMessage || '',
-      retryable: failure.retryable === true
+      retryable: isFailureRetryableForUser(failure)
     },
     queuePosition: queuePositionMap[String(item._id)] || null,
     runtimeState: getRuntimeState(item),
@@ -940,6 +1027,7 @@ function buildTranslationJobDetailResponse(job) {
     translationAiWorkflowViewService.buildTranslationJobWorkflow(workflowJob)
   return {
     ...job,
+    failure: normalizeFailureForResponse(job.failure),
     result: {
       ...result,
       payload: null,
@@ -1068,6 +1156,10 @@ async function cleanupJobCoverImageCacheBeforeDelete(job) {
   return cleanupResult
 }
 
+async function cleanupJobAiChunkCache(job) {
+  return await tryClearTranslationJobAiChunkCacheById(String(job?._id || ''))
+}
+
 async function deferTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertStatus(job, [TRANSLATION_JOB_STATUS.PENDING], '暂时跳过')
@@ -1157,6 +1249,7 @@ async function deleteTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertCanDeleteTranslationJob(job)
   const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
+  const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
 
   const JobModel = getTranslationJobModel()
   const deleteResult = await JobModel.deleteOne({
@@ -1169,7 +1262,8 @@ async function deleteTranslationJob(body = {}, options = {}) {
   return {
     id: job._id,
     deleted: true,
-    cleanupStatus: cleanupResult.cleanupStatus
+    cleanupStatus: cleanupResult.cleanupStatus,
+    aiChunkCacheCleanup: aiChunkCacheCleanupResult
   }
 }
 
@@ -1254,10 +1348,12 @@ async function batchDeleteTranslationJobs(body = {}, options = {}) {
   const items = []
   for (const job of jobs) {
     const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
+    const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
     items.push({
       id: job._id,
       deleted: true,
-      cleanupStatus: cleanupResult.cleanupStatus
+      cleanupStatus: cleanupResult.cleanupStatus,
+      aiChunkCacheCleanup: aiChunkCacheCleanupResult
     })
   }
 
@@ -1303,7 +1399,7 @@ function assertRetryAllowed(job) {
     )
   }
 
-  if (job.failure.retryable === false) {
+  if (!isFailureRetryableForUser(job.failure)) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
       '任务失败已标记为不可重试',
@@ -1354,6 +1450,7 @@ async function retryTranslationJob(body = {}, options = {}) {
   job.runtime.heartbeatAt = null
   job.runtime.leaseExpiresAt = null
   job.runtime.recovering = true
+  job.runtime.attempts = 0
   job.updatedBy = adminSnapshot
   appendLog(job, '用户已请求重试，任务重新进入队列', 'info', 'retry')
   await job.save()
@@ -1383,6 +1480,37 @@ function isRetryableError(error) {
   return true
 }
 
+function isFailureRetryableForUser(failure) {
+  if (!failure || typeof failure !== 'object') {
+    return false
+  }
+  if (failure.retryable === true) {
+    return true
+  }
+
+  const errorCode = toTrimmedString(failure.errorCode)
+  if (errorCode === ERROR_CODES.INTERNAL_ERROR) {
+    return true
+  }
+  if (errorCode === ERROR_CODES.AI_TRANSLATION_FAILED) {
+    return true
+  }
+  if (errorCode === ERROR_CODES.SERVICE_UNAVAILABLE) {
+    return true
+  }
+  return false
+}
+
+function normalizeFailureForResponse(failure) {
+  if (!failure || typeof failure !== 'object') {
+    return failure || {}
+  }
+  return {
+    ...failure,
+    retryable: isFailureRetryableForUser(failure)
+  }
+}
+
 function isManualRetryRequiredError(error) {
   return Boolean(
     error && error.extra && error.extra.manualRetryRequired === true
@@ -1405,13 +1533,17 @@ function getFailedStep(options = {}) {
 function buildFailureProgressStep({
   errorMessage,
   autoRetry,
-  manualRetryRequired
+  manualRetryRequired,
+  manualRetryAvailable
 }) {
   if (manualRetryRequired) {
     return `当前 AI 步骤连续重试失败，等待用户决定是否重试：${errorMessage}`
   }
   if (autoRetry) {
     return `任务执行失败，等待后台自动重试：${errorMessage}`
+  }
+  if (manualRetryAvailable) {
+    return `任务自动重试已达上限，等待用户决定是否重试：${errorMessage}`
   }
   return `任务执行失败：${errorMessage}`
 }
@@ -1763,6 +1895,128 @@ async function saveRunningTranslationJobCheckpoint(options = {}) {
   }
 }
 
+async function readRunningTranslationJobAiChunkCache(options = {}) {
+  const cacheOptions = normalizeAiChunkCacheOptions(options.cacheOptions)
+  if (!cacheOptions) {
+    return null
+  }
+
+  const JobModel = getTranslationJobModel()
+  const job = await JobModel.findOne(
+    {
+      _id: toObjectId(options.id, 'id', true),
+      status: TRANSLATION_JOB_STATUS.RUNNING,
+      'runtime.workerId': options.workerId,
+      'runtime.attempts': Number(options.attemptNo)
+    },
+    {
+      'progress.stageState.aiChunkCache': 1
+    }
+  ).lean()
+
+  if (!job) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_CANCELLED,
+      '任务正文分片缓存读取失败，当前 worker 已失去任务所有权',
+      'translationJob',
+      499
+    )
+  }
+
+  let records = []
+  if (Array.isArray(job.progress?.stageState?.aiChunkCache?.records)) {
+    records = job.progress.stageState.aiChunkCache.records
+  }
+  const record = records.find(item => {
+    return isMatchedAiChunkCacheRecord(item, cacheOptions)
+  })
+  if (!record) {
+    return null
+  }
+
+  return translationAiJsonLogService.sanitizeAiJsonValue(record)
+}
+
+async function saveRunningTranslationJobAiChunkCache(options = {}) {
+  const cacheRecord = normalizeObject(options.cacheRecord, 'cacheRecord')
+  const cacheOptions = normalizeAiChunkCacheOptions(cacheRecord)
+  if (!cacheOptions) {
+    return null
+  }
+
+  const JobModel = getTranslationJobModel()
+  const job = await JobModel.findOne({
+    _id: toObjectId(options.id, 'id', true),
+    status: TRANSLATION_JOB_STATUS.RUNNING,
+    'runtime.workerId': options.workerId,
+    'runtime.attempts': Number(options.attemptNo)
+  })
+
+  if (!job) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_CANCELLED,
+      '任务正文分片缓存写入失败，当前 worker 已失去任务所有权',
+      'translationJob',
+      499
+    )
+  }
+
+  job.progress = normalizeObject(job.progress, 'progress')
+  const stageState = normalizeObject(
+    job.progress.stageState,
+    'progress.stageState'
+  )
+  const cacheState = normalizeAiChunkCacheState(stageState.aiChunkCache)
+  const nextRecords = cacheState.records.filter(record => {
+    return !isSameAiChunkCacheRecord(record, cacheOptions)
+  })
+  nextRecords.push(buildAiChunkCacheRecord(cacheRecord, cacheOptions))
+  cacheState.records = nextRecords
+  cacheState.updatedAt = new Date()
+  stageState.aiChunkCache = cacheState
+  job.progress.stageState = stageState
+  if (typeof job.markModified === 'function') {
+    job.markModified('progress.stageState')
+  }
+  await job.save()
+
+  return {
+    saved: true,
+    scopeKey: cacheOptions.scopeKey,
+    chunkIndex: cacheOptions.chunkIndex
+  }
+}
+
+async function clearTranslationJobAiChunkCacheById(id) {
+  const JobModel = getTranslationJobModel()
+  const result = await JobModel.updateOne(
+    {
+      _id: toObjectId(id, 'id', true)
+    },
+    {
+      $unset: {
+        'progress.stageState.aiChunkCache': ''
+      }
+    }
+  )
+
+  return {
+    deleted: result.matchedCount === 1,
+    modifiedCount: result.modifiedCount || 0
+  }
+}
+
+async function tryClearTranslationJobAiChunkCacheById(id) {
+  try {
+    return await clearTranslationJobAiChunkCacheById(id)
+  } catch (error) {
+    return {
+      deleted: false,
+      errorMessage: error && error.message ? error.message : String(error)
+    }
+  }
+}
+
 async function completeRunningTranslationJobForReview(options = {}) {
   const resultData = normalizeObject(options.result, 'result')
   if (!resultData.payload || !Array.isArray(resultData.previewEntries)) {
@@ -1861,6 +2115,7 @@ async function completeRunningTranslationJobForReview(options = {}) {
       499
     )
   }
+  await tryClearTranslationJobAiChunkCacheById(String(options.id || ''))
 }
 
 async function failRunningTranslationJob(options = {}) {
@@ -1874,15 +2129,19 @@ async function failRunningTranslationJob(options = {}) {
   if (manualRetryRequired) {
     retryable = true
     autoRetry = false
+  } else if (!retryable) {
+    autoRetry = false
   } else if (currentAttemptNo >= maxAttempts) {
-    retryable = false
+    retryable = true
     autoRetry = false
   }
+  const manualRetryAvailable = retryable && !autoRetry
   const failedStep = getFailedStep(options)
   const progressStep = buildFailureProgressStep({
     errorMessage: errorSummary.message,
     autoRetry,
-    manualRetryRequired
+    manualRetryRequired,
+    manualRetryAvailable
   })
 
   const JobModel = getTranslationJobModel()
@@ -2107,6 +2366,8 @@ module.exports = {
   renewTranslationJobLease,
   updateRunningTranslationJobProgress,
   saveRunningTranslationJobCheckpoint,
+  readRunningTranslationJobAiChunkCache,
+  saveRunningTranslationJobAiChunkCache,
   completeRunningTranslationJobForReview,
   failRunningTranslationJob,
   markExpiredRunningTranslationJobsRecovering

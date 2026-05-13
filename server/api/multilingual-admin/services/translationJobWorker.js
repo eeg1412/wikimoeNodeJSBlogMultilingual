@@ -196,6 +196,28 @@ function createExecutionContext(job, state, cancellation) {
         attemptNo,
         checkpoint
       })
+    },
+    async readAiChunkCache(cacheOptions) {
+      if (cancellation.isCancelled) {
+        throw createCancelledError(cancellation)
+      }
+      return await translationJobService.readRunningTranslationJobAiChunkCache({
+        id: job._id,
+        workerId: state.workerId,
+        attemptNo,
+        cacheOptions
+      })
+    },
+    async writeAiChunkCache(cacheRecord) {
+      if (cancellation.isCancelled) {
+        throw createCancelledError(cancellation)
+      }
+      return await translationJobService.saveRunningTranslationJobAiChunkCache({
+        id: job._id,
+        workerId: state.workerId,
+        attemptNo,
+        cacheRecord
+      })
     }
   }
 }
