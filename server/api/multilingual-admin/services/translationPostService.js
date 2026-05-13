@@ -1111,6 +1111,74 @@ async function findExistingTranslationRecord(
     .lean()
 }
 
+function isMongoDuplicateKeyError(error) {
+  if (!error) {
+    return false
+  }
+  return error.code === 11000 || error.code === 11001
+}
+
+function buildTranslationRecordUniqueFilterFromData(data) {
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const sourceId = toObjectId(data.sourceId)
+  if (!sourceId) {
+    return null
+  }
+
+  const sourceCollection = String(data.sourceCollection || '').trim()
+  const languageCode = normalizeLanguageCode(data.languageCode)
+  const recordKind = String(data.recordKind || '').trim()
+  if (!sourceCollection || !languageCode || !recordKind) {
+    return null
+  }
+
+  return {
+    sourceCollection,
+    sourceId,
+    languageCode,
+    recordKind
+  }
+}
+
+async function findExistingTranslationRecordFromData(model, data) {
+  const filter = buildTranslationRecordUniqueFilterFromData(data)
+  if (!filter) {
+    return null
+  }
+
+  return await model.findOne(filter).select('_id').lean()
+}
+
+async function saveTranslationRecordOrReuseExisting(model, data) {
+  try {
+    await new model(data).save()
+    return {
+      action: 'created',
+      record: { _id: data._id }
+    }
+  } catch (error) {
+    if (!isMongoDuplicateKeyError(error)) {
+      throw error
+    }
+
+    const existingRecord = await findExistingTranslationRecordFromData(
+      model,
+      data
+    )
+    if (!existingRecord) {
+      throw error
+    }
+
+    return {
+      action: 'reused',
+      record: existingRecord
+    }
+  }
+}
+
 function applyCollectionDefaults(collectionName, data, sourceObject, context) {
   const sourceId = getSourceIdentityId(sourceObject)
 
@@ -1459,14 +1527,13 @@ async function copySourceSnapshotRecord(
     }
 
     data._id = recordId
-    await new model(data).save()
-    const createdRecord = { _id: recordId }
+    const saveResult = await saveTranslationRecordOrReuseExisting(model, data)
     if (collectionName === 'sorts') {
       cacheDataUtils.invalidateSortListCache(context.languageCode)
     }
-    increaseCopiedCount(context, collectionName, 'created')
-    context.copyCache.set(cacheKey, createdRecord)
-    return createdRecord
+    increaseCopiedCount(context, collectionName, saveResult.action)
+    context.copyCache.set(cacheKey, saveResult.record)
+    return saveResult.record
   })
 }
 
