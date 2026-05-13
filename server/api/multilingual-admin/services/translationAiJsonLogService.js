@@ -183,6 +183,39 @@ function mergeAiJsonLogs(...logLists) {
   return logs
 }
 
+function normalizeLanguageCodeText(value) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  return String(value).trim()
+}
+
+function collectCoverImageLanguageCodes(artifactList, fallbackLanguageCode) {
+  const languageCodes = []
+  const fallback = normalizeLanguageCodeText(fallbackLanguageCode)
+  if (fallback) {
+    fallback.split(',').forEach(item => {
+      const languageCode = normalizeLanguageCodeText(item)
+      if (languageCode && !languageCodes.includes(languageCode)) {
+        languageCodes.push(languageCode)
+      }
+    })
+  }
+  artifactList.forEach(artifact => {
+    let artifactLanguageCodes = []
+    if (Array.isArray(artifact?.languageCodes)) {
+      artifactLanguageCodes = artifact.languageCodes
+    }
+    artifactLanguageCodes.forEach(item => {
+      const languageCode = normalizeLanguageCodeText(item)
+      if (languageCode && !languageCodes.includes(languageCode)) {
+        languageCodes.push(languageCode)
+      }
+    })
+  })
+  return languageCodes.join(',')
+}
+
 function buildCoverImageAiJsonLogs({
   snapshot,
   sourceLanguageCode,
@@ -195,6 +228,10 @@ function buildCoverImageAiJsonLogs({
   const artifactList = Array.isArray(snapshot?.coverImageArtifacts)
     ? snapshot.coverImageArtifacts
     : []
+  const resolvedTargetLanguageCode = collectCoverImageLanguageCodes(
+    artifactList,
+    targetLanguageCode
+  )
 
   const recognitionEntries = Object.entries(recognitionMap)
   if (recognitionEntries.length > 0) {
@@ -206,7 +243,7 @@ function buildCoverImageAiJsonLogs({
         model: '',
         requestId: meta.requestId || '',
         sourceLanguageCode,
-        targetLanguageCode,
+        targetLanguageCode: resolvedTargetLanguageCode,
         meta: {
           ...meta,
           recognitionCount: recognitionEntries.length
@@ -231,7 +268,7 @@ function buildCoverImageAiJsonLogs({
         model: '',
         requestId: meta.requestId || '',
         sourceLanguageCode,
-        targetLanguageCode,
+        targetLanguageCode: resolvedTargetLanguageCode,
         meta: {
           ...meta,
           generationCount: generationEntries.length
@@ -255,7 +292,7 @@ function buildCoverImageAiJsonLogs({
         model: '',
         requestId: meta.requestId || '',
         sourceLanguageCode,
-        targetLanguageCode,
+        targetLanguageCode: resolvedTargetLanguageCode,
         meta: {
           ...meta,
           artifactCount: artifactList.length

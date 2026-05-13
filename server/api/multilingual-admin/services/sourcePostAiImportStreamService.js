@@ -225,6 +225,7 @@ async function translateSourcePostAiImportEntriesStream(
           coverImageTranslationService.shouldSkipCoverImageRecognitionForMode(
             input.coverImageTranslationMode
           ),
+        onStatus: handlers.onStatus,
         cancellation: handlers.cancellation
       })
     data = appendCoverImageResultToStreamData(data, coverResult, registry)
@@ -406,6 +407,7 @@ async function translateSourcePostAiImportCoverImages(body = {}) {
     await coverImageTranslationService.processCoverImageTranslationBatch({
       registry,
       tasks,
+      onStatus: body.onStatus,
       cancellation: body.cancellation
     })
   const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)

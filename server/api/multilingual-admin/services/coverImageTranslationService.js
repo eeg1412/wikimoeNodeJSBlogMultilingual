@@ -95,6 +95,47 @@ function createWarning(code, message, context = {}) {
   }
 }
 
+function emitCoverImageWorkflowStatus(options = {}) {
+  if (typeof options.onStatus !== 'function') {
+    return
+  }
+
+  const stepKey = options.stepKey || ''
+  const stepLabel = options.stepLabel || ''
+  const status = options.status || ''
+  const message = options.message || stepLabel
+  options.onStatus({
+    message,
+    workflow: {
+      stepKey,
+      stepLabel,
+      status,
+      occurredAt: new Date().toISOString(),
+      attemptNo: null,
+      nextAttemptNo: null,
+      maxAttempts: null,
+      errorCode: options.errorCode || '',
+      errorMessage: options.errorMessage || ''
+    }
+  })
+}
+
+function emitCoverImageRecognitionWorkflowStatus(options = {}) {
+  emitCoverImageWorkflowStatus({
+    ...options,
+    stepKey: 'cover-image.recognition',
+    stepLabel: '识别封面图文字与主题'
+  })
+}
+
+function emitCoverImageGenerationWorkflowStatus(options = {}) {
+  emitCoverImageWorkflowStatus({
+    ...options,
+    stepKey: 'cover-image.generation',
+    stepLabel: '生成目标语言封面图'
+  })
+}
+
 function isCancellationError(error) {
   return error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
 }
@@ -963,6 +1004,7 @@ async function runRecognition({
   targetLanguageCode,
   recognitionKey,
   recognitionSettings,
+  onStatus,
   cancellation
 }) {
   if (registry.recognitionMap.has(recognitionKey)) {
@@ -989,6 +1031,11 @@ async function runRecognition({
       targetTitle,
       confidenceThreshold: recognitionSettings.confidenceThreshold
     })
+    emitCoverImageRecognitionWorkflowStatus({
+      onStatus,
+      status: 'running',
+      message: '正在识别封面图文字与主题'
+    })
     const response = await geminiImageRecognitionService.recognizeCoverTitle({
       runtimeSettings: recognitionSettings,
       prompt,
@@ -1005,12 +1052,24 @@ async function runRecognition({
       cancellation
     })
     if (!response.ok) {
+      emitCoverImageRecognitionWorkflowStatus({
+        onStatus,
+        status: 'failed',
+        message: `识别封面图文字与主题失败：${response.errorMessage || 'AI 未返回可用识别结果'}`,
+        errorCode: response.errorCode || 'COVER_IMAGE_RECOGNITION_FAILED',
+        errorMessage: response.errorMessage || 'AI 未返回可用识别结果'
+      })
       return {
         status: 'failed',
         recognitionInput: currentRecognitionInput,
         error: response
       }
     }
+    emitCoverImageRecognitionWorkflowStatus({
+      onStatus,
+      status: 'completed',
+      message: '识别封面图文字与主题已完成'
+    })
     return {
       status: 'success',
       recognitionInput: currentRecognitionInput,
@@ -1057,6 +1116,13 @@ async function runRecognition({
         diagnostics
       }
     }
+    emitCoverImageRecognitionWorkflowStatus({
+      onStatus,
+      status: 'failed',
+      message: `识别封面图文字与主题失败：${failedResult.error.message}`,
+      errorCode: error?.code || 'COVER_IMAGE_RECOGNITION_FAILED',
+      errorMessage: failedResult.error.message
+    })
     registry.recognitionMap.set(recognitionKey, failedResult)
     return failedResult
   }
@@ -1078,6 +1144,7 @@ async function runGeneration({
   generationKey,
   generationSettings,
   recognitionProvider,
+  onStatus,
   cancellation
 }) {
   if (registry.generationMap.has(generationKey)) {
@@ -1116,6 +1183,11 @@ async function runGeneration({
     const sourceBuffer = await fs.promises.readFile(coverInfo.sourceFilePath)
     const sourceMimeType = coverInfo.sourceMimeType || 'image/png'
     const sourceImageDataUrl = `data:${sourceMimeType};base64,${sourceBuffer.toString('base64')}`
+    emitCoverImageGenerationWorkflowStatus({
+      onStatus,
+      status: 'running',
+      message: '正在生成目标语言封面图'
+    })
     const generated = await geminiImageGenerationService.generateCoverImage({
       settings: generationSettings,
       prompt: generationPrompt.prompt,
@@ -1133,6 +1205,11 @@ async function runGeneration({
         targetLanguageCode
       },
       cancellation
+    })
+    emitCoverImageGenerationWorkflowStatus({
+      onStatus,
+      status: 'completed',
+      message: '生成目标语言封面图已完成'
     })
     const generatedImage = await coverImagePostprocessService.resizeCoverExact({
       jobId: getJobId(job),
@@ -1215,6 +1292,13 @@ async function runGeneration({
         diagnostics
       }
     }
+    emitCoverImageGenerationWorkflowStatus({
+      onStatus,
+      status: 'failed',
+      message: `生成目标语言封面图失败：${failedResult.error.message}`,
+      errorCode: error?.code || 'COVER_IMAGE_GENERATION_FAILED',
+      errorMessage: failedResult.error.message
+    })
     registry.generationMap.set(generationKey, failedResult)
     return failedResult
   }
@@ -1403,6 +1487,7 @@ async function processCoverImageTranslation(options = {}) {
       targetLanguageCode: languageCode,
       recognitionKey,
       recognitionSettings,
+      onStatus: options.onStatus,
       cancellation: options.cancellation
     })
   }
@@ -1497,6 +1582,7 @@ async function processCoverImageTranslation(options = {}) {
     generationKey,
     generationSettings,
     recognitionProvider: recognitionResult.provider,
+    onStatus: options.onStatus,
     cancellation: options.cancellation
   })
 
@@ -1594,6 +1680,7 @@ async function processCoverImageTranslationBatch(options = {}) {
         ...task,
         registry,
         targetTitle: task.targetTitle,
+        onStatus: options.onStatus,
         cancellation: options.cancellation
       })
       results.push({

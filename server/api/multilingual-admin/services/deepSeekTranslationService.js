@@ -5007,6 +5007,7 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: input.targetLanguageCode,
           skipRecognition: true,
+          onStatus: handlers.onStatus,
           cancellation: handlers.cancellation
         })
       data = appendCoverImageResultToStreamData(

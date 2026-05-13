@@ -191,6 +191,10 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
     return result
   }
   const registry = coverImageTranslationService.createCoverImageRegistry()
+  const coverImageHandlers = createHandlers(context, 'TranslateCoverImage', {
+    start: 88,
+    end: 96
+  })
   const coverResult =
     await coverImageTranslationService.processCoverImageTranslation({
       job,
@@ -202,6 +206,7 @@ async function appendPostTranslationCoverImageResult(job, result, context) {
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
       skipRecognition: true,
+      onStatus: coverImageHandlers.onStatus,
       cancellation: context.cancellation
     })
   appendCoverImageResult(result, coverResult, registry, {
@@ -1198,6 +1203,10 @@ async function executeSourcePostAiImport(job, context) {
   const coverImageRegistry =
     coverImageTranslationService.createCoverImageRegistry()
   if (coverImageTasks.length > 0) {
+    const coverImageHandlers = createHandlers(context, 'TranslateCoverImage', {
+      start: 88,
+      end: 96
+    })
     await context.updateProgress({
       currentStage: 'TranslateCoverImage',
       currentStep: '正在按标题去重处理所有语言的封面图 AI 翻译',
@@ -1208,6 +1217,7 @@ async function executeSourcePostAiImport(job, context) {
         registry: coverImageRegistry,
         tasks: coverImageTasks,
         cancellation: context.cancellation,
+        onStatus: coverImageHandlers.onStatus,
         onTaskStart: async ({ task, taskIndex, taskCount }) => {
           await context.updateProgress({
             currentStage: 'TranslateCoverImage',
