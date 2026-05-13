@@ -1152,6 +1152,82 @@ async function findExistingTranslationRecordFromData(model, data) {
   return await model.findOne(filter).select('_id').lean()
 }
 
+async function buildValidatedInsertData(model, data) {
+  const document = new model(data)
+  await document.validate()
+  const insertData = document.toObject({ depopulate: true })
+  const now = new Date()
+  if (!insertData.createdAt) {
+    insertData.createdAt = now
+  }
+  if (!insertData.updatedAt) {
+    insertData.updatedAt = now
+  }
+  return insertData
+}
+
+function getFindOneAndUpdateRecord(result) {
+  if (!result) {
+    return null
+  }
+  if (result.value) {
+    return result.value
+  }
+  if (result._id) {
+    return result
+  }
+  return null
+}
+
+function getFindOneAndUpdateAction(result) {
+  if (
+    result &&
+    result.lastErrorObject &&
+    result.lastErrorObject.updatedExisting === false
+  ) {
+    return 'created'
+  }
+  return 'reused'
+}
+
+async function upsertTranslationRecordOrReuseExisting(model, data) {
+  const filter = buildTranslationRecordUniqueFilterFromData(data)
+  if (!filter) {
+    return await saveTranslationRecordOrReuseExisting(model, data)
+  }
+
+  const insertData = await buildValidatedInsertData(model, data)
+  const result = await model.collection.findOneAndUpdate(
+    filter,
+    {
+      $setOnInsert: insertData
+    },
+    {
+      upsert: true,
+      returnDocument: 'after',
+      projection: { _id: 1 },
+      includeResultMetadata: true
+    }
+  )
+  let record = getFindOneAndUpdateRecord(result)
+  if (!record) {
+    record = await findExistingTranslationRecordFromData(model, data)
+  }
+  if (!record) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '翻译关系副本原子创建后无法读取记录，已停止应用以避免关系丢失',
+      'translationRecord',
+      409
+    )
+  }
+
+  return {
+    action: getFindOneAndUpdateAction(result),
+    record: { _id: record._id }
+  }
+}
+
 async function saveTranslationRecordOrReuseExisting(model, data) {
   try {
     await new model(data).save()
@@ -1527,7 +1603,12 @@ async function copySourceSnapshotRecord(
     }
 
     data._id = recordId
-    const saveResult = await saveTranslationRecordOrReuseExisting(model, data)
+    let saveResult = null
+    if (collectionName === SOURCE_POST_COLLECTION) {
+      saveResult = await saveTranslationRecordOrReuseExisting(model, data)
+    } else {
+      saveResult = await upsertTranslationRecordOrReuseExisting(model, data)
+    }
     if (collectionName === 'sorts') {
       cacheDataUtils.invalidateSortListCache(context.languageCode)
     }
