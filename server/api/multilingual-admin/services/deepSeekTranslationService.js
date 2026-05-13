@@ -1486,7 +1486,8 @@ function buildTermExtractionMessages(
         '你是多语言博客 CMS 的官方译名联网检索候选词筛选器。',
         '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
         `JSON 根节点必须包含 schema、version、terms 和 contextSummary，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
-        `返回格式示例：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"某作品主角所属乐队成员"}],"contextSummary":"内容围绕某作品乐队成员的演出准备与人物关系展开"}。`,
+        `返回 JSON 格式固定为：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"稳定身份线索"}],"contextSummary":"用于后续消歧的上下文摘要"}。`,
+        'terms 中每项必须包含 sourceText、searchKeywords、importance 和 note；contextSummary 必须是用于后续消歧的稳定上下文摘要。',
         '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
         '抽取阶段必须把疑似需要官方译名的专有名词交给词库或联网流程；不要把它留给正文翻译阶段自由处理。',
         '如果词条只是普通词、普通地点描述、通用设施或无稳定实体指向的短语，且不需要核对既有译名，才不要抽取。'
@@ -1498,22 +1499,22 @@ function buildTermExtractionMessages(
         '优先抽取作品名称、系列名称、角色名称、真实组织、品牌产品、游戏/书籍/影视/番剧标题、现实地标、官方活动名等需要核对正式译名的词条。',
         '只要词条像作品、角色、声优/作者、游戏、书籍、影视、番剧、出版社、平台、品牌、组织、活动、联名企划、小众地点、新近内容或标题标点敏感名称，就必须抽取；禁止因为你觉得可以直译、音译或意译而跳过。',
         '必须保留原文表面形式，不要自行翻译、改写、解释或添加括号。',
-        '同一实体不要因为书名号、引号、空格、全半角、感叹号、问号、句点等标点差异拆成多个 terms；例如“孤独摇滚”和“孤独摇滚！”只返回一个。',
-        'searchKeywords 必须由你生成，用于数据库模糊查询同一实体；写原文核心名、常见简称、无装饰标点写法，例如“孤独摇滚！”的 searchKeywords 应包含“孤独摇滚”。',
+        '同一实体不要因为书名号、引号、空格、全半角、感叹号、问号、句点等装饰性差异拆成多个 terms；这类差异只保留一个规范词条。',
+        'searchKeywords 必须由你生成，用于数据库模糊查询同一实体；写原文核心名、常见简称、无装饰标点写法。',
         'searchKeywords 不要使用“动画”“角色”“乐园”“停车场”这类过宽普通词，也不要使用目标语言译名。',
         '不要抽取由多个已可独立识别的实体用“×”“x”“X”“&”“＋”“+”“/”连接形成的临时组合名、联名展示名或宣传短语；如果确有翻译价值，只抽取其中需要查译名的独立实体。',
-        '例如“孤独摇滚 × 海岛乐园”如果只是作品名与地点/活动名的组合，不要返回“孤独摇滚 × 海岛乐园”这个组合词条；只返回确实需要确认译名的独立实体。',
+        '如果一个词条只是作品名、地点名、活动名、宣传词或展示用连接符组成的临时组合，不要返回这个组合词条；只返回确实需要确认译名的独立实体。',
         '输入正文已移除 HTML 标签；不要根据标签、属性或结构推测词条。',
         '不要抽取普通形容词、通用名词、完整句子、URL、代码、纯数字、日期、文件路径或随机 ID。',
         '不要抽取可以直接按目标语言常规表达翻译的道路、楼层、房间、编号路线、普通设施、泛称地点或行政区划组合。',
-        '例如“1号路”“2号路”“第3层”“A区入口”“北门”“停车场”这类不需要联网确认官方译名的词条必须排除。',
-        '不要把“某地的停车场”“某地的路口”“某作品拍照场景里的楼梯”这类由普通地点加描述性修饰组成、没有稳定正式名称的短语当成专有名词；即使它与作品巡礼、拍照打卡或剧情场景有关，也不代表它需要联网确认官方译名。',
+        '道路、楼层、房间、编号路线、普通设施、泛称地点或行政区划组合这类不需要联网确认官方译名的词条必须排除。',
+        '不要把普通地点加描述性修饰组成、没有稳定正式名称的短语当成专有名词；即使它与作品巡礼、拍照打卡或剧情场景有关，也不代表它需要联网确认官方译名。',
         '如果你不确定一个词是否存在官方译名，只要它确实像作品、角色、品牌、组织、产品、现实地标、小众地点、活动或标题，就抽取并交给后续流程确认；只有明显是普通描述性短语时才排除。',
         '只有当不同写法确实指向不同官方实体或不同作品版本时才分别返回；同一对象的标点、简称、全半角或装饰符差异不要拆分。',
         'importance 必须综合判断词条对文章主题、标题摘要、关联内容和正文理解的一致性影响，以及联网确认官方译名的必要性。',
         '每个 terms 项都必须写 note；note 只用于数据库同名词消歧，不用于生成译名。',
-        'note 要短，只写可脱离本文单独成立的稳定身份线索，例如所属作品、角色定位、组织属性、产品类型、地理属性；不要解释翻译方法，不要写目标语言译名。',
-        'note 不是文章摘要；不要写“文中提及某作品拍照场景”“正文讨论某角色关系”这类依赖当前文章叙述的句子。',
+        'note 要短，只写可脱离本文单独成立的稳定身份线索，包括所属作品、角色定位、组织属性、产品类型、地理属性；不要解释翻译方法，不要写目标语言译名。',
+        'note 不是文章摘要；不要写依赖当前文章叙述、段落位置或临时场景的句子。',
         'note 禁止写“文中提及”“本文”“正文”“本次内容”“该段”“此处”等文章位置描述；不要写只在当前文章里成立的临时场景说明。',
         '必须结合 previousContextSummary 和当前包文本重新生成 contextSummary；contextSummary 只保留对专有名词译名判断有帮助的作品、人物、组织、地点、关系和场景。',
         'contextSummary 要覆盖当前包新增信息并继承仍然重要的上文信息，删除无关细节，不要逐字复述正文，不要编造未出现的设定，也不要描述名词出现在标题、正文或段落中的位置。',
@@ -2059,16 +2060,46 @@ function buildMissingTermRequests(missingTerms) {
   })
 }
 
-function mergeMatchedTermIds(matchedTermIds, savedTranslations) {
-  const termIdList = matchedTermIds.slice()
-  savedTranslations.forEach(translation => {
-    const termId = String(translation.termId || '')
-    if (!termId || termIdList.includes(termId)) {
+function mergeMatchedTermLinks({
+  matchedTermLinks,
+  savedTranslations,
+  extractedTerms
+}) {
+  const termMap = new Map()
+  extractedTerms.forEach(term => {
+    if (!term.normalizedSourceText) {
       return
     }
-    termIdList.push(termId)
+    termMap.set(term.normalizedSourceText, term)
   })
-  return termIdList
+  const linkList = matchedTermLinks.slice()
+  const linkKeySet = new Set(
+    linkList.map(link => {
+      return `${link.normalizedSourceText}::${link.termId}`
+    })
+  )
+  savedTranslations.forEach(translation => {
+    const termId = String(translation.termId || '')
+    const normalizedSourceText = String(translation.normalizedSourceText || '')
+    if (!termId || !normalizedSourceText) {
+      return
+    }
+    const linkKey = `${normalizedSourceText}::${termId}`
+    if (linkKeySet.has(linkKey)) {
+      return
+    }
+    const extractedTerm = termMap.get(normalizedSourceText)
+    linkKeySet.add(linkKey)
+    linkList.push({
+      termId,
+      sourceText:
+        extractedTerm?.sourceText ||
+        translation.sourceText ||
+        translation.sourceTextSnapshot,
+      normalizedSourceText
+    })
+  })
+  return linkList
 }
 
 async function saveResolvedTermTranslationsAndRefreshCoverage({
@@ -2076,6 +2107,7 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   provider,
   model,
   matchedTermIds,
+  matchedTermLinks,
   extractedTerms,
   targetLanguageCodes,
   usageTracker
@@ -2083,6 +2115,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   if (!Array.isArray(terms) || terms.length === 0) {
     return {
       matchedTermIds,
+      matchedTermLinks,
+      matchedCandidateTerms: [],
       candidateCoverage: null,
       coverage: null,
       savedTranslations: []
@@ -2095,10 +2129,12 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
       provider,
       model
     })
-  const nextMatchedTermIds = mergeMatchedTermIds(
-    matchedTermIds,
-    savedTranslations
-  )
+  const nextMatchedTermLinks = mergeMatchedTermLinks({
+    matchedTermLinks,
+    savedTranslations,
+    extractedTerms
+  })
+  const nextMatchedTermIds = getMatchedTermIdsFromLinks(nextMatchedTermLinks)
   const candidateCoverage =
     await properNounTranslationService.getTranslationCandidatesForExtractedTerms(
       {
@@ -2106,11 +2142,15 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
         targetLanguageCodes
       }
     )
+  const matchedCandidateTerms = buildMatchedCandidateTerms(
+    candidateCoverage.candidateTerms,
+    nextMatchedTermLinks
+  )
   const coverage =
     await properNounTranslationService.compareMatchedTermTranslationCoverage({
       terms: extractedTerms,
       targetLanguageCodes,
-      candidateTerms: candidateCoverage.candidateTerms,
+      candidateTerms: matchedCandidateTerms,
       translations: candidateCoverage.translations,
       matchedTermIds: nextMatchedTermIds,
       usageTracker
@@ -2118,6 +2158,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
 
   return {
     matchedTermIds: nextMatchedTermIds,
+    matchedTermLinks: nextMatchedTermLinks,
+    matchedCandidateTerms,
     candidateCoverage,
     coverage,
     savedTranslations
@@ -2153,8 +2195,10 @@ function shouldFilterExistingTermWithAi(sourceTextItem, candidateTerms) {
 function splitExistingTermCandidatesForFilter(sourceTextItems, candidateTerms) {
   const candidateMap = groupCandidateTermsByNormalizedSourceText(candidateTerms)
   const autoMatchedTermIds = []
+  const autoMatchedTermLinks = []
   const filterSourceTextItems = []
   const filterCandidateTerms = []
+  const filterCandidateTermIdSet = new Set()
 
   sourceTextItems.forEach(sourceTextItem => {
     const termList = candidateMap.get(sourceTextItem.normalizedSourceText) || []
@@ -2162,17 +2206,29 @@ function splitExistingTermCandidatesForFilter(sourceTextItems, candidateTerms) {
       return
     }
     if (!shouldFilterExistingTermWithAi(sourceTextItem, termList)) {
-      autoMatchedTermIds.push(String(termList[0]._id || ''))
+      const termId = String(termList[0]._id || '')
+      autoMatchedTermIds.push(termId)
+      autoMatchedTermLinks.push({
+        termId,
+        sourceText: sourceTextItem.sourceText,
+        normalizedSourceText: sourceTextItem.normalizedSourceText
+      })
       return
     }
     filterSourceTextItems.push(sourceTextItem)
     termList.forEach(term => {
+      const termId = String(term._id || '')
+      if (filterCandidateTermIdSet.has(termId)) {
+        return
+      }
+      filterCandidateTermIdSet.add(termId)
       filterCandidateTerms.push(term)
     })
   })
 
   return {
     autoMatchedTermIds,
+    autoMatchedTermLinks,
     filterSourceTextItems,
     filterCandidateTerms
   }
@@ -2200,11 +2256,11 @@ function buildExistingTermFilterRequestData({
       task: 'filter_existing_proper_noun_terms',
       outputContract: {
         rootType: 'object',
-        requiredFields: ['schema', 'version', 'matchedTermIds'],
+        requiredFields: ['schema', 'version', 'matchedTerms'],
         schema: TERM_EXISTING_FILTER_RESULT_SCHEMA,
         version: 1,
-        matchedTermIds:
-          '数据库候选 termId 字符串数组，只包含确认属于本次文章同一对象的候选'
+        matchedTerms:
+          '数组，每项包含 sourceText 和 termId；只包含确认属于同一对象的抽取名词与数据库候选配对'
       },
       sourceLanguageCode: input.sourceLanguageCode || '',
       targetLanguageCodes: getStableTermTargetLanguageCodes(input),
@@ -2259,7 +2315,8 @@ function buildExistingTermFilterMessages({
         '你是多语言博客 CMS 的专有名词数据库候选消歧器。',
         '本步骤禁止翻译、禁止联网、禁止补充译名，只判断数据库候选是否属于本次文章中的同一对象。',
         '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
-        `JSON 根节点必须包含 schema、version、matchedTermIds，schema 固定为 ${TERM_EXISTING_FILTER_RESULT_SCHEMA}。`
+        `JSON 根节点必须包含 schema、version、matchedTerms，schema 固定为 ${TERM_EXISTING_FILTER_RESULT_SCHEMA}。`,
+        'matchedTerms 中每一项必须包含 sourceText 和 termId；禁止只返回 termId。'
       ])
     },
     {
@@ -2268,11 +2325,14 @@ function buildExistingTermFilterMessages({
         '数据库候选来自 AI 生成关键词的模糊查询，候选 sourceText 不一定与 extractedTerms.sourceText 完全相同。',
         '必须结合 contentContextSummary、extractedTerms.note、databaseCandidates.matchedExtractedTerms 和 databaseCandidates.note 判断。',
         '短人名、昵称、单字名、同形异义词不能只按字面匹配。',
-        '标点、书名号、感叹号、全半角或简称差异不应阻止同一实体匹配，例如“孤独摇滚”和“孤独摇滚！”可以属于同一作品。',
+        '包含关系、同系列、续作、平台版本、服务器区域、Online/手游/2/II 等版本词差异，默认不是同一实体；必须有 note 或上下文明确证明才可配对。',
+        '带版本词、平台词、续作编号、区服词、Online、手游或数字编号的表面相近名词必须分别判断，不能因为共享核心词就互相复用词库记录。',
+        '标点、书名号、感叹号、全半角或简称差异不应阻止同一实体匹配，但只能在实体身份已经确认一致时合并。',
         '临时组合名、联名展示名或宣传短语不能因为包含数据库里的作品名就整体匹配，必须确认候选本身就是 extractedTerms 中需要的实体。',
-        '只有数据库候选明确指向本文同一作品、角色、组织、地点、产品或讨论对象时，才能把 termId 放入 matchedTermIds。',
+        '只有数据库候选明确指向某个 extractedTerms.sourceText 在本文中的同一作品、角色、组织、地点、产品或讨论对象时，才能把 {sourceText, termId} 放入 matchedTerms。',
+        '同一个 termId 不能因为关键词相似就自动套用到多个 sourceText；每个配对都必须单独确认。',
         '如果候选备注缺失或信息不足以确认同一对象，必须剔除该候选。',
-        '不要输出理由、译名、备注或候选之外的 termId。'
+        '不要输出理由、译名、备注、候选之外的 termId 或 extractedTerms 之外的 sourceText。'
       ])
     },
     {
@@ -2330,33 +2390,181 @@ function buildExistingTermFilterRequestBody({
   return requestBody
 }
 
-function normalizeMatchedExistingTermIds(resultData, candidateTerms) {
-  if (!Array.isArray(resultData?.matchedTermIds)) {
+function findSourceTextItemForMatchedTerm(matchItem, sourceTextItems) {
+  const sourceText = properNounTranslationService.normalizeSourceText(
+    matchItem?.sourceText
+  )
+  const normalizedSourceTextFromSource =
+    properNounTranslationService.buildNormalizedSourceText(sourceText)
+  const normalizedSourceTextFromMatch =
+    properNounTranslationService.buildNormalizedSourceText(
+      matchItem?.normalizedSourceText
+    )
+  return sourceTextItems.find(sourceTextItem => {
+    if (
+      normalizedSourceTextFromSource &&
+      sourceTextItem.normalizedSourceText === normalizedSourceTextFromSource
+    ) {
+      return true
+    }
+    if (
+      normalizedSourceTextFromMatch &&
+      sourceTextItem.normalizedSourceText === normalizedSourceTextFromMatch
+    ) {
+      return true
+    }
+    return false
+  })
+}
+
+function isCandidateMatchedToSourceText(term, normalizedSourceText) {
+  const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
+    ? term.matchedSourceTextItems
+    : []
+  if (matchedSourceTextItems.length === 0) {
+    return term.normalizedSourceText === normalizedSourceText
+  }
+  return matchedSourceTextItems.some(item => {
+    return item.normalizedSourceText === normalizedSourceText
+  })
+}
+
+function normalizeMatchedExistingTermLinks({
+  resultData,
+  candidateTerms,
+  sourceTextItems
+}) {
+  if (!Array.isArray(resultData?.matchedTerms)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 专有名词候选消歧结果缺少 matchedTermIds 数组',
+      'DeepSeek 专有名词候选消歧结果缺少 matchedTerms 数组',
       'deepSeek',
       502
     )
   }
 
-  const candidateIdSet = new Set(
-    candidateTerms.map(term => {
-      return String(term._id || '')
+  const candidateMap = new Map()
+  candidateTerms.forEach(term => {
+    const termId = String(term._id || '')
+    if (termId) {
+      candidateMap.set(termId, term)
+    }
+  })
+  const matchedTermLinks = []
+  const matchedLinkKeySet = new Set()
+  resultData.matchedTerms.forEach(matchItem => {
+    const termId = String(matchItem?.termId || '').trim()
+    const candidateTerm = candidateMap.get(termId)
+    if (!termId || !candidateTerm) {
+      return
+    }
+    const sourceTextItem = findSourceTextItemForMatchedTerm(
+      matchItem,
+      sourceTextItems
+    )
+    if (!sourceTextItem) {
+      return
+    }
+    if (
+      !isCandidateMatchedToSourceText(
+        candidateTerm,
+        sourceTextItem.normalizedSourceText
+      )
+    ) {
+      return
+    }
+    const linkKey = `${sourceTextItem.normalizedSourceText}::${termId}`
+    if (matchedLinkKeySet.has(linkKey)) {
+      return
+    }
+    matchedLinkKeySet.add(linkKey)
+    matchedTermLinks.push({
+      termId,
+      sourceText: sourceTextItem.sourceText,
+      normalizedSourceText: sourceTextItem.normalizedSourceText
     })
-  )
+  })
+  return matchedTermLinks
+}
+
+function getMatchedTermIdsFromLinks(matchedTermLinks) {
   const matchedTermIds = []
-  resultData.matchedTermIds.forEach(value => {
-    const termId = String(value || '').trim()
-    if (!termId || !candidateIdSet.has(termId)) {
-      return
+  matchedTermLinks.forEach(link => {
+    const termId = String(link.termId || '')
+    if (termId && !matchedTermIds.includes(termId)) {
+      matchedTermIds.push(termId)
     }
-    if (matchedTermIds.includes(termId)) {
-      return
-    }
-    matchedTermIds.push(termId)
   })
   return matchedTermIds
+}
+
+function buildMatchedCandidateTerms(candidateTerms, matchedTermLinks) {
+  const linkMap = new Map()
+  matchedTermLinks.forEach(link => {
+    const termId = String(link.termId || '')
+    const normalizedSourceText = String(link.normalizedSourceText || '')
+    if (!termId || !normalizedSourceText) {
+      return
+    }
+    if (!linkMap.has(termId)) {
+      linkMap.set(termId, new Set())
+    }
+    linkMap.get(termId).add(normalizedSourceText)
+  })
+  return candidateTerms
+    .map(term => {
+      const termId = String(term._id || '')
+      const normalizedSourceTextSet = linkMap.get(termId)
+      if (!normalizedSourceTextSet) {
+        return null
+      }
+      const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
+        ? term.matchedSourceTextItems.filter(item => {
+            return normalizedSourceTextSet.has(item.normalizedSourceText)
+          })
+        : []
+      if (matchedSourceTextItems.length === 0) {
+        return null
+      }
+      return {
+        ...term,
+        matchedSourceTextItems
+      }
+    })
+    .filter(Boolean)
+}
+
+function buildExistingTermCandidateLogItem(term) {
+  const item = {
+    termId: String(term._id || ''),
+    sourceText: term.sourceText || ''
+  }
+  const note = buildCandidateIdentityNote(term)
+  if (note) {
+    item.note = note
+  }
+  if (Array.isArray(term.matchedSourceTextItems)) {
+    item.matchedExtractedTerms = term.matchedSourceTextItems.map(sourceItem => {
+      return {
+        sourceText: sourceItem.sourceText || '',
+        note: normalizeString(sourceItem.note).slice(
+          0,
+          MAX_EXTRACTED_TERM_NOTE_LENGTH
+        )
+      }
+    })
+  }
+  return item
+}
+
+function buildMatchedExistingTermCandidateLogItems(
+  candidateTerms,
+  matchedTermIds
+) {
+  const matchedIdSet = new Set(matchedTermIds.map(item => String(item || '')))
+  return candidateTerms
+    .filter(term => matchedIdSet.has(String(term._id || '')))
+    .map(term => buildExistingTermCandidateLogItem(term))
 }
 
 async function filterExistingTermCandidatesWithAi({
@@ -2435,12 +2643,27 @@ async function filterExistingTermCandidatesWithAi({
       }
 
       const resultData = parseAiContent(responseData)
-      const matchedTermIds = normalizeMatchedExistingTermIds(
+      const matchedTermLinks = normalizeMatchedExistingTermLinks({
         resultData,
-        candidateTerms
+        candidateTerms,
+        sourceTextItems
+      })
+      const matchedTermIds = getMatchedTermIdsFromLinks(matchedTermLinks)
+      const matchedCandidateTerms = buildMatchedCandidateTerms(
+        candidateTerms,
+        matchedTermLinks
+      )
+      const databaseCandidates = candidateTerms.map(term => {
+        return buildExistingTermCandidateLogItem(term)
+      })
+      const matchedTerms = buildMatchedExistingTermCandidateLogItems(
+        candidateTerms,
+        matchedTermIds
       )
       return {
         matchedTermIds,
+        matchedTermLinks,
+        matchedCandidateTerms,
         aiJsonLog: translationAiJsonLogService.createAiJsonLog({
           operation: 'proper-noun.existing-term.filter',
           stage: 'ProperNounExistingTermFilter',
@@ -2461,7 +2684,10 @@ async function filterExistingTermCandidatesWithAi({
           },
           json: {
             result: resultData,
-            matchedTermIds
+            matchedTermIds,
+            matchedTermLinks,
+            matchedTerms,
+            databaseCandidates
           }
         })
       }
@@ -2490,8 +2716,14 @@ async function resolveExistingTermMatches({
     candidateTerms
   )
   if (splitResult.filterCandidateTerms.length === 0) {
+    const matchedCandidateTerms = buildMatchedCandidateTerms(
+      candidateTerms,
+      splitResult.autoMatchedTermLinks
+    )
     return {
       matchedTermIds: splitResult.autoMatchedTermIds,
+      matchedTermLinks: splitResult.autoMatchedTermLinks,
+      matchedCandidateTerms,
       aiJsonLog: null
     }
   }
@@ -2510,10 +2742,18 @@ async function resolveExistingTermMatches({
     contextSummary,
     handlers
   })
+  const matchedTermLinks = splitResult.autoMatchedTermLinks.concat(
+    filterResult.matchedTermLinks
+  )
+  const matchedTermIds = getMatchedTermIdsFromLinks(matchedTermLinks)
+  const matchedCandidateTerms = buildMatchedCandidateTerms(
+    candidateTerms,
+    matchedTermLinks
+  )
   return {
-    matchedTermIds: splitResult.autoMatchedTermIds.concat(
-      filterResult.matchedTermIds
-    ),
+    matchedTermIds,
+    matchedTermLinks,
+    matchedCandidateTerms,
     aiJsonLog: filterResult.aiJsonLog
   }
 }
@@ -2590,11 +2830,13 @@ async function resolveOfficialTermGlossaryCacheData({
     aiJsonLogs.push(matchResult.aiJsonLog)
   }
   let matchedTermIds = matchResult.matchedTermIds
+  let matchedTermLinks = matchResult.matchedTermLinks
+  let matchedCandidateTerms = matchResult.matchedCandidateTerms
   let coverage =
     await properNounTranslationService.compareMatchedTermTranslationCoverage({
       terms: extractedTerms,
       targetLanguageCodes,
-      candidateTerms: candidateCoverage.candidateTerms,
+      candidateTerms: matchedCandidateTerms,
       translations: candidateCoverage.translations,
       matchedTermIds,
       usageTracker
@@ -2679,13 +2921,18 @@ async function resolveOfficialTermGlossaryCacheData({
         provider: searchResult.provider,
         model: searchResult.model,
         matchedTermIds,
+        matchedTermLinks,
         extractedTerms,
         targetLanguageCodes,
         usageTracker
       })
     matchedTermIds = searchSaveResult.matchedTermIds
+    matchedTermLinks = searchSaveResult.matchedTermLinks
     if (searchSaveResult.candidateCoverage) {
       candidateCoverage = searchSaveResult.candidateCoverage
+    }
+    if (searchSaveResult.matchedCandidateTerms) {
+      matchedCandidateTerms = searchSaveResult.matchedCandidateTerms
     }
     if (searchSaveResult.coverage) {
       coverage = searchSaveResult.coverage

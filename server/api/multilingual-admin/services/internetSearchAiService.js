@@ -65,12 +65,7 @@ const officialTermSearchResponseJsonSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: [
-          'sourceText',
-          'translations',
-          'noteNeedsUpdate',
-          'note'
-        ],
+        required: ['sourceText', 'translations', 'noteNeedsUpdate', 'note'],
         properties: {
           sourceText: { type: 'string' },
           translations: {
@@ -254,7 +249,12 @@ function attachSearchTermNoteRevisionInstruction(requestData, termRequests) {
     return
   }
   requestData['联网检索后的备注修订要求'] =
-    'Gemini 使用 Google Search 确认对象身份后，需要判断 sourceTermRequests[].note 是否存在实体误判、过宽、过窄、依赖正文临时语境或包含译名的问题。需要修订时返回 noteNeedsUpdate=true，并在 note 写入新的中文词库消歧备注；不需要修订时返回 noteNeedsUpdate=false，并在 note 保持原备注。'
+    '使用可用联网检索工具确认对象身份后，需要判断 sourceTermRequests[].note 是否存在实体误判、过宽、过窄、依赖正文临时语境或包含译名的问题。需要修订时返回 noteNeedsUpdate=true，并在 note 写入新的中文词库消歧备注；不需要修订时返回 noteNeedsUpdate=false，并在 note 保持原备注。'
+}
+
+function attachSearchQueryPolicy(requestData) {
+  requestData['联网检索次数与关键词要求'] =
+    '每个 sourceText 的每种目标语言应尽可能只使用 1 次联网检索，最多不得超过 2 次。第一次查询必须同时包含 sourceText、稳定身份线索和目标语言译名意图；查询语言必须优先贴近目标语言的当地写法和当地内容生态，不要只用源文语言关键词检索目标语言结果。只有首轮结果互相矛盾或无法确认对象身份时，才允许第二次查询。禁止用过宽的普通词、截断后的短词或只包含系列母题的关键词反复检索。'
 }
 
 function attachTermTranslationQualityPolicy(requestData) {
@@ -312,6 +312,7 @@ function buildOfficialTermSearchPrompt({
   attachTermTranslationQualityPolicy(requestData)
   attachTermNoteInstruction(requestData, termRequests)
   attachSearchTermNoteRevisionInstruction(requestData, termRequests)
+  attachSearchQueryPolicy(requestData)
   if (normalizedContextSummary) {
     requestData.contentContextSummary = normalizedContextSummary
   }
@@ -319,14 +320,20 @@ function buildOfficialTermSearchPrompt({
   const promptLines = [
     '你是多语言博客 CMS 的互联网检索助手。',
     '本步骤只处理前一步无法通过模型内置知识可靠确认的缺失译名。',
-    '只允许为 sourceTermRequests 中列出的 sourceText 和目标语言 code 使用 Google Search，不要检索请求之外的语言或名词。',
+    '只允许为 sourceTermRequests 中列出的 sourceText 和目标语言 code 使用可用联网检索工具，不要检索请求之外的语言或名词。',
+    '每个 sourceText 的每种目标语言应尽可能只检索一次，最多不能超过两次；不要用大量低质量 query 试探。',
+    '检索关键词必须高效：同时包含 sourceText、note 或 contentContextSummary 中的稳定身份线索，以及目标语言译名意图。',
+    '为某个目标语言确认译名时，query 必须优先使用该目标语言的当地写法、当地语境词和当地站点常用表达；源文词只作为实体定位线索，不得成为唯一检索语言。',
+    '如果目标语言使用不同文字系统，必须积极使用目标语言文字系统组织 query；不要只用源文语言关键词搜索目标语言译名。',
+    '禁止把 sourceText 截短成过宽关键词检索；不得用系列母题、父级作品名、通用类型词或部分核心词替代完整 sourceText。',
+    '只有首轮结果互相矛盾或无法确认对象身份时，才允许第二次检索；第二次必须针对矛盾点改进关键词。',
     'sourceTermRequests 旁可能包含 contentContextSummary；检索和筛选结果时必须优先按该上下文判断名词指向的作品、角色、组织、地点或产品。',
     '短人名、昵称、单字名或同形异义词必须结合 contentContextSummary 检索，不要只按字面普通词或日常含义给译名。',
     '你需要为每个缺失项给出目标语言中的官方译名、正式译名、权威通行译名或稳定通用译名。',
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
     '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
     '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
-    '在确认译名的同时，必须根据 Google Search 结果判断 sourceTermRequests[].note 是否需要修订。',
+    '在确认译名的同时，必须根据联网检索结果判断 sourceTermRequests[].note 是否需要修订。',
     '如果 note 对实体身份、作品归属、角色定位、组织类型、产品类型或地理属性的描述有误，或者含有“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，noteNeedsUpdate 必须为 true。',
     '修订后的 note 必须是中文词库消歧备注，只写可脱离本文单独成立的稳定身份线索；不要写翻译方法，不要写目标语言译名，不要写搜索过程。',
     '如果原 note 已准确可用，noteNeedsUpdate 必须为 false，note 返回原 note。',

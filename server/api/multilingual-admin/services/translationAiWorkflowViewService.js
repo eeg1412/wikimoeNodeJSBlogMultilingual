@@ -30,6 +30,14 @@ function normalizeText(value) {
   return toText(value).replace(/\r\n?/g, '\n').trim()
 }
 
+function getTimestamp(value) {
+  const timestamp = Date.parse(value || '')
+  if (Number.isNaN(timestamp)) {
+    return 0
+  }
+  return timestamp
+}
+
 function limitText(value, maxLength = MAX_TEXT_LENGTH) {
   const text = normalizeText(value)
   if (!text) {
@@ -446,7 +454,22 @@ function normalizeAiWorkflowEventStatus(status) {
 function collectAiWorkflowEventSteps(events) {
   const stepMap = new Map()
   const stepList = []
-  events.forEach(event => {
+  const orderedEvents = events
+    .map((event, index) => {
+      return {
+        event,
+        index,
+        timestamp: getTimestamp(event?.createdAt)
+      }
+    })
+    .sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp
+      }
+      return left.index - right.index
+    })
+    .map(item => item.event)
+  orderedEvents.forEach(event => {
     const stepKey = normalizeText(event.stepKey)
     const majorKey = normalizeWorkflowMajorKey(stepKey)
     const groupId = buildWorkflowEventGroupId(event)
@@ -591,15 +614,10 @@ function buildAiWorkflowEventLogSection(stepEntry) {
   const items = []
   const orderedEvents = stepEntry.events
     .map((event, index) => {
-      const createdAtTime = Date.parse(event.createdAt || '')
-      let normalizedCreatedAtTime = createdAtTime
-      if (Number.isNaN(createdAtTime)) {
-        normalizedCreatedAtTime = 0
-      }
       return {
         event,
         index,
-        createdAtTime: normalizedCreatedAtTime
+        createdAtTime: getTimestamp(event.createdAt)
       }
     })
     .sort((left, right) => {
@@ -873,6 +891,52 @@ function getMessageListFromRequestBody(requestBody) {
   return messages
 }
 
+function getPromptDataListFromRequestBody(requestBody) {
+  const dataList = []
+  getMessageListFromRequestBody(requestBody).forEach(message => {
+    const parsedPrompt = findPromptJsonSuffix(message.text)
+    if (!parsedPrompt || !isPlainObject(parsedPrompt.data)) {
+      return
+    }
+    dataList.push(parsedPrompt.data)
+  })
+  return dataList
+}
+
+function extractOfficialTermGlossaryMarkdown(text) {
+  const normalizedText = normalizeText(text)
+  if (!normalizedText) {
+    return ''
+  }
+  const glossaryIndex = normalizedText.indexOf('## 专有名词翻译数据库')
+  if (glossaryIndex < 0) {
+    return ''
+  }
+  return normalizedText.slice(glossaryIndex).trim()
+}
+
+function buildOfficialTermGlossaryPromptSection(requestBody) {
+  const textBlocks = []
+  getMessageListFromRequestBody(requestBody).forEach(message => {
+    const glossaryMarkdown = extractOfficialTermGlossaryMarkdown(message.text)
+    if (!glossaryMarkdown) {
+      return
+    }
+    textBlocks.push(
+      createTextBlock(`词库 ${textBlocks.length + 1}`, glossaryMarkdown)
+    )
+  })
+  return createSection({
+    title: '实际投喂给 AI 的专有名词词库',
+    description:
+      '这些 Markdown 表格来自本次请求体的名词数据库层，AI 翻译正文时会直接看到。',
+    kind: 'text',
+    tone: 'input',
+    textBlocks,
+    total: textBlocks.length
+  })
+}
+
 function buildPromptDataOverviewSection(data) {
   if (!isPlainObject(data)) {
     return null
@@ -1023,6 +1087,23 @@ function buildTermInputItem(term, index) {
   if (Array.isArray(term.targetLanguageCodes)) {
     meta.push(`目标语言：${formatLanguageList(term.targetLanguageCodes)}`)
   }
+  if (term.termId) {
+    meta.push(`词库ID：${term.termId}`)
+  }
+  if (Array.isArray(term.matchedExtractedTerms)) {
+    const matchedTermText = term.matchedExtractedTerms
+      .map(item => {
+        if (!isPlainObject(item)) {
+          return normalizeText(item)
+        }
+        return normalizeText(item.sourceText)
+      })
+      .filter(Boolean)
+      .join('、')
+    if (matchedTermText) {
+      meta.push(`匹配抽取名词：${matchedTermText}`)
+    }
+  }
   if (Array.isArray(term.searchKeywords)) {
     meta.push(`搜索关键词：${term.searchKeywords.join('、')}`)
   }
@@ -1087,6 +1168,7 @@ function buildPromptDataSections(data) {
     data.sourceTermRequests,
     data.termRequests,
     data.sourceTextItems,
+    data.extractedTerms,
     data.candidateTerms
   ]
   termSources.forEach(list => {
@@ -1104,6 +1186,16 @@ function buildPromptDataSections(data) {
   if (termSection) {
     sections.push(termSection)
   }
+  const databaseCandidateSection = buildArraySection(
+    '数据库候选词库记录',
+    '这些是服务端从专有名词翻译库中查到，并提交给 AI 做同名实体消歧的候选记录。',
+    data.databaseCandidates,
+    buildDatabaseCandidateItem,
+    'input'
+  )
+  if (databaseCandidateSection) {
+    sections.push(databaseCandidateSection)
+  }
   return sections
 }
 
@@ -1112,6 +1204,10 @@ function buildMessageInputSections(requestBody) {
   const overviewSection = buildRequestBodyOverviewSection(requestBody)
   if (overviewSection) {
     sections.push(overviewSection)
+  }
+  const glossarySection = buildOfficialTermGlossaryPromptSection(requestBody)
+  if (glossarySection) {
+    sections.push(glossarySection)
   }
   const messages = getMessageListFromRequestBody(requestBody)
   messages.forEach((message, index) => {
@@ -1282,6 +1378,206 @@ function getOutputRoot(log) {
     return log.json
   }
   return {}
+}
+
+function formatCandidateTranslations(translations) {
+  if (!isPlainObject(translations)) {
+    return ''
+  }
+  return Object.entries(translations)
+    .map(([languageCode, translatedText]) => {
+      const normalizedTranslatedText = normalizeText(translatedText)
+      if (!normalizedTranslatedText) {
+        return ''
+      }
+      return `${formatLanguage(languageCode) || languageCode}：${normalizedTranslatedText}`
+    })
+    .filter(Boolean)
+    .join('；')
+}
+
+function getMatchedExtractedTermText(candidate) {
+  if (!Array.isArray(candidate?.matchedExtractedTerms)) {
+    return ''
+  }
+  return candidate.matchedExtractedTerms
+    .map(item => {
+      if (!isPlainObject(item)) {
+        return normalizeText(item)
+      }
+      return normalizeText(item.sourceText)
+    })
+    .filter(Boolean)
+    .join('、')
+}
+
+function buildDatabaseCandidateItem(candidate, index) {
+  if (!isPlainObject(candidate)) {
+    return createItem(`词库候选 ${index + 1}`, candidate, { tone: 'input' })
+  }
+  const termId = normalizeText(candidate.termId || candidate._id)
+  const sourceText = normalizeText(candidate.sourceText)
+  const label = sourceText || termId || `词库候选 ${index + 1}`
+  const meta = []
+  if (termId) {
+    meta.push(`词库ID：${termId}`)
+  }
+  if (candidate.note) {
+    meta.push(`备注：${candidate.note}`)
+  }
+  const matchedExtractedTerms = getMatchedExtractedTermText(candidate)
+  if (matchedExtractedTerms) {
+    meta.push(`匹配抽取名词：${matchedExtractedTerms}`)
+  }
+  const translationText = formatCandidateTranslations(candidate.translations)
+  if (translationText) {
+    meta.push(`译名：${translationText}`)
+  }
+  return createItem(label, candidate.note || termId || sourceText, {
+    meta,
+    tone: 'input'
+  })
+}
+
+function getRequestBodyFromLog(log) {
+  const input = log?.input || {}
+  return input.requestBody || input.request || null
+}
+
+function getDatabaseCandidatesFromLog(log) {
+  const candidates = []
+  const requestBody = getRequestBodyFromLog(log)
+  getPromptDataListFromRequestBody(requestBody).forEach(data => {
+    if (Array.isArray(data.databaseCandidates)) {
+      candidates.push(...data.databaseCandidates)
+    }
+  })
+  const root = getOutputRoot(log)
+  const result = isPlainObject(root.result) ? root.result : {}
+  if (Array.isArray(root.databaseCandidates)) {
+    candidates.push(...root.databaseCandidates)
+  }
+  if (Array.isArray(root.matchedTerms)) {
+    candidates.push(...root.matchedTerms)
+  }
+  if (Array.isArray(result.databaseCandidates)) {
+    candidates.push(...result.databaseCandidates)
+  }
+  if (Array.isArray(result.matchedTerms)) {
+    candidates.push(...result.matchedTerms)
+  }
+  return candidates
+}
+
+function buildCandidateMap(candidates) {
+  const candidateMap = new Map()
+  candidates.forEach(candidate => {
+    if (!isPlainObject(candidate)) {
+      return
+    }
+    const termId = normalizeText(candidate.termId || candidate._id)
+    if (!termId || candidateMap.has(termId)) {
+      return
+    }
+    candidateMap.set(termId, candidate)
+  })
+  return candidateMap
+}
+
+function getMatchedTermLinksFromLog(log) {
+  const root = getOutputRoot(log)
+  const result = isPlainObject(root.result) ? root.result : {}
+  return getFirstArray(
+    root.matchedTermLinks,
+    result.matchedTermLinks,
+    result.matchedTerms
+  )
+}
+
+function buildMatchedTermLinkItem(candidateMap, link, index) {
+  if (!isPlainObject(link)) {
+    return null
+  }
+  const termId = normalizeText(link.termId)
+  const sourceText = normalizeText(link.sourceText)
+  if (!termId) {
+    return null
+  }
+  const candidate = candidateMap.get(termId)
+  if (!candidate) {
+    return createItem(sourceText || `词库配对 ${index + 1}`, termId, {
+      meta: [`词库ID：${termId}`],
+      tone: 'output'
+    })
+  }
+  const candidateSourceText = normalizeText(candidate.sourceText)
+  const label = sourceText || candidateSourceText || `词库配对 ${index + 1}`
+  const meta = []
+  meta.push(`词库ID：${termId}`)
+  if (candidateSourceText) {
+    meta.push(`匹配词库原文：${candidateSourceText}`)
+  }
+  if (candidate.note) {
+    meta.push(`备注：${candidate.note}`)
+  }
+  const translationText = formatCandidateTranslations(candidate.translations)
+  if (translationText) {
+    meta.push(`译名：${translationText}`)
+  }
+  return createItem(label, candidate.note || termId || candidateSourceText, {
+    meta,
+    tone: 'output'
+  })
+}
+
+function buildMatchedTermCandidateSection(log, matchedTermIds) {
+  if (!Array.isArray(matchedTermIds) || matchedTermIds.length === 0) {
+    return null
+  }
+  const candidateMap = buildCandidateMap(getDatabaseCandidatesFromLog(log))
+  const matchedTermLinks = getMatchedTermLinksFromLog(log)
+  const items = []
+  if (Array.isArray(matchedTermLinks) && matchedTermLinks.length > 0) {
+    matchedTermLinks.slice(0, MAX_SECTION_ITEMS).forEach((link, index) => {
+      pushItem(items, buildMatchedTermLinkItem(candidateMap, link, index))
+    })
+    return createSection({
+      title: 'AI 选中的词库候选详情',
+      description:
+        '这些是候选消歧后确认可复用的数据库记录，按抽取名词与词库记录一一配对展示。',
+      kind: 'list',
+      tone: 'output',
+      items,
+      total: matchedTermLinks.length
+    })
+  }
+  matchedTermIds.slice(0, MAX_SECTION_ITEMS).forEach((termId, index) => {
+    const normalizedTermId = normalizeText(termId)
+    const candidate = candidateMap.get(normalizedTermId)
+    if (candidate) {
+      const item = buildDatabaseCandidateItem(candidate, index)
+      if (item) {
+        item.tone = 'output'
+        items.push(item)
+      }
+      return
+    }
+    pushItem(
+      items,
+      createItem(`词库记录 ${index + 1}`, normalizedTermId, {
+        tone: 'output'
+      })
+    )
+  })
+  return createSection({
+    title: 'AI 选中的词库候选详情',
+    description:
+      '这些是候选消歧后确认可复用的数据库记录，包含词库 ID 与可读候选信息。',
+    kind: 'list',
+    tone: 'output',
+    items,
+    total: matchedTermIds.length
+  })
 }
 
 function getFirstArray(...values) {
@@ -1736,14 +2032,7 @@ function buildOutputSections(log) {
     root.matchedTermIds,
     result.matchedTermIds
   )
-  const matchedSection = buildArraySection(
-    'AI 选中的词库候选',
-    '候选消歧后确认可复用的词库记录。',
-    matchedTermIds,
-    (termId, index) =>
-      createItem(`词库记录 ${index + 1}`, termId, { tone: 'output' }),
-    'output'
-  )
+  const matchedSection = buildMatchedTermCandidateSection(log, matchedTermIds)
   if (matchedSection) {
     sections.push(matchedSection)
   }
@@ -1818,8 +2107,8 @@ function getOperationDisplay(log) {
       description: 'Gemini 使用搜索结果确认缺失语言的正式译名或通行译名。'
     },
     'proper-noun.official-translation.resolve': {
-      title: '整理联网检索译名',
-      description: '服务端汇总联网检索结果，并准备写入本次翻译词库。'
+      title: '整理专有名词译名结果',
+      description: '服务端汇总模型知识与联网检索结果，并准备写入本次翻译词库。'
     },
     'translation.post': {
       title: '翻译文章内容',
@@ -1909,7 +2198,7 @@ function getLogMajorKey(log) {
   }
   const operation = normalizeText(log?.operation)
   if (operation === 'proper-noun.official-translation.resolve') {
-    return 'proper-noun.official-translation.search'
+    return getOfficialTermResolveMajorKey(log)
   }
   if (operation === 'cover-image.artifact') {
     return 'cover-image.generation'
@@ -1918,6 +2207,34 @@ function getLogMajorKey(log) {
     return 'translation.chunk'
   }
   return normalizeWorkflowMajorKey(operation)
+}
+
+function getNumberFromLog(...values) {
+  for (const value of values) {
+    const numberValue = Number(value)
+    if (Number.isFinite(numberValue) && numberValue > 0) {
+      return numberValue
+    }
+  }
+  return 0
+}
+
+function getOfficialTermResolveMajorKey(log) {
+  const meta = log?.meta || {}
+  const root = getOutputRoot(log)
+  const stats = root?.stats || root?.result?.stats || {}
+  const internetSearchCount = getNumberFromLog(
+    meta.internetSearchRequestedTermCount,
+    meta.internetSearchTermCount,
+    meta.internetSearchTranslationCount,
+    stats.internetSearchRequestedTermCount,
+    stats.internetSearchTermCount,
+    stats.internetSearchTranslationCount
+  )
+  if (internetSearchCount > 0) {
+    return 'proper-noun.official-translation.search'
+  }
+  return 'proper-noun.official-translation.knowledge'
 }
 
 function getLogRuntimeStepKey(log) {
@@ -1973,7 +2290,32 @@ function buildWorkflowParentMatch(steps, log) {
     }
   }
   const runtimeStepKey = getLogRuntimeStepKey(log)
-  const stepKeyMatchedStep = candidates.find(step => {
+  const languageCodes = parseLanguageCodeList(log?.targetLanguageCode)
+  let scopedCandidates = candidates
+  if (candidates.length > 1 && languageCodes.length > 0) {
+    const languageMatchedCandidates = candidates.filter(step => {
+      return doesStageMatchLanguage(step.stage, languageCodes)
+    })
+    if (languageMatchedCandidates.length === 0) {
+      integrityWarnings.push(
+        createWorkflowIntegrityWarning(
+          'unmatched-parent-language',
+          'AI 日志的目标语言没有匹配到明确的运行时父步骤。',
+          [
+            `操作：${normalizeText(log?.operation) || majorKey}`,
+            `目标语言：${formatLanguageList(languageCodes)}`,
+            `候选父步骤：${candidates.length}`
+          ]
+        )
+      )
+      return {
+        parentStep: null,
+        integrityWarnings
+      }
+    }
+    scopedCandidates = languageMatchedCandidates
+  }
+  const stepKeyMatchedStep = scopedCandidates.find(step => {
     return (
       Array.isArray(step.stepKeys) && step.stepKeys.includes(runtimeStepKey)
     )
@@ -1984,8 +2326,7 @@ function buildWorkflowParentMatch(steps, log) {
       integrityWarnings
     }
   }
-  const languageCodes = parseLanguageCodeList(log?.targetLanguageCode)
-  const languageMatchedStep = candidates.find(step => {
+  const languageMatchedStep = scopedCandidates.find(step => {
     return doesStageMatchLanguage(step.stage, languageCodes)
   })
   if (languageMatchedStep) {
@@ -1994,7 +2335,7 @@ function buildWorkflowParentMatch(steps, log) {
       integrityWarnings
     }
   }
-  if (candidates.length > 1) {
+  if (scopedCandidates.length > 1) {
     integrityWarnings.push(
       createWorkflowIntegrityWarning(
         languageCodes.length > 0
@@ -2006,7 +2347,7 @@ function buildWorkflowParentMatch(steps, log) {
         [
           `操作：${normalizeText(log?.operation) || majorKey}`,
           `目标语言：${formatLanguageList(languageCodes) || '缺失'}`,
-          `候选父步骤：${candidates.length}`
+          `候选父步骤：${scopedCandidates.length}`
         ]
       )
     )
@@ -2015,7 +2356,7 @@ function buildWorkflowParentMatch(steps, log) {
       integrityWarnings
     }
   }
-  const onlyCandidate = candidates[0]
+  const onlyCandidate = scopedCandidates[0]
   const isWeakLanguageMatch =
     languageCodes.length > 0 &&
     !doesStageMatchLanguage(onlyCandidate.stage, languageCodes)
@@ -2044,23 +2385,37 @@ function buildSyntheticWorkflowParentStep(log, order, extraWarnings = []) {
   if (Array.isArray(extraWarnings)) {
     warningList = extraWarnings
   }
-  const integrityWarnings = [
-    createWorkflowIntegrityWarning(
-      'missing-runtime-parent',
-      'AI 日志没有匹配到运行时主工作流步骤。',
-      [
-        `操作：${normalizeText(log?.operation) || majorKey || '未记录'}`,
-        `阶段：${normalizeText(log?.stage) || '未记录'}`
-      ]
+  const integrityWarnings = []
+  if (isAiProviderCallLog(log) || log?.isMalformedLog) {
+    integrityWarnings.push(
+      createWorkflowIntegrityWarning(
+        'missing-runtime-parent',
+        'AI 日志没有匹配到运行时主工作流步骤。',
+        [
+          `操作：${normalizeText(log?.operation) || majorKey || '未记录'}`,
+          `阶段：${normalizeText(log?.stage) || '未记录'}`
+        ]
+      )
     )
-  ].concat(warningList)
+  }
+  integrityWarnings.push(...warningList)
+  let status = 'completed'
+  const badges = []
+  if (integrityWarnings.length > 0) {
+    status = 'warning'
+    badges.push({
+      label: '日志异常',
+      value: '缺失主步骤',
+      type: 'warning'
+    })
+  }
   return {
     id: `workflow-step-${order}`,
     order,
     title: display.title,
     description: display.description,
-    status: 'warning',
-    statusText: getWorkflowStepStatusText('warning'),
+    status,
+    statusText: getWorkflowStepStatusText(status),
     kind: 'workflow',
     majorKey,
     isSyntheticParent: true,
@@ -2072,13 +2427,7 @@ function buildSyntheticWorkflowParentStep(log, order, extraWarnings = []) {
     requestId: '',
     createdAt: log?.createdAt || null,
     currentStep: '',
-    badges: [
-      {
-        label: '日志异常',
-        value: '缺失主步骤',
-        type: 'warning'
-      }
-    ],
+    badges,
     integrityWarnings,
     children: [],
     childCount: 0,
@@ -2738,6 +3087,7 @@ function buildTranslationJobWorkflow(job) {
   steps.forEach(step => {
     finalizeWorkflowParentStep(step)
   })
+  sortWorkflowStepsByTime(steps)
   const reviewStep = buildReviewStep(job, steps.length + 1, aiCallCount)
   if (reviewStep) {
     reviewStep.majorKey = 'translation.review-preview'
@@ -2767,6 +3117,37 @@ function buildTranslationJobWorkflow(job) {
     summary: summarizeWorkflow(job, steps, aiCallCount),
     steps
   }
+}
+
+function getWorkflowStepSortTime(step) {
+  const times = []
+  const stepTime = getTimestamp(step?.createdAt)
+  if (stepTime > 0) {
+    times.push(stepTime)
+  }
+  if (Array.isArray(step?.children)) {
+    step.children.forEach(child => {
+      const childTime = getTimestamp(child?.createdAt)
+      if (childTime > 0) {
+        times.push(childTime)
+      }
+    })
+  }
+  if (times.length === 0) {
+    return Number.MAX_SAFE_INTEGER
+  }
+  return Math.min(...times)
+}
+
+function sortWorkflowStepsByTime(steps) {
+  steps.sort((left, right) => {
+    const leftTime = getWorkflowStepSortTime(left)
+    const rightTime = getWorkflowStepSortTime(right)
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime
+    }
+    return Number(left.order || 0) - Number(right.order || 0)
+  })
 }
 
 module.exports = {

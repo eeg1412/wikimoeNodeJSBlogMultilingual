@@ -1584,6 +1584,18 @@ async function updateRunningTranslationJobProgress(options = {}) {
   }
   if (progress.currentStage !== undefined) {
     setData['progress.currentStage'] = toTrimmedString(progress.currentStage)
+
+    function normalizeWorkflowEventCreatedAt(value, fallbackDate) {
+      const text = toTrimmedString(value)
+      if (!text) {
+        return fallbackDate
+      }
+      const parsedDate = new Date(text)
+      if (Number.isNaN(parsedDate.getTime())) {
+        return fallbackDate
+      }
+      return parsedDate
+    }
   }
   if (progress.totalSteps !== undefined) {
     setData['progress.totalSteps'] = normalizeOptionalNumber(
@@ -1638,6 +1650,10 @@ async function updateRunningTranslationJobProgress(options = {}) {
   const aiWorkflow = normalizeObject(progress.aiWorkflow, 'progress.aiWorkflow')
   const aiWorkflowStepKey = toTrimmedString(aiWorkflow.stepKey)
   if (aiWorkflowStepKey) {
+    const aiWorkflowCreatedAt = normalizeWorkflowEventCreatedAt(
+      aiWorkflow.occurredAt,
+      now
+    )
     const aiWorkflowEvent = {
       stepKey: aiWorkflowStepKey,
       stepLabel: toTrimmedString(aiWorkflow.stepLabel),
@@ -1655,7 +1671,7 @@ async function updateRunningTranslationJobProgress(options = {}) {
       ),
       errorCode: toTrimmedString(aiWorkflow.errorCode),
       errorMessage: toTrimmedString(aiWorkflow.errorMessage),
-      createdAt: now
+      createdAt: aiWorkflowCreatedAt
     }
     setData['progress.stageState.aiWorkflow.current'] = aiWorkflowEvent
     pushData['progress.stageState.aiWorkflow.events'] = {

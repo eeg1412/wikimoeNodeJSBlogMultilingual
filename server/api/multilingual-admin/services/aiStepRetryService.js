@@ -121,6 +121,7 @@ function buildWorkflowStatus(options, payload = {}) {
     stepKey: normalizeText(payload.stepKey) || getStepKey(options),
     stepLabel: normalizeText(payload.stepLabel) || getStepLabel(options),
     status: normalizeText(payload.status),
+    occurredAt: new Date().toISOString(),
     attemptNo: payload.attemptNo || null,
     nextAttemptNo: payload.nextAttemptNo || null,
     maxAttempts: payload.maxAttempts || null,

@@ -27,14 +27,6 @@ const TRANSLATION_SOURCE_VALUES = [
   'aiKnowledgeBase',
   'imported'
 ]
-const TRANSLATION_SOURCE_LABEL_MAP = {
-  manual: '手动维护',
-  internetSearchAi: '联网检索',
-  aiKnowledgeBase: 'AI知识库',
-  imported: '导入'
-}
-const MISSING_TRANSLATION_INSTRUCTION =
-  '未确认官方译名，请保留原文表面形式；不得自行直译、音译、本地化或改写为看似正式译名'
 let cleanupTimer = null
 let isCleanupRunning = false
 let hasPendingCleanup = false
@@ -376,14 +368,6 @@ function normalizeTranslationSource(value) {
     return translationSource
   }
   return 'manual'
-}
-
-function getTranslationSourceLabel(value) {
-  const translationSource = normalizeTranslationSource(value)
-  if (TRANSLATION_SOURCE_LABEL_MAP[translationSource]) {
-    return TRANSLATION_SOURCE_LABEL_MAP[translationSource]
-  }
-  return translationSource || 'database'
 }
 
 function hasInternetSearchMetadata(searchMetadata) {
@@ -1640,50 +1624,24 @@ function buildMarkdownTableRow(cells) {
     .join(' | ')} |`
 }
 
-function isMissingTermForLanguage(missingMap, sourceTextItem, languageCode) {
-  const missingTerm = missingMap.get(sourceTextItem.normalizedSourceText)
-  if (!missingTerm) {
-    return false
-  }
-  if (!Array.isArray(missingTerm.languageCodes)) {
-    return true
-  }
-  return missingTerm.languageCodes.includes(languageCode)
-}
-
 function pushSingleLanguageGlossaryRow({
   lines,
   sourceTextItem,
   languageCode,
   translationMap,
-  missingMap,
   includeNoteColumn
 }) {
   const translation = translationMap.get(
     buildTranslationKey(sourceTextItem.normalizedSourceText, languageCode)
   )
   if (translation) {
-    const sourceText = translation.sourceText || sourceTextItem.sourceText
-    const sourceLabel = getTranslationSourceLabel(translation.translationSource)
-    const cells = [sourceText]
+    const cells = [sourceTextItem.sourceText]
     if (includeNoteColumn) {
       cells.push(translation.glossaryNote || '')
     }
     cells.push(translation.translatedText)
-    cells.push(sourceLabel)
     lines.push(buildMarkdownTableRow(cells))
     return
-  }
-
-  if (isMissingTermForLanguage(missingMap, sourceTextItem, languageCode)) {
-    const missingTerm = missingMap.get(sourceTextItem.normalizedSourceText)
-    const cells = [sourceTextItem.sourceText]
-    if (includeNoteColumn) {
-      cells.push(missingTerm?.glossaryNote || '')
-    }
-    cells.push(MISSING_TRANSLATION_INSTRUCTION)
-    cells.push('missing')
-    lines.push(buildMarkdownTableRow(cells))
   }
 }
 
@@ -1691,7 +1649,6 @@ function buildSingleLanguageGlossaryMarkdown({
   sourceTextItems,
   languageCode,
   translationMap,
-  missingMap,
   includeNoteColumn
 }) {
   const headerCells = ['原文']
@@ -1701,8 +1658,6 @@ function buildSingleLanguageGlossaryMarkdown({
     separatorCells.push('---')
   }
   headerCells.push('译名')
-  headerCells.push('来源')
-  separatorCells.push('---')
   separatorCells.push('---')
 
   const lines = [
@@ -1720,7 +1675,6 @@ function buildSingleLanguageGlossaryMarkdown({
       sourceTextItem,
       languageCode,
       translationMap,
-      missingMap,
       includeNoteColumn
     })
   })
@@ -1728,33 +1682,39 @@ function buildSingleLanguageGlossaryMarkdown({
   return lines.join('\n')
 }
 
-function shouldIncludeGlossaryNoteColumn(translations, missingTerms) {
-  const hasTranslationNote = translations.some(translation => {
+function shouldIncludeGlossaryNoteColumn(translations) {
+  return translations.some(translation => {
     return Boolean(normalizeString(translation.glossaryNote, 300))
   })
-  if (hasTranslationNote) {
-    return true
-  }
-  return missingTerms.some(missingTerm => {
-    return Boolean(normalizeString(missingTerm.glossaryNote, 300))
+}
+
+function hasGlossaryTranslationRows(
+  sourceTextItems,
+  languageCodes,
+  translationMap
+) {
+  return sourceTextItems.some(sourceTextItem => {
+    return languageCodes.some(languageCode => {
+      return Boolean(
+        translationMap.get(
+          buildTranslationKey(sourceTextItem.normalizedSourceText, languageCode)
+        )
+      )
+    })
   })
 }
 
 function buildGlossaryMarkdown({
   sourceTexts = [],
   targetLanguageCodes = [],
-  translations = [],
-  missingTerms = []
+  translations = []
 } = {}) {
   const sourceTextItems = normalizeExtractedTermList(sourceTexts)
   const languageCodes = normalizeLanguageCodeList(targetLanguageCodes)
   if (sourceTextItems.length === 0) {
     return ''
   }
-  const includeNoteColumn = shouldIncludeGlossaryNoteColumn(
-    translations,
-    missingTerms
-  )
+  const includeNoteColumn = shouldIncludeGlossaryNoteColumn(translations)
 
   const translationMap = new Map()
   translations.forEach(translation => {
@@ -1771,17 +1731,16 @@ function buildGlossaryMarkdown({
       translation
     )
   })
-  const missingMap = new Map()
-  missingTerms.forEach(item => {
-    missingMap.set(item.normalizedSourceText, item)
-  })
-
+  if (
+    !hasGlossaryTranslationRows(sourceTextItems, languageCodes, translationMap)
+  ) {
+    return ''
+  }
   if (languageCodes.length === 1) {
     return buildSingleLanguageGlossaryMarkdown({
       sourceTextItems,
       languageCode: languageCodes[0],
       translationMap,
-      missingMap,
       includeNoteColumn
     })
   }
@@ -1794,8 +1753,6 @@ function buildGlossaryMarkdown({
   }
   headerCells.push('目标语言')
   headerCells.push('译名')
-  headerCells.push('来源')
-  separatorCells.push('---')
   separatorCells.push('---')
   separatorCells.push('---')
 
@@ -1812,30 +1769,12 @@ function buildGlossaryMarkdown({
         buildTranslationKey(sourceTextItem.normalizedSourceText, languageCode)
       )
       if (translation) {
-        const sourceText = translation.sourceText || sourceTextItem.sourceText
-        const sourceLabel = getTranslationSourceLabel(
-          translation.translationSource
-        )
-        const cells = [sourceText]
+        const cells = [sourceTextItem.sourceText]
         if (includeNoteColumn) {
           cells.push(translation.glossaryNote || '')
         }
         cells.push(`${getLanguageText(languageCode)}（${languageCode}）`)
         cells.push(translation.translatedText)
-        cells.push(sourceLabel)
-        lines.push(buildMarkdownTableRow(cells))
-        return
-      }
-
-      if (isMissingTermForLanguage(missingMap, sourceTextItem, languageCode)) {
-        const missingTerm = missingMap.get(sourceTextItem.normalizedSourceText)
-        const cells = [sourceTextItem.sourceText]
-        if (includeNoteColumn) {
-          cells.push(missingTerm?.glossaryNote || '')
-        }
-        cells.push(`${getLanguageText(languageCode)}（${languageCode}）`)
-        cells.push(MISSING_TRANSLATION_INSTRUCTION)
-        cells.push('missing')
         lines.push(buildMarkdownTableRow(cells))
       }
     })
