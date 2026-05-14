@@ -6,6 +6,7 @@ const {
   truncateText
 } = require('./coverImageAiDiagnosticService')
 const {
+  applyGeminiThinkingConfig,
   buildGeminiNativeGenerateContentUrl,
   buildInlineDataPartFromDataUrl,
   buildTextPart,
@@ -218,7 +219,7 @@ function buildRecognitionRequest(settings, prompt, imageDataUrl) {
         ]
       }
     ],
-    generationConfig
+    generationConfig: applyGeminiThinkingConfig(generationConfig, settings)
   }
 }
 

@@ -135,6 +135,20 @@ const GEMINI_MEDIA_RESOLUTION_OPTIONS = [
   { label: 'Unspecified', value: 'MEDIA_RESOLUTION_UNSPECIFIED' }
 ]
 
+const GEMINI_THINKING_LEVEL_DEFAULT = 'default'
+
+const GEMINI_THINKING_LEVEL_OPTIONS = [
+  { label: '默认（模型默认）', value: GEMINI_THINKING_LEVEL_DEFAULT },
+  { label: 'Minimal（最低延迟）', value: 'minimal' },
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High（最高推理）', value: 'high' }
+]
+
+const GEMINI_THINKING_LEVEL_VALUES = new Set(
+  GEMINI_THINKING_LEVEL_OPTIONS.map(option => option.value)
+)
+
 const DEFAULT_IMAGE_RECOGNITION_PROMPT = [
   '你是图像识别助手。',
   '根据服务端提供的具体任务要求识别图片内容。',
@@ -149,6 +163,19 @@ const LEGACY_AI_SETTING_MIGRATIONS = {
   nanoBananaModel: 'geminiImageModel',
   nanoBananaAspectRatio: 'geminiImageAspectRatio',
   nanoBananaImageSize: 'geminiImageSize'
+}
+
+function buildGeminiThinkingLevelField(name, group) {
+  return {
+    name,
+    label: 'Gemini 思考深度',
+    type: 'radio',
+    group,
+    defaultValue: GEMINI_THINKING_LEVEL_DEFAULT,
+    options: GEMINI_THINKING_LEVEL_OPTIONS,
+    helpText:
+      'Gemini 3 系列会发送 thinkingConfig.thinkingLevel；Gemini 3 Pro 不支持 Minimal，Gemini 2.5 系列不支持 thinkingLevel，请保持默认。'
+  }
 }
 
 const AI_SETTING_FIELDS = [
@@ -341,6 +368,7 @@ const AI_SETTING_FIELDS = [
     helpText:
       'Gemini 图像生成统一走原生 generateContent；默认使用 gemini-3.1-flash-image-preview。'
   },
+  buildGeminiThinkingLevelField('geminiImageThinkingLevel', 'geminiImage'),
   {
     name: 'geminiImageAspectRatio',
     label: 'Gemini 画幅比例',
@@ -446,6 +474,10 @@ const AI_SETTING_FIELDS = [
     helpText:
       'Gemini 3.1 Pro Preview 支持图像输入；需要更低延迟时可选择 Gemini 3 Flash Preview。'
   },
+  buildGeminiThinkingLevelField(
+    'geminiImageRecognitionThinkingLevel',
+    'geminiImageRecognition'
+  ),
   {
     name: 'geminiImageRecognitionMediaResolution',
     label: 'Gemini 媒体解析度',
@@ -521,7 +553,11 @@ const AI_SETTING_FIELDS = [
     options: GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
     helpText:
       'Google Search grounding 当前模型使用 tools: [{ google_search: {} }]；默认采用文档示例的 gemini-3-flash-preview。'
-  }
+  },
+  buildGeminiThinkingLevelField(
+    'geminiInternetSearchThinkingLevel',
+    'geminiInternetSearch'
+  )
 ]
 
 const AI_SETTING_FIELD_MAP = AI_SETTING_FIELDS.reduce((map, item) => {
@@ -660,6 +696,73 @@ function normalizeTrimmedString(value, maxLength = 12000) {
   return String(value).trim().slice(0, maxLength)
 }
 
+function isGemini25Model(model) {
+  return /^gemini-2\.5([.-]|$)/i.test(normalizeTrimmedString(model, 120))
+}
+
+function isGemini3Model(model) {
+  return /^gemini-3([.-]|$)/i.test(normalizeTrimmedString(model, 120))
+}
+
+function isGemini3ProModel(model) {
+  return /^gemini-3(\.\d+)?-pro([.-]|$)/i.test(
+    normalizeTrimmedString(model, 120)
+  )
+}
+
+function buildGeminiThinkingConfig(model, thinkingLevel, fieldName) {
+  const normalizedThinkingLevel = normalizeTrimmedString(thinkingLevel, 40)
+  if (
+    !normalizedThinkingLevel ||
+    normalizedThinkingLevel === GEMINI_THINKING_LEVEL_DEFAULT
+  ) {
+    return null
+  }
+
+  if (!GEMINI_THINKING_LEVEL_VALUES.has(normalizedThinkingLevel)) {
+    throw new ApiError(
+      ERROR_CODES.AI_SETTINGS_INVALID,
+      'Gemini 思考深度配置无效',
+      fieldName,
+      400
+    )
+  }
+
+  if (isGemini25Model(model)) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      'Gemini 2.5 系列不支持 thinkingLevel 思考深度；请保持默认，或改用支持 thinkingLevel 的 Gemini 3 系列模型。',
+      fieldName,
+      400
+    )
+  }
+
+  if (!isGemini3Model(model)) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      '当前 Gemini 模型不支持 thinkingLevel 思考深度；请保持默认，或改用 Gemini 3 系列模型。',
+      fieldName,
+      400
+    )
+  }
+
+  if (
+    normalizedThinkingLevel === 'minimal' &&
+    isGemini3ProModel(model)
+  ) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      'Gemini 3 Pro 不支持 Minimal 思考深度；请选择 Low、Medium、High 或默认。',
+      fieldName,
+      400
+    )
+  }
+
+  return {
+    thinkingLevel: normalizedThinkingLevel
+  }
+}
+
 function normalizeValue(field, value) {
   if (field.type === 'languagePromptMap') {
     return normalizeLanguagePromptMap(value)
@@ -754,12 +857,14 @@ async function getAiSettings() {
       imageGeneration: {
         geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         geminiDefaultModel: 'gemini-3.1-flash-image-preview',
-        geminiModelOptions: GEMINI_IMAGE_GENERATION_MODEL_OPTIONS
+        geminiModelOptions: GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
+        geminiThinkingLevelOptions: GEMINI_THINKING_LEVEL_OPTIONS
       },
       imageRecognition: {
         geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         geminiDefaultModel: 'gemini-3.1-pro-preview',
         geminiModelOptions: GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
+        geminiThinkingLevelOptions: GEMINI_THINKING_LEVEL_OPTIONS,
         defaultConfidenceThreshold: 0.75,
         maxInputImageDimension: 1280
       },
@@ -767,6 +872,7 @@ async function getAiSettings() {
         geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         geminiDefaultModel: 'gemini-3-flash-preview',
         geminiModelOptions: GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
+        geminiThinkingLevelOptions: GEMINI_THINKING_LEVEL_OPTIONS,
         googleSearchTool: { google_search: {} }
       }
     }
@@ -878,7 +984,12 @@ function buildGeminiImageRuntimeSettings(values) {
     promptPrefix: normalizeTrimmedString(values.imageGenerationPromptPrefix),
     requestOptions: {
       aspectRatio: values.geminiImageAspectRatio,
-      imageSize: values.geminiImageSize
+      imageSize: values.geminiImageSize,
+      thinkingConfig: buildGeminiThinkingConfig(
+        values.geminiImageModel,
+        values.geminiImageThinkingLevel,
+        'geminiImageThinkingLevel'
+      )
     }
   }
 }
@@ -928,7 +1039,12 @@ function buildGeminiImageRecognitionRuntimeSettings(values) {
     confidenceThreshold: values.imageRecognitionConfidenceThreshold,
     prompt: normalizeTrimmedString(values.imageRecognitionPrompt),
     requestOptions: {
-      mediaResolution: values.geminiImageRecognitionMediaResolution
+      mediaResolution: values.geminiImageRecognitionMediaResolution,
+      thinkingConfig: buildGeminiThinkingConfig(
+        values.geminiImageRecognitionModel,
+        values.geminiImageRecognitionThinkingLevel,
+        'geminiImageRecognitionThinkingLevel'
+      )
     }
   }
 }
@@ -976,7 +1092,12 @@ function buildGeminiInternetSearchRuntimeSettings(values) {
     model: normalizeTrimmedString(values.geminiInternetSearchModel),
     timeoutSeconds: values.internetSearchTimeoutSeconds,
     requestOptions: {
-      tool: 'google_search'
+      tool: 'google_search',
+      thinkingConfig: buildGeminiThinkingConfig(
+        values.geminiInternetSearchModel,
+        values.geminiInternetSearchThinkingLevel,
+        'geminiInternetSearchThinkingLevel'
+      )
     }
   }
 }

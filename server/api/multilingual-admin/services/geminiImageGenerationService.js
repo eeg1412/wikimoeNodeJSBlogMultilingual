@@ -6,6 +6,7 @@ const {
   summarizeRuntimeSettings
 } = require('./coverImageAiDiagnosticService')
 const {
+  applyGeminiThinkingConfig,
   buildGeminiNativeGenerateContentUrl,
   buildInlineDataPartFromDataUrl,
   buildTextPart,
@@ -41,7 +42,8 @@ function appendPromptPrefix(prompt, promptPrefix) {
   return `${normalizedPrefix}\n\n${normalizedPrompt}`
 }
 
-function buildGeminiGenerationConfig(requestOptions = {}, selectedRatio) {
+function buildGeminiGenerationConfig(settings, selectedRatio) {
+  const requestOptions = settings?.requestOptions || {}
   const generationConfig = {
     responseModalities: ['TEXT', 'IMAGE']
   }
@@ -56,7 +58,7 @@ function buildGeminiGenerationConfig(requestOptions = {}, selectedRatio) {
   if (Object.keys(imageConfig).length > 0) {
     generationConfig.imageConfig = imageConfig
   }
-  return generationConfig
+  return applyGeminiThinkingConfig(generationConfig, settings)
 }
 
 function buildGenerationRequest(
@@ -76,10 +78,7 @@ function buildGenerationRequest(
         ]
       }
     ],
-    generationConfig: buildGeminiGenerationConfig(
-      settings.requestOptions,
-      selectedRatio
-    )
+    generationConfig: buildGeminiGenerationConfig(settings, selectedRatio)
   }
 }
 

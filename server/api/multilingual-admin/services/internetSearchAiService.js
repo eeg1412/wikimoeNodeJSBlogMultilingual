@@ -9,6 +9,7 @@ const {
 const aiSettingsService = require('./aiSettingsService')
 const properNounTranslationService = require('./properNounTranslationService')
 const {
+  applyGeminiThinkingConfig,
   buildGeminiNativeGenerateContentUrl,
   buildTextPart,
   extractTextFromGeminiNativeResponse,
@@ -348,6 +349,14 @@ function buildOfficialTermSearchPrompt({
 }
 
 function buildGeminiKnowledgeRequest(settings, prompt) {
+  const generationConfig = applyGeminiThinkingConfig(
+    {
+      responseMimeType: 'application/json',
+      responseJsonSchema: officialTermKnowledgeResponseJsonSchema
+    },
+    settings
+  )
+
   return {
     model: settings.model,
     contents: [
@@ -356,14 +365,19 @@ function buildGeminiKnowledgeRequest(settings, prompt) {
         parts: [buildTextPart(prompt)]
       }
     ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseJsonSchema: officialTermKnowledgeResponseJsonSchema
-    }
+    generationConfig
   }
 }
 
 function buildGeminiSearchRequest(settings, prompt) {
+  const generationConfig = applyGeminiThinkingConfig(
+    {
+      responseMimeType: 'application/json',
+      responseJsonSchema: officialTermSearchResponseJsonSchema
+    },
+    settings
+  )
+
   return {
     model: settings.model,
     contents: [
@@ -373,10 +387,7 @@ function buildGeminiSearchRequest(settings, prompt) {
       }
     ],
     tools: [{ google_search: {} }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseJsonSchema: officialTermSearchResponseJsonSchema
-    }
+    generationConfig
   }
 }
 

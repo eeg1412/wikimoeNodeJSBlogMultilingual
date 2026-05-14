@@ -57,6 +57,7 @@
                 <el-radio-group
                   v-else-if="field.type === 'radio'"
                   v-model="settingsForm[field.name]"
+                  class="ai-radio-group"
                 >
                   <el-radio
                     v-for="option in field.options || []"
@@ -619,6 +620,17 @@ export default {
   line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+.ai-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+:deep(.ai-radio-group .el-radio) {
+  margin-right: 0;
 }
 
 .language-prompt-list {

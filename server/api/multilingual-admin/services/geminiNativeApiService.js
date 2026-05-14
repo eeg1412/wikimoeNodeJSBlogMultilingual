@@ -292,6 +292,28 @@ function buildTextPart(text) {
   }
 }
 
+function applyGeminiThinkingConfig(generationConfig, settings) {
+  const outputGenerationConfig = { ...(generationConfig || {}) }
+  const thinkingConfig = settings?.requestOptions?.thinkingConfig
+  if (
+    !thinkingConfig ||
+    typeof thinkingConfig !== 'object' ||
+    Array.isArray(thinkingConfig)
+  ) {
+    return outputGenerationConfig
+  }
+
+  const thinkingLevel = normalizeText(thinkingConfig.thinkingLevel)
+  if (!thinkingLevel) {
+    return outputGenerationConfig
+  }
+
+  outputGenerationConfig.thinkingConfig = {
+    thinkingLevel
+  }
+  return outputGenerationConfig
+}
+
 function extractBase64FromGeminiNativeResponse(response) {
   const candidates = Array.isArray(response?.candidates)
     ? response.candidates
@@ -346,6 +368,7 @@ function extractTextFromGeminiNativeResponse(response) {
 }
 
 module.exports = {
+  applyGeminiThinkingConfig,
   buildGeminiNativeGenerateContentUrl,
   buildInlineDataPartFromDataUrl,
   buildTextPart,
