@@ -48,7 +48,7 @@ export default {
   emoji: {
     button: 'Emoji',
     empty: 'No emoji yet',
-    frequent: 'Recent'
+    frequent: '🕒'
   },
   rating: {
     points: '{score}',

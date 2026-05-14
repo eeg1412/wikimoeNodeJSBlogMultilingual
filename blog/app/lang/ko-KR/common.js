@@ -49,7 +49,7 @@ export default {
   emoji: {
     button: '이모지',
     empty: '아직 이모지가 없습니다',
-    frequent: '최근 사용'
+    frequent: '🕒'
   },
   rating: {
     points: '{score}',

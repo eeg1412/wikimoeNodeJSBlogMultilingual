@@ -50,7 +50,7 @@ export default {
   emoji: {
     button: '絵文字',
     empty: '絵文字がありません',
-    frequent: 'よく使う'
+    frequent: '🕒'
   },
   image: {
     loading: '画像を読み込み中...',
