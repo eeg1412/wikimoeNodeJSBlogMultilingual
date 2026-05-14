@@ -100,7 +100,7 @@
               :disabled="item.value === defaultLanguageCode"
               @click="copyDefaultLanguage(item.value)"
             >
-              复制简体中文
+              复制{{ defaultLanguageText }}
             </el-button>
             <el-button type="primary" @click="submitLanguage(item.value)">
               保存当前语言
@@ -118,9 +118,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import Cropper from '@/components/Cropper.vue'
 import RichEditor5Switch from '@/components/RichEditor5Switch.vue'
 import { multilingualApi } from '@/api'
-import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
-
-const DEFAULT_LANGUAGE_CODE = 'zh-CN'
+import {
+  DEFAULT_LANGUAGE_CODE,
+  SUPPORTED_LANGUAGE_OPTIONS
+} from '@/utils/multilingual'
 
 const FIELD_GROUP_OPTIONS = [
   { label: '站点展示', value: 'site' },
@@ -143,6 +144,10 @@ export default {
     const fieldList = ref([])
     const settingsMap = reactive({})
     const languageOptions = SUPPORTED_LANGUAGE_OPTIONS
+    const defaultLanguageOption = languageOptions.find(item => {
+      return item.value === DEFAULT_LANGUAGE_CODE
+    })
+    const defaultLanguageText = defaultLanguageOption.label
 
     function getDefaultValue(field) {
       if (field.type === 'boolean') {
@@ -275,9 +280,13 @@ export default {
         return
       }
 
-      ElMessageBox.confirm('确定复制简体中文配置到当前语言吗？', '复制配置', {
-        type: 'warning'
-      })
+      ElMessageBox.confirm(
+        `确定复制${defaultLanguageText}配置到当前语言吗？`,
+        '复制配置',
+        {
+          type: 'warning'
+        }
+      )
         .then(() => {
           fieldList.value.forEach(field => {
             settingsMap[languageCode][field.name] =
@@ -316,6 +325,7 @@ export default {
       activeLanguage,
       copyDefaultLanguage,
       defaultLanguageCode: DEFAULT_LANGUAGE_CODE,
+      defaultLanguageText,
       fieldGroupOptions: FIELD_GROUP_OPTIONS,
       fieldList,
       getColumnSpan,

@@ -160,6 +160,19 @@ export default {
     menu: '導覽',
     sidebar: '側邊欄'
   },
+  sidebarBuiltinTitles: {
+    1: '自訂內容',
+    3: '最新評論',
+    4: '隨機標籤',
+    8: '分類',
+    9: '歸檔',
+    10: 'Google 廣告',
+    11: '自訂 HTML',
+    12: '熱門文章',
+    13: '當季追番',
+    14: '攻略中',
+    15: '閱讀中'
+  },
   search: {
     placeholder: '請輸入關鍵字',
     title: '搜尋：{keyword}'

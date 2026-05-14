@@ -160,6 +160,19 @@ export default {
     menu: '导航',
     sidebar: '侧边栏'
   },
+  sidebarBuiltinTitles: {
+    1: '自定义内容',
+    3: '最新评论',
+    4: '随机标签',
+    8: '分类',
+    9: '归档',
+    10: '谷歌广告',
+    11: '自定义HTML',
+    12: '热门文章',
+    13: '当季追番',
+    14: '攻略中',
+    15: '阅读中'
+  },
   search: {
     placeholder: '请输入关键词',
     title: '搜索：{keyword}'

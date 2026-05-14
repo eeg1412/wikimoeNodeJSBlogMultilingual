@@ -1,20 +1,74 @@
-const SUPPORTED_LANGUAGE_CODES = [
-  'zh-CN',
-  'zh-HK',
-  'zh-TW',
-  'zh-SG',
-  'ja-JP',
-  'en-US'
-]
-const DEFAULT_LANGUAGE_CODE = 'zh-CN'
-const LANGUAGE_TEXT_MAP = {
-  'zh-CN': '简体中文',
-  'zh-HK': '繁体中文（香港）',
-  'zh-TW': '繁体中文（台湾）',
-  'zh-SG': '简体中文（新加坡）',
-  'ja-JP': '日本語',
-  'en-US': 'English'
+const { LANGUAGE_CONFIG_LIST } = require('../config/languages')
+
+function assertValidLanguageConfigList(languageConfigList) {
+  if (!Array.isArray(languageConfigList) || languageConfigList.length === 0) {
+    throw new Error('LANGUAGE_CONFIG_LIST must be a non-empty array')
+  }
+
+  const languageCodeSet = new Set()
+  let defaultLanguageConfig = null
+
+  for (const languageConfig of languageConfigList) {
+    if (!languageConfig || typeof languageConfig !== 'object') {
+      throw new Error('Language config must be an object')
+    }
+
+    if (
+      typeof languageConfig.code !== 'string' ||
+      !languageConfig.code.trim()
+    ) {
+      throw new Error('Language config code is required')
+    }
+
+    if (languageConfig.code !== languageConfig.code.trim()) {
+      throw new Error(
+        `Language config code has extra whitespace: ${languageConfig.code}`
+      )
+    }
+
+    if (languageCodeSet.has(languageConfig.code)) {
+      throw new Error(`Duplicate language code: ${languageConfig.code}`)
+    }
+
+    if (
+      typeof languageConfig.label !== 'string' ||
+      !languageConfig.label.trim()
+    ) {
+      throw new Error(`Language label is required: ${languageConfig.code}`)
+    }
+
+    languageCodeSet.add(languageConfig.code)
+
+    if (languageConfig.isDefault) {
+      if (defaultLanguageConfig) {
+        throw new Error('Only one default language is allowed')
+      }
+
+      defaultLanguageConfig = languageConfig
+    }
+  }
+
+  if (!defaultLanguageConfig) {
+    throw new Error('Default language config is required')
+  }
 }
+
+assertValidLanguageConfigList(LANGUAGE_CONFIG_LIST)
+
+const DEFAULT_LANGUAGE_CONFIG = LANGUAGE_CONFIG_LIST.find(languageConfig => {
+  return languageConfig.isDefault
+})
+const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(languageConfig => {
+  return languageConfig.code
+})
+const DEFAULT_LANGUAGE_CODE = DEFAULT_LANGUAGE_CONFIG.code
+const LANGUAGE_TEXT_MAP = LANGUAGE_CONFIG_LIST.reduce(
+  (languageTextMap, languageConfig) => {
+    languageTextMap[languageConfig.code] = languageConfig.label
+    return languageTextMap
+  },
+  {}
+)
 
 const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce((map, code) => {
   map[code.toLowerCase()] = code
@@ -48,6 +102,7 @@ function getLanguageText(input) {
 }
 
 module.exports = {
+  LANGUAGE_CONFIG_LIST,
   SUPPORTED_LANGUAGE_CODES,
   DEFAULT_LANGUAGE_CODE,
   LANGUAGE_CODE_MAP,

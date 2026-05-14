@@ -1,11 +1,8 @@
-const SUPPORTED_LANGUAGE_CODES = [
-  'zh-CN',
-  'zh-HK',
-  'zh-TW',
-  'zh-SG',
-  'ja-JP',
-  'en-US'
-]
+import { LANGUAGE_CONFIG_LIST } from '../../shared/languages'
+
+const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(languageConfig => {
+  return languageConfig.code
+})
 
 const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce((map, code) => {
   map[code.toLowerCase()] = code

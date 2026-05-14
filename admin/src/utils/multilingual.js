@@ -1,13 +1,97 @@
 import { limitStr } from '@/utils/utils'
+import {
+  LANGUAGE_CONFIG_LIST,
+  SIDEBAR_BUILTIN_TYPE_LIST
+} from '@/config/languages'
 
-export const SUPPORTED_LANGUAGE_OPTIONS = [
-  { label: '简体中文', value: 'zh-CN' },
-  { label: '繁体中文（香港）', value: 'zh-HK' },
-  { label: '繁体中文（台湾）', value: 'zh-TW' },
-  { label: '简体中文（新加坡）', value: 'zh-SG' },
-  { label: '日本語', value: 'ja-JP' },
-  { label: 'English', value: 'en-US' }
-]
+function assertValidLanguageConfigList(languageConfigList) {
+  if (!Array.isArray(languageConfigList) || languageConfigList.length === 0) {
+    throw new Error('LANGUAGE_CONFIG_LIST must be a non-empty array')
+  }
+
+  const languageCodeSet = new Set()
+  let defaultLanguageConfig = null
+
+  for (const languageConfig of languageConfigList) {
+    if (!languageConfig || typeof languageConfig !== 'object') {
+      throw new Error('Language config must be an object')
+    }
+
+    if (
+      typeof languageConfig.code !== 'string' ||
+      !languageConfig.code.trim()
+    ) {
+      throw new Error('Language config code is required')
+    }
+
+    if (languageCodeSet.has(languageConfig.code)) {
+      throw new Error(`Duplicate language code: ${languageConfig.code}`)
+    }
+
+    if (
+      typeof languageConfig.label !== 'string' ||
+      !languageConfig.label.trim()
+    ) {
+      throw new Error(`Language label is required: ${languageConfig.code}`)
+    }
+
+    if (!languageConfig.sidebarBuiltinTitles) {
+      throw new Error(
+        `Sidebar builtin titles are required: ${languageConfig.code}`
+      )
+    }
+
+    for (const sidebarType of SIDEBAR_BUILTIN_TYPE_LIST) {
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          languageConfig.sidebarBuiltinTitles,
+          sidebarType
+        )
+      ) {
+        throw new Error(
+          `Missing sidebar builtin title ${sidebarType}: ${languageConfig.code}`
+        )
+      }
+    }
+
+    languageCodeSet.add(languageConfig.code)
+
+    if (languageConfig.isDefault) {
+      if (defaultLanguageConfig) {
+        throw new Error('Only one default language is allowed')
+      }
+
+      defaultLanguageConfig = languageConfig
+    }
+  }
+
+  if (!defaultLanguageConfig) {
+    throw new Error('Default language config is required')
+  }
+}
+
+assertValidLanguageConfigList(LANGUAGE_CONFIG_LIST)
+
+const DEFAULT_LANGUAGE_CONFIG = LANGUAGE_CONFIG_LIST.find(languageConfig => {
+  return languageConfig.isDefault
+})
+
+export const SUPPORTED_LANGUAGE_OPTIONS = LANGUAGE_CONFIG_LIST.map(
+  languageConfig => {
+    return {
+      label: languageConfig.label,
+      value: languageConfig.code
+    }
+  }
+)
+
+export const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(
+  languageConfig => {
+    return languageConfig.code
+  }
+)
+
+export const DEFAULT_LANGUAGE_CODE = DEFAULT_LANGUAGE_CONFIG.code
 
 const SUPPORTED_LANGUAGE_ORDER_MAP = SUPPORTED_LANGUAGE_OPTIONS.reduce(
   (result, item, index) => {
@@ -51,96 +135,19 @@ export const MEDIA_MODE_OPTIONS = [
   { label: '本地文件', value: 'local' }
 ]
 
-export const SIDEBAR_BUILTIN_TITLE_MAP = {
-  1: {
-    'zh-CN': '自定义内容',
-    'zh-HK': '自訂內容',
-    'zh-TW': '自訂內容',
-    'zh-SG': '自定义内容',
-    'ja-JP': 'カスタムコンテンツ',
-    'en-US': 'Custom content'
+export const SIDEBAR_BUILTIN_TITLE_MAP = SIDEBAR_BUILTIN_TYPE_LIST.reduce(
+  (titleMap, sidebarType) => {
+    titleMap[sidebarType] = {}
+
+    for (const languageConfig of LANGUAGE_CONFIG_LIST) {
+      titleMap[sidebarType][languageConfig.code] =
+        languageConfig.sidebarBuiltinTitles[sidebarType]
+    }
+
+    return titleMap
   },
-  3: {
-    'zh-CN': '最新评论',
-    'zh-HK': '最新評論',
-    'zh-TW': '最新評論',
-    'zh-SG': '最新评论',
-    'ja-JP': '最新コメント',
-    'en-US': 'Latest comments'
-  },
-  4: {
-    'zh-CN': '随机标签',
-    'zh-HK': '隨機標籤',
-    'zh-TW': '隨機標籤',
-    'zh-SG': '随机标签',
-    'ja-JP': 'ランダムタグ',
-    'en-US': 'Random tags'
-  },
-  8: {
-    'zh-CN': '分类',
-    'zh-HK': '分類',
-    'zh-TW': '分類',
-    'zh-SG': '分类',
-    'ja-JP': 'カテゴリ',
-    'en-US': 'Categories'
-  },
-  9: {
-    'zh-CN': '归档',
-    'zh-HK': '歸檔',
-    'zh-TW': '歸檔',
-    'zh-SG': '归档',
-    'ja-JP': 'アーカイブ',
-    'en-US': 'Archive'
-  },
-  10: {
-    'zh-CN': '谷歌广告',
-    'zh-HK': 'Google 廣告',
-    'zh-TW': 'Google 廣告',
-    'zh-SG': '谷歌广告',
-    'ja-JP': 'Google 広告',
-    'en-US': 'Google Ads'
-  },
-  11: {
-    'zh-CN': '自定义HTML',
-    'zh-HK': '自訂 HTML',
-    'zh-TW': '自訂 HTML',
-    'zh-SG': '自定义HTML',
-    'ja-JP': 'カスタム HTML',
-    'en-US': 'Custom HTML'
-  },
-  12: {
-    'zh-CN': '热门文章',
-    'zh-HK': '熱門文章',
-    'zh-TW': '熱門文章',
-    'zh-SG': '热门文章',
-    'ja-JP': '人気記事',
-    'en-US': 'Popular posts'
-  },
-  13: {
-    'zh-CN': '当季追番',
-    'zh-HK': '當季追番',
-    'zh-TW': '當季追番',
-    'zh-SG': '当季追番',
-    'ja-JP': '今期アニメ',
-    'en-US': 'This season'
-  },
-  14: {
-    'zh-CN': '攻略中',
-    'zh-HK': '攻略中',
-    'zh-TW': '攻略中',
-    'zh-SG': '攻略中',
-    'ja-JP': '攻略中',
-    'en-US': 'Currently playing'
-  },
-  15: {
-    'zh-CN': '阅读中',
-    'zh-HK': '閱讀中',
-    'zh-TW': '閱讀中',
-    'zh-SG': '阅读中',
-    'ja-JP': '読書中',
-    'en-US': 'Currently reading'
-  }
-}
+  {}
+)
 
 function findOption(options, value) {
   return options.find(item => item.value === value)
@@ -179,8 +186,10 @@ export function compareSupportedLanguage(leftLanguageCode, rightLanguageCode) {
 }
 
 export function sortBySupportedLanguageOrder(list, getLanguageCode) {
-  const resolveLanguageCode =
-    typeof getLanguageCode === 'function' ? getLanguageCode : item => item
+  let resolveLanguageCode = item => item
+  if (typeof getLanguageCode === 'function') {
+    resolveLanguageCode = getLanguageCode
+  }
 
   return [...(Array.isArray(list) ? list : [])].sort((leftItem, rightItem) => {
     return compareSupportedLanguage(
@@ -196,13 +205,14 @@ export function getLocalizedSidebarBuiltinTitle(type, languageCode) {
     return ''
   }
 
-  const normalizedLanguageCode = SUPPORTED_LANGUAGE_OPTIONS.some(option => {
+  const isSupportedLanguage = SUPPORTED_LANGUAGE_OPTIONS.some(option => {
     return option.value === languageCode
   })
-    ? languageCode
-    : 'zh-CN'
+  if (!isSupportedLanguage) {
+    return ''
+  }
 
-  return titleMap[normalizedLanguageCode] || titleMap['zh-CN'] || ''
+  return titleMap[languageCode] || ''
 }
 
 export function normalizeSidebarBuiltinTitle(title, type, languageCode) {

@@ -164,6 +164,19 @@ export default {
     menu: 'ナビゲーション',
     sidebar: 'サイドバー'
   },
+  sidebarBuiltinTitles: {
+    1: 'カスタムコンテンツ',
+    3: '最新コメント',
+    4: 'ランダムタグ',
+    8: 'カテゴリ',
+    9: 'アーカイブ',
+    10: 'Google 広告',
+    11: 'カスタム HTML',
+    12: '人気記事',
+    13: '今期アニメ',
+    14: '攻略中',
+    15: '読書中'
+  },
   search: {
     placeholder: 'キーワードを入力',
     title: '検索：{keyword}'

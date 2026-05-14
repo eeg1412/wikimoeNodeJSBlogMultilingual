@@ -272,119 +272,47 @@
 <script setup>
 import { getNaviListApi } from '@/api/navi'
 import { getSidebarListApi } from '@/api/sidebar'
-
-const SIDEBAR_BUILTIN_TITLE_MAP = {
-  1: {
-    'zh-CN': '自定义内容',
-    'zh-HK': '自訂內容',
-    'zh-TW': '自訂內容',
-    'zh-SG': '自定义内容',
-    'ja-JP': 'カスタムコンテンツ',
-    'en-US': 'Custom content'
-  },
-  3: {
-    'zh-CN': '最新评论',
-    'zh-HK': '最新評論',
-    'zh-TW': '最新評論',
-    'zh-SG': '最新评论',
-    'ja-JP': '最新コメント',
-    'en-US': 'Latest comments'
-  },
-  4: {
-    'zh-CN': '随机标签',
-    'zh-HK': '隨機標籤',
-    'zh-TW': '隨機標籤',
-    'zh-SG': '随机标签',
-    'ja-JP': 'ランダムタグ',
-    'en-US': 'Random tags'
-  },
-  8: {
-    'zh-CN': '分类',
-    'zh-HK': '分類',
-    'zh-TW': '分類',
-    'zh-SG': '分类',
-    'ja-JP': 'カテゴリ',
-    'en-US': 'Categories'
-  },
-  9: {
-    'zh-CN': '归档',
-    'zh-HK': '歸檔',
-    'zh-TW': '歸檔',
-    'zh-SG': '归档',
-    'ja-JP': 'アーカイブ',
-    'en-US': 'Archive'
-  },
-  10: {
-    'zh-CN': '谷歌广告',
-    'zh-HK': 'Google 廣告',
-    'zh-TW': 'Google 廣告',
-    'zh-SG': '谷歌广告',
-    'ja-JP': 'Google 広告',
-    'en-US': 'Google Ads'
-  },
-  11: {
-    'zh-CN': '自定义HTML',
-    'zh-HK': '自訂 HTML',
-    'zh-TW': '自訂 HTML',
-    'zh-SG': '自定义HTML',
-    'ja-JP': 'カスタム HTML',
-    'en-US': 'Custom HTML'
-  },
-  12: {
-    'zh-CN': '热门文章',
-    'zh-HK': '熱門文章',
-    'zh-TW': '熱門文章',
-    'zh-SG': '热门文章',
-    'ja-JP': '人気記事',
-    'en-US': 'Popular posts'
-  },
-  13: {
-    'zh-CN': '当季追番',
-    'zh-HK': '當季追番',
-    'zh-TW': '當季追番',
-    'zh-SG': '当季追番',
-    'ja-JP': '今期アニメ',
-    'en-US': 'This season'
-  },
-  14: {
-    'zh-CN': '攻略中',
-    'zh-HK': '攻略中',
-    'zh-TW': '攻略中',
-    'zh-SG': '攻略中',
-    'ja-JP': '攻略中',
-    'en-US': 'Currently playing'
-  },
-  15: {
-    'zh-CN': '阅读中',
-    'zh-HK': '閱讀中',
-    'zh-TW': '閱讀中',
-    'zh-SG': '阅读中',
-    'ja-JP': '読書中',
-    'en-US': 'Currently reading'
-  }
-}
+import { getLanguageText } from '@/lang'
 
 const route = useRoute()
 const router = useRouter()
-const { languageCode, localePath, localeUrl, t } = useLang()
+const { languageCode, localePath, localeUrl, supportedLanguageCodes, t } =
+  useLang()
 languageCode.value
 
-const getSidebarTitle = item => {
-  const titleMap = SIDEBAR_BUILTIN_TITLE_MAP[item?.type]
-  const title = String(item?.title || '').trim()
-
-  if (!titleMap) {
-    return title
+const getSidebarBuiltinTitle = (type, targetLanguageCode) => {
+  const titlePath = `common.sidebarBuiltinTitles.${type}`
+  const title = getLanguageText(targetLanguageCode, titlePath)
+  if (title === titlePath) {
+    return ''
   }
 
-  const localizedTitle =
-    titleMap[languageCode.value] || titleMap['zh-CN'] || title
+  return title
+}
+
+const getSidebarBuiltinTitleList = type => {
+  return supportedLanguageCodes
+    .map(targetLanguageCode => {
+      return getSidebarBuiltinTitle(type, targetLanguageCode)
+    })
+    .filter(title => {
+      return Boolean(title)
+    })
+}
+
+const getSidebarTitle = item => {
+  const title = String(item?.title || '').trim()
+  const localizedTitle = getSidebarBuiltinTitle(item?.type, languageCode.value)
+
+  if (!localizedTitle) {
+    return title
+  }
 
   if (!title) {
     return localizedTitle
   }
 
-  if (Object.values(titleMap).includes(title)) {
+  if (getSidebarBuiltinTitleList(item?.type).includes(title)) {
     return localizedTitle
   }
 

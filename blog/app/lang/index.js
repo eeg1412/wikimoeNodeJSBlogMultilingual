@@ -1,31 +1,67 @@
-import zhCNCommon from './zh-CN/common'
-import zhCNAlmanac from './zh-CN/almanac'
-import zhCNSeeking from './zh-CN/seeking'
-import zhHKCommon from './zh-HK/common'
-import zhHKAlmanac from './zh-HK/almanac'
-import zhHKSeeking from './zh-HK/seeking'
-import zhTWCommon from './zh-TW/common'
-import zhTWAlmanac from './zh-TW/almanac'
-import zhTWSeeking from './zh-TW/seeking'
-import zhSGCommon from './zh-SG/common'
-import zhSGAlmanac from './zh-SG/almanac'
-import zhSGSeeking from './zh-SG/seeking'
-import jaJPCommon from './ja-JP/common'
-import jaJPAlmanac from './ja-JP/almanac'
-import jaJPSeeking from './ja-JP/seeking'
-import enUSCommon from './en-US/common'
-import enUSAlmanac from './en-US/almanac'
-import enUSSeeking from './en-US/seeking'
+import {
+  LANGUAGE_CONFIG_LIST,
+  REQUIRED_LANGUAGE_MODULE_NAMES
+} from '../../shared/languages'
 
-export const SUPPORTED_LANGUAGE_CODES = [
-  'zh-CN',
-  'zh-HK',
-  'zh-TW',
-  'zh-SG',
-  'ja-JP',
-  'en-US'
-]
-export const DEFAULT_LANGUAGE_CODE = 'zh-CN'
+function assertValidLanguageConfigList(languageConfigList) {
+  if (!Array.isArray(languageConfigList) || languageConfigList.length === 0) {
+    throw new Error('LANGUAGE_CONFIG_LIST must be a non-empty array')
+  }
+
+  const languageCodeSet = new Set()
+  let defaultLanguageConfig = null
+
+  for (const languageConfig of languageConfigList) {
+    if (!languageConfig || typeof languageConfig !== 'object') {
+      throw new Error('Language config must be an object')
+    }
+
+    if (
+      typeof languageConfig.code !== 'string' ||
+      !languageConfig.code.trim()
+    ) {
+      throw new Error('Language config code is required')
+    }
+
+    if (languageCodeSet.has(languageConfig.code)) {
+      throw new Error(`Duplicate language code: ${languageConfig.code}`)
+    }
+
+    if (
+      typeof languageConfig.label !== 'string' ||
+      !languageConfig.label.trim()
+    ) {
+      throw new Error(`Language label is required: ${languageConfig.code}`)
+    }
+
+    languageCodeSet.add(languageConfig.code)
+
+    if (languageConfig.isDefault) {
+      if (defaultLanguageConfig) {
+        throw new Error('Only one default language is allowed')
+      }
+
+      defaultLanguageConfig = languageConfig
+    }
+  }
+
+  if (!defaultLanguageConfig) {
+    throw new Error('Default language config is required')
+  }
+}
+
+assertValidLanguageConfigList(LANGUAGE_CONFIG_LIST)
+
+const DEFAULT_LANGUAGE_CONFIG = LANGUAGE_CONFIG_LIST.find(languageConfig => {
+  return languageConfig.isDefault
+})
+
+export const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(
+  languageConfig => {
+    return languageConfig.code
+  }
+)
+export const DEFAULT_LANGUAGE_CODE = DEFAULT_LANGUAGE_CONFIG.code
 
 export const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce(
   (map, code) => {
@@ -35,38 +71,64 @@ export const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce(
   {}
 )
 
-const LANGUAGE_TEXT_MAP = {
-  'zh-CN': {
-    common: zhCNCommon,
-    almanac: zhCNAlmanac,
-    seeking: zhCNSeeking
-  },
-  'zh-HK': {
-    common: zhHKCommon,
-    almanac: zhHKAlmanac,
-    seeking: zhHKSeeking
-  },
-  'zh-TW': {
-    common: zhTWCommon,
-    almanac: zhTWAlmanac,
-    seeking: zhTWSeeking
-  },
-  'zh-SG': {
-    common: zhSGCommon,
-    almanac: zhSGAlmanac,
-    seeking: zhSGSeeking
-  },
-  'ja-JP': {
-    common: jaJPCommon,
-    almanac: jaJPAlmanac,
-    seeking: jaJPSeeking
-  },
-  'en-US': {
-    common: enUSCommon,
-    almanac: enUSAlmanac,
-    seeking: enUSSeeking
+const translationModules = import.meta.glob('./*/*.js', {
+  eager: true,
+  import: 'default'
+})
+
+function discoverLanguageTextMap() {
+  const discoveredLanguageTextMap = {}
+
+  for (const [modulePath, moduleText] of Object.entries(translationModules)) {
+    const match = modulePath.match(/^\.\/([^/]+)\/([^/]+)\.js$/)
+    if (!match) {
+      throw new Error(`Invalid language file path: ${modulePath}`)
+    }
+
+    const languageCode = match[1]
+    const moduleName = match[2]
+
+    if (!discoveredLanguageTextMap[languageCode]) {
+      discoveredLanguageTextMap[languageCode] = {}
+    }
+
+    discoveredLanguageTextMap[languageCode][moduleName] = moduleText
   }
+
+  return discoveredLanguageTextMap
 }
+
+function buildLanguageTextMap() {
+  const discoveredLanguageTextMap = discoverLanguageTextMap()
+  const languageTextMap = {}
+
+  for (const languageCode of SUPPORTED_LANGUAGE_CODES) {
+    const languageText = discoveredLanguageTextMap[languageCode]
+    if (!languageText) {
+      throw new Error(`Missing translation directory: ${languageCode}`)
+    }
+
+    for (const moduleName of REQUIRED_LANGUAGE_MODULE_NAMES) {
+      if (!languageText[moduleName]) {
+        throw new Error(
+          `Missing translation file: ${languageCode}/${moduleName}.js`
+        )
+      }
+    }
+
+    languageTextMap[languageCode] = languageText
+  }
+
+  for (const languageCode of Object.keys(discoveredLanguageTextMap)) {
+    if (!SUPPORTED_LANGUAGE_CODES.includes(languageCode)) {
+      throw new Error(`Unexpected translation directory: ${languageCode}`)
+    }
+  }
+
+  return languageTextMap
+}
+
+const LANGUAGE_TEXT_MAP = buildLanguageTextMap()
 
 export function normalizeLanguageCode(input) {
   if (typeof input !== 'string') {

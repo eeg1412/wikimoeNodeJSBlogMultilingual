@@ -162,6 +162,19 @@ export default {
     menu: 'Navigation',
     sidebar: 'Sidebar'
   },
+  sidebarBuiltinTitles: {
+    1: 'Custom content',
+    3: 'Latest comments',
+    4: 'Random tags',
+    8: 'Categories',
+    9: 'Archive',
+    10: 'Google Ads',
+    11: 'Custom HTML',
+    12: 'Popular posts',
+    13: 'This season',
+    14: 'Currently playing',
+    15: 'Currently reading'
+  },
   search: {
     placeholder: 'Enter keywords',
     title: 'Search: {keyword}'

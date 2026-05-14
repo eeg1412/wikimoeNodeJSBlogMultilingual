@@ -3,6 +3,7 @@ const path = require('path')
 const {
   DEFAULT_LANGUAGE_CODE,
   LANGUAGE_CODE_MAP,
+  LANGUAGE_CONFIG_LIST: SERVER_LANGUAGE_CONFIG_LIST,
   SUPPORTED_LANGUAGE_CODES,
   normalizeLanguageCode
 } = require('./utils/language')
@@ -61,6 +62,350 @@ function getFilesRecursively(dirPath, extensions = ['.js']) {
   }
 
   return files
+}
+
+function loadExportedConstConfig(filePath, exportNames) {
+  const content = fs.readFileSync(filePath, 'utf8')
+  let executableContent = content
+
+  for (const exportName of exportNames) {
+    executableContent = executableContent.replace(
+      new RegExp(`export\\s+const\\s+${exportName}\\s*=`, 'g'),
+      `const ${exportName} =`
+    )
+  }
+
+  assert(
+    !/(^|\n)\s*import\s/.test(executableContent),
+    `${filePath} 禁止包含 import`
+  )
+  assert(
+    !/(^|\n)\s*export\s/.test(executableContent),
+    `${filePath} 存在未支持的导出`
+  )
+
+  const returnStatement = `\nreturn { ${exportNames.join(', ')} }`
+  return new Function(`${executableContent}${returnStatement}`)()
+}
+
+function loadDefaultObjectModule(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8')
+  const executableContent = content.replace(/export\s+default\s+/, 'return ')
+
+  assert(
+    executableContent !== content,
+    `${filePath} 必须使用 export default 导出语言包对象`
+  )
+  assert(
+    !/(^|\n)\s*import\s/.test(executableContent),
+    `${filePath} 禁止包含 import`
+  )
+  assert(
+    !/(^|\n)\s*export\s/.test(executableContent),
+    `${filePath} 存在未支持的导出`
+  )
+
+  return new Function(executableContent)()
+}
+
+function readObjectPath(source, pathText) {
+  const pathList = pathText.split('.')
+  let currentValue = source
+
+  for (const pathItem of pathList) {
+    if (!currentValue || typeof currentValue !== 'object') {
+      return undefined
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(currentValue, pathItem)) {
+      return undefined
+    }
+
+    currentValue = currentValue[pathItem]
+  }
+
+  return currentValue
+}
+
+function collectObjectPathList(source, prefix = '') {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return [prefix]
+  }
+
+  const pathList = []
+  for (const key of Object.keys(source)) {
+    let nextPrefix = key
+    if (prefix) {
+      nextPrefix = `${prefix}.${key}`
+    }
+
+    pathList.push(...collectObjectPathList(source[key], nextPrefix))
+  }
+
+  return pathList
+}
+
+function assertLanguageConfigList(languageConfigList, sourceName) {
+  assert(
+    Array.isArray(languageConfigList) && languageConfigList.length > 0,
+    `${sourceName} 语言配置必须是非空数组`
+  )
+
+  const languageCodeSet = new Set()
+  let defaultLanguageConfig = null
+
+  for (const languageConfig of languageConfigList) {
+    assert(
+      languageConfig && typeof languageConfig === 'object',
+      `${sourceName} 语言配置项必须是对象`
+    )
+    assert(
+      typeof languageConfig.code === 'string' && languageConfig.code.trim(),
+      `${sourceName} 语言配置缺少 code`
+    )
+    assert(
+      languageConfig.code === languageConfig.code.trim(),
+      `${sourceName} 语言 code 存在多余空白: ${languageConfig.code}`
+    )
+    assert(
+      !languageCodeSet.has(languageConfig.code),
+      `${sourceName} 语言 code 重复: ${languageConfig.code}`
+    )
+    assert(
+      typeof languageConfig.label === 'string' && languageConfig.label.trim(),
+      `${sourceName} 语言配置缺少 label: ${languageConfig.code}`
+    )
+
+    languageCodeSet.add(languageConfig.code)
+
+    if (languageConfig.isDefault) {
+      assert(!defaultLanguageConfig, `${sourceName} 只能有一个默认语言`)
+      defaultLanguageConfig = languageConfig
+    }
+  }
+
+  assert(defaultLanguageConfig, `${sourceName} 必须声明默认语言`)
+  return defaultLanguageConfig
+}
+
+function getLanguageConfigSummary(languageConfigList, sourceName) {
+  const defaultLanguageConfig = assertLanguageConfigList(
+    languageConfigList,
+    sourceName
+  )
+  const languageCodes = []
+  const languageLabelMap = {}
+
+  for (const languageConfig of languageConfigList) {
+    languageCodes.push(languageConfig.code)
+    languageLabelMap[languageConfig.code] = languageConfig.label
+  }
+
+  return {
+    sourceName,
+    languageCodes,
+    defaultLanguageCode: defaultLanguageConfig.code,
+    languageLabelMap
+  }
+}
+
+function assertLanguageConfigSummaryEqual(referenceSummary, currentSummary) {
+  assert(
+    currentSummary.languageCodes.length ===
+      referenceSummary.languageCodes.length,
+    `${currentSummary.sourceName} 语言数量与 ${referenceSummary.sourceName} 不一致`
+  )
+  assert(
+    currentSummary.defaultLanguageCode === referenceSummary.defaultLanguageCode,
+    `${currentSummary.sourceName} 默认语言与 ${referenceSummary.sourceName} 不一致`
+  )
+
+  for (const index of referenceSummary.languageCodes.keys()) {
+    const languageCode = referenceSummary.languageCodes[index]
+    assert(
+      currentSummary.languageCodes[index] === languageCode,
+      `${currentSummary.sourceName} 语言顺序与 ${referenceSummary.sourceName} 不一致`
+    )
+    assert(
+      currentSummary.languageLabelMap[languageCode] ===
+        referenceSummary.languageLabelMap[languageCode],
+      `${currentSummary.sourceName} 语言显示名不一致: ${languageCode}`
+    )
+  }
+}
+
+function getUnsupportedLanguageCodeForValidation() {
+  const candidateLanguageCodes = ['fr-FR', 'ko-KR', 'de-DE', 'es-ES']
+  for (const languageCode of candidateLanguageCodes) {
+    if (!SUPPORTED_LANGUAGE_CODES.includes(languageCode)) {
+      return languageCode
+    }
+  }
+
+  throw new Error('缺少可用于校验的不支持语言 code')
+}
+
+function getAdminLanguageConfigData() {
+  const adminConfigPath = path.join(
+    rootDir,
+    'admin',
+    'src',
+    'config',
+    'languages.js'
+  )
+
+  assert(fs.existsSync(adminConfigPath), '缺少 admin/src/config/languages.js')
+  return loadExportedConstConfig(adminConfigPath, [
+    'LANGUAGE_CONFIG_LIST',
+    'SIDEBAR_BUILTIN_TYPE_LIST'
+  ])
+}
+
+function getBlogLanguageConfigData() {
+  const blogConfigPath = path.join(rootDir, 'blog', 'shared', 'languages.js')
+
+  assert(fs.existsSync(blogConfigPath), '缺少 blog/shared/languages.js')
+  return loadExportedConstConfig(blogConfigPath, [
+    'LANGUAGE_CONFIG_LIST',
+    'REQUIRED_LANGUAGE_MODULE_NAMES'
+  ])
+}
+
+function validateAdminSidebarBuiltinTitles(
+  adminLanguageConfigList,
+  sidebarBuiltinTypeList
+) {
+  assert(
+    Array.isArray(sidebarBuiltinTypeList) && sidebarBuiltinTypeList.length > 0,
+    'Admin 侧边栏内置类型配置必须是非空数组'
+  )
+
+  for (const sidebarType of sidebarBuiltinTypeList) {
+    assert(
+      Number.isInteger(sidebarType),
+      `Admin 侧边栏内置类型必须是整数: ${sidebarType}`
+    )
+  }
+
+  for (const languageConfig of adminLanguageConfigList) {
+    assert(
+      languageConfig.sidebarBuiltinTitles &&
+        typeof languageConfig.sidebarBuiltinTitles === 'object',
+      `Admin 缺少侧边栏内置标题配置: ${languageConfig.code}`
+    )
+
+    for (const sidebarType of sidebarBuiltinTypeList) {
+      const title = languageConfig.sidebarBuiltinTitles[sidebarType]
+      assert(
+        typeof title === 'string' && title.trim(),
+        `Admin 缺少侧边栏内置标题 ${sidebarType}: ${languageConfig.code}`
+      )
+    }
+  }
+}
+
+function validateBlogLanguagePackKeys(referencePack, currentPack, filePath) {
+  const referencePathList = collectObjectPathList(referencePack)
+
+  for (const languageTextPath of referencePathList) {
+    assert(
+      readObjectPath(currentPack, languageTextPath) !== undefined,
+      `${filePath} 缺少语言 key: ${languageTextPath}`
+    )
+  }
+}
+
+function validateBlogSidebarBuiltinTitles(
+  blogLangDir,
+  adminLanguageConfigList,
+  sidebarBuiltinTypeList
+) {
+  for (const languageConfig of adminLanguageConfigList) {
+    const commonPath = path.join(blogLangDir, languageConfig.code, 'common.js')
+    const commonText = loadDefaultObjectModule(commonPath)
+
+    for (const sidebarType of sidebarBuiltinTypeList) {
+      const titlePath = `sidebarBuiltinTitles.${sidebarType}`
+      assert(
+        readObjectPath(commonText, titlePath) ===
+          languageConfig.sidebarBuiltinTitles[sidebarType],
+        `Blog 与 Admin 侧边栏内置标题不一致 ${sidebarType}: ${languageConfig.code}`
+      )
+    }
+  }
+}
+
+function validateBlogLanguagePacks(blogConfigData, adminConfigData) {
+  const blogLangDir = path.join(rootDir, 'blog', 'app', 'lang')
+  const blogSummary = getLanguageConfigSummary(
+    blogConfigData.LANGUAGE_CONFIG_LIST,
+    'Blog'
+  )
+  const requiredModuleNames = blogConfigData.REQUIRED_LANGUAGE_MODULE_NAMES
+
+  assert(fs.existsSync(blogLangDir), '缺少 blog/app/lang')
+  assert(
+    Array.isArray(requiredModuleNames) && requiredModuleNames.length > 0,
+    'Blog REQUIRED_LANGUAGE_MODULE_NAMES 必须是非空数组'
+  )
+
+  const languageDirNames = fs
+    .readdirSync(blogLangDir, { withFileTypes: true })
+    .filter(entry => {
+      return entry.isDirectory()
+    })
+    .map(entry => {
+      return entry.name
+    })
+
+  for (const languageDirName of languageDirNames) {
+    assert(
+      blogSummary.languageCodes.includes(languageDirName),
+      `Blog 存在未配置语言目录: ${languageDirName}`
+    )
+  }
+
+  const referenceLanguagePackMap = {}
+  for (const moduleName of requiredModuleNames) {
+    const referencePath = path.join(
+      blogLangDir,
+      blogSummary.defaultLanguageCode,
+      `${moduleName}.js`
+    )
+    assert(
+      fs.existsSync(referencePath),
+      `缺少默认语言包: blog/app/lang/${blogSummary.defaultLanguageCode}/${moduleName}.js`
+    )
+    referenceLanguagePackMap[moduleName] =
+      loadDefaultObjectModule(referencePath)
+  }
+
+  for (const languageCode of blogSummary.languageCodes) {
+    for (const moduleName of requiredModuleNames) {
+      const modulePath = path.join(
+        blogLangDir,
+        languageCode,
+        `${moduleName}.js`
+      )
+      assert(
+        fs.existsSync(modulePath),
+        `缺少语言包: blog/app/lang/${languageCode}/${moduleName}.js`
+      )
+
+      const currentPack = loadDefaultObjectModule(modulePath)
+      validateBlogLanguagePackKeys(
+        referenceLanguagePackMap[moduleName],
+        currentPack,
+        modulePath
+      )
+    }
+  }
+
+  validateBlogSidebarBuiltinTitles(
+    blogLangDir,
+    adminConfigData.LANGUAGE_CONFIG_LIST,
+    adminConfigData.SIDEBAR_BUILTIN_TYPE_LIST
+  )
 }
 
 function validateSourceReadOnlyFiles() {
@@ -188,11 +533,38 @@ function validateDualMongoFoundation() {
 }
 
 function validateLanguageCodeRules() {
-  assert(DEFAULT_LANGUAGE_CODE === 'zh-CN', '默认语言必须是 zh-CN')
-  assert(SUPPORTED_LANGUAGE_CODES.length === 6, '必须支持 6 个语言 code')
+  const adminConfigData = getAdminLanguageConfigData()
+  const blogConfigData = getBlogLanguageConfigData()
+  const serverSummary = getLanguageConfigSummary(
+    SERVER_LANGUAGE_CONFIG_LIST,
+    'Server'
+  )
+  const adminSummary = getLanguageConfigSummary(
+    adminConfigData.LANGUAGE_CONFIG_LIST,
+    'Admin'
+  )
+  const blogSummary = getLanguageConfigSummary(
+    blogConfigData.LANGUAGE_CONFIG_LIST,
+    'Blog'
+  )
 
-  const expectedCodes = ['zh-CN', 'zh-HK', 'zh-TW', 'zh-SG', 'ja-JP', 'en-US']
-  for (const code of expectedCodes) {
+  assertLanguageConfigSummaryEqual(serverSummary, adminSummary)
+  assertLanguageConfigSummaryEqual(serverSummary, blogSummary)
+  validateAdminSidebarBuiltinTitles(
+    adminConfigData.LANGUAGE_CONFIG_LIST,
+    adminConfigData.SIDEBAR_BUILTIN_TYPE_LIST
+  )
+
+  assert(
+    DEFAULT_LANGUAGE_CODE === serverSummary.defaultLanguageCode,
+    '默认语言必须从 server/config/languages.js 派生'
+  )
+  assert(
+    SUPPORTED_LANGUAGE_CODES.length === serverSummary.languageCodes.length,
+    'Server 支持语言数量必须从配置派生'
+  )
+
+  for (const code of serverSummary.languageCodes) {
     assert(SUPPORTED_LANGUAGE_CODES.includes(code), `缺少语言 code: ${code}`)
     assert(
       LANGUAGE_CODE_MAP[code.toLowerCase()] === code,
@@ -209,11 +581,17 @@ function validateLanguageCodeRules() {
     normalizeLanguageCode(' ja-jp ') === 'ja-JP',
     'ja-jp 必须归一化为 ja-JP'
   )
-  assert(normalizeLanguageCode('fr-FR') === null, '不支持语言必须返回 null')
+  const unsupportedLanguageCode = getUnsupportedLanguageCodeForValidation()
+  assert(
+    normalizeLanguageCode(unsupportedLanguageCode) === null,
+    '不支持语言必须返回 null'
+  )
   assert(normalizeLanguageCode('') === null, '空字符串必须返回 null')
 }
 
 function validateBlogLanguageEntry() {
+  const adminConfigData = getAdminLanguageConfigData()
+  const blogConfigData = getBlogLanguageConfigData()
   const blogLangIndexPath = path.join(
     rootDir,
     'blog',
@@ -228,10 +606,24 @@ function validateBlogLanguageEntry() {
     'composables',
     'useLang.js'
   )
+  const blogSharedLanguagePath = path.join(
+    rootDir,
+    'blog',
+    'shared',
+    'languages.js'
+  )
 
   assert(fs.existsSync(blogLangIndexPath), '缺少 blog/app/lang/index.js')
   assert(fs.existsSync(useLangPath), '缺少 blog/app/composables/useLang.js')
+  assert(fs.existsSync(blogSharedLanguagePath), '缺少 blog/shared/languages.js')
+  assertFileIncludes(blogSharedLanguagePath, [
+    'LANGUAGE_CONFIG_LIST',
+    'REQUIRED_LANGUAGE_MODULE_NAMES'
+  ])
   assertFileIncludes(blogLangIndexPath, [
+    'LANGUAGE_CONFIG_LIST',
+    'REQUIRED_LANGUAGE_MODULE_NAMES',
+    'import.meta.glob',
     'SUPPORTED_LANGUAGE_CODES',
     'DEFAULT_LANGUAGE_CODE',
     'normalizeLanguageCode',
@@ -244,20 +636,7 @@ function validateBlogLanguageEntry() {
     'getLanguageText'
   ])
 
-  for (const code of SUPPORTED_LANGUAGE_CODES) {
-    const commonPath = path.join(
-      rootDir,
-      'blog',
-      'app',
-      'lang',
-      code,
-      'common.js'
-    )
-    assert(
-      fs.existsSync(commonPath),
-      `缺少语言包: blog/app/lang/${code}/common.js`
-    )
-  }
+  validateBlogLanguagePacks(blogConfigData, adminConfigData)
 }
 
 function validateModelSchemaFields() {
@@ -657,7 +1036,7 @@ function validateMultilingualAdminConsoleSlice() {
       'getLanguageSettings',
       'updateLanguageSettings',
       '保存当前语言',
-      '复制简体中文',
+      'defaultLanguageText',
       'sitePostRandomSimilarTitle'
     ]
   )
@@ -1503,7 +1882,7 @@ function validateBlogLanguageSeo() {
   ])
 
   assertFileIncludes(useLangPath, [
-    'assertLanguageCode(getRouteCode(route))',
+    'assertLanguageCode(routeCode)',
     'languageCode.value',
     'export function buildLanguagePath',
     'localePath',
@@ -1520,14 +1899,17 @@ function validateBlogLanguageSeo() {
     "localeUrl(options.siteUrl, '/rss')",
     "localeUrl(options.siteUrl, '/rss/blog')",
     "localeUrl(options.siteUrl, '/rss/tweet')",
-    "t('common.footer.sitemap')"
+    "t('common.footer.sitemap')",
+    'getSidebarBuiltinTitle'
   ])
+  assertFileNotIncludes(layoutPath, ['SIDEBAR_BUILTIN_TITLE_MAP'])
   assertFileIncludes(naviItemPath, ['getItemUrl(item)', 'localePath(item.url)'])
 
   for (const languageCode of SUPPORTED_LANGUAGE_CODES) {
     const commonPath = path.join(blogAppDir, 'lang', languageCode, 'common.js')
     assertFileIncludes(commonPath, [
       'navigation:',
+      'sidebarBuiltinTitles:',
       'search:',
       'footer:',
       'rssSubscribe'
@@ -1591,10 +1973,20 @@ function validateBlogRssSitemapRoutes() {
     'global.$isReady = true'
   ])
   assertFileIncludes(languageSeoPath, [
+    '../../shared/languages',
+    'LANGUAGE_CONFIG_LIST',
     'getCanonicalLanguageCode',
     'getCanonicalRequestUrl',
     'proxyLanguageSeoRequest',
     "getRouterParam(event, 'code')"
+  ])
+  assertFileNotIncludes(languageSeoPath, [
+    "'zh-CN'",
+    "'zh-HK'",
+    "'zh-TW'",
+    "'zh-SG'",
+    "'ja-JP'",
+    "'en-US'"
   ])
 
   for (const routePath of routePaths) {
