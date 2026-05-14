@@ -483,6 +483,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/post/updatePost')
   },
   {
+    path: '/translation/post/status',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/post/updateStatus')
+  },
+  {
     path: '/translation/post/restore-snapshot',
     method: 'post',
     middleware: [checkAuth],

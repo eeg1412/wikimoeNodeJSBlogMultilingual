@@ -2717,6 +2717,112 @@ async function updateTranslationPostAiSkip(body = {}) {
   return updatedPost
 }
 
+async function updateTranslationPostStatus(body = {}) {
+  const id = String(body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(body, 'status')) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'status is required',
+      'status',
+      400
+    )
+  }
+
+  const nextStatus = Number(body.status)
+  if (![0, 1].includes(nextStatus)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'status must be draft or published',
+      'status',
+      400
+    )
+  }
+
+  const PostModel = getPostModel()
+  const post = await PostModel.findOne({
+    _id: new mongoose.Types.ObjectId(id),
+    recordKind: TRANSLATION_RECORD_KIND
+  }).select('_id languageCode alias type status')
+
+  if (!post) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  assertUpdateLanguageMatched(post, body)
+
+  if (Number(post.status) === 99) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'trash status cannot be switched',
+      'status',
+      400
+    )
+  }
+
+  if (Number(post.status) === nextStatus) {
+    return {
+      _id: post._id,
+      languageCode: post.languageCode,
+      status: Number(post.status)
+    }
+  }
+
+  await assertAliasAvailable(
+    post.languageCode,
+    post.alias,
+    post.type,
+    post._id,
+    nextStatus
+  )
+
+  const updatedPost = await PostModel.findOneAndUpdate(
+    { _id: post._id, recordKind: TRANSLATION_RECORD_KIND },
+    {
+      $set: {
+        status: nextStatus,
+        lastChangDate: new Date()
+      }
+    },
+    {
+      new: true,
+      projection: {
+        _id: 1,
+        languageCode: 1,
+        status: 1,
+        updatedAt: 1,
+        lastChangDate: 1
+      }
+    }
+  ).lean()
+
+  if (!updatedPost) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'translation post not found',
+      'id',
+      404
+    )
+  }
+
+  await contentRefreshUtils.refreshArticlePublishing(post.languageCode)
+
+  return updatedPost
+}
+
 function parseRestoreRecordInput(body = {}) {
   const collectionName = String(body.collectionName || 'posts').trim()
   if (!RESTORABLE_COLLECTION_NAMES.has(collectionName)) {
@@ -4122,5 +4228,6 @@ module.exports = {
   getTranslationPostDetail,
   restoreTranslationRecordFromSnapshot,
   updateTranslationPostAiSkip,
+  updateTranslationPostStatus,
   updateTranslationPost
 }

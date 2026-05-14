@@ -96,15 +96,27 @@
               <span v-else class="table-empty-text">-</span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="状态" width="100">
+          <ResponsiveTableColumn label="状态" width="150">
             <template #default="{ row }">
-              <el-tag
-                v-if="row.translation"
-                :type="getPostStatusTagType(row.translation.status)"
-                effect="plain"
-              >
-                {{ getPostStatusText(row.translation.status) }}
-              </el-tag>
+              <div v-if="row.translation" class="translation-status-cell">
+                <el-switch
+                  :model-value="isTranslationPublished(row.translation)"
+                  :loading="isStatusUpdating(row.translation)"
+                  :disabled="isStatusSwitchDisabled(row.translation)"
+                  @change="
+                    value => updateTranslationStatus(row.translation, value)
+                  "
+                />
+                <el-tag
+                  v-if="isStatusSwitchDisabled(row.translation)"
+                  type="danger"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ getPostStatusText(row.translation.status) }}
+                </el-tag>
+              </div>
+              <span v-else class="table-empty-text">-</span>
             </template>
           </ResponsiveTableColumn>
           <ResponsiveTableColumn label="版本" width="90">
@@ -146,45 +158,59 @@
               </span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="操作" width="250" fixed="right">
+          <ResponsiveTableColumn label="操作" width="330" fixed="right">
             <template #default="{ row }">
-              <el-button
-                v-if="row.translation"
-                type="primary"
-                size="small"
-                @click="goTranslationEditor(row.translation)"
-              >
-                编辑
-              </el-button>
-              <el-button
-                v-if="row.translation"
-                type="warning"
-                size="small"
-                :loading="rowActionLoadingMap[row.translation._id]"
-                @click="restoreTranslation(row.translation)"
-              >
-                同步快照
-              </el-button>
-              <el-button
-                v-else
-                type="primary"
-                size="small"
-                :loading="
-                  rowActionLoadingMap[getCreateActionKey(row.languageCode)]
-                "
-                :disabled="
-                  rowActionLoadingMap[getCreateActionKey(row.languageCode)]
-                "
-                @click="createTranslation(row.languageCode)"
-              >
-                创建
-              </el-button>
+              <div class="translation-row-actions">
+                <el-button
+                  v-if="row.translation"
+                  type="primary"
+                  size="small"
+                  @click="goTranslationEditor(row.translation)"
+                >
+                  编辑
+                </el-button>
+                <TranslationPostAiTranslateButton
+                  v-if="row.translation"
+                  :post="row.translation"
+                  size="small"
+                  @translate="openAiTranslationDialog"
+                />
+                <el-button
+                  v-if="row.translation"
+                  type="warning"
+                  size="small"
+                  :loading="rowActionLoadingMap[row.translation._id]"
+                  @click="restoreTranslation(row.translation)"
+                >
+                  同步快照
+                </el-button>
+                <el-button
+                  v-else
+                  type="primary"
+                  size="small"
+                  :loading="
+                    rowActionLoadingMap[getCreateActionKey(row.languageCode)]
+                  "
+                  :disabled="
+                    rowActionLoadingMap[getCreateActionKey(row.languageCode)]
+                  "
+                  @click="createTranslation(row.languageCode)"
+                >
+                  创建
+                </el-button>
+              </div>
             </template>
           </ResponsiveTableColumn>
         </ResponsiveTable>
       </div>
     </template>
     <el-empty v-else description="源文章快照不存在" />
+
+    <TranslationPostAiTranslationDialog
+      v-model="aiTranslationDialogVisible"
+      :post-id="aiTranslationPostId"
+      @saved="handleAiTranslationSaved"
+    />
   </div>
 </template>
 
@@ -194,24 +220,29 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
+import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
   getPostDisplayTitle,
-  getPostStatusTagType,
   getPostStatusText
 } from '@/utils/multilingual'
 
 export default {
   name: 'TranslationPostLanguageList',
   components: {
-    PostRelationSummary
+    PostRelationSummary,
+    TranslationPostAiTranslateButton,
+    TranslationPostAiTranslationDialog
   },
   setup() {
     const route = useRoute()
     const router = useRouter()
     const loading = ref(false)
     const sourceGroup = ref(null)
+    const aiTranslationDialogVisible = ref(false)
+    const aiTranslationPostId = ref('')
     const rowActionLoadingMap = reactive({})
 
     const sourcePost = computed(() => {
@@ -249,6 +280,71 @@ export default {
         return false
       }
       return rowActionLoadingMap[actionKey] === true
+    }
+
+    function getStatusActionKey(translation) {
+      if (!translation || !translation._id) {
+        return ''
+      }
+      return `status:${translation._id}`
+    }
+
+    function isStatusUpdating(translation) {
+      const actionKey = getStatusActionKey(translation)
+      if (!actionKey) {
+        return false
+      }
+      return rowActionLoadingMap[actionKey] === true
+    }
+
+    function isTranslationPublished(translation) {
+      return Number(translation?.status) === 1
+    }
+
+    function isStatusSwitchDisabled(translation) {
+      return Number(translation?.status) === 99
+    }
+
+    function updateTranslationStatus(translation, value) {
+      if (!translation || isStatusSwitchDisabled(translation)) {
+        return
+      }
+
+      const actionKey = getStatusActionKey(translation)
+      if (!actionKey || rowActionLoadingMap[actionKey]) {
+        return
+      }
+
+      let nextStatus = 0
+      if (value === true) {
+        nextStatus = 1
+      }
+      if (Number(translation.status) === nextStatus) {
+        return
+      }
+
+      setRowLoading(actionKey, true)
+      multilingualApi
+        .updateTranslationPostStatus(
+          {
+            id: translation._id,
+            languageCode: translation.languageCode,
+            status: nextStatus
+          },
+          true
+        )
+        .then(response => {
+          const updatedData = response.data.data || {}
+          translation.status = Number(updatedData.status)
+          translation.updatedAt = updatedData.updatedAt || translation.updatedAt
+          ElMessage.success('状态已更新')
+        })
+        .catch(error => {
+          console.log(error)
+        })
+        .finally(() => {
+          setRowLoading(actionKey, false)
+        })
     }
 
     function updateAiSkip(translation, value) {
@@ -394,24 +490,44 @@ export default {
       })
     }
 
+    function openAiTranslationDialog(translation) {
+      if (!translation || !translation._id) {
+        return
+      }
+
+      aiTranslationPostId.value = translation._id
+      aiTranslationDialogVisible.value = true
+    }
+
+    function handleAiTranslationSaved() {
+      getLanguageList()
+    }
+
     onMounted(() => {
       getLanguageList()
     })
 
     return {
       loading,
+      aiTranslationDialogVisible,
+      aiTranslationPostId,
       rowActionLoadingMap,
       getCreateActionKey,
       sourcePost,
       translationRows,
       isAiSkipUpdating,
+      isStatusUpdating,
+      isTranslationPublished,
+      isStatusSwitchDisabled,
       updateAiSkip,
+      updateTranslationStatus,
       createTranslation,
       getLanguageText,
       getPostDisplayTitle,
-      getPostStatusTagType,
       getPostStatusText,
       goTranslationEditor,
+      openAiTranslationDialog,
+      handleAiTranslationSaved,
       restoreTranslation
     }
   }
@@ -443,6 +559,23 @@ export default {
 
 .table-empty-text {
   color: var(--el-text-color-secondary);
+}
+
+.translation-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.translation-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.translation-row-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 @media (max-width: 767px) {

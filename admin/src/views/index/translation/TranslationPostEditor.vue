@@ -364,9 +364,9 @@
           <div class="translation-editor-action-divider" />
 
           <div class="translation-editor-action-group">
-            <el-button type="success" @click="openAiTranslationDialog">
-              AI 翻译
-            </el-button>
+            <TranslationPostAiTranslateButton
+              @translate="openPostAiTranslationDialog"
+            />
             <el-button @click="openTranslationJsonExport">JSON 导出</el-button>
             <el-button @click="openTranslationJsonImport">JSON 导入</el-button>
           </div>
@@ -659,6 +659,14 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <TranslationPostAiTranslationDialog
+      v-model="postAiDialogVisible"
+      :form="form"
+      :relation-records="relationRecords"
+      :original-editor-version="originalEditorVersion"
+      @saved="handlePostAiTranslationSaved"
+    />
 
     <el-dialog
       v-model="aiDialogVisible"
@@ -1454,6 +1462,8 @@ import EmojiTextarea from '@/components/EmojiTextarea.vue'
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
+import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
+import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
@@ -1752,6 +1762,8 @@ export default {
     RelationBusinessFieldEditor,
     TranslationEntryMeta,
     TranslationEntrySelectableGroups,
+    TranslationPostAiTranslateButton,
+    TranslationPostAiTranslationDialog,
     VideoUploader,
     VideoPlay
   },
@@ -1854,6 +1866,7 @@ export default {
     const importing = ref(false)
     const importFileInputRef = ref(null)
     const importSelectedFileCount = ref(0)
+    const postAiDialogVisible = ref(false)
     const aiDialogVisible = ref(false)
     const aiLoading = ref(false)
     const aiTranslating = ref(false)
@@ -2693,6 +2706,22 @@ export default {
         return
       }
       form.content = contentSource.value
+    }
+
+    function syncEditorContentBeforeAiTranslation() {
+      if (contentTab.value === 'sourceCode') {
+        form.content = contentSource.value
+      }
+    }
+
+    function openPostAiTranslationDialog() {
+      syncEditorContentBeforeAiTranslation()
+      postAiDialogVisible.value = true
+    }
+
+    function handlePostAiTranslationSaved(nextDetailData) {
+      applyPostDetailData(nextDetailData)
+      contentSource.value = form.content
     }
 
     function buildSubmitData(confirmReview) {
@@ -3912,8 +3941,11 @@ export default {
       onContentTabChange,
       openArticleMediaReplace,
       openMediaPreview,
+      openPostAiTranslationDialog,
       openAiTranslationDialog,
+      handlePostAiTranslationSaved,
       openRelationEditor,
+      originalEditorVersion,
       handleAiBaseModeChange,
       handleAiDialogBeforeClose,
       handleAiSourceLanguageChange,
@@ -3934,6 +3966,7 @@ export default {
       relationSaving,
       isAiBusy,
       officialTermSearchDefaultLoading,
+      postAiDialogVisible,
       postEditorVersion,
       resetRandomAlias,
       resetAiTranslationPreview,

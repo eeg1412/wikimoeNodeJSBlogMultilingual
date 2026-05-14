@@ -306,6 +306,12 @@ export default function (api) {
         noLoading
       })
     },
+    updateTranslationPostStatus(data, noLoading = false) {
+      return api.put('/translation/post/status', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     restoreTranslationPostSnapshot(data) {
       return api.post('/translation/post/restore-snapshot', data, {
         shouldAdminJWT: true
