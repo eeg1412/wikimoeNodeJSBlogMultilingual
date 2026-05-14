@@ -1,5 +1,66 @@
 import * as crypto from 'node:crypto'
 import { default as LRUCacheDriver } from 'unstorage/drivers/lru-cache'
+import { LANGUAGE_CONFIG_LIST } from '#shared/languages'
+
+const DEFAULT_LANGUAGE_CONFIG = LANGUAGE_CONFIG_LIST.find(languageConfig => {
+  return languageConfig.isDefault
+})
+const DEFAULT_LANGUAGE_CODE = DEFAULT_LANGUAGE_CONFIG.code
+const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(languageConfig => {
+  return languageConfig.code
+})
+const LANGUAGE_CODE_MAP = SUPPORTED_LANGUAGE_CODES.reduce((map, code) => {
+  map[code.toLowerCase()] = code
+  return map
+}, {})
+
+function normalizeLanguageCode(input) {
+  if (typeof input !== 'string') {
+    return null
+  }
+
+  const key = input.trim().toLowerCase()
+  if (!key) {
+    return null
+  }
+
+  return LANGUAGE_CODE_MAP[key] || null
+}
+
+function getErrorStatusCode(error) {
+  return (
+    error?.statusCode ||
+    error?.status ||
+    error?.response?.status ||
+    error?.data?.statusCode
+  )
+}
+
+function getUrlPathname(url) {
+  const [pathname] = String(url || '/').split('?')
+  return pathname || '/'
+}
+
+function getUrlLanguageCode(url) {
+  const pathname = getUrlPathname(url)
+  const pathList = pathname.split('/')
+  const firstSegment = pathList[1]
+  const firstSegmentLanguageCode = normalizeLanguageCode(firstSegment)
+
+  if (firstSegmentLanguageCode) {
+    return firstSegmentLanguageCode
+  }
+
+  if (pathname === '/' || pathname.startsWith('/post/')) {
+    return DEFAULT_LANGUAGE_CODE
+  }
+
+  if (pathname.startsWith('/page/')) {
+    return DEFAULT_LANGUAGE_CODE
+  }
+
+  return null
+}
 
 export default defineNitroPlugin(nitroApp => {
   // 每秒输出内存使用情况，输出MB
@@ -212,18 +273,41 @@ export default defineNitroPlugin(nitroApp => {
   const inflightCacheWrites = new Set()
   const inflightBackgroundUpdates = new Set()
 
+  function getBlogLanguageOptionsUrl(languageCode) {
+    const apiPath = `/api/multilingual-blog/options?languageCode=${encodeURIComponent(
+      languageCode
+    )}`
+
+    if (config.apiDomain) {
+      return `${config.apiDomain}${apiPath}`
+    }
+
+    return apiPath
+  }
+
+  async function isBlogLanguageEnabledForUrl(url) {
+    const languageCode = getUrlLanguageCode(url)
+
+    if (!languageCode) {
+      return false
+    }
+
+    try {
+      const response = await $fetch(getBlogLanguageOptionsUrl(languageCode))
+      return response?.data?.blogLanguageEnabled === true
+    } catch (error) {
+      if (getErrorStatusCode(error) === 404) {
+        return false
+      }
+
+      throw error
+    }
+  }
+
   // 缓存URL列表
-  const supportedLanguageCodes = [
-    'zh-CN',
-    'zh-HK',
-    'zh-TW',
-    'zh-SG',
-    'ja-JP',
-    'en-US'
-  ]
   const cacheableLanguagePrefixes = Array.from(
     new Set(
-      supportedLanguageCodes.flatMap(code => [
+      SUPPORTED_LANGUAGE_CODES.flatMap(code => [
         `/${code}`,
         `/${code.toLowerCase()}`
       ])
@@ -384,6 +468,15 @@ export default defineNitroPlugin(nitroApp => {
     const shouldCache = SWR_ENABLED && isUrlCacheable(url)
     if (shouldCache) {
       XWMCACHE_VALUE = 'MISS'
+      const cacheKey = getCacheKey(url)
+      const isBlogLanguageEnabled = await isBlogLanguageEnabledForUrl(url)
+
+      if (!isBlogLanguageEnabled) {
+        await driver.removeItem(cacheKey)
+        event.node.res.setHeader('x-wm-cache', 'BYPASS')
+        return
+      }
+
       // 添加SWR的头
       event.node.res.setHeader(
         'Cache-Control',
@@ -391,8 +484,6 @@ export default defineNitroPlugin(nitroApp => {
           SWR_CACHE_STALEMAXAGE / 1000
         }`
       )
-
-      const cacheKey = getCacheKey(url)
 
       // 读取LRU缓存
       const cached = driver.getItem(cacheKey)

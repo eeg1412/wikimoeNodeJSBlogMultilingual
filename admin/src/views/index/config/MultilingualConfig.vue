@@ -132,6 +132,8 @@ const FIELD_GROUP_OPTIONS = [
   { label: 'RSS 与站点地图', value: 'seoFeed' }
 ]
 
+const NON_COPY_FIELD_NAMES = ['blogLanguageEnabled']
+
 export default {
   name: 'MultilingualConfig',
   components: {
@@ -289,6 +291,10 @@ export default {
       )
         .then(() => {
           fieldList.value.forEach(field => {
+            if (NON_COPY_FIELD_NAMES.includes(field.name)) {
+              return
+            }
+
             settingsMap[languageCode][field.name] =
               settingsMap[DEFAULT_LANGUAGE_CODE][field.name]
           })

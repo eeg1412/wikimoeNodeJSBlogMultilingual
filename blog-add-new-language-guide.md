@@ -8,14 +8,15 @@
 
 新增语言前先确认：
 
-| 项目       | 要求                                                  |
-| ---------- | ----------------------------------------------------- |
-| 规范语言码 | 与 Server、Admin 完全一致，例如 `fr-FR`               |
-| 展示名称   | 与 Server、Admin 配置一致，例如 `Français`            |
-| 默认语言   | 只新增语言时不要修改默认语言                          |
-| 语言包     | 必须补齐 `common.js`、`almanac.js`、`seeking.js`      |
-| 侧边栏标题 | 必须在 `common.sidebarBuiltinTitles` 补齐所有内置类型 |
-| 内容策略   | 明确新语言页面是立即上线，还是先只进入配置和翻译流程  |
+| 项目           | 要求                                                  |
+| -------------- | ----------------------------------------------------- |
+| 规范语言码     | 与 Server、Admin 完全一致，例如 `fr-FR`               |
+| 展示名称       | 与 Server、Admin 配置一致，例如 `Français`            |
+| 默认语言       | 只新增语言时不要修改默认语言                          |
+| 语言包         | 必须补齐 `common.js`、`almanac.js`、`seeking.js`      |
+| 侧边栏标题     | 必须在 `common.sidebarBuiltinTitles` 补齐所有内置类型 |
+| 博客端启用状态 | 新增语言默认启用，可在 Admin 多语言站点配置中关闭     |
+| 内容策略       | 明确新语言页面是立即上线，还是先只进入配置和翻译流程  |
 
 不要让新语言页面回退显示默认语言内容。缺数据时空列表和 404 是正确表现。
 
@@ -196,6 +197,7 @@ Blog 只负责展示。新语言要正常上线，还需要 Server 数据和管�
 新增语言后检查：
 
 - `/<code>` 可以进入新语言首页。
+- Admin 中关闭该语言的博客端启用状态后，`/<code>` 和该语言前缀下所有前台页面通过 Nuxt 错误页返回 404，错误页按钮导航到根路径主站 `/`。
 - `/<小写 code>` 会规范化为标准 code 相关行为。
 - 短 code 或未配置 code 按当前设计 404。
 - 导航、搜索、文章链接都带当前语言前缀。
@@ -233,6 +235,8 @@ Blog 只负责展示。新语言要正常上线，还需要 Server 数据和管�
 - `blog/app/lang/index.js` 仍使用 `import.meta.glob`。
 - `blog/server/utils/languageSeo.js` 仍读取 `blog/shared/languages.js`。
 - Blog 入口和 Nitro server 入口引用共享配置时仍使用 `#shared/languages`。
+- `blog/app/middleware/language-active.global.js` 仍会在每次进入页面时检查博客端语言启用状态。
+- `blog/server/plugins/routecache.js` 仍会在返回页面缓存前检查博客端语言启用状态。
 
 项目一致性校验位于：
 
@@ -245,6 +249,7 @@ server/validator-tool.js
 ## 9. Blog 验收清单
 
 - 新语言路由可进入。
+- 关闭博客端启用状态后，新语言路由通过 Nuxt 错误页返回 404，错误页按钮进入根路径主站 `/`，对应 Blog API 返回 404 状态。
 - 静态文案来自新语言语言包。
 - 缺失 key 不会大量回退默认语言。
 - 前台侧边栏内置标题显示新语言文案。
@@ -264,4 +269,5 @@ server/validator-tool.js
 - 漏补 `common.sidebarBuiltinTitles`，导致前台内置侧边栏标题缺失。
 - 语言包 key 不完整，页面混默认语言。
 - 新语言没有内容时用默认语言内容兜底。
+- 语言关闭后仍由 SWR 页面缓存返回旧页面。
 - 目标语言是 RTL，却只加语言包没有做额外评估。

@@ -612,10 +612,45 @@ function validateBlogLanguageEntry() {
     'shared',
     'languages.js'
   )
+  const useOptionsPath = path.join(
+    rootDir,
+    'blog',
+    'app',
+    'composables',
+    'useOptions.js'
+  )
+  const languageActiveMiddlewarePath = path.join(
+    rootDir,
+    'blog',
+    'app',
+    'middleware',
+    'language-active.global.js'
+  )
+  const routeCachePath = path.join(
+    rootDir,
+    'blog',
+    'server',
+    'plugins',
+    'routecache.js'
+  )
+  const errorPagePath = path.join(rootDir, 'blog', 'app', 'error.vue')
 
   assert(fs.existsSync(blogLangIndexPath), '缺少 blog/app/lang/index.js')
   assert(fs.existsSync(useLangPath), '缺少 blog/app/composables/useLang.js')
   assert(fs.existsSync(blogSharedLanguagePath), '缺少 blog/shared/languages.js')
+  assert(
+    fs.existsSync(useOptionsPath),
+    '缺少 blog/app/composables/useOptions.js'
+  )
+  assert(
+    fs.existsSync(languageActiveMiddlewarePath),
+    '缺少 blog/app/middleware/language-active.global.js'
+  )
+  assert(
+    fs.existsSync(routeCachePath),
+    '缺少 blog/server/plugins/routecache.js'
+  )
+  assert(fs.existsSync(errorPagePath), '缺少 blog/app/error.vue')
   assertFileIncludes(blogSharedLanguagePath, [
     'LANGUAGE_CONFIG_LIST',
     'REQUIRED_LANGUAGE_MODULE_NAMES'
@@ -634,6 +669,29 @@ function validateBlogLanguageEntry() {
     'useLang',
     'assertLanguageCode',
     'getLanguageText'
+  ])
+  assertFileIncludes(useOptionsPath, [
+    'blogLanguageEnabled',
+    'BLOG_LANGUAGE_DISABLED_REASON',
+    'optionsLanguageCode',
+    'createLanguageNotFoundError'
+  ])
+  assertFileIncludes(languageActiveMiddlewarePath, [
+    'defineNuxtRouteMiddleware',
+    'getOptions({ languageCode, force: true })',
+    'throw createLanguageNotFoundError()'
+  ])
+  assertFileIncludes(routeCachePath, [
+    '#shared/languages',
+    'isBlogLanguageEnabledForUrl',
+    'blogLanguageEnabled',
+    'SUPPORTED_LANGUAGE_CODES.flatMap'
+  ])
+  assertFileIncludes(errorPagePath, [
+    'BLOG_LANGUAGE_DISABLED_REASON',
+    'isBlogLanguageDisabledError',
+    'DEFAULT_LANGUAGE_CODE',
+    "return '/'"
   ])
 
   validateBlogLanguagePacks(blogConfigData, adminConfigData)
@@ -771,9 +829,11 @@ function validateAdminPathMigration() {
     'BackupList.vue'
   )
   const rssRoutePath = path.join(serverDir, 'routes', 'multilingualRss.js')
+  const blogRoutePath = path.join(serverDir, 'routes', 'blog.js')
   const sitemapPath = path.join(serverDir, 'utils', 'sitemap.js')
 
   assert(fs.existsSync(rssRoutePath), '缺少 server/routes/multilingualRss.js')
+  assert(fs.existsSync(blogRoutePath), '缺少 server/routes/blog.js')
   assertFileIncludes(appPath, [
     "app.use('/api/multilingual-admin', multilingualAdminRouter)",
     "app.use('/api/multilingual-blog', multilingualBlogRouter)",
@@ -802,6 +862,12 @@ function validateAdminPathMigration() {
     'seo',
     'rss',
     'languageCode'
+  ])
+  assertFileIncludes(blogRoutePath, [
+    'checkBlogLanguageEnabled',
+    'isBlogLanguageEnabled',
+    'getRequestLanguageCode',
+    'res.status(404)'
   ])
   assertFileIncludes(sitemapPath, [
     'getLanguageSitemap',
@@ -1037,6 +1103,8 @@ function validateMultilingualAdminConsoleSlice() {
       'updateLanguageSettings',
       '保存当前语言',
       'defaultLanguageText',
+      'blogLanguageEnabled',
+      'NON_COPY_FIELD_NAMES',
       'sitePostRandomSimilarTitle'
     ]
   )
@@ -1390,6 +1458,8 @@ function validateMultilingualAdminApi() {
   ])
   assertFileIncludes(languageSettingsServicePath, [
     'LANGUAGE_SETTING_FIELDS',
+    'blogLanguageEnabled',
+    'isBlogLanguageEnabled',
     'siteTitle',
     'sitePostRandomSimilarTitle',
     'scope: OPTION_SCOPE',

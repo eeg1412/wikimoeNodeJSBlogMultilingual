@@ -1,6 +1,8 @@
 var express = require('express')
 var router = express.Router()
 const { referrerRecord } = require('../utils/utils')
+const cacheDataUtils = require('../config/cacheData')
+const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
 
 const checkIsReady = (req, res, next) => {
   const isReady = global.$isReady
@@ -24,6 +26,27 @@ const checkIsBackuping = (req, res, next) => {
 const referrerRecordMiddleware = (req, res, next) => {
   referrerRecord(req.headers.referer, 'blogApi')
   next()
+}
+
+const checkBlogLanguageEnabled = async (req, res, next) => {
+  try {
+    const languageCode = cacheDataUtils.getRequestLanguageCode(req)
+    if (!languageCode) {
+      res.status(404).json({ errors: [{ message: 'languageCode不支持' }] })
+      return
+    }
+
+    const isEnabled =
+      await languageSettingsService.isBlogLanguageEnabled(languageCode)
+    if (!isEnabled) {
+      res.status(404).json({ errors: [{ message: '语言未启用' }] })
+      return
+    }
+
+    next()
+  } catch (error) {
+    next(error)
+  }
 }
 
 const blogRouteSetting = [
@@ -278,6 +301,7 @@ blogRouteSetting.forEach(item => {
   const middleware = [
     checkIsReady,
     checkIsBackuping,
+    checkBlogLanguageEnabled,
     referrerRecordMiddleware,
     ...item.middleware
   ]

@@ -6,12 +6,12 @@ import { multilingualRequest, sourceRequest } from '~/api'
  */
 
 const URL = `/options`
-const getOptionsApi = () => {
-  return sourceRequest.getFetch(URL)
+const getOptionsApi = (params = {}, options = {}) => {
+  return sourceRequest.getFetch(URL, params, options)
 }
 
-const getMultilingualOptionsApi = () => {
-  return multilingualRequest.getFetch(URL)
+const getMultilingualOptionsApi = (params = {}, options = {}) => {
+  return multilingualRequest.getFetch(URL, params, options)
 }
 
 export { getOptionsApi, getMultilingualOptionsApi }

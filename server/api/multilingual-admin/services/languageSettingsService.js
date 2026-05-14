@@ -16,6 +16,13 @@ const BASE64_IMAGE_REG = /^data:image\/\w+;base64,/
 
 const LANGUAGE_SETTING_FIELDS = [
   {
+    name: 'blogLanguageEnabled',
+    label: '启用博客端语言',
+    type: 'boolean',
+    group: 'site',
+    defaultValue: true
+  },
+  {
     name: 'siteTitle',
     label: '站点标题',
     type: 'string',
@@ -372,6 +379,25 @@ async function getLanguageSettings(languageCodeInput) {
   }
 }
 
+async function isBlogLanguageEnabled(languageCodeInput) {
+  const languageCode = normalizeSupportedLanguageCode(languageCodeInput)
+  const OptionModel = getOptionModel()
+  const field = LANGUAGE_SETTING_FIELD_MAP.blogLanguageEnabled
+  const record = await OptionModel.findOne({
+    scope: OPTION_SCOPE,
+    languageCode,
+    name: 'blogLanguageEnabled'
+  })
+    .select('value')
+    .lean()
+
+  if (!record) {
+    return true
+  }
+
+  return normalizeValue(field, record.value) === true
+}
+
 async function updateLanguageSettings(body = {}) {
   const languageCode = normalizeSupportedLanguageCode(body.languageCode)
   const values = body.values || {}
@@ -438,5 +464,6 @@ module.exports = {
   LANGUAGE_SETTING_FIELDS,
   getLanguageSettings,
   getLanguageSettingsList,
+  isBlogLanguageEnabled,
   updateLanguageSettings
 }
