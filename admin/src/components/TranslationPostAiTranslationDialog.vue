@@ -980,6 +980,19 @@ export default {
       return form.sourceLanguageCode || ''
     }
 
+    function syncDefaultAiSourceLanguageCode(options = {}) {
+      if (!options.force && aiSourceLanguageCode.value) {
+        return
+      }
+
+      const defaultSourceLanguageCode = getDefaultAiSourceLanguageCode()
+      if (!defaultSourceLanguageCode) {
+        return
+      }
+
+      aiSourceLanguageCode.value = defaultSourceLanguageCode
+    }
+
     function getSourceSnapshotId() {
       return form.sourceSnapshotId
     }
@@ -1066,6 +1079,9 @@ export default {
       }
       detailData.value = nextDetailData
       applyPost(nextDetailData.post)
+      syncDefaultAiSourceLanguageCode({
+        force: options.forceAiSourceLanguageCode === true
+      })
       if (options.emitSaved === true) {
         emit('saved', nextDetailData)
       }
@@ -1081,7 +1097,9 @@ export default {
         id: postId
       })
       const responseData = response.data.data
-      applyPostDetailData(responseData)
+      applyPostDetailData(responseData, {
+        forceAiSourceLanguageCode: true
+      })
       return responseData
     }
 
@@ -2194,6 +2212,7 @@ export default {
       canStartAiTranslation,
       clearAiEntries,
       confirmAiTranslationImport,
+      creatableAiSkippedEntries,
       createAiTranslationJob,
       createAllSkippedTranslations,
       createSkippedTranslation,
