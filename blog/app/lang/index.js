@@ -1,7 +1,7 @@
 import {
   LANGUAGE_CONFIG_LIST,
   REQUIRED_LANGUAGE_MODULE_NAMES
-} from '../../shared/languages'
+} from '#shared/languages'
 
 function assertValidLanguageConfigList(languageConfigList) {
   if (!Array.isArray(languageConfigList) || languageConfigList.length === 0) {

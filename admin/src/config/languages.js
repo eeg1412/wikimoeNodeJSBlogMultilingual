@@ -101,6 +101,23 @@ export const LANGUAGE_CONFIG_LIST = [
       14: 'Currently playing',
       15: 'Currently reading'
     }
+  },
+  {
+    code: 'ko-KR',
+    label: '한국어',
+    sidebarBuiltinTitles: {
+      1: '사용자 지정 콘텐츠',
+      3: '최신 댓글',
+      4: '랜덤 태그',
+      8: '카테고리',
+      9: '아카이브',
+      10: 'Google 광고',
+      11: '사용자 지정 HTML',
+      12: '인기 글',
+      13: '이번 시즌',
+      14: '플레이 중',
+      15: '읽는 중'
+    }
   }
 ]
 

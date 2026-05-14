@@ -1973,7 +1973,7 @@ function validateBlogRssSitemapRoutes() {
     'global.$isReady = true'
   ])
   assertFileIncludes(languageSeoPath, [
-    '../../shared/languages',
+    '#shared/languages',
     'LANGUAGE_CONFIG_LIST',
     'getCanonicalLanguageCode',
     'getCanonicalRequestUrl',

@@ -1,4 +1,4 @@
-import { LANGUAGE_CONFIG_LIST } from '../../shared/languages'
+import { LANGUAGE_CONFIG_LIST } from '#shared/languages'
 
 const SUPPORTED_LANGUAGE_CODES = LANGUAGE_CONFIG_LIST.map(languageConfig => {
   return languageConfig.code
