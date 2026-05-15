@@ -81,6 +81,29 @@ const officialTermSearchResponseJsonSchema = {
   }
 }
 
+const officialTermSearchTranslationOnlyResponseJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['terms'],
+  properties: {
+    terms: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['sourceText', 'translations'],
+        properties: {
+          sourceText: { type: 'string' },
+          translations: {
+            type: 'object',
+            additionalProperties: { type: 'string' }
+          }
+        }
+      }
+    }
+  }
+}
+
 function normalizeString(value, maxLength = 600) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -258,6 +281,11 @@ function attachSearchQueryPolicy(requestData) {
     '每个 sourceText 的每种目标语言应尽可能只使用 1 次联网检索，最多不得超过 2 次。第一次查询必须同时包含 sourceText、稳定身份线索和目标语言译名意图；查询语言必须优先贴近目标语言的当地写法和当地内容生态，不要只用源文语言关键词检索目标语言结果。只有首轮结果互相矛盾或无法确认对象身份时，才允许第二次查询。禁止用过宽的普通词、截断后的短词或只包含系列母题的关键词反复检索。'
 }
 
+function attachSkipNoteRevisionInstruction(requestData) {
+  requestData['备注处理要求'] =
+    'sourceTermRequests[].note 只用于识别对象和避免检索串词；本步骤只返回译名，不要生成、修订或返回任何备注字段。'
+}
+
 function attachTermTranslationQualityPolicy(requestData) {
   requestData['翻译质量约束'] =
     translationPromptPolicyService.getTermTranslationQualityPolicyText()
@@ -301,7 +329,8 @@ function buildOfficialTermKnowledgePrompt({
 function buildOfficialTermSearchPrompt({
   termRequests,
   sourceLanguageCode,
-  contextSummary
+  contextSummary,
+  includeTermNoteRevision = true
 }) {
   const normalizedContextSummary =
     normalizeOfficialTermContextSummary(contextSummary)
@@ -312,7 +341,11 @@ function buildOfficialTermSearchPrompt({
   }
   attachTermTranslationQualityPolicy(requestData)
   attachTermNoteInstruction(requestData, termRequests)
-  attachSearchTermNoteRevisionInstruction(requestData, termRequests)
+  if (includeTermNoteRevision) {
+    attachSearchTermNoteRevisionInstruction(requestData, termRequests)
+  } else {
+    attachSkipNoteRevisionInstruction(requestData)
+  }
   attachSearchQueryPolicy(requestData)
   if (normalizedContextSummary) {
     requestData.contentContextSummary = normalizedContextSummary
@@ -334,16 +367,27 @@ function buildOfficialTermSearchPrompt({
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
     '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
     '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
-    '在确认译名的同时，必须根据联网检索结果判断 sourceTermRequests[].note 是否需要修订。',
-    '如果 note 对实体身份、作品归属、角色定位、组织类型、产品类型或地理属性的描述有误，或者含有“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，noteNeedsUpdate 必须为 true。',
-    '修订后的 note 必须是中文词库消歧备注，只写可脱离本文单独成立的稳定身份线索；不要写翻译方法，不要写目标语言译名，不要写搜索过程。',
-    '如果原 note 已准确可用，noteNeedsUpdate 必须为 false，note 返回原 note。',
-    '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。',
-    '只返回合法 JSON，不要使用 Markdown，不要解释。',
-    'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。',
-    '',
-    JSON.stringify(requestData, null, 2)
+    '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。'
   ]
+
+  if (includeTermNoteRevision) {
+    promptLines.push(
+      '在确认译名的同时，必须根据联网检索结果判断 sourceTermRequests[].note 是否需要修订。',
+      '如果 note 对实体身份、作品归属、角色定位、组织类型、产品类型或地理属性的描述有误，或者含有“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，noteNeedsUpdate 必须为 true。',
+      '修订后的 note 必须是中文词库消歧备注，只写可脱离本文单独成立的稳定身份线索；不要写翻译方法，不要写目标语言译名，不要写搜索过程。',
+      '如果原 note 已准确可用，noteNeedsUpdate 必须为 false，note 返回原 note。',
+      '只返回合法 JSON，不要使用 Markdown，不要解释。',
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。'
+    )
+  } else {
+    promptLines.push(
+      'sourceTermRequests[].note 只用于判断名词指向，严禁在响应中返回 note、noteNeedsUpdate、translationNote 或其它备注字段。',
+      '只返回合法 JSON，不要使用 Markdown，不要解释。',
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。'
+    )
+  }
+
+  promptLines.push('', JSON.stringify(requestData, null, 2))
 
   return promptLines.join('\n')
 }
@@ -369,11 +413,15 @@ function buildGeminiKnowledgeRequest(settings, prompt) {
   }
 }
 
-function buildGeminiSearchRequest(settings, prompt) {
+function buildGeminiSearchRequest(settings, prompt, options = {}) {
+  let responseJsonSchema = officialTermSearchResponseJsonSchema
+  if (options.includeTermNoteRevision === false) {
+    responseJsonSchema = officialTermSearchTranslationOnlyResponseJsonSchema
+  }
   const generationConfig = applyGeminiThinkingConfig(
     {
       responseMimeType: 'application/json',
-      responseJsonSchema: officialTermSearchResponseJsonSchema
+      responseJsonSchema
     },
     settings
   )
@@ -533,8 +581,9 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
   }
 }
 
-function normalizeSearchTerms(resultData, termRequests) {
+function normalizeSearchTerms(resultData, termRequests, options = {}) {
   normalizeResultRoot(resultData, 'Gemini 联网搜索')
+  const includeTermNoteRevision = options.includeTermNoteRevision !== false
 
   const requestedTermMap = buildRequestedTermMap(termRequests)
 
@@ -559,32 +608,36 @@ function normalizeSearchTerms(resultData, termRequests) {
         translations[languageCode] = translatedText
       }
     })
-    if (typeof termItem?.noteNeedsUpdate !== 'boolean') {
-      throw new ApiError(
-        ERROR_CODES.AI_TRANSLATION_FAILED,
-        `Gemini 联网搜索结果 ${sourceText} 缺少 noteNeedsUpdate 布尔值`,
-        'geminiInternetSearch',
-        502
-      )
-    }
-    const revisedNote = normalizeString(termItem?.note, 200)
-    if (termItem.noteNeedsUpdate === true && !revisedNote) {
-      throw new ApiError(
-        ERROR_CODES.AI_TRANSLATION_FAILED,
-        `Gemini 联网搜索结果 ${sourceText} 标记需要修订备注但没有返回 note`,
-        'geminiInternetSearch',
-        502
-      )
-    }
     let termNote = termRequest.note || ''
-    if (termItem.noteNeedsUpdate === true) {
-      termNote = revisedNote
+    let shouldUpdateTermNote = false
+    if (includeTermNoteRevision) {
+      if (typeof termItem?.noteNeedsUpdate !== 'boolean') {
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          `Gemini 联网搜索结果 ${sourceText} 缺少 noteNeedsUpdate 布尔值`,
+          'geminiInternetSearch',
+          502
+        )
+      }
+      const revisedNote = normalizeString(termItem?.note, 200)
+      if (termItem.noteNeedsUpdate === true && !revisedNote) {
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          `Gemini 联网搜索结果 ${sourceText} 标记需要修订备注但没有返回 note`,
+          'geminiInternetSearch',
+          502
+        )
+      }
+      if (termItem.noteNeedsUpdate === true) {
+        termNote = revisedNote
+        shouldUpdateTermNote = true
+      }
     }
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
       termId: termRequest.termId || '',
       note: termNote,
-      shouldUpdateTermNote: termItem.noteNeedsUpdate === true,
+      shouldUpdateTermNote,
       translations,
       translationSource: TERM_TRANSLATION_SOURCE_INTERNET_SEARCH
     })
@@ -782,15 +835,19 @@ async function searchOfficialTermTranslationsWithInternet({
   requestUrl,
   cancellation,
   onStatus,
-  skipUsageLog
+  skipUsageLog,
+  includeTermNoteRevision = true
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermSearchPrompt({
     termRequests,
     sourceLanguageCode,
-    contextSummary
+    contextSummary,
+    includeTermNoteRevision
   })
-  const requestBody = buildGeminiSearchRequest(settings, prompt)
+  const requestBody = buildGeminiSearchRequest(settings, prompt, {
+    includeTermNoteRevision
+  })
   const requestSummary = summarizeGeminiNativeRequestBody(
     requestBody,
     requestUrl
@@ -809,14 +866,14 @@ async function searchOfficialTermTranslationsWithInternet({
         const extractedText = extractTextFromGeminiNativeResponse(response)
         const resultData = parseSearchResponseText(extractedText?.text || '')
         const groundingMetadata = summarizeGroundingMetadata(response)
-        const terms = normalizeSearchTerms(resultData, termRequests).map(
-          term => {
-            return {
-              ...term,
-              searchMetadata: groundingMetadata
-            }
+        const terms = normalizeSearchTerms(resultData, termRequests, {
+          includeTermNoteRevision
+        }).map(term => {
+          return {
+            ...term,
+            searchMetadata: groundingMetadata
           }
-        )
+        })
         await recordUsage({
           settings,
           operation: OPERATION_OFFICIAL_TERM_SEARCH,
@@ -922,6 +979,7 @@ async function searchOfficialTermTranslations(options = {}) {
   )
   const requestTargetLanguageCodes =
     getTermRequestTargetLanguageCodes(termRequests)
+  const includeTermNoteRevision = options.includeTermNoteRevision !== false
 
   const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
   const timeoutSeconds = Number(options.timeoutSeconds)
@@ -971,7 +1029,8 @@ async function searchOfficialTermTranslations(options = {}) {
       requestUrl,
       cancellation: options.cancellation,
       onStatus: options.onStatus,
-      skipUsageLog: options.skipUsageLog
+      skipUsageLog: options.skipUsageLog,
+      includeTermNoteRevision
     })
   }
 
@@ -983,6 +1042,7 @@ async function searchOfficialTermTranslations(options = {}) {
       sourceTermCount: sourceTerms.length,
       targetLanguageCodes: requestTargetLanguageCodes,
       skipKnowledgeBase: options.skipKnowledgeBase === true,
+      includeTermNoteRevision,
       aiKnowledgeBaseTermCount: knowledgeResult.terms.length,
       aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
         knowledgeResult.terms

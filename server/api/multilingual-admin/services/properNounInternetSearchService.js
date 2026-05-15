@@ -198,7 +198,35 @@ async function resolveSearchTerms(body = {}) {
   )
 }
 
-function normalizePreviewTerm(term) {
+function buildOriginalTermNoteMap(terms) {
+  const noteMap = new Map()
+  terms.forEach(term => {
+    const note = normalizeString(term?.note, 2000)
+    const id = normalizeString(term?._id, 80)
+    if (id) {
+      noteMap.set(`id:${id}`, note)
+    }
+    const sourceText = normalizeString(term?.sourceText, 300)
+    if (sourceText) {
+      noteMap.set(`source:${sourceText}`, note)
+    }
+  })
+  return noteMap
+}
+
+function getOriginalTermNote(term, noteMap) {
+  const termId = normalizeString(term?.termId, 80)
+  if (termId && noteMap.has(`id:${termId}`)) {
+    return noteMap.get(`id:${termId}`)
+  }
+  const sourceText = normalizeString(term?.sourceText, 300)
+  if (sourceText && noteMap.has(`source:${sourceText}`)) {
+    return noteMap.get(`source:${sourceText}`)
+  }
+  return ''
+}
+
+function normalizePreviewTerm(term, noteMap = null) {
   const translations = {}
   if (term?.translations && typeof term.translations === 'object') {
     Object.keys(term.translations).forEach(languageCode => {
@@ -215,8 +243,10 @@ function normalizePreviewTerm(term) {
   return {
     sourceText: normalizeString(term?.sourceText, 300),
     termId: normalizeString(term?.termId, 80),
-    note: normalizeString(term?.note, 2000),
-    shouldUpdateTermNote: term?.shouldUpdateTermNote === true,
+    note: noteMap
+      ? getOriginalTermNote(term, noteMap)
+      : normalizeString(term?.note, 2000),
+    shouldUpdateTermNote: false,
     translationSource: 'internetSearchAi',
     translations,
     searchMetadata:
@@ -274,6 +304,7 @@ async function searchInternetTranslations(body = {}, options = {}) {
         contextSummary: body.contextSummary
       }),
       skipKnowledgeBase: true,
+      includeTermNoteRevision: false,
       timeoutSeconds: REALTIME_INTERNET_SEARCH_TIMEOUT_SECONDS,
       onStatus: options.onStatus,
       cancellation: options.cancellation
@@ -282,10 +313,14 @@ async function searchInternetTranslations(body = {}, options = {}) {
     requestedLanguagePairCount
   })
 
+  const originalTermNoteMap = buildOriginalTermNoteMap(terms)
+
   return {
     provider: searchResult.provider || '',
     model: searchResult.model || '',
-    terms: searchResult.terms.map(normalizePreviewTerm),
+    terms: searchResult.terms.map(term => {
+      return normalizePreviewTerm(term, originalTermNoteMap)
+    }),
     stats: {
       ...(searchResult.stats || {}),
       requestedTermCount: terms.length,
