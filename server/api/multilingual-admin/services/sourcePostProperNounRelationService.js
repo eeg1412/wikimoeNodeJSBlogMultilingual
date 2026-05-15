@@ -9,6 +9,7 @@ const properNounTranslationService = require('./properNounTranslationService')
 const SOURCE_COLLECTION_POSTS = 'posts'
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
+const MAX_INTERNET_SEARCH_TERM_COUNT = 100
 const RELATION_SOURCE_VALUES = ['manual', 'aiOrganize', 'translationWorkflow']
 
 function getRelationModel() {
@@ -155,10 +156,17 @@ function getSourcePostIdList(values) {
   return Array.from(idMap.values())
 }
 
-function buildRelationMatch({ sourceId, enabled = true }) {
+function buildRelationMatch({
+  sourceId,
+  sourceLanguageCode = '',
+  enabled = true
+}) {
   const match = {
     sourceCollection: SOURCE_COLLECTION_POSTS,
     sourceId
+  }
+  if (sourceLanguageCode) {
+    match.sourceLanguageCode = sourceLanguageCode
   }
   if (enabled === true) {
     match.enabled = true
@@ -173,7 +181,7 @@ async function getSourcePostSummary(sourceId) {
   const repository = getSourcePostRepository()
   const sourcePost = await repository.findOne(
     { _id: sourceId },
-    '_id title alias type status updatedAt createdAt',
+    '_id title alias type status sourceLanguageCode updatedAt createdAt',
     { lean: true }
   )
   if (!sourcePost) {
@@ -191,6 +199,7 @@ async function getSourcePostSummary(sourceId) {
     alias: sourcePost.alias || '',
     type: sourcePost.type,
     status: sourcePost.status,
+    sourceLanguageCode: sourcePost.sourceLanguageCode || '',
     updatedAt: sourcePost.updatedAt || null,
     createdAt: sourcePost.createdAt || null
   }
@@ -390,6 +399,52 @@ async function getSourcePostTermList(query = {}) {
     relationCount: relationList.length,
     page,
     limit
+  }
+}
+
+async function getSourcePostTermsForInternetSearch(query = {}) {
+  const sourceId = parseSourceId(query.sourceId || query.id)
+  const sourceLanguageCode = normalizeOptionalLanguageCode(
+    query.sourceLanguageCode,
+    'sourceLanguageCode'
+  )
+  const sourcePost = await getSourcePostSummary(sourceId)
+  const RelationModel = getRelationModel()
+  const TermModel = getTermModel()
+  const relationMatch = buildRelationMatch({ sourceId, sourceLanguageCode })
+  const relationList = await RelationModel.find(relationMatch)
+    .sort({ updatedAt: -1, _id: -1 })
+    .limit(MAX_INTERNET_SEARCH_TERM_COUNT + 1)
+    .lean()
+  const hasMore = relationList.length > MAX_INTERNET_SEARCH_TERM_COUNT
+  const visibleRelations = relationList.slice(0, MAX_INTERNET_SEARCH_TERM_COUNT)
+  const termIdList = visibleRelations.map(relation => relation.termId)
+  if (termIdList.length === 0) {
+    return {
+      sourcePost,
+      terms: [],
+      total: 0,
+      hasMore: false,
+      maxCount: MAX_INTERNET_SEARCH_TERM_COUNT
+    }
+  }
+
+  const terms = await TermModel.find({
+    _id: { $in: termIdList },
+    enabled: true
+  }).lean()
+  const termMap = new Map()
+  terms.forEach(term => {
+    termMap.set(String(term._id), term)
+  })
+  return {
+    sourcePost,
+    terms: visibleRelations
+      .map(relation => termMap.get(String(relation.termId || '')))
+      .filter(Boolean),
+    total: visibleRelations.length,
+    hasMore,
+    maxCount: MAX_INTERNET_SEARCH_TERM_COUNT
   }
 }
 
@@ -619,16 +674,20 @@ async function resolveOrganizedTermIds({
   for (const termItem of extractedTerms) {
     const sourceText = normalizeSourceText(termItem?.sourceText || termItem)
     const normalizedSourceText = buildNormalizedSourceText(sourceText)
-    if (!sourceText || linkedNormalizedSourceTextSet.has(normalizedSourceText)) {
+    if (
+      !sourceText ||
+      linkedNormalizedSourceTextSet.has(normalizedSourceText)
+    ) {
       continue
     }
-    const term = await properNounTranslationService.findOrCreateTermForSourceText(
-      sourceText,
-      {
-        sourceLanguageCode,
-        note: termItem?.note || ''
-      }
-    )
+    const term =
+      await properNounTranslationService.findOrCreateTermForSourceText(
+        sourceText,
+        {
+          sourceLanguageCode,
+          note: termItem?.note || ''
+        }
+      )
     appendUniqueTermId(termIdList, term._id)
   }
   return termIdList
@@ -980,6 +1039,7 @@ module.exports = {
   getSourcePostIdFromScopeKey,
   getSourcePostSummary,
   getSourcePostTermList,
+  getSourcePostTermsForInternetSearch,
   mergeArticleLinkedCandidateCoverage,
   resolveOrganizedTermIds,
   unbindSourcePostTerm

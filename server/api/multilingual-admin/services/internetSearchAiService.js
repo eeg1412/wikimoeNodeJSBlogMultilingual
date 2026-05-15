@@ -924,6 +924,10 @@ async function searchOfficialTermTranslations(options = {}) {
     getTermRequestTargetLanguageCodes(termRequests)
 
   const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
+  const timeoutSeconds = Number(options.timeoutSeconds)
+  if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+    settings.timeoutSeconds = timeoutSeconds
+  }
   if (settings.provider !== 'gemini') {
     throw new ApiError(
       ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,

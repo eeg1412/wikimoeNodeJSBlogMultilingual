@@ -40,7 +40,7 @@
           <el-checkbox
             v-for="item in targetLanguageOptions"
             :key="item.value"
-            :label="item.value"
+            :value="item.value"
           >
             {{ item.label }}
           </el-checkbox>
@@ -105,9 +105,7 @@ export default {
     let defaultRequestId = 0
     const form = reactive({
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
-      targetLanguageCodes: getDefaultTargetLanguageCodes(
-        DEFAULT_LANGUAGE_CODE
-      ),
+      targetLanguageCodes: getDefaultTargetLanguageCodes(DEFAULT_LANGUAGE_CODE),
       searchOfficialTermTranslations: false
     })
 
@@ -204,8 +202,7 @@ export default {
             sourceLanguageCode: form.sourceLanguageCode,
             targetLanguageCodes: form.targetLanguageCodes,
             title: sourcePostTitle.value,
-            searchOfficialTermTranslations:
-              form.searchOfficialTermTranslations
+            searchOfficialTermTranslations: form.searchOfficialTermTranslations
           },
           true
         )

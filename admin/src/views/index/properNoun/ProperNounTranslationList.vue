@@ -69,6 +69,15 @@
           专有名词 {{ termLimitText }}
         </div>
         <div class="proper-noun-action-buttons">
+          <ProperNounInternetSearchButton
+            button-text="联网检索"
+            :term-ids="selectedTermIds"
+            :default-language-codes="internetSearchDefaultLanguageCodes"
+            :count="selectedTermIds.length"
+            :disabled="selectedTermIds.length === 0"
+            title="联网检索名词译名"
+            @applied="handleInternetSearchApplied"
+          />
           <el-button
             class="proper-noun-batch-delete-button"
             type="danger"
@@ -405,6 +414,7 @@ import {
   sortBySupportedLanguageOrder,
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
+import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 
 const TRANSLATION_SOURCE_TEXT_MAP = {
   manual: '手动维护',
@@ -437,6 +447,7 @@ function getInitialTranslationForm() {
 export default {
   name: 'ProperNounTranslationList',
   components: {
+    ProperNounInternetSearchButton,
     Plus,
     Refresh
   },
@@ -504,6 +515,12 @@ export default {
         return `${count}/-`
       }
       return `${count}/${maxCount}`
+    })
+    const internetSearchDefaultLanguageCodes = computed(() => {
+      if (params.languageCode) {
+        return [params.languageCode]
+      }
+      return []
     })
 
     function assignReactive(target, source) {
@@ -673,6 +690,13 @@ export default {
       }
     }
 
+    function handleInternetSearchApplied() {
+      getTermList()
+      if (translationDialogVisible.value && activeTerm.value) {
+        getTranslationList()
+      }
+    }
+
     function openTranslationDialog(row) {
       activeTerm.value = row
       translationDialogVisible.value = true
@@ -834,7 +858,9 @@ export default {
       getTranslationList,
       getTranslationSourceText,
       getUsedCountText,
+      handleInternetSearchApplied,
       handleTermSelectionChange,
+      internetSearchDefaultLanguageCodes,
       languageOptions,
       loading,
       openCreateTermDialog,

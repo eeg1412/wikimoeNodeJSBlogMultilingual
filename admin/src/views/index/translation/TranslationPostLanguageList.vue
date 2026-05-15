@@ -26,6 +26,16 @@
         </el-descriptions-item>
       </el-descriptions>
 
+      <div class="translation-language-actions mb20">
+        <ProperNounInternetSearchButton
+          button-text="联网搜索"
+          :source-id="internetSearchSourceId"
+          :source-language-code="internetSearchSourceLanguageCode"
+          title="联网搜索文章名词译名"
+          @applied="handleInternetSearchApplied"
+        />
+      </div>
+
       <div class="mb20 list-table-body">
         <ResponsiveTable :data="translationRows" row-key="languageCode" border>
           <ResponsiveTableColumn label="语言" width="150">
@@ -158,9 +168,20 @@
               </span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="操作" width="330" fixed="right">
+          <ResponsiveTableColumn label="操作" width="430" fixed="right">
             <template #default="{ row }">
               <div class="translation-row-actions">
+                <ProperNounInternetSearchButton
+                  button-text="联网搜索"
+                  size="small"
+                  :source-id="internetSearchSourceId"
+                  :source-language-code="internetSearchSourceLanguageCode"
+                  :default-language-codes="
+                    getInternetSearchLanguageCodes(row.languageCode)
+                  "
+                  title="联网搜索文章名词译名"
+                  @applied="handleInternetSearchApplied"
+                />
                 <el-button
                   v-if="row.translation"
                   type="primary"
@@ -220,6 +241,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import {
@@ -233,6 +255,7 @@ export default {
   name: 'TranslationPostLanguageList',
   components: {
     PostRelationSummary,
+    ProperNounInternetSearchButton,
     TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog
   },
@@ -257,6 +280,12 @@ export default {
           translation: translations[item.value]
         }
       })
+    })
+    const internetSearchSourceId = computed(() => {
+      return String(sourcePost.value?._id || '')
+    })
+    const internetSearchSourceLanguageCode = computed(() => {
+      return String(sourcePost.value?.sourceLanguageCode || '')
     })
 
     function setRowLoading(id, value) {
@@ -499,6 +528,17 @@ export default {
       aiTranslationDialogVisible.value = true
     }
 
+    function getInternetSearchLanguageCodes(languageCode) {
+      if (languageCode) {
+        return [languageCode]
+      }
+      return []
+    }
+
+    function handleInternetSearchApplied() {
+      getLanguageList()
+    }
+
     function handleAiTranslationSaved() {
       getLanguageList()
     }
@@ -511,6 +551,8 @@ export default {
       loading,
       aiTranslationDialogVisible,
       aiTranslationPostId,
+      internetSearchSourceId,
+      internetSearchSourceLanguageCode,
       rowActionLoadingMap,
       getCreateActionKey,
       sourcePost,
@@ -525,7 +567,9 @@ export default {
       getLanguageText,
       getPostDisplayTitle,
       getPostStatusText,
+      getInternetSearchLanguageCodes,
       goTranslationEditor,
+      handleInternetSearchApplied,
       openAiTranslationDialog,
       handleAiTranslationSaved,
       restoreTranslation
@@ -568,7 +612,15 @@ export default {
   gap: 6px;
 }
 
+.translation-language-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .translation-row-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

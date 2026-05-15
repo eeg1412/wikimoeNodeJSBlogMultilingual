@@ -1,4 +1,5 @@
 const properNounTranslationService = require('./services/properNounTranslationService')
+const properNounInternetSearchService = require('./services/properNounInternetSearchService')
 const handleApiError = require('./handleApiError')
 
 function controller(handler, logMessage) {
@@ -52,6 +53,18 @@ async function deleteTranslation(req) {
   return await properNounTranslationService.deleteTranslation(req.query || {})
 }
 
+async function searchInternetTranslations(req) {
+  return await properNounInternetSearchService.searchInternetTranslations(
+    req.body || {}
+  )
+}
+
+async function applyInternetTranslations(req) {
+  return await properNounInternetSearchService.applyInternetTranslations(
+    req.body || {}
+  )
+}
+
 module.exports = {
   getTermList: controller(getTermList, 'proper noun term list get fail'),
   getTermDetail: controller(getTermDetail, 'proper noun term detail get fail'),
@@ -77,5 +90,13 @@ module.exports = {
   deleteTranslation: controller(
     deleteTranslation,
     'proper noun translation delete fail'
+  ),
+  searchInternetTranslations: controller(
+    searchInternetTranslations,
+    'proper noun internet search fail'
+  ),
+  applyInternetTranslations: controller(
+    applyInternetTranslations,
+    'proper noun internet search apply fail'
   )
 }

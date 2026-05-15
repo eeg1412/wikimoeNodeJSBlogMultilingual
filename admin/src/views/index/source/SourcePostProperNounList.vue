@@ -17,6 +17,15 @@
       </div>
       <div class="source-post-term-header-actions">
         <el-button @click="goBack">返回</el-button>
+        <ProperNounInternetSearchButton
+          button-text="联网检索"
+          :term-ids="selectedTermIds"
+          :default-language-codes="internetSearchDefaultLanguageCodes"
+          :count="selectedTermIds.length"
+          :disabled="selectedTermIds.length === 0"
+          title="联网检索名词译名"
+          @applied="handleInternetSearchApplied"
+        />
         <el-button type="primary" plain @click="openOrganizeDialog">
           整理名词
         </el-button>
@@ -64,9 +73,7 @@
         </el-form>
       </div>
       <div class="fr source-post-term-actions">
-        <div class="source-post-term-count">
-          关联名词 {{ relationCount }}
-        </div>
+        <div class="source-post-term-count">关联名词 {{ relationCount }}</div>
         <div class="source-post-term-action-buttons">
           <el-button @click="getTermList(false)">
             <el-icon><Refresh /></el-icon>
@@ -87,13 +94,18 @@
         row-key="_id"
         height="100%"
         border
+        @selection-change="handleTermSelectionChange"
       >
+        <ResponsiveTableColumn type="selection" width="48" reserve-selection />
         <ResponsiveTableColumn label="原文名词" min-width="240">
           <template #default="{ row }">
             <div class="source-post-term-source-text">
               {{ row.sourceText }}
             </div>
-            <div v-if="row.relation?.relationSource" class="source-post-term-note">
+            <div
+              v-if="row.relation?.relationSource"
+              class="source-post-term-note"
+            >
               {{ getRelationSourceText(row.relation.relationSource) }}
             </div>
           </template>
@@ -143,9 +155,17 @@
             {{ getRelationUpdatedAtText(row) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="320" fixed="right">
+        <ResponsiveTableColumn label="操作" width="410" fixed="right">
           <template #default="{ row }">
             <div class="source-post-term-row-actions">
+              <ProperNounInternetSearchButton
+                button-text="联网检索"
+                size="small"
+                :term-ids="getRowTermIds(row)"
+                :default-language-codes="internetSearchDefaultLanguageCodes"
+                title="联网检索名词译名"
+                @applied="handleInternetSearchApplied"
+              />
               <el-button
                 type="primary"
                 size="small"
@@ -188,7 +208,11 @@
       append-to-body
       destroy-on-close
     >
-      <el-form :model="termForm" label-width="120px" class="source-post-term-form">
+      <el-form
+        :model="termForm"
+        label-width="120px"
+        class="source-post-term-form"
+      >
         <el-form-item label="原文名词" required>
           <el-input
             v-model="termForm.sourceText"
@@ -374,6 +398,7 @@ import {
   sortBySupportedLanguageOrder,
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
+import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 
 const TRANSLATION_SOURCE_TEXT_MAP = {
@@ -413,6 +438,7 @@ export default {
   components: {
     Plus,
     Refresh,
+    ProperNounInternetSearchButton,
     SourcePostTermOrganizeDialog
   },
   setup() {
@@ -424,6 +450,7 @@ export default {
     const total = ref(0)
     const relationCount = ref(0)
     const sourcePost = ref(null)
+    const selectedTermRows = ref([])
     const organizeDialogVisible = ref(false)
     const params = reactive({
       page: 1,
@@ -469,6 +496,23 @@ export default {
       }
       return '新增译名'
     })
+    const selectedTermIds = computed(() => {
+      const idList = []
+      selectedTermRows.value.forEach(row => {
+        const id = String(row?._id || '')
+        if (!id || idList.includes(id)) {
+          return
+        }
+        idList.push(id)
+      })
+      return idList
+    })
+    const internetSearchDefaultLanguageCodes = computed(() => {
+      if (params.languageCode) {
+        return [params.languageCode]
+      }
+      return []
+    })
 
     function assignReactive(target, source) {
       Object.keys(target).forEach(key => {
@@ -494,6 +538,9 @@ export default {
     function getTermList(resetPage = false) {
       if (!sourceId.value) {
         return
+      }
+      if (resetPage === true) {
+        clearTermSelection()
       }
       if (resetPage === true && params.page !== 1) {
         params.page = 1
@@ -582,6 +629,7 @@ export default {
         .unbindSourcePostProperNounTerm({ id: relationId }, true)
         .then(() => {
           ElMessage.success('名词已解绑')
+          clearTermSelection()
           getTermList(false)
         })
     }
@@ -602,8 +650,22 @@ export default {
       }
       multilingualApi.deleteProperNounTerm({ id: row._id }, true).then(() => {
         ElMessage.success('名词已删除')
+        clearTermSelection()
         getTermList(false)
       })
+    }
+
+    function handleTermSelectionChange(selection) {
+      if (!Array.isArray(selection)) {
+        selectedTermRows.value = []
+        return
+      }
+      selectedTermRows.value = selection
+    }
+
+    function clearTermSelection() {
+      selectedTermRows.value = []
+      tableRef.value?.clearSelection()
     }
 
     function openTranslationDialog(row) {
@@ -705,6 +767,20 @@ export default {
       organizeDialogVisible.value = true
     }
 
+    function handleInternetSearchApplied() {
+      getTermList(false)
+      if (translationDialogVisible.value && activeTerm.value) {
+        getTranslationList()
+      }
+    }
+
+    function getRowTermIds(row) {
+      if (!row?._id) {
+        return []
+      }
+      return [row._id]
+    }
+
     function goBack() {
       router.push({ name: 'SourcePostImport' })
     }
@@ -787,10 +863,14 @@ export default {
       getLastUsedAtText,
       getRelationSourceText,
       getRelationUpdatedAtText,
+      getRowTermIds,
       getTermList,
       getTranslationList,
       getTranslationSourceText,
       goBack,
+      handleInternetSearchApplied,
+      handleTermSelectionChange,
+      internetSearchDefaultLanguageCodes,
       languageOptions,
       loading,
       openCreateTermDialog,
@@ -802,6 +882,7 @@ export default {
       organizeDialogVisible,
       params,
       relationCount,
+      selectedTermIds,
       sourceId,
       sourcePost,
       sourcePostTitle,

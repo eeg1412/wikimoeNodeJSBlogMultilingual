@@ -174,6 +174,19 @@ export default function (api) {
         noLoading
       })
     },
+    searchProperNounInternetTranslations(data, noLoading = false) {
+      return api.post('/proper-noun/internet-search', data, {
+        shouldAdminJWT: true,
+        noLoading,
+        timeout: 130000
+      })
+    },
+    applyProperNounInternetTranslations(data, noLoading = false) {
+      return api.post('/proper-noun/internet-search/apply', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getSourcePostProperNounTermList(data = {}, noLoading = false) {
       return api.get('/source/post/proper-noun/list', {
         params: data,

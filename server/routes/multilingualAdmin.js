@@ -190,6 +190,24 @@ const multilingualAdminRouteSetting = [
     controller: properNounTranslationController.deleteTranslation
   },
   {
+    path: '/proper-noun/internet-search',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.searchInternetTranslations
+  },
+  {
+    path: '/proper-noun/internet-search-stream',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/properNoun/streamInternetSearch')
+  },
+  {
+    path: '/proper-noun/internet-search/apply',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.applyInternetTranslations
+  },
+  {
     path: '/source/post/proper-noun/list',
     method: 'get',
     middleware: [checkAuth],
