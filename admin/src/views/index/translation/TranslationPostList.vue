@@ -222,20 +222,9 @@
             {{ $formatDate(row.sourcePost.sourceSnapshotAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="230" fixed="right">
+        <ResponsiveTableColumn label="操作" width="130" fixed="right">
           <template #default="{ row }">
             <div class="translation-row-actions">
-              <ProperNounInternetSearchButton
-                button-text="联网搜索"
-                size="small"
-                :source-id="getInternetSearchSourceId(row)"
-                :source-language-code="getInternetSearchSourceLanguageCode(row)"
-                :default-language-codes="
-                  getInternetSearchDefaultLanguageCodes()
-                "
-                title="联网搜索文章名词译名"
-                @applied="handleInternetSearchApplied"
-              />
               <el-button
                 type="primary"
                 size="small"
@@ -367,7 +356,6 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
-import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import {
   POST_STATUS_OPTIONS,
@@ -383,7 +371,6 @@ import {
 
 export default {
   components: {
-    ProperNounInternetSearchButton,
     PostRelationSummary
   },
   setup() {
@@ -601,25 +588,6 @@ export default {
       })
     }
 
-    const getInternetSearchDefaultLanguageCodes = () => {
-      if (params.languageCode) {
-        return [params.languageCode]
-      }
-      return []
-    }
-
-    const getInternetSearchSourceId = row => {
-      return String(row?.sourcePost?._id || '')
-    }
-
-    const getInternetSearchSourceLanguageCode = row => {
-      return String(row?.sourcePost?.sourceLanguageCode || '')
-    }
-
-    const handleInternetSearchApplied = () => {
-      getTranslationPostList(false)
-    }
-
     const syncEditForm = post => {
       editForm.title = post?.title || ''
       editForm.alias = post?.alias || ''
@@ -723,16 +691,12 @@ export default {
       getTranslationRows,
       isAiSkipUpdating,
       getTranslationTagType,
-      getInternetSearchDefaultLanguageCodes,
-      getInternetSearchSourceId,
-      getInternetSearchSourceLanguageCode,
       getPostDisplayTitle,
       getTranslationPostList,
       updateTranslationAiSkip,
       createTranslation,
       openTranslationDetail,
       goLanguageList,
-      handleInternetSearchApplied,
       goTranslationEditor,
       saveDetail,
       confirmReview

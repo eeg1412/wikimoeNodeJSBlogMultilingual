@@ -26,16 +26,6 @@
         </el-descriptions-item>
       </el-descriptions>
 
-      <div class="translation-language-actions mb20">
-        <ProperNounInternetSearchButton
-          button-text="联网搜索"
-          :source-id="internetSearchSourceId"
-          :source-language-code="internetSearchSourceLanguageCode"
-          title="联网搜索文章名词译名"
-          @applied="handleInternetSearchApplied"
-        />
-      </div>
-
       <div class="mb20 list-table-body">
         <ResponsiveTable :data="translationRows" row-key="languageCode" border>
           <ResponsiveTableColumn label="语言" width="150">
@@ -168,20 +158,9 @@
               </span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="操作" width="430" fixed="right">
+          <ResponsiveTableColumn label="操作" width="340" fixed="right">
             <template #default="{ row }">
               <div class="translation-row-actions">
-                <ProperNounInternetSearchButton
-                  button-text="联网搜索"
-                  size="small"
-                  :source-id="internetSearchSourceId"
-                  :source-language-code="internetSearchSourceLanguageCode"
-                  :default-language-codes="
-                    getInternetSearchLanguageCodes(row.languageCode)
-                  "
-                  title="联网搜索文章名词译名"
-                  @applied="handleInternetSearchApplied"
-                />
                 <el-button
                   v-if="row.translation"
                   type="primary"
@@ -200,8 +179,7 @@
                   v-if="row.translation"
                   type="warning"
                   size="small"
-                  :loading="rowActionLoadingMap[row.translation._id]"
-                  @click="restoreTranslation(row.translation)"
+                  @click="openRestoreTranslationDialog(row.translation)"
                 >
                   同步快照
                 </el-button>
@@ -232,6 +210,13 @@
       :post-id="aiTranslationPostId"
       @saved="handleAiTranslationSaved"
     />
+    <TranslationPostSnapshotRestoreDialog
+      v-model="snapshotRestoreDialogVisible"
+      :post-id="snapshotRestorePost?._id || ''"
+      :source-snapshot-id="route.params.sourceSnapshotId"
+      :language-code="snapshotRestorePost?.languageCode || ''"
+      @restored="handleSnapshotRestored"
+    />
   </div>
 </template>
 
@@ -241,9 +226,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
-import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
+import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
@@ -255,9 +240,9 @@ export default {
   name: 'TranslationPostLanguageList',
   components: {
     PostRelationSummary,
-    ProperNounInternetSearchButton,
     TranslationPostAiTranslateButton,
-    TranslationPostAiTranslationDialog
+    TranslationPostAiTranslationDialog,
+    TranslationPostSnapshotRestoreDialog
   },
   setup() {
     const route = useRoute()
@@ -266,6 +251,8 @@ export default {
     const sourceGroup = ref(null)
     const aiTranslationDialogVisible = ref(false)
     const aiTranslationPostId = ref('')
+    const snapshotRestoreDialogVisible = ref(false)
+    const snapshotRestorePost = ref(null)
     const rowActionLoadingMap = reactive({})
 
     const sourcePost = computed(() => {
@@ -280,12 +267,6 @@ export default {
           translation: translations[item.value]
         }
       })
-    })
-    const internetSearchSourceId = computed(() => {
-      return String(sourcePost.value?._id || '')
-    })
-    const internetSearchSourceLanguageCode = computed(() => {
-      return String(sourcePost.value?.sourceLanguageCode || '')
     })
 
     function setRowLoading(id, value) {
@@ -480,36 +461,9 @@ export default {
         })
     }
 
-    function restoreTranslation(translation) {
-      ElMessageBox.confirm(
-        '确认将该语言版本还原为当前源快照内容，并把状态改为草稿？',
-        '同步快照',
-        {
-          type: 'warning',
-          confirmButtonText: '同步快照',
-          cancelButtonText: '取消'
-        }
-      )
-        .then(() => {
-          setRowLoading(translation._id, true)
-          return multilingualApi.restoreTranslationPostSnapshot({
-            id: translation._id,
-            sourceSnapshotId: route.params.sourceSnapshotId,
-            languageCode: translation.languageCode
-          })
-        })
-        .then(() => {
-          ElMessage.success('已同步为最新快照草稿')
-          getLanguageList()
-        })
-        .catch(error => {
-          if (error !== 'cancel' && error !== 'close') {
-            console.log(error)
-          }
-        })
-        .finally(() => {
-          setRowLoading(translation._id, false)
-        })
+    function openRestoreTranslationDialog(translation) {
+      snapshotRestorePost.value = translation
+      snapshotRestoreDialogVisible.value = true
     }
 
     function goTranslationEditor(translation) {
@@ -528,18 +482,11 @@ export default {
       aiTranslationDialogVisible.value = true
     }
 
-    function getInternetSearchLanguageCodes(languageCode) {
-      if (languageCode) {
-        return [languageCode]
-      }
-      return []
-    }
-
-    function handleInternetSearchApplied() {
+    function handleAiTranslationSaved() {
       getLanguageList()
     }
 
-    function handleAiTranslationSaved() {
+    function handleSnapshotRestored() {
       getLanguageList()
     }
 
@@ -551,9 +498,10 @@ export default {
       loading,
       aiTranslationDialogVisible,
       aiTranslationPostId,
-      internetSearchSourceId,
-      internetSearchSourceLanguageCode,
+      snapshotRestoreDialogVisible,
+      snapshotRestorePost,
       rowActionLoadingMap,
+      route,
       getCreateActionKey,
       sourcePost,
       translationRows,
@@ -567,12 +515,11 @@ export default {
       getLanguageText,
       getPostDisplayTitle,
       getPostStatusText,
-      getInternetSearchLanguageCodes,
       goTranslationEditor,
-      handleInternetSearchApplied,
       openAiTranslationDialog,
       handleAiTranslationSaved,
-      restoreTranslation
+      handleSnapshotRestored,
+      openRestoreTranslationDialog
     }
   }
 }
@@ -610,13 +557,6 @@ export default {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-}
-
-.translation-language-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .translation-row-actions {

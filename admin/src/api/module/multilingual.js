@@ -356,6 +356,12 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
+    getTranslationPostSnapshotRestorePreview(data, noLoading = false) {
+      return api.post('/translation/post/restore-snapshot/preview', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     updateTranslationRelation(data, noLoading = false) {
       return api.put('/translation/relation/update', data, {
         shouldAdminJWT: true,

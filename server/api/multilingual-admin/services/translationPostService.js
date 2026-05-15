@@ -203,6 +203,88 @@ const POST_ARRAY_RELATION_EDIT_FIELDS = new Set(
   Object.keys(POST_ARRAY_RELATION_COLLECTIONS)
 )
 
+const POST_SNAPSHOT_RESTORE_FIELD_GROUPS = [
+  {
+    key: 'content',
+    label: '文章内容',
+    fields: [
+      { key: 'title', label: '标题' },
+      { key: 'excerpt', label: '摘要' },
+      { key: 'content', label: '正文' },
+      { key: 'type', label: '类型' },
+      { key: 'date', label: '日期' }
+    ]
+  },
+  {
+    key: 'settings',
+    label: '显示设置',
+    fields: [
+      { key: 'coverImages', label: '封面图' },
+      { key: 'top', label: '置顶' },
+      { key: 'sortop', label: '排序置顶' },
+      { key: 'allowRemark', label: '允许评论' },
+      { key: 'template', label: '模板' },
+      { key: 'code', label: '插入代码' },
+      { key: 'editorVersion', label: '编辑器版本' },
+      { key: 'client__v', label: '客户端版本' }
+    ]
+  },
+  {
+    key: 'taxonomy',
+    label: '归属信息',
+    fields: [
+      { key: 'author', label: '作者' },
+      { key: 'sort', label: '分类' },
+      { key: 'tags', label: '标签' },
+      { key: 'mappointList', label: '地点' }
+    ]
+  },
+  {
+    key: 'recommendRelations',
+    label: '详情页相关内容',
+    fields: [
+      { key: 'bangumiList', label: '番剧' },
+      { key: 'movieList', label: '电影' },
+      { key: 'gameList', label: '游戏' },
+      { key: 'bookList', label: '书籍' },
+      { key: 'postList', label: '博文' },
+      { key: 'tweetList', label: '推文' },
+      { key: 'eventList', label: '事件' },
+      { key: 'voteList', label: '投票' },
+      { key: 'seriesSortList', label: '详情页排序引用' }
+    ]
+  },
+  {
+    key: 'contentRelations',
+    label: '正文关联内容',
+    fields: [
+      { key: 'contentBangumiList', label: '正文番剧' },
+      { key: 'contentMovieList', label: '正文电影' },
+      { key: 'contentGameList', label: '正文游戏' },
+      { key: 'contentBookList', label: '正文书籍' },
+      { key: 'contentPostList', label: '正文博文' },
+      { key: 'contentTweetList', label: '正文推文' },
+      { key: 'contentEventList', label: '正文事件' },
+      { key: 'contentVoteList', label: '正文投票' },
+      { key: 'contentSeriesSortList', label: '正文排序引用' }
+    ]
+  },
+  {
+    key: 'state',
+    label: '状态',
+    fields: [{ key: 'status', label: '发布状态' }]
+  }
+]
+
+const POST_SNAPSHOT_RESTORE_FIELD_LABEL_MAP = new Map()
+const POST_SNAPSHOT_RESTORE_FIELD_KEYS = new Set()
+POST_SNAPSHOT_RESTORE_FIELD_GROUPS.forEach(group => {
+  group.fields.forEach(field => {
+    POST_SNAPSHOT_RESTORE_FIELD_KEYS.add(field.key)
+    POST_SNAPSHOT_RESTORE_FIELD_LABEL_MAP.set(field.key, field.label)
+  })
+})
+
 const PREVIEW_RELATION_DEPENDENCY_FIELDS = {
   sorts: [{ field: 'parent', collectionName: 'sorts', multiple: false }],
   games: [
@@ -1426,10 +1508,17 @@ async function applyPostRelationFields(data, sourceObject, context, options) {
   }
 }
 
-async function buildPostRelationIndexUpdateData(sourcePost, context) {
+async function buildPostRelationIndexUpdateData(
+  sourcePost,
+  context,
+  relationFields = POST_RELATION_FIELDS
+) {
   const updateData = {}
+  const fields = relationFields.filter(field => {
+    return POST_RELATION_FIELDS.includes(field)
+  })
   const relationEntries = await mapWithConcurrency(
-    POST_RELATION_FIELDS,
+    fields,
     RELATION_COPY_CONCURRENCY,
     async field => {
       return {
@@ -2925,7 +3014,13 @@ function removeImmutableRestoreFields(data) {
   return updateData
 }
 
-async function buildPostRestoreUpdateData(record, sourceRecord, context, now) {
+async function buildPostRestoreUpdateData(
+  record,
+  sourceRecord,
+  context,
+  now,
+  options = {}
+) {
   const data = await buildTranslationRecordData(
     'posts',
     sourceRecord,
@@ -2937,9 +3032,14 @@ async function buildPostRestoreUpdateData(record, sourceRecord, context, now) {
     }
   )
   const updateData = removeImmutableRestoreFields(data)
+  let relationFields = POST_RELATION_FIELDS
+  if (options.fieldKeys && options.fieldKeys.length > 0) {
+    relationFields = options.fieldKeys
+  }
   const relationIndexUpdateData = await buildPostRelationIndexUpdateData(
     sourceRecord,
-    context
+    context,
+    relationFields
   )
 
   Object.assign(updateData, relationIndexUpdateData)
@@ -2949,19 +3049,228 @@ async function buildPostRestoreUpdateData(record, sourceRecord, context, now) {
   updateData.sourceChanged = false
   updateData.pendingReview = false
   updateData.sourceChangedAt = null
-  await assertAliasAvailable(
-    record.languageCode,
-    record.alias,
-    updateData.type,
-    record._id,
-    updateData.status
-  )
+  const fieldKeys = options.fieldKeys || []
+  const shouldAssertAlias =
+    fieldKeys.length === 0 ||
+    fieldKeys.includes('type') ||
+    fieldKeys.includes('status')
+  if (shouldAssertAlias) {
+    await assertAliasAvailable(
+      record.languageCode,
+      record.alias,
+      updateData.type,
+      record._id,
+      updateData.status
+    )
+  }
 
   return updateData
 }
 
+function normalizeRestoreFieldKeys(value) {
+  if (typeof value === 'undefined') {
+    return []
+  }
+  if (!Array.isArray(value)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '同步字段必须是数组',
+      'fields',
+      400
+    )
+  }
+  const fieldKeys = []
+  value.forEach(item => {
+    const key = String(item || '').trim()
+    if (!key) {
+      return
+    }
+    if (!POST_SNAPSHOT_RESTORE_FIELD_KEYS.has(key)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        `不支持同步字段：${key}`,
+        'fields',
+        400
+      )
+    }
+    if (!fieldKeys.includes(key)) {
+      fieldKeys.push(key)
+    }
+  })
+  return fieldKeys
+}
+
+function pickPostRestoreUpdateData(updateData, fieldKeys) {
+  if (!Array.isArray(fieldKeys) || fieldKeys.length === 0) {
+    return updateData
+  }
+  const selectedUpdateData = {}
+  fieldKeys.forEach(field => {
+    if (Object.prototype.hasOwnProperty.call(updateData, field)) {
+      selectedUpdateData[field] = updateData[field]
+    }
+  })
+  Object.assign(selectedUpdateData, {
+    lastChangDate: updateData.lastChangDate,
+    sourceChanged: updateData.sourceChanged,
+    pendingReview: updateData.pendingReview,
+    sourceChangedAt: updateData.sourceChangedAt,
+    snapshotVersion: updateData.snapshotVersion,
+    sourceSnapshotAt: updateData.sourceSnapshotAt,
+    sourceUpdatedAt: updateData.sourceUpdatedAt,
+    sourceHash: updateData.sourceHash
+  })
+  return selectedUpdateData
+}
+
+function getRecordPreviewText(value) {
+  if (value === null || typeof value === 'undefined') {
+    return '-'
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return '空'
+    }
+    return value.map(item => getRecordPreviewText(item)).join('、')
+  }
+  if (typeof value === 'boolean') {
+    if (value) {
+      return '是'
+    }
+    return '否'
+  }
+  if (typeof value === 'object') {
+    return String(
+      value.title ||
+        value.name ||
+        value.nickname ||
+        value.username ||
+        value.sortname ||
+        value.tagname ||
+        value.alias ||
+        value._id ||
+        '-'
+    )
+  }
+  if (value === '') {
+    return '空'
+  }
+  return String(value)
+}
+
+function getPostStatusPreviewText(value) {
+  const status = Number(value)
+  if (status === 0) {
+    return '草稿'
+  }
+  if (status === 1) {
+    return '发布'
+  }
+  if (status === 99) {
+    return '回收站'
+  }
+  return getRecordPreviewText(value)
+}
+
+function getPostTypePreviewText(value) {
+  const type = Number(value)
+  if (type === 1) {
+    return '博文'
+  }
+  if (type === 2) {
+    return '推文'
+  }
+  if (type === 3) {
+    return '页面'
+  }
+  return getRecordPreviewText(value)
+}
+
+function getPostRestoreFieldPreviewText(field, value) {
+  if (field === 'status') {
+    return getPostStatusPreviewText(value)
+  }
+  if (field === 'type') {
+    return getPostTypePreviewText(value)
+  }
+  return getRecordPreviewText(value)
+}
+
+function getPreviewSourceIdentity(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return ''
+  }
+  return String(value.sourceId || value.remoteSourceId || '').trim()
+}
+
+function getPreviewSourceIdentityList(value) {
+  const list = Array.isArray(value) ? value : [value]
+  const identityList = list
+    .map(item => getPreviewSourceIdentity(item))
+    .filter(Boolean)
+    .sort()
+  if (identityList.length === 0) {
+    return null
+  }
+  return identityList
+}
+
+function isSourceIdentityChanged(currentValue, snapshotValue) {
+  const currentIdentityList = getPreviewSourceIdentityList(currentValue)
+  const snapshotIdentityList = getPreviewSourceIdentityList(snapshotValue)
+  if (!currentIdentityList || !snapshotIdentityList) {
+    return false
+  }
+  return (
+    JSON.stringify(currentIdentityList) !== JSON.stringify(snapshotIdentityList)
+  )
+}
+
+function buildPostRestorePreviewFields(currentPost, sourcePost) {
+  return POST_SNAPSHOT_RESTORE_FIELD_GROUPS.map(group => {
+    return {
+      key: group.key,
+      label: group.label,
+      fields: group.fields.map(field => {
+        const snapshotValue =
+          field.key === 'status' ? 0 : sourcePost?.[field.key]
+        const currentText = getPostRestoreFieldPreviewText(
+          field.key,
+          currentPost?.[field.key]
+        )
+        const snapshotText = getPostRestoreFieldPreviewText(
+          field.key,
+          snapshotValue
+        )
+        return {
+          key: field.key,
+          label: field.label,
+          currentText,
+          snapshotText,
+          changed: isSourceIdentityChanged(
+            currentPost?.[field.key],
+            sourcePost?.[field.key]
+          )
+        }
+      })
+    }
+  })
+}
+
 async function restoreTranslationRecordFromSnapshot(body = {}) {
   const input = parseRestoreRecordInput(body)
+  const restoreFieldKeys = normalizeRestoreFieldKeys(body.fields)
+  if (Array.isArray(body.fields) && restoreFieldKeys.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '请选择至少一个同步字段',
+      'fields',
+      400
+    )
+  }
   let record = await findTranslationRecord(input.collectionName, input.id)
   if (!record) {
     throw new ApiError(
@@ -3048,8 +3357,10 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
       record,
       sourceRecord,
       context,
-      now
+      now,
+      { fieldKeys: restoreFieldKeys }
     )
+    updateData = pickPostRestoreUpdateData(updateData, restoreFieldKeys)
   } else {
     const data = await buildTranslationRecordData(
       input.collectionName,
@@ -3079,6 +3390,66 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
   }
 
   return await Model.findOne({ _id: record._id }).lean()
+}
+
+async function getTranslationPostSnapshotRestorePreview(body = {}) {
+  const input = parseRestoreRecordInput({
+    ...body,
+    collectionName: 'posts'
+  })
+  let record = await findTranslationRecord(input.collectionName, input.id)
+  if (!record) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      'translation record not found',
+      'id',
+      404
+    )
+  }
+
+  if (input.languageCode && input.languageCode !== record.languageCode) {
+    throw new ApiError(
+      ERROR_CODES.RELATION_LANGUAGE_MISMATCH,
+      undefined,
+      'languageCode',
+      409
+    )
+  }
+
+  let sourceRecord = await findSourceRecordSnapshot(
+    input.collectionName,
+    record,
+    input.sourceSnapshotId
+  )
+  if (!sourceRecord) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source snapshot record not found',
+      'sourceId',
+      404
+    )
+  }
+
+  sourceRecord = await ensureSourcePostSnapshotRelations(sourceRecord)
+  record = await repairTranslationPostIdentityForSource(record, sourceRecord)
+  if (!isTranslationMatchedSourcePost(record, sourceRecord)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '当前语言版本与源快照身份不匹配，已停止同步以避免串源',
+      'sourceSnapshotId',
+      409
+    )
+  }
+
+  const currentPost = await findTranslationPostDetailById(record._id)
+  return {
+    groups: buildPostRestorePreviewFields(currentPost, sourceRecord),
+    defaultFields: Array.from(POST_SNAPSHOT_RESTORE_FIELD_KEYS),
+    currentSnapshotVersion: Number(record.snapshotVersion || 0) || null,
+    sourceSnapshotVersion: Number(sourceRecord.snapshotVersion || 0) || null,
+    languageCode: record.languageCode,
+    sourceLanguageCode: record.sourceLanguageCode
+  }
 }
 
 function normalizeAiImportResultList(body = {}) {
@@ -4226,6 +4597,7 @@ module.exports = {
   getSourcePostAiImportPreviewContext,
   getTranslationPostListBySource,
   getTranslationPostDetail,
+  getTranslationPostSnapshotRestorePreview,
   restoreTranslationRecordFromSnapshot,
   updateTranslationPostAiSkip,
   updateTranslationPostStatus,

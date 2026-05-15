@@ -3,6 +3,7 @@
     v-model="dialogVisible"
     :title="dialogTitle"
     width="min(920px, 96vw)"
+    align-center
     append-to-body
     destroy-on-close
     :before-close="handleBeforeClose"

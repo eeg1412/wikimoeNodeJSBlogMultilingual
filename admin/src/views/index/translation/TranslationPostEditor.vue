@@ -668,6 +668,14 @@
       @saved="handlePostAiTranslationSaved"
     />
 
+    <TranslationPostSnapshotRestoreDialog
+      v-model="snapshotRestoreDialogVisible"
+      :post-id="form.id"
+      :source-snapshot-id="form.sourceSnapshotId"
+      :language-code="form.languageCode"
+      @restored="handleSnapshotRestored"
+    />
+
     <el-dialog
       v-model="aiDialogVisible"
       title="AI 翻译"
@@ -1464,6 +1472,7 @@ import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
+import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
@@ -1764,6 +1773,7 @@ export default {
     TranslationEntrySelectableGroups,
     TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog,
+    TranslationPostSnapshotRestoreDialog,
     VideoUploader,
     VideoPlay
   },
@@ -1777,6 +1787,7 @@ export default {
     const contentSource = ref('')
     const relationRecords = reactive(createRelationRecords())
     const originalEditorVersion = ref(undefined)
+    const snapshotRestoreDialogVisible = ref(false)
     const form = reactive({
       id: '',
       languageCode: '',
@@ -2801,33 +2812,15 @@ export default {
       submit(true)
     }
 
-    async function restoreSnapshot() {
-      try {
-        await ElMessageBox.confirm(
-          '确认将当前文章还原为最新源快照内容，并同步作者、分类、标签、地点、媒体、推文内关联内容、详情页相关内容及排序引用？只会更新这些引用索引，不覆盖已编辑的关联内容本身；文章状态会改为草稿，旧关联和旧媒体不会删除。',
-          '同步快照',
-          {
-            type: 'warning',
-            confirmButtonText: '同步快照',
-            cancelButtonText: '取消'
-          }
-        )
-      } catch (error) {
+    function restoreSnapshot() {
+      if (!form.id) {
         return
       }
+      snapshotRestoreDialogVisible.value = true
+    }
 
-      saving.value = true
-      try {
-        const response = await multilingualApi.restoreTranslationPostSnapshot({
-          id: form.id,
-          sourceSnapshotId: form.sourceSnapshotId,
-          languageCode: form.languageCode
-        })
-        applyPostDetailData(response.data.data)
-        ElMessage.success('已同步为最新快照草稿')
-      } finally {
-        saving.value = false
-      }
+    function handleSnapshotRestored(data) {
+      applyPostDetailData(data)
     }
 
     function goList() {
@@ -3971,7 +3964,9 @@ export default {
       resetRandomAlias,
       resetAiTranslationPreview,
       refreshExportEntries,
+      handleSnapshotRestored,
       restoreSnapshot,
+      snapshotRestoreDialogVisible,
       selectedExportIds,
       selectedAiEntryIds,
       clearExportEntries,
