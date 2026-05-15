@@ -158,7 +158,7 @@
               </span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="操作" width="340" fixed="right">
+          <ResponsiveTableColumn label="操作" width="460" fixed="right">
             <template #default="{ row }">
               <div class="translation-row-actions">
                 <el-button
@@ -182,6 +182,14 @@
                   @click="openRestoreTranslationDialog(row.translation)"
                 >
                   同步快照
+                </el-button>
+                <el-button
+                  v-if="row.translation"
+                  type="warning"
+                  size="small"
+                  @click="openSourceLinkRewriteDialog(row.translation)"
+                >
+                  检查源站链接
                 </el-button>
                 <el-button
                   v-else
@@ -217,6 +225,12 @@
       :language-code="snapshotRestorePost?.languageCode || ''"
       @restored="handleSnapshotRestored"
     />
+    <TranslationPostSourceLinkRewriteDialog
+      v-model="sourceLinkRewriteDialogVisible"
+      :post-id="sourceLinkRewritePost?._id || ''"
+      :language-code="sourceLinkRewritePost?.languageCode || ''"
+      @applied="handleSourceLinkRewriteApplied"
+    />
   </div>
 </template>
 
@@ -229,6 +243,7 @@ import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
+import TranslationPostSourceLinkRewriteDialog from '@/components/TranslationPostSourceLinkRewriteDialog.vue'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
@@ -242,7 +257,8 @@ export default {
     PostRelationSummary,
     TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog,
-    TranslationPostSnapshotRestoreDialog
+    TranslationPostSnapshotRestoreDialog,
+    TranslationPostSourceLinkRewriteDialog
   },
   setup() {
     const route = useRoute()
@@ -253,6 +269,8 @@ export default {
     const aiTranslationPostId = ref('')
     const snapshotRestoreDialogVisible = ref(false)
     const snapshotRestorePost = ref(null)
+    const sourceLinkRewriteDialogVisible = ref(false)
+    const sourceLinkRewritePost = ref(null)
     const rowActionLoadingMap = reactive({})
 
     const sourcePost = computed(() => {
@@ -466,6 +484,11 @@ export default {
       snapshotRestoreDialogVisible.value = true
     }
 
+    function openSourceLinkRewriteDialog(translation) {
+      sourceLinkRewritePost.value = translation
+      sourceLinkRewriteDialogVisible.value = true
+    }
+
     function goTranslationEditor(translation) {
       router.push({
         name: 'TranslationPostEdit',
@@ -490,6 +513,10 @@ export default {
       getLanguageList()
     }
 
+    function handleSourceLinkRewriteApplied() {
+      getLanguageList()
+    }
+
     onMounted(() => {
       getLanguageList()
     })
@@ -500,6 +527,8 @@ export default {
       aiTranslationPostId,
       snapshotRestoreDialogVisible,
       snapshotRestorePost,
+      sourceLinkRewriteDialogVisible,
+      sourceLinkRewritePost,
       rowActionLoadingMap,
       route,
       getCreateActionKey,
@@ -519,7 +548,9 @@ export default {
       openAiTranslationDialog,
       handleAiTranslationSaved,
       handleSnapshotRestored,
-      openRestoreTranslationDialog
+      handleSourceLinkRewriteApplied,
+      openRestoreTranslationDialog,
+      openSourceLinkRewriteDialog
     }
   }
 }

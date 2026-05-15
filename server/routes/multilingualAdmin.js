@@ -526,6 +526,18 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/post/updatePost')
   },
   {
+    path: '/translation/post/source-link/preview',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/post/sourceLinkPreview')
+  },
+  {
+    path: '/translation/post/source-link/apply',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/post/sourceLinkApply')
+  },
+  {
     path: '/translation/post/status',
     method: 'put',
     middleware: [checkAuth],

@@ -383,6 +383,13 @@
               同步快照
             </el-button>
             <el-button
+              type="warning"
+              :loading="saving"
+              @click="openSourceLinkRewriteDialog"
+            >
+              检查源站链接
+            </el-button>
+            <el-button
               v-if="form.pendingReview"
               type="success"
               plain
@@ -674,6 +681,13 @@
       :source-snapshot-id="form.sourceSnapshotId"
       :language-code="form.languageCode"
       @restored="handleSnapshotRestored"
+    />
+
+    <TranslationPostSourceLinkRewriteDialog
+      v-model="sourceLinkRewriteDialogVisible"
+      :post-id="form.id"
+      :language-code="form.languageCode"
+      @applied="handleSourceLinkRewriteApplied"
     />
 
     <el-dialog
@@ -1473,6 +1487,7 @@ import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelec
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
+import TranslationPostSourceLinkRewriteDialog from '@/components/TranslationPostSourceLinkRewriteDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
@@ -1774,6 +1789,7 @@ export default {
     TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog,
     TranslationPostSnapshotRestoreDialog,
+    TranslationPostSourceLinkRewriteDialog,
     VideoUploader,
     VideoPlay
   },
@@ -1788,6 +1804,7 @@ export default {
     const relationRecords = reactive(createRelationRecords())
     const originalEditorVersion = ref(undefined)
     const snapshotRestoreDialogVisible = ref(false)
+    const sourceLinkRewriteDialogVisible = ref(false)
     const form = reactive({
       id: '',
       languageCode: '',
@@ -2821,6 +2838,20 @@ export default {
 
     function handleSnapshotRestored(data) {
       applyPostDetailData(data)
+    }
+
+    function openSourceLinkRewriteDialog() {
+      if (!form.id) {
+        return
+      }
+      sourceLinkRewriteDialogVisible.value = true
+    }
+
+    function handleSourceLinkRewriteApplied(data) {
+      if (data?.detail) {
+        applyPostDetailData(data.detail)
+        contentSource.value = form.content
+      }
     }
 
     function goList() {
@@ -3965,8 +3996,11 @@ export default {
       resetAiTranslationPreview,
       refreshExportEntries,
       handleSnapshotRestored,
+      handleSourceLinkRewriteApplied,
       restoreSnapshot,
+      openSourceLinkRewriteDialog,
       snapshotRestoreDialogVisible,
+      sourceLinkRewriteDialogVisible,
       selectedExportIds,
       selectedAiEntryIds,
       clearExportEntries,

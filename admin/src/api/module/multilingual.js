@@ -345,6 +345,18 @@ export default function (api) {
         noLoading
       })
     },
+    getTranslationPostSourceLinkPreview(data, noLoading = false) {
+      return api.post('/translation/post/source-link/preview', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    applyTranslationPostSourceLinkReplacement(data, noLoading = false) {
+      return api.post('/translation/post/source-link/apply', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     updateTranslationPostStatus(data, noLoading = false) {
       return api.put('/translation/post/status', data, {
         shouldAdminJWT: true,
