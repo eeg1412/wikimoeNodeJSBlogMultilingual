@@ -11,6 +11,7 @@ const upload = multer({ storage: storage })
 const jwtVersion = 1
 const localContentController = require('../api/multilingual-admin/localContentController')
 const properNounTranslationController = require('../api/multilingual-admin/properNounTranslationController')
+const sourcePostProperNounController = require('../api/multilingual-admin/sourcePostProperNounController')
 
 const checkIsReady = (req, res, next) => {
   const isReady = global.$isReady
@@ -187,6 +188,30 @@ const multilingualAdminRouteSetting = [
     method: 'delete',
     middleware: [checkAuth],
     controller: properNounTranslationController.deleteTranslation
+  },
+  {
+    path: '/source/post/proper-noun/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.getTermList
+  },
+  {
+    path: '/source/post/proper-noun/create',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.createOrBindTerm
+  },
+  {
+    path: '/source/post/proper-noun/unbind',
+    method: 'delete',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.unbindTerm
+  },
+  {
+    path: '/source/post/proper-noun/organize-job',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.createOrganizeJob
   },
   {
     path: '/dashboard/summary',

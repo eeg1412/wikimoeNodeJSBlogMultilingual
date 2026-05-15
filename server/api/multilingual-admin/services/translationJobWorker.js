@@ -240,6 +240,7 @@ async function executeClaimedJob(job, state) {
     }
     await translationJobService.completeRunningTranslationJobForReview({
       id: job._id,
+      jobType: job.jobType,
       workerId: state.workerId,
       attemptNo: getAttemptNo(job),
       result

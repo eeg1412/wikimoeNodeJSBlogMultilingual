@@ -15,6 +15,7 @@ const aiUsageService = require('./aiUsageService')
 const coverImageTranslationService = require('./coverImageTranslationService')
 const internetSearchAiService = require('./internetSearchAiService')
 const properNounTranslationService = require('./properNounTranslationService')
+const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const translationPromptPolicyService = require('./translationPromptPolicyService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
@@ -370,6 +371,68 @@ function parseGenericInput(body = {}) {
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
     properNounScopeKey: String(body.properNounScopeKey || '').trim(),
+    cacheKey: String(body.cacheKey || '').trim(),
+    cacheScopeKey: String(body.cacheScopeKey || '').trim(),
+    officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
+      body.officialTermGlossaryTaskCache
+    ),
+    skipUsageLog: body.skipUsageLog === true,
+    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
+  }
+}
+
+function parseProperNounOrganizeInput(body = {}) {
+  const sourceId = String(body.sourceId || body.postId || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_ID_INVALID,
+      undefined,
+      'sourceId',
+      400
+    )
+  }
+  const sourceLanguageCode = normalizeLanguageCode(body.sourceLanguageCode)
+  if (!sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'sourceLanguageCode',
+      400
+    )
+  }
+  const targetLanguageCodes = normalizeTargetLanguageCodeList({
+    targetLanguageCode: body.targetLanguageCode,
+    targetLanguageCodes: body.targetLanguageCodes
+  })
+  if (targetLanguageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      '请至少选择一个目标语言',
+      'targetLanguageCodes',
+      400
+    )
+  }
+  const entries = Array.isArray(body.entries) ? body.entries : []
+  if (entries.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '文章名词整理没有可分析的正文条目',
+      'entries',
+      400
+    )
+  }
+  entries.forEach((entry, index) => validateInputEntry(entry, index))
+
+  return {
+    contentId: sourceId,
+    contentType: 'sourcePostProperNounOrganize',
+    sourceId,
+    sourceLanguageCode,
+    targetLanguageCode: targetLanguageCodes[0],
+    targetLanguageCodes,
+    prompt: '',
+    entries,
+    properNounScopeKey: `sourcePostImport:${sourceId}`,
     cacheKey: String(body.cacheKey || '').trim(),
     cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
@@ -1958,6 +2021,8 @@ async function extractTermsFromPackage({
     {
       stepKey: 'proper-noun.keyword.extract',
       stepLabel: `专有名词抽取第 ${packageIndex}/${packageCount} 包`,
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
       field: 'deepSeek',
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
@@ -2132,6 +2197,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   matchedTermLinks,
   extractedTerms,
   targetLanguageCodes,
+  properNounScopeKey = '',
+  sourceLanguageCode = '',
   usageTracker
 }) {
   if (!Array.isArray(terms) || terms.length === 0) {
@@ -2157,10 +2224,19 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
     extractedTerms
   })
   const nextMatchedTermIds = getMatchedTermIdsFromLinks(nextMatchedTermLinks)
-  const candidateCoverage =
+  let candidateCoverage =
     await properNounTranslationService.getTranslationCandidatesForExtractedTerms(
       {
         terms: extractedTerms,
+        targetLanguageCodes
+      }
+    )
+  candidateCoverage =
+    await sourcePostProperNounRelationService.mergeArticleLinkedCandidateCoverage(
+      {
+        scopeKey: properNounScopeKey,
+        sourceLanguageCode,
+        candidateCoverage,
         targetLanguageCodes
       }
     )
@@ -2717,6 +2793,8 @@ async function filterExistingTermCandidatesWithAi({
     {
       stepKey: 'proper-noun.existing-term.filter',
       stepLabel: '专有名词候选消歧',
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
       field: 'deepSeek',
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
@@ -2811,11 +2889,29 @@ async function resolveOfficialTermGlossaryCacheData({
     }
     return {
       aiJsonLogs,
+      extractedTerms: [],
+      keywordArray: [],
+      matchedTermIds: [],
+      matchedTermLinks: [],
+      matchedCandidateTerms: [],
+      candidateCoverage: {
+        sourceTextItems: [],
+        languageCodes: targetLanguageCodes,
+        candidateTerms: [],
+        translations: []
+      },
+      coverage: {
+        translations: [],
+        existingTerms: [],
+        missingTerms: []
+      },
+      savedTranslations: [],
       officialTermContextSummary,
       officialTermGlossaryMarkdownMap: {},
       officialTermStats: {
         keywordCount: 0,
         candidateCount: 0,
+        articleLinkedCandidateCount: 0,
         matchedTermCount: 0,
         existingCount: 0,
         missingCount: 0,
@@ -2836,6 +2932,15 @@ async function resolveOfficialTermGlossaryCacheData({
     await properNounTranslationService.getTranslationCandidatesForExtractedTerms(
       {
         terms: extractedTerms,
+        targetLanguageCodes
+      }
+    )
+  candidateCoverage =
+    await sourcePostProperNounRelationService.mergeArticleLinkedCandidateCoverage(
+      {
+        scopeKey: getOfficialTermGlossaryScopeKey(input),
+        sourceLanguageCode: input.sourceLanguageCode,
+        candidateCoverage,
         targetLanguageCodes
       }
     )
@@ -2871,6 +2976,7 @@ async function resolveOfficialTermGlossaryCacheData({
   let internetSearchTranslationCount = 0
   let internetSearchRequestedTermCount = 0
   let internetSearchTargetLanguageCodes = []
+  let savedTranslations = []
   if (
     input.searchOfficialTermTranslations === true &&
     missingTermRequests.length > 0
@@ -2946,6 +3052,8 @@ async function resolveOfficialTermGlossaryCacheData({
         matchedTermLinks,
         extractedTerms,
         targetLanguageCodes,
+        properNounScopeKey: getOfficialTermGlossaryScopeKey(input),
+        sourceLanguageCode: input.sourceLanguageCode,
         usageTracker
       })
     matchedTermIds = searchSaveResult.matchedTermIds
@@ -2959,6 +3067,7 @@ async function resolveOfficialTermGlossaryCacheData({
     if (searchSaveResult.coverage) {
       coverage = searchSaveResult.coverage
     }
+    savedTranslations = searchSaveResult.savedTranslations || []
     missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
   }
 
@@ -2975,11 +3084,21 @@ async function resolveOfficialTermGlossaryCacheData({
 
   return {
     aiJsonLogs,
+    extractedTerms,
+    keywordArray,
+    matchedTermIds,
+    matchedTermLinks,
+    matchedCandidateTerms,
+    candidateCoverage,
+    coverage,
+    savedTranslations,
     officialTermContextSummary,
     officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
     officialTermStats: {
       keywordCount: keywordArray.length,
       candidateCount: candidateCoverage.candidateTerms.length,
+      articleLinkedCandidateCount:
+        candidateCoverage.articleLinkedCandidateCount || 0,
       matchedTermCount: matchedTermIds.length,
       existingCount: coverage.existingTerms.length,
       missingCount: coverage.missingTerms.length,
@@ -4607,6 +4726,9 @@ async function recordTranslationUsage({
 async function translatePostEntries(body = {}) {
   const input = parseInput(body)
   const post = await getTranslationPost(input)
+  if (post.sourceId && mongoose.Types.ObjectId.isValid(String(post.sourceId))) {
+    input.properNounScopeKey = `sourcePostImport:${String(post.sourceId)}`
+  }
   const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
   const url = buildChatCompletionUrl(settings)
   const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
@@ -4841,6 +4963,8 @@ async function translateStreamChunkWithRetry({
     {
       stepKey: `translation.chunk.${chunkIndex + 1}`,
       stepLabel: `翻译第 ${chunkIndex + 1}/${chunkTotal} 批`,
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: input.targetLanguageCode,
       field: 'deepSeek',
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
@@ -4971,6 +5095,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
 async function translatePostEntriesStream(body = {}, handlers = {}) {
   const input = parseInput(body)
   const post = await getTranslationPost(input)
+  if (post.sourceId && mongoose.Types.ObjectId.isValid(String(post.sourceId))) {
+    input.properNounScopeKey = `sourcePostImport:${String(post.sourceId)}`
+  }
   const requestContext = createBrowserRequestContext()
   let data = null
 
@@ -5038,7 +5165,31 @@ async function translateContentEntriesStream(body = {}, handlers = {}) {
   return data
 }
 
+async function organizeProperNounTerms(body = {}, handlers = {}) {
+  const input = parseProperNounOrganizeInput(body)
+  const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
+  const url = buildChatCompletionUrl(settings)
+  if (handlers.onStatus) {
+    handlers.onStatus({ message: '正在整理文章专有名词' })
+  }
+  const glossaryData = await resolveOfficialTermGlossaryCacheData({
+    input,
+    settings,
+    url,
+    handlers,
+    targetLanguageCodes: input.targetLanguageCodes
+  })
+  return {
+    sourceId: input.sourceId,
+    sourceLanguageCode: input.sourceLanguageCode,
+    targetLanguageCodes: input.targetLanguageCodes,
+    searchOfficialTermTranslations: input.searchOfficialTermTranslations,
+    ...glossaryData
+  }
+}
+
 module.exports = {
+  organizeProperNounTerms,
   translatePostEntries,
   translatePostEntriesStream,
   translateContentEntriesStream

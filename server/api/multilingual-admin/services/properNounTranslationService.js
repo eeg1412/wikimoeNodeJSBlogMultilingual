@@ -49,6 +49,10 @@ function getTranslationModel() {
   return repository.model
 }
 
+function getSourcePostProperNounRelationService() {
+  return require('./sourcePostProperNounRelationService')
+}
+
 function startCleanupTimer() {
   if (cleanupTimer) {
     clearTimeout(cleanupTimer)
@@ -130,6 +134,10 @@ async function enforceProperNounTermLimit() {
     const translationDeleteResult = await TranslationModel.deleteMany({
       termId: { $in: termIdList }
     })
+    const relationDeleteResult =
+      await getSourcePostProperNounRelationService().deleteRelationsByTermIds(
+        termIdList
+      )
     const termDeleteResult = await TermModel.deleteMany({
       _id: { $in: termIdList }
     })
@@ -137,7 +145,8 @@ async function enforceProperNounTermLimit() {
     return {
       total,
       deletedCount: termDeleteResult.deletedCount || 0,
-      translationDeletedCount: translationDeleteResult.deletedCount || 0
+      translationDeletedCount: translationDeleteResult.deletedCount || 0,
+      relationDeletedCount: relationDeleteResult.deletedCount || 0
     }
   })
 }
@@ -745,6 +754,7 @@ async function deleteTerm(query = {}) {
     throw new ApiError(ERROR_CODES.CONTENT_NOT_FOUND, '名词不存在', 'id', 404)
   }
   await TranslationModel.deleteMany({ termId: id })
+  await getSourcePostProperNounRelationService().deleteRelationsByTermIds([id])
   return { deletedCount: result.deletedCount }
 }
 
@@ -788,11 +798,16 @@ async function batchDeleteTerms(body = {}) {
   const translationDeleteResult = await TranslationModel.deleteMany({
     termId: { $in: termIdList }
   })
+  const relationDeleteResult =
+    await getSourcePostProperNounRelationService().deleteRelationsByTermIds(
+      termIdList
+    )
 
   return {
     requestedCount: termIdList.length,
     deletedCount: termDeleteResult.deletedCount || 0,
-    translationDeletedCount: translationDeleteResult.deletedCount || 0
+    translationDeletedCount: translationDeleteResult.deletedCount || 0,
+    relationDeletedCount: relationDeleteResult.deletedCount || 0
   }
 }
 
@@ -1165,9 +1180,7 @@ async function getTranslationsForSourceTexts({
       termMap.get(normalizedSourceText)?.sourceText ||
       translation.sourceTextSnapshot ||
       ''
-    if (
-      isSameSourceAndTranslatedText(sourceText, translation.translatedText)
-    ) {
+    if (isSameSourceAndTranslatedText(sourceText, translation.translatedText)) {
       return
     }
     const item = {
@@ -1412,7 +1425,10 @@ async function compareMatchedTermTranslationCoverage({
         matchedSourceText,
         matchedTranslation.translation.translatedText
       )
-      if (!isSameTranslation && matchedSourceText !== sourceTextItem.sourceText) {
+      if (
+        !isSameTranslation &&
+        matchedSourceText !== sourceTextItem.sourceText
+      ) {
         isSameTranslation = isSameSourceAndTranslatedText(
           sourceTextItem.sourceText,
           matchedTranslation.translation.translatedText
@@ -1489,7 +1505,9 @@ async function createTermForSourceText(sourceText, options = {}) {
   const term = await TermModel.create({
     sourceText: normalizeSourceText(sourceText),
     normalizedSourceText,
-    sourceLanguageCode: '',
+    sourceLanguageCode: normalizeOptionalLanguageCode(
+      options.sourceLanguageCode
+    ),
     note: normalizeString(options.note, 2000),
     enabled: true
   })
@@ -1625,10 +1643,7 @@ function buildAiSearchTranslationPayload({
   }
 
   let searchMetadata = {}
-  if (
-    termItem?.searchMetadata &&
-    typeof termItem.searchMetadata === 'object'
-  ) {
+  if (termItem?.searchMetadata && typeof termItem.searchMetadata === 'object') {
     searchMetadata = termItem.searchMetadata
   }
 
@@ -1939,10 +1954,12 @@ module.exports = {
   compareMatchedTermTranslationCoverage,
   compareTermTranslationCoverage,
   createTerm,
+  createTermForSourceText,
   createTranslation,
   deleteTerm,
   deleteTranslation,
   enforceProperNounTermLimit,
+  findOrCreateTermForSourceText,
   getTermDetail,
   getTermList,
   getTranslationList,

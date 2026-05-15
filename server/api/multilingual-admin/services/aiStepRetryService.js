@@ -125,6 +125,12 @@ function buildWorkflowStatus(options, payload = {}) {
     attemptNo: payload.attemptNo || null,
     nextAttemptNo: payload.nextAttemptNo || null,
     maxAttempts: payload.maxAttempts || null,
+    sourceLanguageCode: normalizeText(
+      payload.sourceLanguageCode || options.sourceLanguageCode
+    ),
+    targetLanguageCode: normalizeText(
+      payload.targetLanguageCode || options.targetLanguageCode
+    ),
     errorCode: normalizeText(payload.errorCode),
     errorMessage: normalizeText(payload.errorMessage)
   }

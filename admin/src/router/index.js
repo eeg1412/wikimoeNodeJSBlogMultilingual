@@ -35,6 +35,12 @@ const routes = [
         component: () => import('../views/index/source/SourcePostImport.vue')
       },
       {
+        path: '/source/post/proper-noun',
+        name: 'SourcePostProperNounList',
+        component: () =>
+          import('../views/index/source/SourcePostProperNounList.vue')
+      },
+      {
         path: '/source/post/snapshot/list',
         name: 'SourcePostSnapshotList',
         component: () =>

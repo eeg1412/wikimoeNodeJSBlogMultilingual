@@ -174,6 +174,32 @@ export default function (api) {
         noLoading
       })
     },
+    getSourcePostProperNounTermList(data = {}, noLoading = false) {
+      return api.get('/source/post/proper-noun/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    createSourcePostProperNounTerm(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/create', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    unbindSourcePostProperNounTerm(data, noLoading = false) {
+      return api.delete('/source/post/proper-noun/unbind', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    createSourcePostProperNounOrganizeJob(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/organize-job', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationJob(data, noLoading = false) {
       return api.post('/translation/job/create', data, {
         shouldAdminJWT: true,

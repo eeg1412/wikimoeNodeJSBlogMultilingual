@@ -143,6 +143,13 @@
             <PostRelationSummary :post="row" />
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="名词数" width="100">
+          <template #default="{ row }">
+            <el-tag type="primary" effect="plain">
+              {{ getProperNounTermCount(row) }}
+            </el-tag>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="源状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getPostStatusTagType(row.status)" effect="plain">
@@ -176,43 +183,72 @@
             {{ $formatDate(row.updatedAt || row.date || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="340" fixed="right">
+        <ResponsiveTableColumn label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="!row.hasSnapshot"
-              type="primary"
-              size="small"
-              :loading="rowActionLoadingMap[row.sourceId]"
-              @click="openLanguageDialog(row, 'import')"
-            >
-              生成快照
-            </el-button>
-            <el-button
-              v-if="row.hasSnapshot"
-              type="warning"
-              size="small"
-              :loading="rowActionLoadingMap[row.sourceId]"
-              @click="openLanguageDialog(row, 'overwrite')"
-            >
-              覆盖快照
-            </el-button>
-            <el-button
-              v-if="row.hasSnapshot"
-              size="small"
-              @click="goSnapshot(row)"
-            >
-              查看快照
-            </el-button>
-            <el-button
-              v-if="!row.hasSnapshot"
-              type="success"
-              size="small"
-              :loading="rowActionLoadingMap[getAiActionKey(row)]"
-              :disabled="rowActionLoadingMap[row.sourceId]"
-              @click="openAiImportDialog(row)"
-            >
-              生成并AI翻译
-            </el-button>
+            <div class="source-post-row-actions">
+              <el-button
+                v-if="!row.hasSnapshot"
+                type="primary"
+                size="small"
+                :loading="rowActionLoadingMap[row.sourceId]"
+                @click="openLanguageDialog(row, 'import')"
+              >
+                生成快照
+              </el-button>
+              <el-button
+                v-if="row.hasSnapshot"
+                type="warning"
+                size="small"
+                :loading="rowActionLoadingMap[row.sourceId]"
+                @click="openLanguageDialog(row, 'overwrite')"
+              >
+                覆盖快照
+              </el-button>
+              <el-dropdown
+                trigger="click"
+                @command="command => handleSourcePostAction(row, command)"
+              >
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="isSourcePostActionLoading(row)"
+                >
+                  文章操作
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-if="row.hasSnapshot" command="snapshot">
+                      <el-icon><View /></el-icon>
+                      <span>查看快照</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="properNoun"
+                      :divided="row.hasSnapshot"
+                    >
+                      <el-icon><Collection /></el-icon>
+                      <span>名词管理</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="organizeTerm">
+                      <el-icon><MagicStick /></el-icon>
+                      <span>整理名词</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="!row.hasSnapshot"
+                      command="aiImport"
+                      divided
+                      :disabled="
+                        rowActionLoadingMap[row.sourceId] ||
+                        rowActionLoadingMap[getAiActionKey(row)]
+                      "
+                    >
+                      <el-icon><Promotion /></el-icon>
+                      <span>生成并AI翻译</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </ResponsiveTableColumn>
       </ResponsiveTable>
@@ -270,6 +306,12 @@
         </div>
       </template>
     </el-dialog>
+
+    <SourcePostTermOrganizeDialog
+      v-model="organizeDialogVisible"
+      :source-post="organizeRow"
+      @created="getSourceDatabasePostList(false)"
+    />
 
     <el-dialog
       v-model="aiDialogVisible"
@@ -1029,6 +1071,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import ls from '@/utils/ls'
@@ -1086,6 +1129,7 @@ const POST_RELATION_FIELD_LIST = [
 export default {
   components: {
     PostRelationSummary,
+    SourcePostTermOrganizeDialog,
     TranslationEntrySelectableGroups,
     TranslationEntryMeta
   },
@@ -1098,9 +1142,11 @@ export default {
     const resultDialogVisible = ref(false)
     const languageDialogVisible = ref(false)
     const aiDialogVisible = ref(false)
+    const organizeDialogVisible = ref(false)
     const languageAction = ref('import')
     const languageRow = ref(null)
     const aiRow = ref(null)
+    const organizeRow = ref(null)
     const aiStep = ref('setup')
     const aiRunning = ref(false)
     const aiApplying = ref(false)
@@ -1402,6 +1448,11 @@ export default {
       aiForm.searchOfficialTermTranslations = false
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
+    }
+
+    const openOrganizeDialog = row => {
+      organizeRow.value = row
+      organizeDialogVisible.value = true
     }
 
     const handleAiSourceLanguageChange = () => {
@@ -3162,6 +3213,48 @@ export default {
       })
     }
 
+    const goProperNounManager = row => {
+      router.push({
+        name: 'SourcePostProperNounList',
+        query: {
+          sourceId: String(row.sourceId || row._id || '')
+        }
+      })
+    }
+
+    const getProperNounTermCount = row => {
+      const count = Number(row?.properNounTermCount || 0)
+      if (!Number.isFinite(count) || count < 0) {
+        return 0
+      }
+      return Math.floor(count)
+    }
+
+    const isSourcePostActionLoading = row => {
+      if (rowActionLoadingMap[getAiActionKey(row)]) {
+        return true
+      }
+      return false
+    }
+
+    const handleSourcePostAction = (row, command) => {
+      if (command === 'snapshot') {
+        goSnapshot(row)
+        return
+      }
+      if (command === 'properNoun') {
+        goProperNounManager(row)
+        return
+      }
+      if (command === 'organizeTerm') {
+        openOrganizeDialog(row)
+        return
+      }
+      if (command === 'aiImport') {
+        openAiImportDialog(row)
+      }
+    }
+
     watch(
       () => params.page,
       () => {
@@ -3194,11 +3287,12 @@ export default {
       postStatusOptions: POST_STATUS_OPTIONS,
       result,
       resultDialogVisible,
+      organizeDialogVisible,
+      organizeRow,
       aiApplying,
       aiDialogVisible,
       aiForm,
-      coverImageTranslationModeOptions:
-        AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS,
+      coverImageTranslationModeOptions: AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS,
       aiProgressList,
       aiPublishLanguageCodes,
       aiResultList,
@@ -3226,6 +3320,8 @@ export default {
       getPostStatusText,
       getPostStatusTagType,
       getPostDisplayTitle,
+      getProperNounTermCount,
+      handleSourcePostAction,
       getAiRelatedCoverImageEntries,
       getAiResultCoverImageEntries,
       getAiRelatedSelectableEntryIds,
@@ -3243,6 +3339,7 @@ export default {
       getPreviewTotalChangeCount,
       hasPreviewChanges,
       hasPreviewTextChanges,
+      isSourcePostActionLoading,
       canSelectCoverImage,
       setSelectedAiResultEntryIds,
       setSelectedAiRelatedEntryIds,
@@ -3260,9 +3357,11 @@ export default {
       handleAiSourceLanguageChange,
       openAiImportDialog,
       openLanguageDialog,
+      openOrganizeDialog,
       resetAiImportState,
       stopAiImportTranslation,
       startAiImportTranslation,
+      goProperNounManager,
       goSnapshot
     }
   }
@@ -3304,6 +3403,17 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.source-post-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-post-row-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .table-empty-text {

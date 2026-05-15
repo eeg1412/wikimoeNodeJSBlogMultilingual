@@ -114,6 +114,8 @@ function emitCoverImageWorkflowStatus(options = {}) {
       attemptNo: null,
       nextAttemptNo: null,
       maxAttempts: null,
+      sourceLanguageCode: options.sourceLanguageCode || '',
+      targetLanguageCode: options.targetLanguageCode || '',
       errorCode: options.errorCode || '',
       errorMessage: options.errorMessage || ''
     }
@@ -1034,6 +1036,8 @@ async function runRecognition({
     emitCoverImageRecognitionWorkflowStatus({
       onStatus,
       status: 'running',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: '正在识别封面图文字与主题'
     })
     const response = await geminiImageRecognitionService.recognizeCoverTitle({
@@ -1055,6 +1059,8 @@ async function runRecognition({
       emitCoverImageRecognitionWorkflowStatus({
         onStatus,
         status: 'failed',
+        sourceLanguageCode,
+        targetLanguageCode,
         message: `识别封面图文字与主题失败：${response.errorMessage || 'AI 未返回可用识别结果'}`,
         errorCode: response.errorCode || 'COVER_IMAGE_RECOGNITION_FAILED',
         errorMessage: response.errorMessage || 'AI 未返回可用识别结果'
@@ -1068,6 +1074,8 @@ async function runRecognition({
     emitCoverImageRecognitionWorkflowStatus({
       onStatus,
       status: 'completed',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: '识别封面图文字与主题已完成'
     })
     return {
@@ -1119,6 +1127,8 @@ async function runRecognition({
     emitCoverImageRecognitionWorkflowStatus({
       onStatus,
       status: 'failed',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: `识别封面图文字与主题失败：${failedResult.error.message}`,
       errorCode: error?.code || 'COVER_IMAGE_RECOGNITION_FAILED',
       errorMessage: failedResult.error.message
@@ -1186,6 +1196,8 @@ async function runGeneration({
     emitCoverImageGenerationWorkflowStatus({
       onStatus,
       status: 'running',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: '正在生成目标语言封面图'
     })
     const generated = await geminiImageGenerationService.generateCoverImage({
@@ -1209,6 +1221,8 @@ async function runGeneration({
     emitCoverImageGenerationWorkflowStatus({
       onStatus,
       status: 'completed',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: '生成目标语言封面图已完成'
     })
     const generatedImage = await coverImagePostprocessService.resizeCoverExact({
@@ -1295,6 +1309,8 @@ async function runGeneration({
     emitCoverImageGenerationWorkflowStatus({
       onStatus,
       status: 'failed',
+      sourceLanguageCode,
+      targetLanguageCode,
       message: `生成目标语言封面图失败：${failedResult.error.message}`,
       errorCode: error?.code || 'COVER_IMAGE_GENERATION_FAILED',
       errorMessage: failedResult.error.message

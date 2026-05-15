@@ -749,8 +749,10 @@ import { getTranslationGroupDisplayMeta } from '@/utils/translationEntryDisplay'
 const jobTypeOptions = [
   { label: '文章 AI 翻译', value: 'post-ai-translation' },
   { label: '源文生成并 AI 翻译', value: 'source-post-ai-import' },
+  { label: '源文章名词整理', value: 'source-post-proper-noun-organize' },
   { label: '通用内容 AI 翻译', value: 'content-ai-translation' }
 ]
+const sourcePostProperNounOrganizeJobType = 'source-post-proper-noun-organize'
 
 const statusOptions = [
   { label: '未开始', value: '未开始' },
@@ -778,9 +780,12 @@ const progressStageTextMap = {
   TranslatePost: '翻译文章',
   TranslateCoverImage: '翻译封面图',
   TranslateContent: '翻译内容',
+  OrganizeProperNouns: '整理文章名词',
+  BindProperNouns: '关联文章名词',
   ImportSourceSnapshot: '导入源快照',
   PrepareTargetPost: '准备目标文章',
   ValidateJob: '校验任务',
+  FinalizeProperNounOrganize: '完成名词整理',
   FinalizeReview: '整理审核结果'
 }
 
@@ -2020,7 +2025,13 @@ export default {
     })
 
     const canApplyCurrentJob = computed(() => {
-      return currentJob.value && applyStatusSet.has(currentJob.value.status)
+      if (!currentJob.value) {
+        return false
+      }
+      if (currentJob.value.jobType === sourcePostProperNounOrganizeJobType) {
+        return false
+      }
+      return applyStatusSet.has(currentJob.value.status)
     })
 
     const jobStorageTables = computed(() => {
@@ -2527,6 +2538,9 @@ export default {
     }
 
     const canReject = row => {
+      if (row.jobType === sourcePostProperNounOrganizeJobType) {
+        return false
+      }
       return row.status === '等待审核'
     }
 

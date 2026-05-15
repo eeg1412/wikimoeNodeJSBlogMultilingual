@@ -11,6 +11,7 @@ const {
 } = require('../../../utils/multilingualAdminResponse')
 const { buildSourcePostPopulate } = require('../../../utils/sourcePostPopulate')
 const contentRefreshUtils = require('../../../utils/contentRefresh')
+const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -1321,13 +1322,14 @@ async function buildTranslationSummaryMap(sourcePosts) {
 async function getSourcePostList(query = {}) {
   const page = parsePositiveInteger(query.page, 1)
   const limit = parsePositiveInteger(query.limit, 20, 100)
+  let sourceLanguageCode = ''
   const params = {
     sourceCollection: SOURCE_POST_COLLECTION,
     recordKind: SOURCE_RECORD_KIND
   }
 
   if (query.sourceLanguageCode) {
-    const sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
+    sourceLanguageCode = normalizeLanguageCode(query.sourceLanguageCode)
     if (!sourceLanguageCode) {
       throw new ApiError(
         ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
@@ -1397,6 +1399,11 @@ async function getSourcePostList(query = {}) {
 
   const normalizedList = await normalizeSourcePostSnapshotIdentityList(list)
   const summaryMap = await buildTranslationSummaryMap(normalizedList)
+  const properNounCountMap =
+    await sourcePostProperNounRelationService.getRelationCountMapBySourceIds(
+      normalizedList.map(item => item.sourceId),
+      { sourceLanguageCode }
+    )
   const rows = normalizedList.map(item => {
     const summary =
       summaryMap[getSourcePostGroupKey(item)] || buildEmptyTranslationSummary()
@@ -1412,6 +1419,8 @@ async function getSourcePostList(query = {}) {
       snapshotVersion: item.snapshotVersion,
       sourceSnapshotAt: item.sourceSnapshotAt,
       updatedAt: item.updatedAt,
+      properNounTermCount:
+        properNounCountMap.get(String(item.sourceId || '')) || 0,
       translationSummary: summary
     }
   })
@@ -1524,6 +1533,11 @@ async function getSourceDatabasePostList(query = {}) {
       snapshotMap.set(sourceIdText, snapshot)
     }
   }
+  const properNounCountMap =
+    await sourcePostProperNounRelationService.getRelationCountMapBySourceIds(
+      sourceIds,
+      { sourceLanguageCode }
+    )
 
   return {
     list: list.map(item => {
@@ -1538,7 +1552,8 @@ async function getSourceDatabasePostList(query = {}) {
         sourceId: item._id,
         hasSnapshot: snapshotSummary.length > 0,
         snapshot,
-        snapshotSummary
+        snapshotSummary,
+        properNounTermCount: properNounCountMap.get(sourceIdText) || 0
       }
     }),
     total,

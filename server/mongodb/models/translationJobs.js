@@ -600,7 +600,10 @@ translationJobs.index({
   'runtime.leaseExpiresAt': 1,
   createdAt: 1
 })
-translationJobs.index({ jobType: 1, status: 1, createdAt: -1 })
+translationJobs.index({ createdAt: -1, _id: -1 })
+translationJobs.index({ status: 1, createdAt: -1, _id: -1 })
+translationJobs.index({ jobType: 1, createdAt: -1, _id: -1 })
+translationJobs.index({ jobType: 1, status: 1, createdAt: -1, _id: -1 })
 translationJobs.index({ 'source.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.languageCode': 1, status: 1, createdAt: -1 })

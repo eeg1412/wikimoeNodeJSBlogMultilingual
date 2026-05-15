@@ -153,6 +153,9 @@ function collectReadableText(value, parts, depth = 0) {
     'content',
     'value',
     'v',
+    'sourceText',
+    'termId',
+    'normalizedSourceText',
     'translatedText',
     'nextPreviewText',
     'nextPreviewRawValue',
@@ -268,7 +271,24 @@ function createItem(label, value, options = {}) {
       .filter(Boolean)
       .slice(0, MAX_META_ITEMS)
   }
+  if (Array.isArray(options.images)) {
+    item.images = options.images.filter(Boolean).slice(0, MAX_META_ITEMS)
+  }
   return item
+}
+
+function createImage(label, src, options = {}) {
+  const imageSrc = normalizeText(src)
+  if (!imageSrc) {
+    return null
+  }
+  return {
+    label: normalizeText(label) || '图片',
+    src: imageSrc,
+    alt: normalizeText(options.alt) || normalizeText(label) || '图片',
+    role: normalizeText(options.role),
+    description: normalizeText(options.description)
+  }
 }
 
 function createTextBlock(title, value, options = {}) {
@@ -299,7 +319,10 @@ function createSection(options = {}) {
   const textBlocks = Array.isArray(options.textBlocks)
     ? options.textBlocks.filter(Boolean)
     : []
-  if (items.length === 0 && textBlocks.length === 0) {
+  const images = Array.isArray(options.images)
+    ? options.images.filter(Boolean)
+    : []
+  if (items.length === 0 && textBlocks.length === 0 && images.length === 0) {
     return null
   }
   return {
@@ -310,7 +333,10 @@ function createSection(options = {}) {
     tone: normalizeText(options.tone) || '',
     items,
     textBlocks,
-    total: Number(options.total || items.length || textBlocks.length || 0)
+    images,
+    total: Number(
+      options.total || items.length || textBlocks.length || images.length || 0
+    )
   }
 }
 
@@ -407,7 +433,9 @@ function normalizeWorkflowMajorKey(value) {
 function buildWorkflowEventGroupId(event) {
   const stage = normalizeText(event?.stage)
   const stepKey = normalizeText(event?.stepKey)
-  return `${stage}::${stepKey}`
+  const sourceLanguageCode = normalizeText(event?.sourceLanguageCode)
+  const targetLanguageCode = normalizeText(event?.targetLanguageCode)
+  return `${stage}::${sourceLanguageCode}::${targetLanguageCode}::${stepKey}`
 }
 
 function getAiWorkflowEvents(job) {
@@ -487,10 +515,26 @@ function collectAiWorkflowEventSteps(events) {
         firstAt: null,
         latestAt: null,
         latestMessage: '',
-        stage: normalizeText(event.stage)
+        stage: normalizeText(event.stage),
+        sourceLanguageCodes: [],
+        targetLanguageCodes: []
       }
       stepMap.set(groupId, stepEntry)
       stepList.push(stepEntry)
+    }
+    const sourceLanguageCode = normalizeText(event.sourceLanguageCode)
+    if (
+      sourceLanguageCode &&
+      !stepEntry.sourceLanguageCodes.includes(sourceLanguageCode)
+    ) {
+      stepEntry.sourceLanguageCodes.push(sourceLanguageCode)
+    }
+    const targetLanguageCode = normalizeText(event.targetLanguageCode)
+    if (
+      targetLanguageCode &&
+      !stepEntry.targetLanguageCodes.includes(targetLanguageCode)
+    ) {
+      stepEntry.targetLanguageCodes.push(targetLanguageCode)
     }
     if (!stepEntry.stepKeys.includes(stepKey)) {
       stepEntry.stepKeys.push(stepKey)
@@ -598,6 +642,14 @@ function buildAiWorkflowEventStatusSection(stepEntry) {
   )
   pushItem(items, createItem('当前消息', latestEvent.message))
   pushItem(items, createItem('执行阶段', latestEvent.stage))
+  pushItem(
+    items,
+    createItem('源语言', formatLanguageList(stepEntry.sourceLanguageCodes))
+  )
+  pushItem(
+    items,
+    createItem('目标语言', formatLanguageList(stepEntry.targetLanguageCodes))
+  )
   pushItem(items, createItem('尝试次数', latestEvent.attemptNo))
   pushItem(items, createItem('最大尝试次数', latestEvent.maxAttempts))
   pushItem(items, createItem('更新时间', latestEvent.createdAt))
@@ -639,6 +691,9 @@ function buildAiWorkflowEventLogSection(stepEntry) {
     }
     if (event.attemptNo) {
       meta.push(`尝试：${event.attemptNo}/${event.maxAttempts || '-'}`)
+    }
+    if (event.targetLanguageCode) {
+      meta.push(`目标语言：${formatLanguage(event.targetLanguageCode)}`)
     }
     if (event.createdAt) {
       meta.push(`时间：${event.createdAt}`)
@@ -714,6 +769,13 @@ function buildAiWorkflowEventStep(stepEntry, order) {
   if (Array.isArray(stepEntry.stepKeys)) {
     stepKeys = stepEntry.stepKeys
   }
+  const badges = [{ label: '状态', value: getWorkflowStepStatusText(status) }]
+  if (stepEntry.targetLanguageCodes.length > 0) {
+    badges.push({
+      label: '目标语言',
+      value: formatLanguageList(stepEntry.targetLanguageCodes)
+    })
+  }
   const step = {
     id: `runtime-step-${order}`,
     order,
@@ -724,6 +786,8 @@ function buildAiWorkflowEventStep(stepEntry, order) {
     kind: 'runtime',
     majorKey: stepEntry.majorKey,
     stepKeys,
+    sourceLanguageCodes: stepEntry.sourceLanguageCodes,
+    targetLanguageCodes: stepEntry.targetLanguageCodes,
     displayLevel: 0,
     operation: stepEntry.majorKey,
     stage: normalizeText(latestEvent.stage || stepEntry.stage),
@@ -732,7 +796,7 @@ function buildAiWorkflowEventStep(stepEntry, order) {
     requestId: '',
     createdAt: stepEntry.latestAt || stepEntry.firstAt || null,
     currentStep: normalizeText(latestEvent.message),
-    badges: [{ label: '状态', value: getWorkflowStepStatusText(status) }],
+    badges,
     integrityWarnings,
     children: [],
     childCount: 0,
@@ -1806,6 +1870,60 @@ function collectCoverImageRecords(value, records, depth = 0) {
   })
 }
 
+function getNestedImageUrl(value, keys) {
+  if (!isPlainObject(value) || !Array.isArray(keys)) {
+    return ''
+  }
+  for (const key of keys) {
+    const url = normalizeText(value[key])
+    if (url) {
+      return url
+    }
+  }
+  return ''
+}
+
+function buildCoverImageRecordImages(record) {
+  const imageMap = new Map()
+  const appendImage = image => {
+    if (!image || !image.src || imageMap.has(image.src)) {
+      return
+    }
+    imageMap.set(image.src, image)
+  }
+  const generatedCoverUrl = getFirstPresentValue(
+    record.generatedCoverUrl,
+    getNestedImageUrl(record.generatedImage, ['previewUrl', 'filepath', 'url'])
+  )
+  const sourceCoverUrl = getFirstPresentValue(
+    record.sourceCoverUrl,
+    getNestedImageUrl(record.sourceImage, ['previewUrl', 'filepath', 'url'])
+  )
+  const currentCoverUrl = getFirstPresentValue(
+    record.currentCoverUrl,
+    getNestedImageUrl(record.currentImage, ['previewUrl', 'filepath', 'url'])
+  )
+  appendImage(
+    createImage('AI 生成封面', generatedCoverUrl, {
+      role: 'generated',
+      alt: `${record.targetTitle || record.sourceTitle || 'AI 生成封面'}`
+    })
+  )
+  appendImage(
+    createImage('源封面', sourceCoverUrl, {
+      role: 'source',
+      alt: `${record.sourceTitle || '源封面'}`
+    })
+  )
+  appendImage(
+    createImage('当前目标封面', currentCoverUrl, {
+      role: 'current',
+      alt: `${record.targetTitle || '当前目标封面'}`
+    })
+  )
+  return Array.from(imageMap.values())
+}
+
 function buildCoverImageOutputItem(record, index) {
   const label = getFirstPresentValue(
     record.targetTitle,
@@ -1845,8 +1963,10 @@ function buildCoverImageOutputItem(record, index) {
   if (record.generatedCoverUrl) {
     meta.push(`AI 封面：${record.generatedCoverUrl}`)
   }
+  const images = buildCoverImageRecordImages(record)
   return createItem(label, value, {
     meta,
+    images,
     tone: 'output'
   })
 }
@@ -1883,6 +2003,12 @@ function buildAdditionalOutputSection(root, result) {
     'terms',
     'missingTermRequests',
     'matchedTermIds',
+    'matchedTermLinks',
+    'matchedTerms',
+    'matchedCandidateTerms',
+    'databaseCandidates',
+    'candidateTerms',
+    'translations',
     'result',
     'payload',
     'rawResponse',
@@ -2250,6 +2376,9 @@ function getLogRuntimeStepKey(log) {
 }
 
 function parseLanguageCodeList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeText(item)).filter(Boolean)
+  }
   return normalizeText(value)
     .split(',')
     .map(item => item.trim())
@@ -2279,6 +2408,52 @@ function doesStageMatchLanguage(stage, languageCodes) {
   })
 }
 
+function doesStepMatchLanguage(step, languageCodes) {
+  const expectedLanguageCodes = parseLanguageCodeList(languageCodes).map(code =>
+    code.toLowerCase()
+  )
+  if (expectedLanguageCodes.length === 0) {
+    return false
+  }
+  const runtimeLanguageCodes = parseLanguageCodeList(
+    step?.targetLanguageCodes || step?.targetLanguageCode
+  ).map(code => code.toLowerCase())
+  const hasRuntimeLanguageMatch = runtimeLanguageCodes.some(code => {
+    return expectedLanguageCodes.includes(code)
+  })
+  if (hasRuntimeLanguageMatch) {
+    return true
+  }
+  return doesStageMatchLanguage(step?.stage, expectedLanguageCodes)
+}
+
+function findClosestWorkflowParentStep(candidates, log) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return null
+  }
+  if (candidates.length === 1) {
+    return candidates[0]
+  }
+  const logTime = getTimestamp(log?.createdAt)
+  if (logTime <= 0) {
+    return null
+  }
+  let closestStep = null
+  let closestDistance = Number.MAX_SAFE_INTEGER
+  candidates.forEach(step => {
+    const stepTime = getTimestamp(step?.createdAt)
+    if (stepTime <= 0) {
+      return
+    }
+    const distance = Math.abs(stepTime - logTime)
+    if (distance < closestDistance) {
+      closestDistance = distance
+      closestStep = step
+    }
+  })
+  return closestStep
+}
+
 function buildWorkflowParentMatch(steps, log) {
   const majorKey = getLogMajorKey(log)
   const candidates = steps.filter(step => step.majorKey === majorKey)
@@ -2294,44 +2469,43 @@ function buildWorkflowParentMatch(steps, log) {
   let scopedCandidates = candidates
   if (candidates.length > 1 && languageCodes.length > 0) {
     const languageMatchedCandidates = candidates.filter(step => {
-      return doesStageMatchLanguage(step.stage, languageCodes)
+      return doesStepMatchLanguage(step, languageCodes)
     })
-    if (languageMatchedCandidates.length === 0) {
-      integrityWarnings.push(
-        createWorkflowIntegrityWarning(
-          'unmatched-parent-language',
-          'AI 日志的目标语言没有匹配到明确的运行时父步骤。',
-          [
-            `操作：${normalizeText(log?.operation) || majorKey}`,
-            `目标语言：${formatLanguageList(languageCodes)}`,
-            `候选父步骤：${candidates.length}`
-          ]
-        )
-      )
-      return {
-        parentStep: null,
-        integrityWarnings
-      }
+    if (languageMatchedCandidates.length > 0) {
+      scopedCandidates = languageMatchedCandidates
     }
-    scopedCandidates = languageMatchedCandidates
   }
-  const stepKeyMatchedStep = scopedCandidates.find(step => {
+  const stepKeyMatchedCandidates = scopedCandidates.filter(step => {
     return (
       Array.isArray(step.stepKeys) && step.stepKeys.includes(runtimeStepKey)
     )
   })
+  const stepKeyMatchedStep = findClosestWorkflowParentStep(
+    stepKeyMatchedCandidates,
+    log
+  )
   if (stepKeyMatchedStep) {
     return {
       parentStep: stepKeyMatchedStep,
       integrityWarnings
     }
   }
-  const languageMatchedStep = scopedCandidates.find(step => {
-    return doesStageMatchLanguage(step.stage, languageCodes)
-  })
+  const languageMatchedStep = findClosestWorkflowParentStep(
+    scopedCandidates.filter(step => {
+      return doesStepMatchLanguage(step, languageCodes)
+    }),
+    log
+  )
   if (languageMatchedStep) {
     return {
       parentStep: languageMatchedStep,
+      integrityWarnings
+    }
+  }
+  const closestStep = findClosestWorkflowParentStep(scopedCandidates, log)
+  if (closestStep) {
+    return {
+      parentStep: closestStep,
       integrityWarnings
     }
   }
@@ -2357,21 +2531,6 @@ function buildWorkflowParentMatch(steps, log) {
     }
   }
   const onlyCandidate = scopedCandidates[0]
-  const isWeakLanguageMatch =
-    languageCodes.length > 0 &&
-    !doesStageMatchLanguage(onlyCandidate.stage, languageCodes)
-  if (isWeakLanguageMatch) {
-    integrityWarnings.push(
-      createWorkflowIntegrityWarning(
-        'weak-parent-language-match',
-        'AI 日志只找到一个同类父步骤，但语言信息没有明确匹配。',
-        [
-          `目标语言：${formatLanguageList(languageCodes)}`,
-          `父步骤阶段：${onlyCandidate.stage || '缺失'}`
-        ]
-      )
-    )
-  }
   return {
     parentStep: onlyCandidate,
     integrityWarnings
@@ -2742,8 +2901,10 @@ function buildReviewPreviewItem(entry, index) {
   if (entry.status) {
     meta.push(`状态：${entry.status}`)
   }
+  const images = buildCoverImageRecordImages(entry)
   return createItem(label, value, {
     meta,
+    images,
     tone: 'output'
   })
 }

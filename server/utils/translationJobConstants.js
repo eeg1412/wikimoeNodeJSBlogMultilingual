@@ -1,6 +1,7 @@
 const TRANSLATION_JOB_TYPES = Object.freeze({
   POST_AI_TRANSLATION: 'post-ai-translation',
   SOURCE_POST_AI_IMPORT: 'source-post-ai-import',
+  SOURCE_POST_PROPER_NOUN_ORGANIZE: 'source-post-proper-noun-organize',
   CONTENT_AI_TRANSLATION: 'content-ai-translation'
 })
 

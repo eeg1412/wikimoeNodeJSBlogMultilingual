@@ -12,6 +12,7 @@ const translationPayloadApplyService = require('./translationPayloadApplyService
 const translationEntryBuildService = require('./translationEntryBuildService')
 const translationPostService = require('./translationPostService')
 const coverImageTranslationService = require('./coverImageTranslationService')
+const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const {
   STRUCTURED_RICH_TEXT_VALUE_TYPE,
@@ -1306,6 +1307,167 @@ async function executeSourcePostAiImport(job, context) {
   }
 }
 
+async function executeSourcePostProperNounOrganize(job, context) {
+  const languageCodes = Array.isArray(job.target.languageCodes)
+    ? job.target.languageCodes
+    : []
+  if (languageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '文章名词整理任务缺少 target.languageCodes',
+      'target.languageCodes',
+      400,
+      { retryable: false }
+    )
+  }
+
+  const sourcePostId = String(job.source.postId || '')
+  if (!isValidObjectId(sourcePostId)) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '文章名词整理任务缺少 source.postId',
+      'source.postId',
+      400,
+      { retryable: false }
+    )
+  }
+
+  await context.updateProgress({
+    currentStage: 'BuildEntries',
+    currentStep: '正在准备源文章名词整理内容',
+    percent: 10
+  })
+  const previewContext =
+    await translationPostService.getSourcePostAiImportPreviewContext({
+      sourceId: sourcePostId,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: languageCodes[0]
+    })
+  const sourcePost = previewContext.sourcePost
+  const sourcePostStableId = getSourcePostId(sourcePost) || sourcePostId
+  const sourceEntries =
+    translationEntryBuildService.buildPostTranslationEntries({
+      post: sourcePost
+    })
+  const entries = sourceEntries.filter(shouldSubmitAiImportEntry)
+  if (entries.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '源文章没有可用于名词整理的正文条目',
+      'request.entries',
+      400,
+      { retryable: false }
+    )
+  }
+
+  await context.saveCheckpoint({
+    stage: 'BuildEntries',
+    stateSummary: {
+      sourceId: sourcePostStableId,
+      entryCount: entries.length,
+      targetLanguageCodes: languageCodes
+    }
+  })
+  await context.updateProgress({
+    currentStage: 'OrganizeProperNouns',
+    currentStep: '正在调用 AI 整理文章专有名词',
+    percent: 20
+  })
+
+  const organizeResult = await deepSeekTranslationService.organizeProperNounTerms(
+    {
+      sourceId: sourcePostStableId,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCodes: languageCodes,
+      searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
+      cacheKey: getJobId(job),
+      cacheScopeKey: `sourcePostProperNoun:${sourcePostStableId}`,
+      entries
+    },
+    createHandlers(context, 'OrganizeProperNouns', { start: 20, end: 85 })
+  )
+
+  let matchedTermIds = Array.isArray(organizeResult.matchedTermIds)
+    ? organizeResult.matchedTermIds
+    : []
+  matchedTermIds =
+    await sourcePostProperNounRelationService.resolveOrganizedTermIds({
+      extractedTerms: organizeResult.extractedTerms || [],
+      matchedTermIds,
+      matchedTermLinks: organizeResult.matchedTermLinks || [],
+      sourceLanguageCode: job.source.languageCode
+    })
+  await context.updateProgress({
+    currentStage: 'BindProperNouns',
+    currentStep: `正在关联 ${matchedTermIds.length} 个文章专有名词`,
+    percent: 90
+  })
+  const bindResult =
+    await sourcePostProperNounRelationService.bindTermsToSourcePost({
+      sourceId: sourcePostStableId,
+      sourceLanguageCode: job.source.languageCode,
+      termIds: matchedTermIds,
+      relationSource: 'aiOrganize',
+      sourcePost,
+      lastOrganizedAt: new Date()
+    })
+
+  await context.saveCheckpoint({
+    stage: 'BindProperNouns',
+    stateSummary: {
+      sourceId: sourcePostStableId,
+      matchedTermCount: matchedTermIds.length,
+      relationCount: bindResult.relationCount
+    }
+  })
+
+  const stats = organizeResult.officialTermStats || {}
+  const payload = {
+    schema: 'wikimoe.ai.proper_noun.organize',
+    version: 1,
+    sourceId: sourcePostStableId,
+    sourceLanguageCode: job.source.languageCode,
+    targetLanguageCodes: languageCodes,
+    searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
+    extractedTerms: organizeResult.extractedTerms || [],
+    matchedTermIds,
+    matchedTermLinks: organizeResult.matchedTermLinks || [],
+    stats: {
+      ...stats,
+      relationCount: bindResult.relationCount
+    }
+  }
+
+  return {
+    payload,
+    previewEntries: [],
+    warningList: [],
+    aiSkipList: [],
+    relatedResults: [
+      {
+        sourceId: sourcePostStableId,
+        languageCode: job.source.languageCode,
+        termCount: bindResult.relationCount,
+        extractedTermCount: payload.extractedTerms.length,
+        matchedTermCount: matchedTermIds.length
+      }
+    ],
+    languageResults: [],
+    translationPostMap: {},
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(
+      organizeResult.aiJsonLogs || []
+    ),
+    coverImageArtifacts: [],
+    coverImageGenerationMap: {},
+    coverImageRecognitionMap: {},
+    sourceSnapshotId: null,
+    aiUsage: {
+      officialTermStats: stats
+    },
+    model: ''
+  }
+}
+
 async function executeTranslationJob(job, context) {
   if (!job || !job.jobType) {
     throw new ApiError(
@@ -1335,6 +1497,12 @@ async function executeTranslationJob(job, context) {
 
   if (job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT) {
     return await executeSourcePostAiImport(job, context)
+  }
+
+  if (
+    job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE
+  ) {
+    return await executeSourcePostProperNounOrganize(job, context)
   }
 
   throw new ApiError(

@@ -442,6 +442,17 @@ function normalizeSource(sourceInput, jobType) {
     }
   }
 
+  if (jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE) {
+    if (!normalizedSource.postId) {
+      throw new ApiError(
+        ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+        '文章名词整理任务必须提供 source.postId',
+        'source.postId',
+        400
+      )
+    }
+  }
+
   if (jobType === TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION) {
     if (!normalizedSource.contentId && !normalizedSource.postId) {
       throw new ApiError(
@@ -510,6 +521,17 @@ function normalizeTarget(targetInput, requestInput, jobType) {
       throw new ApiError(
         ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
         '生成并 AI 翻译任务必须提供 target.languageCodes',
+        'target.languageCodes',
+        400
+      )
+    }
+  }
+
+  if (jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE) {
+    if (!normalizedTarget.languageCodes.length) {
+      throw new ApiError(
+        ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+        '文章名词整理任务必须提供 target.languageCodes',
         'target.languageCodes',
         400
       )
@@ -1803,6 +1825,8 @@ async function updateRunningTranslationJobProgress(options = {}) {
       ),
       errorCode: toTrimmedString(aiWorkflow.errorCode),
       errorMessage: toTrimmedString(aiWorkflow.errorMessage),
+      sourceLanguageCode: toTrimmedString(aiWorkflow.sourceLanguageCode),
+      targetLanguageCode: toTrimmedString(aiWorkflow.targetLanguageCode),
       createdAt: aiWorkflowCreatedAt
     }
     setData['progress.stageState.aiWorkflow.current'] = aiWorkflowEvent
@@ -2029,6 +2053,67 @@ async function completeRunningTranslationJobForReview(options = {}) {
   }
 
   const now = new Date()
+  const isProperNounOrganizeJob =
+    options.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE
+  let nextStatus = TRANSLATION_JOB_STATUS.WAITING_REVIEW
+  let finalProgressStep = '翻译结果已完成，等待人工审核'
+  let finalProgressStage = 'FinalizeReview'
+  let finalLogMessage = '翻译结果已完整保存，进入等待审核'
+  if (isProperNounOrganizeJob) {
+    nextStatus = TRANSLATION_JOB_STATUS.FULLY_ADOPTED
+    finalProgressStep = '文章名词整理已完成，已自动按采纳处理'
+    finalProgressStage = 'FinalizeProperNounOrganize'
+    finalLogMessage = '文章名词整理结果已保存，已自动按采纳处理'
+  }
+  const updateSet = {
+    status: nextStatus,
+    'queueControl.active': false,
+    'runtime.lockedBy': '',
+    'runtime.workerId': '',
+    'runtime.finishedAt': now,
+    'runtime.heartbeatAt': now,
+    'runtime.leaseExpiresAt': null,
+    'runtime.recovering': false,
+    'result.payload': resultData.payload,
+    'result.previewEntries': resultData.previewEntries,
+    'result.warningList': resultData.warningList || [],
+    'result.aiSkipList': resultData.aiSkipList || [],
+    'result.aiJsonLogs': translationAiJsonLogService.sanitizeAiJsonValue(
+      resultData.aiJsonLogs || []
+    ),
+    'result.relatedResults': resultData.relatedResults || [],
+    'result.languageResults': resultData.languageResults || [],
+    'result.translationPostMap': resultData.translationPostMap || {},
+    'result.coverImageArtifacts':
+      translationAiJsonLogService.sanitizeAiJsonValue(
+        resultData.coverImageArtifacts || []
+      ),
+    'result.coverImageGenerationMap':
+      translationAiJsonLogService.sanitizeAiJsonValue(
+        resultData.coverImageGenerationMap || {}
+      ),
+    'result.coverImageRecognitionMap':
+      translationAiJsonLogService.sanitizeAiJsonValue(
+        resultData.coverImageRecognitionMap || {}
+      ),
+    'result.sourceSnapshotId': toObjectId(
+      resultData.sourceSnapshotId,
+      'result.sourceSnapshotId'
+    ),
+    'result.aiUsage': resultData.aiUsage || {},
+    'result.model': resultData.model || '',
+    'result.completedAt': now,
+    'progress.currentStep': finalProgressStep,
+    'progress.currentStage': finalProgressStage,
+    'progress.percent': 100,
+    'attempts.$[attempt].status': 'success',
+    'attempts.$[attempt].finishedAt': now,
+    'attempts.$[attempt].stage': finalProgressStage
+  }
+  if (isProperNounOrganizeJob) {
+    updateSet['adoption.adoptedAt'] = now
+    updateSet['adoption.lastApplyBatchId'] = `auto:${String(options.id || '')}`
+  }
   const JobModel = getTranslationJobModel()
   const result = await JobModel.updateOne(
     {
@@ -2038,60 +2123,10 @@ async function completeRunningTranslationJobForReview(options = {}) {
       'runtime.attempts': Number(options.attemptNo)
     },
     {
-      $set: {
-        status: TRANSLATION_JOB_STATUS.WAITING_REVIEW,
-        'queueControl.active': false,
-        'runtime.lockedBy': '',
-        'runtime.workerId': '',
-        'runtime.finishedAt': now,
-        'runtime.heartbeatAt': now,
-        'runtime.leaseExpiresAt': null,
-        'runtime.recovering': false,
-        'result.payload': resultData.payload,
-        'result.previewEntries': resultData.previewEntries,
-        'result.warningList': resultData.warningList || [],
-        'result.aiSkipList': resultData.aiSkipList || [],
-        'result.aiJsonLogs': translationAiJsonLogService.sanitizeAiJsonValue(
-          resultData.aiJsonLogs || []
-        ),
-        'result.relatedResults': resultData.relatedResults || [],
-        'result.languageResults': resultData.languageResults || [],
-        'result.translationPostMap': resultData.translationPostMap || {},
-        'result.coverImageArtifacts':
-          translationAiJsonLogService.sanitizeAiJsonValue(
-            resultData.coverImageArtifacts || []
-          ),
-        'result.coverImageGenerationMap':
-          translationAiJsonLogService.sanitizeAiJsonValue(
-            resultData.coverImageGenerationMap || {}
-          ),
-        'result.coverImageRecognitionMap':
-          translationAiJsonLogService.sanitizeAiJsonValue(
-            resultData.coverImageRecognitionMap || {}
-          ),
-        'result.sourceSnapshotId': toObjectId(
-          resultData.sourceSnapshotId,
-          'result.sourceSnapshotId'
-        ),
-        'result.aiUsage': resultData.aiUsage || {},
-        'result.model': resultData.model || '',
-        'result.completedAt': now,
-        'progress.currentStep': '翻译结果已完成，等待人工审核',
-        'progress.currentStage': 'FinalizeReview',
-        'progress.percent': 100,
-        'attempts.$[attempt].status': 'success',
-        'attempts.$[attempt].finishedAt': now,
-        'attempts.$[attempt].stage': 'FinalizeReview'
-      },
+      $set: updateSet,
       $push: {
         'progress.recentLogs': {
-          $each: [
-            buildRecentLog(
-              '翻译结果已完整保存，进入等待审核',
-              'info',
-              'FinalizeReview'
-            )
-          ],
+          $each: [buildRecentLog(finalLogMessage, 'info', finalProgressStage)],
           $slice: -MAX_RECENT_LOGS
         }
       }

@@ -136,6 +136,31 @@
                     {{ block.charLength }} 字。
                   </div>
                 </div>
+                <div
+                  v-if="section.images?.length"
+                  class="ai-workflow-image-grid"
+                >
+                  <div
+                    v-for="(image, imageIndex) in section.images"
+                    :key="getImageKey(image, imageIndex, sectionIndex, 'input')"
+                    class="ai-workflow-image-card"
+                  >
+                    <div class="ai-workflow-image-title">
+                      {{ image.label }}
+                    </div>
+                    <img
+                      class="ai-workflow-image"
+                      :src="image.src"
+                      :alt="getImageAlt(image)"
+                    />
+                    <div
+                      v-if="image.description"
+                      class="ai-workflow-image-description"
+                    >
+                      {{ image.description }}
+                    </div>
+                  </div>
+                </div>
                 <div v-if="section.items.length" class="ai-workflow-item-list">
                   <div
                     v-for="(item, itemIndex) in section.items"
@@ -148,6 +173,38 @@
                       <span v-for="meta in item.meta" :key="meta">
                         {{ meta }}
                       </span>
+                    </div>
+                    <div
+                      v-if="item.images?.length"
+                      class="ai-workflow-image-grid is-item"
+                    >
+                      <div
+                        v-for="(image, imageIndex) in item.images"
+                        :key="
+                          getImageKey(
+                            image,
+                            imageIndex,
+                            itemIndex,
+                            'input-item'
+                          )
+                        "
+                        class="ai-workflow-image-card"
+                      >
+                        <div class="ai-workflow-image-title">
+                          {{ image.label }}
+                        </div>
+                        <img
+                          class="ai-workflow-image"
+                          :src="image.src"
+                          :alt="getImageAlt(image)"
+                        />
+                        <div
+                          v-if="image.description"
+                          class="ai-workflow-image-description"
+                        >
+                          {{ image.description }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -198,6 +255,33 @@
                     {{ block.charLength }} 字。
                   </div>
                 </div>
+                <div
+                  v-if="section.images?.length"
+                  class="ai-workflow-image-grid"
+                >
+                  <div
+                    v-for="(image, imageIndex) in section.images"
+                    :key="
+                      getImageKey(image, imageIndex, sectionIndex, 'output')
+                    "
+                    class="ai-workflow-image-card"
+                  >
+                    <div class="ai-workflow-image-title">
+                      {{ image.label }}
+                    </div>
+                    <img
+                      class="ai-workflow-image"
+                      :src="image.src"
+                      :alt="getImageAlt(image)"
+                    />
+                    <div
+                      v-if="image.description"
+                      class="ai-workflow-image-description"
+                    >
+                      {{ image.description }}
+                    </div>
+                  </div>
+                </div>
                 <div v-if="section.items.length" class="ai-workflow-item-list">
                   <div
                     v-for="(item, itemIndex) in section.items"
@@ -210,6 +294,38 @@
                       <span v-for="meta in item.meta" :key="meta">
                         {{ meta }}
                       </span>
+                    </div>
+                    <div
+                      v-if="item.images?.length"
+                      class="ai-workflow-image-grid is-item"
+                    >
+                      <div
+                        v-for="(image, imageIndex) in item.images"
+                        :key="
+                          getImageKey(
+                            image,
+                            imageIndex,
+                            itemIndex,
+                            'output-item'
+                          )
+                        "
+                        class="ai-workflow-image-card"
+                      >
+                        <div class="ai-workflow-image-title">
+                          {{ image.label }}
+                        </div>
+                        <img
+                          class="ai-workflow-image"
+                          :src="image.src"
+                          :alt="getImageAlt(image)"
+                        />
+                        <div
+                          v-if="image.description"
+                          class="ai-workflow-image-description"
+                        >
+                          {{ image.description }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -337,6 +453,14 @@ export default {
       return `${area}-item-${sectionIndex}-${itemIndex}-${
         item?.label || 'unlabeled'
       }`
+    },
+    getImageKey(image, imageIndex, ownerIndex, area) {
+      return `${area}-image-${ownerIndex}-${imageIndex}-${
+        image?.src || image?.label || 'unlabeled'
+      }`
+    },
+    getImageAlt(image) {
+      return image?.alt || image?.label || 'AI 工作流图片'
     },
     getDisplayBadges(step) {
       const displayBadges = []
@@ -932,6 +1056,50 @@ export default {
   font-size: 12px;
   line-height: 1.5;
   margin-top: 4px;
+}
+
+.ai-workflow-image-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-top: 10px;
+}
+
+.ai-workflow-image-grid.is-item {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.ai-workflow-image-card {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ai-workflow-image-title {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  padding: 8px 9px 6px;
+}
+
+.ai-workflow-image {
+  aspect-ratio: 16 / 9;
+  background: var(--el-fill-color-lighter);
+  display: block;
+  object-fit: contain;
+  width: 100%;
+}
+
+.ai-workflow-image-description {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  padding: 7px 9px 8px;
 }
 
 .ai-workflow-item-list {
