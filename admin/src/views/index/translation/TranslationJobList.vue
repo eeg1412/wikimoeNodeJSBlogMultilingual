@@ -1847,21 +1847,24 @@ export default {
       if (!entry?.id || !entry?.artifactId) {
         return false
       }
-      if (entry.isApplied === true) {
-        return false
-      }
       if (entry.status !== 'generated') {
         return false
       }
       return Boolean(entry.generatedCoverUrl)
     }
 
-    const setCoverImageSelected = (entry, checked) => {
+    const setCoverImageSelected = async (entry, checked) => {
       const entryKey = String(entry?.id || '')
       if (!entryKey || !canSelectCoverImage(entry)) {
         return
       }
       if (checked) {
+        if (entry.isApplied === true) {
+          const confirmed = await confirmAppliedEntrySelection([entry])
+          if (confirmed === false) {
+            return
+          }
+        }
         if (!selectedEntryKeys.value.includes(entryKey)) {
           selectedEntryKeys.value = selectedEntryKeys.value.concat(entryKey)
         }

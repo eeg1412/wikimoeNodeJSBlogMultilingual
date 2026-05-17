@@ -1564,9 +1564,6 @@ export default {
       if (!entry?.id || !entry?.artifactId) {
         return false
       }
-      if (entry.isApplied === true) {
-        return false
-      }
       if (entry.status !== 'generated') {
         return false
       }
