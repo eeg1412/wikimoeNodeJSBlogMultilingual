@@ -349,13 +349,19 @@ function buildAiChunkCacheRecord(cacheRecord, cacheOptions) {
     response: translationAiJsonLogService.sanitizeAiJsonValue(
       cacheRecord.response || null
     ),
-    resultData: translationAiJsonLogService.sanitizeAiJsonValue(
-      cacheRecord.resultData || null
-    ),
+    resultData: cloneSerializableValue(cacheRecord.resultData || null),
     aiJsonLog: translationAiJsonLogService.sanitizeAiJsonValue(
       cacheRecord.aiJsonLog || null
     )
   }
+}
+
+function cloneSerializableValue(value) {
+  if (typeof value === 'undefined') {
+    return value
+  }
+
+  return JSON.parse(JSON.stringify(value))
 }
 
 function normalizeJobType(value) {
@@ -2093,15 +2099,14 @@ async function saveRunningTranslationJobAiChunkCache(options = {}) {
   const nextRecords = cacheState.records.filter(record => {
     return !isSameAiChunkCacheRecord(record, cacheOptions)
   })
-  const cacheFileRecord = await aiLogFileService.writeTranslationJobAiChunkCacheRecord(
-    {
+  const cacheFileRecord =
+    await aiLogFileService.writeTranslationJobAiChunkCacheRecord({
       jobId: cacheOptions.cacheKey,
       cacheOptions,
       cacheRecord: buildAiChunkCacheRecord(cacheRecord, cacheOptions),
       schema: AI_CHUNK_CACHE_SCHEMA,
       version: AI_CHUNK_CACHE_VERSION
-    }
-  )
+    })
   nextRecords.push(cacheFileRecord)
   cacheState.records = nextRecords
   cacheState.updatedAt = new Date()
@@ -2132,8 +2137,9 @@ async function clearTranslationJobAiChunkCacheById(id) {
       }
     }
   )
-  const fileCleanup =
-    await aiLogFileService.deleteTranslationJobAiChunkCache(String(id || ''))
+  const fileCleanup = await aiLogFileService.deleteTranslationJobAiChunkCache(
+    String(id || '')
+  )
 
   return {
     deleted: result.matchedCount === 1,
@@ -2159,7 +2165,7 @@ function stripLanguageResultAiJsonLogs(languageResults) {
   }
 
   return languageResults.map(item => {
-    const nextItem = translationAiJsonLogService.sanitizeAiJsonValue(item)
+    const nextItem = cloneSerializableValue(item)
     const nestedLogs = nextItem?.result?.aiJsonLogs
     if (nextItem?.result && Array.isArray(nestedLogs)) {
       nextItem.result.aiJsonLogCount = nestedLogs.length
@@ -2184,11 +2190,12 @@ async function completeRunningTranslationJobForReview(options = {}) {
   const aiJsonLogs = translationAiJsonLogService.sanitizeAiJsonValue(
     resultData.aiJsonLogs || []
   )
-  const aiJsonLogStorage =
-    await aiLogFileService.writeTranslationJobAiJsonLogs({
+  const aiJsonLogStorage = await aiLogFileService.writeTranslationJobAiJsonLogs(
+    {
       jobId: String(options.id || ''),
       logs: aiJsonLogs
-    })
+    }
+  )
   const isProperNounOrganizeJob =
     options.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE
   let nextStatus = TRANSLATION_JOB_STATUS.WAITING_REVIEW

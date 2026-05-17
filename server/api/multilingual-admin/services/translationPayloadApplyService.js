@@ -724,8 +724,14 @@ function buildEntryMap(entries = []) {
   return map
 }
 
-function buildSourcePostApplyPayload(job, selectedEntryKeys) {
-  const selectedKeySet = new Set(selectedEntryKeys)
+function buildSourcePostApplyPayload(job, selectedEntries) {
+  const selectedEntryMap = new Map()
+  selectedEntries.forEach(entry => {
+    if (!entry?.entryKey) {
+      return
+    }
+    selectedEntryMap.set(entry.entryKey, entry)
+  })
   const languageResultList = Array.isArray(job.result?.languageResults)
     ? job.result.languageResults
     : []
@@ -746,11 +752,14 @@ function buildSourcePostApplyPayload(job, selectedEntryKeys) {
         relatedPostResults: []
       })
     }
-    const selectedPayloadEntries = (item.result.payload.entries || []).filter(
-      entry => {
-        return entry?.entryKey && selectedKeySet.has(entry.entryKey)
-      }
-    )
+    const selectedPayloadEntries = (item.result.payload.entries || [])
+      .map(entry => {
+        if (!entry?.entryKey) {
+          return null
+        }
+        return selectedEntryMap.get(entry.entryKey) || null
+      })
+      .filter(Boolean)
     if (selectedPayloadEntries.length === 0) {
       return
     }
@@ -858,13 +867,12 @@ async function updateSourcePostJobAdoption({
 async function applySourcePostTranslationJob({
   job,
   selectedEntries,
-  selectedEntryKeys,
   adminSnapshot,
   admin,
   applyBatchId,
   publish
 }) {
-  const results = buildSourcePostApplyPayload(job, selectedEntryKeys).map(
+  const results = buildSourcePostApplyPayload(job, selectedEntries).map(
     item => {
       return {
         ...item,
@@ -1363,7 +1371,6 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
       const contentApplyResult = await applySourcePostTranslationJob({
         job,
         selectedEntries: selectedContentEntries,
-        selectedEntryKeys: selectedContentEntries.map(entry => entry.entryKey),
         adminSnapshot,
         admin: options.admin,
         applyBatchId,
