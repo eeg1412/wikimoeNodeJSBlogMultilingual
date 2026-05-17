@@ -74,6 +74,10 @@ var aiUsageLogs = new Schema(
       type: Schema.Types.Mixed,
       default: {}
     },
+    rawResponseStorage: {
+      type: Schema.Types.Mixed,
+      default: null
+    },
     meta: {
       type: Schema.Types.Mixed,
       default: {}

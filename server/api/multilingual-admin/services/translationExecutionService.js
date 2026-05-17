@@ -6,6 +6,7 @@ const {
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 const {
+  TRANSLATION_JOB_STATUS,
   TRANSLATION_JOB_TYPES
 } = require('../../../utils/translationJobConstants')
 const translationPayloadApplyService = require('./translationPayloadApplyService')
@@ -35,6 +36,15 @@ function getPostModel() {
   const repository = global.$mongodDB?.multilingual?.repositories?.posts
   if (!repository || !repository.model) {
     throw new Error('multilingual posts repository not found')
+  }
+  return repository.model
+}
+
+function getTranslationJobModel() {
+  const repository =
+    global.$mongodDB?.multilingual?.repositories?.translationJobs
+  if (!repository || !repository.model) {
+    throw new Error('multilingual translationJobs repository not found')
   }
   return repository.model
 }
@@ -77,6 +87,78 @@ function shouldSkipCoverImageRecognition(job) {
   return coverImageTranslationService.shouldSkipCoverImageRecognitionForMode(
     getCoverImageTranslationMode(job, 'never')
   )
+}
+
+function getJobTaskRelation(job) {
+  if (!job || !job.taskRelation || typeof job.taskRelation !== 'object') {
+    return {}
+  }
+  return job.taskRelation
+}
+
+function isSourcePostImportChildJob(job) {
+  return getJobTaskRelation(job).role === 'child'
+}
+
+function shouldSyncRelatedPosts(job) {
+  const options = job?.request?.options || {}
+  if (options.syncRelatedPosts === false) {
+    return false
+  }
+  if (options.translateRelatedPosts === false) {
+    return false
+  }
+  return true
+}
+
+function shouldCreateRelatedChildJobs(job) {
+  if (!shouldSyncRelatedPosts(job)) {
+    return false
+  }
+  return !isSourcePostImportChildJob(job)
+}
+
+function getSharedTranslationCacheKey(job) {
+  const relation = getJobTaskRelation(job)
+  const sharedCacheKey = normalizeString(job?.request?.options?.sharedCacheKey)
+  if (sharedCacheKey) {
+    return sharedCacheKey
+  }
+  if (relation.rootId) {
+    return String(relation.rootId)
+  }
+  if (relation.parentId) {
+    return String(relation.parentId)
+  }
+  return getJobId(job)
+}
+
+function getPlannedRelatedSourceIds(job, languageCode) {
+  const relation = getJobTaskRelation(job)
+  const relatedMap = relation.plannedRelatedSourceIdsByLanguage || {}
+  const relatedList = relatedMap[languageCode]
+  if (!Array.isArray(relatedList)) {
+    return null
+  }
+  return relatedList
+    .map(item => normalizeString(item))
+    .filter(Boolean)
+}
+
+function getSourcePostDisplayTitle(post) {
+  const title = normalizeString(post?.title)
+  if (title) {
+    return title
+  }
+  const excerpt = normalizeString(post?.excerpt).replace(/\s+/g, ' ')
+  if (excerpt) {
+    return excerpt.slice(0, 50)
+  }
+  const sourceId = getSourcePostId(post)
+  if (sourceId) {
+    return `源文章 ${sourceId}`
+  }
+  return '未命名内容'
 }
 
 function shouldSearchOfficialTermTranslations(job) {
@@ -497,6 +579,7 @@ async function executePostAiTranslation(job, context) {
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: job.target.languageCode,
         targetLanguageCodes: getJobTargetLanguageCodes(job),
+        translationJobId: getJobId(job),
         cacheKey: getJobId(job),
         cacheScopeKey: 'post',
         prompt: getPrompt(job),
@@ -548,6 +631,7 @@ async function executeContentAiTranslation(job, context) {
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: job.target.languageCode,
       targetLanguageCodes: getJobTargetLanguageCodes(job),
+      translationJobId: getJobId(job),
       cacheKey: getJobId(job),
       cacheScopeKey: `content:${contentType}`,
       prompt: getPrompt(job),
@@ -968,10 +1052,16 @@ async function translateSourcePostForLanguage({
     sourceEntries,
     targetEntries
   )
-  const relatedSourceIds = collectRelatedSourceIds(
-    previewContext.sourcePost,
-    previewContext.targetPost
-  )
+  let relatedSourceIds = []
+  const plannedRelatedSourceIds = getPlannedRelatedSourceIds(job, languageCode)
+  if (Array.isArray(plannedRelatedSourceIds)) {
+    relatedSourceIds = plannedRelatedSourceIds
+  } else if (shouldSyncRelatedPosts(job)) {
+    relatedSourceIds = collectRelatedSourceIds(
+      previewContext.sourcePost,
+      previewContext.targetPost
+    )
+  }
   const hideCurrentPreview = !hasCurrentSnapshotVersion(
     previewContext.targetPost
   )
@@ -1020,7 +1110,8 @@ async function translateSourcePostForLanguage({
         sourceLanguageCode: job.source.languageCode,
         targetLanguageCode: languageCode,
         targetLanguageCodes,
-        cacheKey: getJobId(job),
+        translationJobId: getJobId(job),
+        cacheKey: getSharedTranslationCacheKey(job),
         cacheScopeKey: `sourcePostImport:${languageCode}`,
         prompt: getPrompt(job),
         searchOfficialTermTranslations:
@@ -1107,7 +1198,8 @@ async function executeSourcePostLanguageDag({
   officialTermGlossaryTaskCache,
   progressRange,
   maxDepth,
-  coverImageTasks
+  coverImageTasks,
+  enqueueRelatedPosts
 }) {
   const queue = [
     {
@@ -1143,6 +1235,9 @@ async function executeSourcePostLanguageDag({
     })
     results.push(result)
 
+    if (enqueueRelatedPosts !== true) {
+      continue
+    }
     if (task.depth >= maxDepth) {
       continue
     }
@@ -1160,6 +1255,392 @@ async function executeSourcePostLanguageDag({
   return results
 }
 
+function toObjectId(value) {
+  const text = normalizeString(value)
+  if (!text || !mongoose.Types.ObjectId.isValid(text)) {
+    return null
+  }
+  return new mongoose.Types.ObjectId(text)
+}
+
+function buildExecutionLog(message, level = 'info', stage = '') {
+  return {
+    message,
+    level,
+    stage,
+    createdAt: new Date()
+  }
+}
+
+function getPlanNode(planMap, sourceId) {
+  const key = normalizeString(sourceId)
+  if (!planMap.has(key)) {
+    planMap.set(key, {
+      sourceId: key,
+      title: '',
+      minDepth: Number.MAX_SAFE_INTEGER,
+      parentSourceIds: [],
+      languageCodes: [],
+      plannedRelatedSourceIdsByLanguage: {}
+    })
+  }
+  return planMap.get(key)
+}
+
+function appendUniqueValue(list, value) {
+  const text = normalizeString(value)
+  if (!text) {
+    return
+  }
+  if (!list.includes(text)) {
+    list.push(text)
+  }
+}
+
+function updatePlanNodeForLanguage({
+  planMap,
+  sourceId,
+  languageCode,
+  depth,
+  sourcePost,
+  parentSourceId
+}) {
+  const node = getPlanNode(planMap, sourceId)
+  if (depth < node.minDepth) {
+    node.minDepth = depth
+  }
+  appendUniqueValue(node.languageCodes, languageCode)
+  appendUniqueValue(node.parentSourceIds, parentSourceId)
+  if (!node.title && sourcePost) {
+    node.title = getSourcePostDisplayTitle(sourcePost)
+  }
+  return node
+}
+
+function setPlanNodeRelatedSourceIds({ node, languageCode, relatedSourceIds }) {
+  const list = []
+  relatedSourceIds.forEach(sourceId => {
+    appendUniqueValue(list, sourceId)
+  })
+  node.plannedRelatedSourceIdsByLanguage[languageCode] = list
+}
+
+async function loadSourcePostImportPreviewContextForPlan({
+  job,
+  sourceId,
+  languageCode
+}) {
+  return await translationPostService.getSourcePostAiImportPreviewContext({
+    sourceId,
+    sourceLanguageCode: job.source.languageCode,
+    targetLanguageCode: languageCode
+  })
+}
+
+async function buildSourcePostImportChildPlan({
+  job,
+  languageCodes,
+  maxDepth,
+  context
+}) {
+  const rootSourceId = normalizeString(job.source.postId)
+  if (!rootSourceId || maxDepth <= 1) {
+    return []
+  }
+
+  const planMap = new Map()
+  for (
+    let languageIndex = 0;
+    languageIndex < languageCodes.length;
+    languageIndex += 1
+  ) {
+    const languageCode = languageCodes[languageIndex]
+    const queue = [
+      {
+        sourceId: rootSourceId,
+        parentSourceId: '',
+        depth: 1
+      }
+    ]
+    const visited = new Set()
+
+    while (queue.length > 0) {
+      const task = queue.shift()
+      const sourceId = normalizeString(task.sourceId)
+      if (!sourceId || visited.has(sourceId)) {
+        continue
+      }
+      visited.add(sourceId)
+
+      const previewContext = await loadSourcePostImportPreviewContextForPlan({
+        job,
+        sourceId,
+        languageCode
+      })
+      const normalizedSourceId =
+        getSourcePostId(previewContext.sourcePost) || sourceId
+      if (normalizedSourceId !== rootSourceId) {
+        updatePlanNodeForLanguage({
+          planMap,
+          sourceId: normalizedSourceId,
+          languageCode,
+          depth: task.depth,
+          sourcePost: previewContext.sourcePost,
+          parentSourceId: task.parentSourceId
+        })
+      }
+
+      const relatedSourceIds = collectRelatedSourceIds(
+        previewContext.sourcePost,
+        previewContext.targetPost
+      )
+      if (normalizedSourceId !== rootSourceId) {
+        const node = getPlanNode(planMap, normalizedSourceId)
+        setPlanNodeRelatedSourceIds({
+          node,
+          languageCode,
+          relatedSourceIds
+        })
+      }
+
+      if (task.depth >= maxDepth) {
+        continue
+      }
+
+      relatedSourceIds.forEach(relatedSourceId => {
+        const relatedId = normalizeString(relatedSourceId)
+        if (!relatedId || relatedId === rootSourceId) {
+          return
+        }
+        updatePlanNodeForLanguage({
+          planMap,
+          sourceId: relatedId,
+          languageCode,
+          depth: task.depth + 1,
+          sourcePost: null,
+          parentSourceId: normalizedSourceId
+        })
+        if (!visited.has(relatedId)) {
+          queue.push({
+            sourceId: relatedId,
+            parentSourceId: normalizedSourceId,
+            depth: task.depth + 1
+          })
+        }
+      })
+    }
+
+    if (context?.cancellation?.isCancelled) {
+      throw new ApiError(
+        ERROR_CODES.AI_TRANSLATION_CANCELLED,
+        '任务已停止，取消相关文章拆解',
+        'translationJob',
+        499,
+        { retryable: false }
+      )
+    }
+  }
+
+  return Array.from(planMap.values())
+    .filter(item => item.sourceId !== rootSourceId)
+    .sort((leftItem, rightItem) => {
+      if (leftItem.minDepth !== rightItem.minDepth) {
+        return leftItem.minDepth - rightItem.minDepth
+      }
+      return leftItem.sourceId.localeCompare(rightItem.sourceId)
+    })
+}
+
+function buildChildTaskRequest(job, planItem, rootId) {
+  const request = job.request || {}
+  const options = {
+    ...(request.options || {}),
+    syncRelatedPosts: true,
+    sharedCacheKey: String(rootId),
+    plannedRelatedSourceIdsByLanguage:
+      planItem.plannedRelatedSourceIdsByLanguage || {}
+  }
+  return {
+    selectedEntryKeys: Array.isArray(request.selectedEntryKeys)
+      ? request.selectedEntryKeys
+      : [],
+    prompt: request.prompt || '',
+    baseMode: request.baseMode || '',
+    targetLanguageCodes: planItem.languageCodes,
+    recursion: {
+      maxDepth: 1
+    },
+    entries: [],
+    options
+  }
+}
+
+function buildChildTaskRelation({ job, planItem, rootId }) {
+  return {
+    role: 'child',
+    rootId,
+    parentId: job._id,
+    depth: planItem.minDepth,
+    sourcePostId: toObjectId(planItem.sourceId),
+    childJobIds: [],
+    plannedRelatedSourceIdsByLanguage:
+      planItem.plannedRelatedSourceIdsByLanguage || {},
+    plan: {
+      parentSourceIds: planItem.parentSourceIds || [],
+      languageCodes: planItem.languageCodes || []
+    }
+  }
+}
+
+async function createSourcePostImportChildJobs({
+  job,
+  languageCodes,
+  maxDepth,
+  context
+}) {
+  await context.updateProgress({
+    currentStage: 'AnalyzeRelatedPosts',
+    currentStep: '正在分析相关文章并拆解 AI 子任务',
+    percent: 1
+  })
+  const childPlan = await buildSourcePostImportChildPlan({
+    job,
+    languageCodes,
+    maxDepth,
+    context
+  })
+  if (childPlan.length === 0) {
+    await context.saveCheckpoint({
+      stage: 'AnalyzeRelatedPosts',
+      stateSummary: {
+        childTaskCount: 0,
+        message: '没有需要同步翻译的相关文章'
+      }
+    })
+    return []
+  }
+
+  const JobModel = getTranslationJobModel()
+  const rootId = getJobTaskRelation(job).rootId || job._id
+  const childJobIds = []
+  const childTaskResults = []
+  for (const planItem of childPlan) {
+    const sourcePostId = toObjectId(planItem.sourceId)
+    if (!sourcePostId) {
+      continue
+    }
+    const existingChild = await JobModel.findOne({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
+      'taskRelation.parentId': job._id,
+      'source.postId': sourcePostId
+    }).lean()
+    if (existingChild) {
+      childJobIds.push(existingChild._id)
+      childTaskResults.push({
+        sourceId: planItem.sourceId,
+        title: planItem.title || '',
+        depth: planItem.minDepth,
+        languageCodes: planItem.languageCodes,
+        childJobId: existingChild._id
+      })
+      continue
+    }
+
+    const title = planItem.title || `源文章 ${planItem.sourceId}`
+    const childJob = await JobModel.create({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
+      status: TRANSLATION_JOB_STATUS.PENDING,
+      queueControl: {
+        active: true,
+        deferred: false,
+        priority: job.queueControl?.priority || 0
+      },
+      source: {
+        postId: sourcePostId,
+        languageCode: job.source.languageCode,
+        title,
+        meta: {
+          parentJobId: getJobId(job),
+          rootJobId: String(rootId)
+        }
+      },
+      target: {
+        languageCodes: planItem.languageCodes,
+        title
+      },
+      request: buildChildTaskRequest(job, planItem, rootId),
+      taskRelation: buildChildTaskRelation({ job, planItem, rootId }),
+      progress: {
+        currentStep: '等待后台 worker 领取相关文章子任务',
+        currentStage: 'pending',
+        totalSteps: 0,
+        completedSteps: 0,
+        percent: 0,
+        recentLogs: [
+          buildExecutionLog(
+            `由父任务 ${getJobId(job)} 拆解创建`,
+            'info',
+            'createChildTask'
+          )
+        ]
+      },
+      createdBy: job.createdBy || null,
+      updatedBy: job.updatedBy || job.createdBy || null
+    })
+    childJobIds.push(childJob._id)
+    childTaskResults.push({
+      sourceId: planItem.sourceId,
+      title: planItem.title || '',
+      depth: planItem.minDepth,
+      languageCodes: planItem.languageCodes,
+      childJobId: childJob._id
+    })
+  }
+
+  await JobModel.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        'taskRelation.role': 'parent',
+        'taskRelation.rootId': rootId,
+        'taskRelation.sourcePostId': job.source.postId,
+        'taskRelation.childJobIds': childJobIds,
+        'taskRelation.plan': {
+          schema: 'wikimoe.ai.translation.source-post-import.child-plan',
+          version: 1,
+          childTaskCount: childJobIds.length,
+          sourceCount: childPlan.length,
+          maxDepth,
+          generatedAt: new Date()
+        }
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildExecutionLog(
+              `已拆解 ${childJobIds.length} 个相关文章 AI 子任务`,
+              'info',
+              'AnalyzeRelatedPosts'
+            )
+          ],
+          $slice: -20
+        }
+      }
+    }
+  )
+
+  await context.saveCheckpoint({
+    stage: 'AnalyzeRelatedPosts',
+    stateSummary: {
+      childTaskCount: childJobIds.length,
+      sourceCount: childPlan.length,
+      maxDepth
+    }
+  })
+
+  return childTaskResults
+}
+
 async function executeSourcePostAiImport(job, context) {
   const languageCodes = Array.isArray(job.target.languageCodes)
     ? job.target.languageCodes
@@ -1175,6 +1656,15 @@ async function executeSourcePostAiImport(job, context) {
   }
 
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
+  let childTaskResults = []
+  if (shouldCreateRelatedChildJobs(job)) {
+    childTaskResults = await createSourcePostImportChildJobs({
+      job,
+      languageCodes,
+      maxDepth,
+      context
+    })
+  }
   const coverImageTasks = []
   const languageResults = []
   const officialTermGlossaryTaskCache = new Map()
@@ -1195,8 +1685,9 @@ async function executeSourcePostAiImport(job, context) {
           languageIndex,
           languageCodes.length
         ),
-        maxDepth,
-        coverImageTasks
+        maxDepth: 1,
+        coverImageTasks,
+        enqueueRelatedPosts: false
       }))
     )
   }
@@ -1291,6 +1782,7 @@ async function executeSourcePostAiImport(job, context) {
       requestId: item.result.requestId,
       model: item.result.model
     })),
+    childTaskResults,
     languageResults,
     translationPostMap: {},
     aiJsonLogs,
@@ -1380,6 +1872,7 @@ async function executeSourcePostProperNounOrganize(job, context) {
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCodes: languageCodes,
       searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
+      translationJobId: getJobId(job),
       cacheKey: getJobId(job),
       cacheScopeKey: `sourcePostProperNoun:${sourcePostStableId}`,
       entries

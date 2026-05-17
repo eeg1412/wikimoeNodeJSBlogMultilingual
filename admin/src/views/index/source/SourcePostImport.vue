@@ -385,6 +385,13 @@
                 active-text="联网检索官方译名"
               />
             </el-form-item>
+            <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
+              <el-switch
+                v-model="aiForm.syncRelatedPosts"
+                :disabled="isAiImportBusy"
+                active-text="同步翻译相关文章"
+              />
+            </el-form-item>
             <el-form-item label="翻译封面图">
               <el-radio-group
                 v-model="aiForm.coverImageTranslationMode"
@@ -1172,7 +1179,8 @@ export default {
       targetLanguageCodes: [],
       prompt: '',
       coverImageTranslationMode: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER,
-      searchOfficialTermTranslations: false
+      searchOfficialTermTranslations: false,
+      syncRelatedPosts: true
     })
     const params = reactive({
       page: 1,
@@ -1395,6 +1403,7 @@ export default {
       aiForm.prompt = ''
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
+      aiForm.syncRelatedPosts = true
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
     }
@@ -1446,6 +1455,7 @@ export default {
       aiForm.prompt = ''
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
+      aiForm.syncRelatedPosts = true
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
     }
@@ -1943,6 +1953,24 @@ export default {
       })
       return Array.from(sourceIdSet)
     }
+
+    const hasPostRelatedSourcePosts = post => {
+      if (!post) {
+        return false
+      }
+      return POST_RELATION_FIELD_LIST.some(fieldName => {
+        const relationList = Array.isArray(post[fieldName])
+          ? post[fieldName]
+          : []
+        return relationList.some(record => {
+          return Boolean(getRecordSourceId(record))
+        })
+      })
+    }
+
+    const showSyncRelatedPostsOption = computed(() => {
+      return hasPostRelatedSourcePosts(aiRow.value)
+    })
 
     const confirmLanguageAction = () => {
       const row = languageRow.value
@@ -2541,10 +2569,13 @@ export default {
         sourcePreviewPost,
         targetPreviewPost
       )
-      const relatedSourceIds = getRelatedSourceIdsForTranslate(
+      let relatedSourceIds = getRelatedSourceIdsForTranslate(
         previewContext.sourcePost,
         targetPreviewPost
       )
+      if (aiForm.syncRelatedPosts !== true) {
+        relatedSourceIds = []
+      }
       const aiTranslationSkippedEntries = buildAiTranslationSkipEntries(
         mappedResult.entries
       )
@@ -3011,7 +3042,10 @@ export default {
               coverImageTranslationMode: aiForm.coverImageTranslationMode,
               translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
-                aiForm.searchOfficialTermTranslations
+                aiForm.searchOfficialTermTranslations,
+              syncRelatedPosts:
+                showSyncRelatedPostsOption.value &&
+                aiForm.syncRelatedPosts === true
             },
             targetLanguageCodes: aiForm.targetLanguageCodes,
             recursion: {
@@ -3313,6 +3347,7 @@ export default {
       isAiImportBusy,
       officialTermSearchDefaultLoading,
       rowActionLoadingMap,
+      showSyncRelatedPostsOption,
       targetLanguageOptions,
       getLanguageText,
       getPostTypeTagType,
