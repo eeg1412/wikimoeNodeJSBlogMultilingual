@@ -160,13 +160,14 @@ nano .env
 
 #### 核心配置（必看）
 
-| 变量名            | 例子                                     | 说明                                            |
-| :---------------- | :--------------------------------------- | :---------------------------------------------- |
-| `USER_NAME`       | `admin`                                  | **首次启动**时创建的管理员账号名。              |
-| `NUXT_API_DOMAIN` | `http://localhost:3006`                  | **必填项非常重要！** 博客前端访问后端的地址。   |
-| `PORT`            | `3006`                                   | 后端 API 服务的内部端口，通常不需要修改。       |
-| `NITRO_PORT`      | `3007`                                   | 博客前端页面的内部端口，通常不需要修改。        |
-| `DB_HOST`         | `mongodb://wikimoe-db:27017/wikimoeBlog` | 数据库连接地址，Docker 内部自动关联，无需修改。 |
+| 变量名                 | 例子                                                 | 说明                                             |
+| :--------------------- | :--------------------------------------------------- | :----------------------------------------------- |
+| `USER_NAME`            | `admin`                                              | **首次启动**时创建的管理员账号名。               |
+| `NUXT_API_DOMAIN`      | `http://localhost:3006`                              | **必填项非常重要！** 博客前端访问后端的地址。    |
+| `PORT`                 | `3006`                                               | 后端 API 服务的内部端口，通常不需要修改。        |
+| `NITRO_PORT`           | `3007`                                               | 博客前端页面的内部端口，通常不需要修改。         |
+| `DB_HOST`              | `mongodb://wikimoe-db:27017/wikimoeBlog`             | 源站数据库连接地址，只用于只读查询。             |
+| `DB_HOST_MULTILINGUAL` | `mongodb://wikimoe-db:27017/wikimoeBlogMultilingual` | 多语言站数据库连接地址，备份和还原只操作这个库。 |
 
 #### 性能与限制配置（可选）
 
@@ -290,7 +291,8 @@ yarn install
 
 ```env
 PORT="填写运行端口号"
-DB_HOST="填写mongodb地址"
+DB_HOST="填写源站mongodb地址，只读使用"
+DB_HOST_MULTILINGUAL="填写多语言站mongodb地址，备份和还原只操作这个库"
 JSON_LIMIT="JSON格式的大小限制如（50mb）"
 URLENCODED_LIMIT="URL编码的大小限制如（50mb）"
 IP2LOCATION_FILE_NAME="地址解析用到的BIN文件，切记一定要下载【DB3.LITE】的BIN文件。默认为IP2LOCATION.BIN，如果想更改文件名可以修改这个项目"

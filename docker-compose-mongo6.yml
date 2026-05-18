@@ -33,6 +33,7 @@ services:
       - TZ=Asia/Shanghai
       - PORT=${PORT}
       - DB_HOST=${DB_HOST}
+      - DB_HOST_MULTILINGUAL=${DB_HOST_MULTILINGUAL}
       - JSON_LIMIT=${JSON_LIMIT}
       - URLENCODED_LIMIT=${URLENCODED_LIMIT}
       - IP2LOCATION_FILE_NAME=${IP2LOCATION_FILE_NAME}
@@ -44,6 +45,9 @@ services:
       - ./data/wikimoe-blog-server/backups:/app/backups
       - ./data/wikimoe-blog-server/cache:/app/cache
       - ./data/wikimoe-blog-server/public:/app/public
+      - ./data/wikimoe-blog-server/ailog:/app/ailog
+      - ./data/wikimoe-blog-server/blog-public:/blog/public
+      - ./data/wikimoe-blog-server/blog-public-root:/blog/public-root
       - ./data/wikimoe-blog-server/secret:/app/secret
     ports:
       - '3006:3006'

@@ -461,7 +461,7 @@ exports.getUserIp = function (req) {
 
 // checkEnv
 exports.checkEnv = function () {
-  const envArr = ['DB_HOST']
+  const envArr = ['DB_HOST', 'DB_HOST_MULTILINGUAL']
   const result = []
   envArr.forEach(env => {
     if (!process.env[env]) {
