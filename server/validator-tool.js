@@ -570,10 +570,12 @@ function validateMultilingualBackupScope() {
     'MULTILINGUAL_BACKUP_SCOPE',
     'DB_HOST_MULTILINGUAL',
     'assertMultilingualDbConnection',
+    'getManagedCollectionNames',
     "archivePath: 'public'",
     "archivePath: 'blog-public'",
     "archivePath: 'blog-public-root'",
     'validateBackupInfo',
+    'assertBackupCollectionFiles',
     'insertMany(documentBatch'
   ])
   assertFileNotIncludes(backupPath, [

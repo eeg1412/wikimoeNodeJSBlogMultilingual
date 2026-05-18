@@ -9,6 +9,7 @@ const { promisify } = require('util')
 const pipeline = promisify(require('stream').pipeline)
 const yauzl = require('yauzl')
 const multilingualConnectionInfo = require('../mongodb/multilingualConnection')
+const registerModels = require('../mongodb/modelFactory/registerModels')
 
 const MULTILINGUAL_BACKUP_SCOPE = 'wikimoeNodeJSBlogMultilingual'
 const BACKUP_INFO_FILE = 'backupInfo.bson'
@@ -21,6 +22,7 @@ const ignoredCollections = new Set([
   ...noDropCollections,
   ...excludedCollections
 ])
+let managedCollectionsCache = null
 
 const RESOURCE_DIRECTORIES = [
   {
@@ -42,6 +44,55 @@ const RESOURCE_DIRECTORIES = [
     archivePath: 'blog-public-root'
   }
 ]
+
+function getManagedCollections() {
+  if (managedCollectionsCache) {
+    return managedCollectionsCache
+  }
+
+  const multilingualModels = registerModels(
+    multilingualConnectionInfo.connection
+  )
+  const collectionMap = new Map()
+
+  for (const model of Object.values(multilingualModels)) {
+    const collectionName = model.collection && model.collection.name
+    if (!collectionName || shouldIgnoreCollection(collectionName)) {
+      continue
+    }
+
+    if (!collectionMap.has(collectionName)) {
+      collectionMap.set(collectionName, {
+        name: collectionName,
+        model
+      })
+    }
+  }
+
+  managedCollectionsCache = Array.from(collectionMap.values()).sort(
+    (leftCollection, rightCollection) => {
+      return leftCollection.name.localeCompare(rightCollection.name)
+    }
+  )
+
+  return managedCollectionsCache
+}
+
+function getManagedCollectionNames() {
+  return getManagedCollections().map(collection => collection.name)
+}
+
+function getManagedCollectionModel(collectionName) {
+  const managedCollection = getManagedCollections().find(collection => {
+    return collection.name === collectionName
+  })
+
+  if (!managedCollection) {
+    throw new Error(`集合不属于多语言备份范围: ${collectionName}`)
+  }
+
+  return managedCollection.model
+}
 
 function normalizeMongoUri(uri) {
   if (!uri) {
@@ -170,6 +221,31 @@ function assertBackupInfo(backupInfo) {
       throw new Error(`备份集合清单包含禁止还原集合: ${collectionName}`)
     }
   }
+
+  const expectedCollections = new Set(getManagedCollectionNames())
+  const backupCollections = new Set(backupInfo.collections)
+
+  for (const collectionName of backupCollections) {
+    if (!expectedCollections.has(collectionName)) {
+      throw new Error(`备份集合不属于多语言站范围: ${collectionName}`)
+    }
+  }
+
+  for (const collectionName of expectedCollections) {
+    if (!backupCollections.has(collectionName)) {
+      throw new Error(`备份文件缺少多语言集合记录: ${collectionName}`)
+    }
+  }
+}
+
+function assertBackupCollectionFiles(fullPath, backupInfo) {
+  const dir = path.join(getRestoreCacheDir(fullPath), MONGODB_ARCHIVE_DIR)
+  if (!fs.existsSync(dir)) {
+    throw new Error('备份文件缺少 MongoDB 集合目录')
+  }
+
+  const files = fs.readdirSync(dir).filter(file => file.endsWith('.bson'))
+  validateRestoreCollectionFiles(backupInfo, files)
 }
 
 function assertBackupResourceDirectories(fullPath, backupInfo) {
@@ -264,10 +340,23 @@ async function restoreCollectionDocuments(nativeDb, collectionName, filePath) {
   }
 }
 
+async function ensureManagedCollectionExists(nativeDb, collectionName) {
+  const collections = await nativeDb
+    .listCollections({ name: collectionName })
+    .toArray()
+
+  if (collections.length > 0) {
+    return
+  }
+
+  const model = getManagedCollectionModel(collectionName)
+  await model.createCollection()
+}
+
 function validateRestoreCollectionFiles(backupInfo, files) {
   const expectedCollections = new Set(backupInfo.collections)
   const actualCollections = new Set(
-    files.map(file => file.replace('.bson', ''))
+    files.map(file => path.basename(file, '.bson'))
   )
 
   for (const collectionName of expectedCollections) {
@@ -304,17 +393,13 @@ exports.dumpCollections = async (pathname, id) => {
     fs.mkdirSync(dir, { recursive: true })
   }
 
-  const collections = await nativeDb.listCollections().toArray()
+  const collectionNames = getManagedCollectionNames()
   const dumpedCollections = []
 
-  for (const collection of collections) {
-    if (shouldIgnoreCollection(collection.name)) {
-      continue
-    }
-
-    const cursor = nativeDb.collection(collection.name).find()
+  for (const collectionName of collectionNames) {
+    const cursor = nativeDb.collection(collectionName).find()
     const writeStream = fs.createWriteStream(
-      path.join(dir, `${collection.name}.bson`)
+      path.join(dir, `${collectionName}.bson`)
     )
 
     for await (const doc of cursor) {
@@ -322,14 +407,14 @@ exports.dumpCollections = async (pathname, id) => {
     }
 
     await closeWriteStream(writeStream)
-    dumpedCollections.push(collection.name)
-    console.log(`Collection ${collection.name} dumped successfully`)
+    dumpedCollections.push(collectionName)
+    console.log(`Collection ${collectionName} dumped successfully`)
   }
 
   const backupInfo = {
     _id: id,
     scope: MULTILINGUAL_BACKUP_SCOPE,
-    version: 2,
+    version: 3,
     databaseName: nativeDb.databaseName,
     collections: dumpedCollections,
     resourceDirectories: getResourceManifest(),
@@ -465,6 +550,7 @@ exports.validateBackupInfo = async fullPath => {
     )
   }
 
+  assertBackupCollectionFiles(fullPath, backupInfo)
   assertBackupResourceDirectories(fullPath, backupInfo)
 
   return backupInfo
@@ -472,16 +558,20 @@ exports.validateBackupInfo = async fullPath => {
 
 exports.clearCollections = async () => {
   const nativeDb = assertMultilingualDbConnection()
-  const collections = await nativeDb.listCollections().toArray()
+  const collectionNames = getManagedCollectionNames()
 
-  for (const collection of collections) {
-    if (shouldIgnoreCollection(collection.name)) {
+  for (const collectionName of collectionNames) {
+    const collections = await nativeDb
+      .listCollections({ name: collectionName })
+      .toArray()
+
+    if (collections.length === 0) {
       continue
     }
 
-    console.log(`Clearing collection ${collection.name}`)
-    await nativeDb.collection(collection.name).deleteMany({})
-    console.log(`Collection ${collection.name} cleared successfully`)
+    console.log(`Dropping collection ${collectionName}`)
+    await nativeDb.dropCollection(collectionName)
+    console.log(`Collection ${collectionName} dropped successfully`)
   }
 }
 
@@ -490,12 +580,12 @@ exports.restoreCollections = async fullPath => {
   const backupInfo = readBackupInfoFromCacheDir(getRestoreCacheDir(fullPath))
   assertBackupInfo(backupInfo)
 
+  assertBackupCollectionFiles(fullPath, backupInfo)
   const dir = path.join(getRestoreCacheDir(fullPath), MONGODB_ARCHIVE_DIR)
-  const files = fs.readdirSync(dir).filter(file => file.endsWith('.bson'))
-  validateRestoreCollectionFiles(backupInfo, files)
 
   for (const collectionName of backupInfo.collections) {
     console.log(`Restoring collection ${collectionName}`)
+    await ensureManagedCollectionExists(nativeDb, collectionName)
     await restoreCollectionDocuments(
       nativeDb,
       collectionName,
