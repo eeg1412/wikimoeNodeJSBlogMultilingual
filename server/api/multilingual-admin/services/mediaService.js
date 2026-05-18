@@ -753,6 +753,83 @@ async function safeDeleteContentFiles(storedPathList) {
   }
 }
 
+function getAttachmentLocalPathList(attachment) {
+  const pathList = []
+  if (!attachment) {
+    return pathList
+  }
+
+  if (attachment.localFilepath) {
+    pathList.push(attachment.localFilepath)
+  }
+  if (attachment.localThumbnailPath) {
+    pathList.push(attachment.localThumbnailPath)
+  }
+
+  const isStoredLocalFile =
+    attachment.mediaMode === 'local' ||
+    attachment.localStorageStatus === 'stored'
+  if (isStoredLocalFile) {
+    if (attachment.filepath) {
+      pathList.push(attachment.filepath)
+    }
+    if (attachment.thumfor) {
+      pathList.push(attachment.thumfor)
+    }
+  }
+
+  return pathList
+}
+
+function buildNormalizedContentPathSet(storedPathList = []) {
+  const pathSet = new Set()
+  for (const storedPath of storedPathList) {
+    const filePath = normalizeStoredContentPath(storedPath)
+    if (filePath) {
+      pathSet.add(path.normalize(filePath))
+    }
+  }
+  return pathSet
+}
+
+function getReplacedAttachmentLocalPathList(
+  attachment,
+  nextStoredPathList = []
+) {
+  const nextPathSet = buildNormalizedContentPathSet(nextStoredPathList)
+  const oldPathSet = new Set()
+  const replacedPathList = []
+
+  for (const storedPath of getAttachmentLocalPathList(attachment)) {
+    const filePath = normalizeStoredContentPath(storedPath)
+    if (!filePath) {
+      continue
+    }
+
+    const pathKey = path.normalize(filePath)
+    if (oldPathSet.has(pathKey)) {
+      continue
+    }
+    oldPathSet.add(pathKey)
+
+    if (nextPathSet.has(pathKey)) {
+      continue
+    }
+
+    replacedPathList.push(storedPath)
+  }
+
+  return replacedPathList
+}
+
+async function deleteAttachmentLocalFiles(attachment, nextStoredPathList = []) {
+  const replacedPathList = getReplacedAttachmentLocalPathList(
+    attachment,
+    nextStoredPathList
+  )
+  await safeDeleteContentFiles(replacedPathList)
+}
+
 function validateReplacementFileType(attachment, file) {
   if (attachment.mimetype && attachment.mimetype.startsWith('image')) {
     if (!isImageFile(file)) {
@@ -812,9 +889,18 @@ async function replaceLocalAttachment(body = {}, file, coverFile) {
     localThumbnailPath: storageData.updateData.thumfor || '',
     localStorageStatus: 'stored'
   }
+  const nextLocalPathList = [
+    storageData.updateData.filepath,
+    storageData.updateData.thumfor
+  ]
+  const replacedLocalPathList = getReplacedAttachmentLocalPathList(
+    attachment,
+    nextLocalPathList
+  )
 
+  let updatedAttachment = null
   try {
-    const updatedAttachment = await AttachmentModel.findOneAndUpdate(
+    updatedAttachment = await AttachmentModel.findOneAndUpdate(
       { _id: attachment._id, recordKind: TRANSLATION_RECORD_KIND },
       { $set: updateData },
       { new: true }
@@ -823,12 +909,13 @@ async function replaceLocalAttachment(body = {}, file, coverFile) {
     if (!updatedAttachment) {
       throw new Error('attachment update failed')
     }
-
-    return updatedAttachment
   } catch (error) {
     await cleanupCreatedFiles(storageData.createdFiles)
     throw error
   }
+
+  await safeDeleteContentFiles(replacedLocalPathList)
+  return updatedAttachment
 }
 
 function parseLocalAttachmentInput(body = {}) {
@@ -944,11 +1031,7 @@ async function deletePureLocalAttachment(body = {}) {
     )
   }
 
-  const localPathList = [
-    attachment.localFilepath || attachment.filepath,
-    attachment.localThumbnailPath || attachment.thumfor
-  ]
-  await safeDeleteContentFiles(localPathList)
+  await deleteAttachmentLocalFiles(attachment)
 
   await attachment.deleteOne()
 
@@ -1038,11 +1121,7 @@ async function convertLocalAttachmentToRemote(body = {}) {
     )
   }
 
-  const localPathList = [
-    attachment.localFilepath || attachment.filepath,
-    attachment.localThumbnailPath || attachment.thumfor
-  ]
-  await safeDeleteContentFiles(localPathList)
+  await deleteAttachmentLocalFiles(attachment)
 
   const AttachmentModel = getAttachmentModel()
   const updatedAttachment = await AttachmentModel.findOneAndUpdate(
@@ -1067,5 +1146,6 @@ module.exports = {
   convertLocalAttachmentToRemote,
   normalizeStoredContentPath,
   safeDeleteContentFiles,
+  deleteAttachmentLocalFiles,
   isPureLocalAttachment
 }

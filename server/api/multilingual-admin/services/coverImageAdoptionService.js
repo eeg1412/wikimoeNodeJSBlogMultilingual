@@ -115,7 +115,7 @@ function assertArtifactAdoptable(artifact, previewEntry = null) {
   }
 }
 
-async function updateTargetPostCoverImage(targetPostId, attachmentId) {
+async function findTargetPost(targetPostId) {
   const PostModel = getRepositoryModel('posts')
   const targetPost = await PostModel.findOne({
     _id: toObjectId(
@@ -132,9 +132,59 @@ async function updateTargetPostCoverImage(targetPostId, attachmentId) {
       404
     )
   }
+
+  return targetPost
+}
+
+function getTargetPostCoverImages(targetPost) {
   const currentCoverImages = Array.isArray(targetPost.coverImages)
     ? targetPost.coverImages
     : []
+
+  return currentCoverImages
+}
+
+function normalizeCoverImageId(coverImage) {
+  if (!coverImage) {
+    return ''
+  }
+  if (coverImage._id) {
+    return String(coverImage._id)
+  }
+  return String(coverImage).trim()
+}
+
+function getPrimaryCoverImageId(targetPost) {
+  const currentCoverImages = getTargetPostCoverImages(targetPost)
+  if (currentCoverImages.length === 0) {
+    return ''
+  }
+
+  return normalizeCoverImageId(currentCoverImages[0])
+}
+
+async function touchTargetPostCoverImage(targetPost) {
+  const PostModel = getRepositoryModel('posts')
+  await PostModel.updateOne(
+    { _id: targetPost._id },
+    {
+      $set: {
+        lastChangDate: new Date()
+      }
+    }
+  )
+
+  return {
+    targetPostId: String(targetPost._id),
+    coverImages: getTargetPostCoverImages(targetPost).map(item => {
+      return normalizeCoverImageId(item)
+    })
+  }
+}
+
+async function updateTargetPostCoverImage(targetPost, attachmentId) {
+  const PostModel = getRepositoryModel('posts')
+  const currentCoverImages = getTargetPostCoverImages(targetPost)
   const nextCoverImages = [attachmentId]
   currentCoverImages.slice(1).forEach(coverImage => {
     nextCoverImages.push(coverImage)
@@ -150,7 +200,51 @@ async function updateTargetPostCoverImage(targetPostId, attachmentId) {
   )
   return {
     targetPostId: String(targetPost._id),
-    coverImages: nextCoverImages.map(item => String(item))
+    coverImages: nextCoverImages.map(item => {
+      return normalizeCoverImageId(item)
+    })
+  }
+}
+
+async function saveTargetPostCoverAttachment({
+  targetPostId,
+  languageCode,
+  artifact,
+  body,
+  file
+}) {
+  const targetPost = await findTargetPost(targetPostId)
+  const primaryCoverImageId = getPrimaryCoverImageId(targetPost)
+  if (primaryCoverImageId) {
+    const attachment = await mediaService.replaceLocalAttachment(
+      {
+        id: primaryCoverImageId,
+        languageCode
+      },
+      file
+    )
+    const targetUpdate = await touchTargetPostCoverImage(targetPost)
+    return {
+      attachment,
+      targetPost: targetUpdate
+    }
+  }
+
+  const attachment = await mediaService.createLocalAttachment(
+    buildAttachmentBody(artifact, {
+      ...body,
+      languageCode
+    }),
+    file
+  )
+  const targetUpdate = await updateTargetPostCoverImage(
+    targetPost,
+    attachment._id
+  )
+
+  return {
+    attachment,
+    targetPost: targetUpdate
   }
 }
 
@@ -481,19 +575,25 @@ async function adoptCoverImage(body = {}, options = {}) {
     mimeType: artifact.generatedImage?.mimeType || 'image/png',
     buffer: coverBuffer
   }
-  const attachment = await mediaService.createLocalAttachment(
-    buildAttachmentBody(artifact, body),
-    buildAttachmentFile(artifact, fileData)
-  )
   const resolvedTargetPostId = await resolveTargetPostId({
     body,
     artifact,
     previewEntry: previewEntryBeforeAdopt
   })
-  const targetUpdate = await updateTargetPostCoverImage(
-    resolvedTargetPostId,
-    attachment._id
+  const languageCode = resolveCoverLanguageCode(
+    body,
+    artifact,
+    previewEntryBeforeAdopt
   )
+  const coverAttachmentResult = await saveTargetPostCoverAttachment({
+    targetPostId: resolvedTargetPostId,
+    languageCode,
+    artifact,
+    body,
+    file: buildAttachmentFile(artifact, fileData)
+  })
+  const attachment = coverAttachmentResult.attachment
+  const targetUpdate = coverAttachmentResult.targetPost
 
   const now = new Date()
   const artifactUpdateData = {
@@ -610,19 +710,21 @@ async function adoptPreviewCoverImage(body = {}) {
     mimeType: artifact.generatedImage?.mimeType || 'image/png',
     buffer: coverBuffer
   }
-  const attachment = await mediaService.createLocalAttachment(
-    buildAttachmentBody(artifact, body),
-    buildAttachmentFile(artifact, fileData)
-  )
   const resolvedTargetPostId = await resolveTargetPostId({
     body,
     artifact,
     previewEntry
   })
-  const targetUpdate = await updateTargetPostCoverImage(
-    resolvedTargetPostId,
-    attachment._id
-  )
+  const languageCode = resolveCoverLanguageCode(body, artifact, previewEntry)
+  const coverAttachmentResult = await saveTargetPostCoverAttachment({
+    targetPostId: resolvedTargetPostId,
+    languageCode,
+    artifact,
+    body,
+    file: buildAttachmentFile(artifact, fileData)
+  })
+  const attachment = coverAttachmentResult.attachment
+  const targetUpdate = coverAttachmentResult.targetPost
 
   return {
     artifactId: normalizeArtifactId(artifact?.artifactId),

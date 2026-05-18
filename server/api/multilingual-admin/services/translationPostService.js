@@ -12,6 +12,7 @@ const {
 } = require('../../../utils/multilingualAdminResponse')
 const importPostSourceService = require('./importPostSourceService')
 const coverImageAdoptionService = require('./coverImageAdoptionService')
+const mediaService = require('./mediaService')
 const relationService = require('./relationService')
 const {
   COVER_IMAGE_ENTRY_TYPE
@@ -3379,6 +3380,13 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
     { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
     { $set: updateData }
   )
+
+  if (
+    input.collectionName === 'attachments' &&
+    updateData.mediaMode === 'remote'
+  ) {
+    await mediaService.deleteAttachmentLocalFiles(record)
+  }
 
   if (input.collectionName === 'posts' || input.collectionName === 'sorts') {
     cacheDataUtils.invalidateSortListCache(record.languageCode)
