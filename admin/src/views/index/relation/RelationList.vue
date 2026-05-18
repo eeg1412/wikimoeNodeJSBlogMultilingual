@@ -272,6 +272,10 @@ import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.
 import RelationBusinessFieldEditor from '@/components/RelationBusinessFieldEditor.vue'
 import { multilingualApi } from '@/api'
 import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
+import {
   RELATION_COLLECTION_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
@@ -374,6 +378,11 @@ export default {
         collectionName: route.query.collectionName || ''
       }
 
+      restoreListSessionParams(route, defaultParams, [
+        'keyword',
+        'languageCode',
+        'collectionName'
+      ])
       return defaultParams
     }
 
@@ -532,6 +541,7 @@ export default {
           const responseData = response.data.data || {}
           relationList.value = responseData.list || []
           total.value = responseData.total || 0
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)

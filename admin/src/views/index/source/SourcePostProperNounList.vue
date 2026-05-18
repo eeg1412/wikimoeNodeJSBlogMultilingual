@@ -393,6 +393,10 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import { formatDate } from '@/utils/utils'
 import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
+import {
   getLanguageText,
   getPostDisplayTitle,
   sortBySupportedLanguageOrder,
@@ -477,6 +481,9 @@ export default {
     const sourceId = computed(() => {
       return String(route.query.sourceId || route.params.sourceId || '').trim()
     })
+    const listSessionKey = computed(() => {
+      return `${route.name}:${sourceId.value}`
+    })
     const sourcePostTitle = computed(() => {
       const title = getPostDisplayTitle(sourcePost.value)
       if (title && title !== '-') {
@@ -520,6 +527,16 @@ export default {
       })
     }
 
+    function restoreTermListParams() {
+      assignReactive(params, {
+        page: 1,
+        limit: 20,
+        keyword: '',
+        languageCode: ''
+      })
+      restoreListSessionParams(route, params, [], listSessionKey.value)
+    }
+
     function getRequestParams() {
       const requestParams = {
         sourceId: sourceId.value,
@@ -556,6 +573,7 @@ export default {
           total.value = data.total || 0
           relationCount.value = data.relationCount || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params, listSessionKey.value)
         })
         .finally(() => {
           loading.value = false
@@ -835,6 +853,8 @@ export default {
       )
     }
 
+    restoreTermListParams()
+
     watch(
       () => [params.page, params.limit],
       () => {
@@ -845,7 +865,8 @@ export default {
     watch(
       () => sourceId.value,
       () => {
-        getTermList(true)
+        restoreTermListParams()
+        getTermList(false)
       }
     )
 

@@ -405,10 +405,15 @@
 
 <script>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import { formatDate } from '@/utils/utils'
+import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
 import {
   getLanguageText,
   sortBySupportedLanguageOrder,
@@ -452,6 +457,7 @@ export default {
     Refresh
   },
   setup() {
+    const route = useRoute()
     const tableRef = ref(null)
     const loading = ref(false)
     const batchDeleting = ref(false)
@@ -469,6 +475,7 @@ export default {
       languageCode: ''
       // enabled: ''
     })
+    restoreListSessionParams(route, params)
 
     const termDialogVisible = ref(false)
     const termSaving = ref(false)
@@ -566,6 +573,7 @@ export default {
           termSummary.count = data.termCount || 0
           termSummary.maxCount = data.maxTermCount || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .finally(() => {
           loading.value = false

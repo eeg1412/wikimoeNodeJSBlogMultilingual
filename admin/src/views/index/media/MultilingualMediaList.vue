@@ -511,6 +511,10 @@ import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.
 import VideoUploader from '@/components/VideoUploader.vue'
 import { loadAndOpenImg } from '@/utils/utils'
 import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
+import {
   MEDIA_MODE_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText
@@ -582,6 +586,7 @@ export default {
         defaultParams.languageCode = 'zh-CN'
       }
 
+      restoreListSessionParams(route, defaultParams)
       return defaultParams
     }
 
@@ -848,6 +853,7 @@ export default {
           mediaList.value = responseData.list || []
           total.value = responseData.total || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)

@@ -262,6 +262,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
+import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
   getPostDisplayTitle,
@@ -289,6 +293,10 @@ export default {
       snapshotVersionMin: null,
       snapshotVersionMax: null
     })
+    restoreListSessionParams(route, params, [
+      'keyword',
+      'sourceLanguageCode'
+    ])
 
     const getRequestParams = () => {
       const requestParams = {
@@ -327,6 +335,7 @@ export default {
           sourcePostList.value = responseData.list || []
           total.value = responseData.total || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)

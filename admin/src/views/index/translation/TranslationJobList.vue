@@ -745,6 +745,7 @@
 
 <script>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AiTranslationWorkflowViewer from '@/components/AiTranslationWorkflowViewer.vue'
@@ -753,6 +754,10 @@ import ResponsiveTableColumn from '@/components/ResponsiveTableColumn.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationSkippedEntryPreviewList from '@/components/TranslationSkippedEntryPreviewList.vue'
 import { multilingualApi } from '@/api'
+import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
 import { getLanguageText as getSharedLanguageText } from '@/utils/multilingual'
 import { getTranslationGroupDisplayMeta } from '@/utils/translationEntryDisplay'
 
@@ -1541,6 +1546,7 @@ export default {
     TranslationSkippedEntryPreviewList
   },
   setup() {
+    const route = useRoute()
     const tableRef = ref(null)
     const jobList = ref([])
     const total = ref(0)
@@ -1562,6 +1568,7 @@ export default {
       page: 1,
       limit: 20
     })
+    restoreListSessionParams(route, params)
     const applyForm = reactive({
       force: false,
       publish: false,
@@ -2106,6 +2113,7 @@ export default {
           jobList.value = responseData.list || []
           total.value = responseData.total || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)

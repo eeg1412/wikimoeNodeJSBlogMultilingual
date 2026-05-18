@@ -353,10 +353,14 @@
 
 <script>
 import { onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -374,6 +378,7 @@ export default {
     PostRelationSummary
   },
   setup() {
+    const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
     const sourceGroupList = ref([])
@@ -401,6 +406,7 @@ export default {
       status: '',
       type: ''
     })
+    restoreListSessionParams(route, params)
 
     const getRequestParams = () => {
       const requestParams = {
@@ -438,6 +444,7 @@ export default {
           sourceGroupList.value = responseData.list || []
           total.value = responseData.total || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)

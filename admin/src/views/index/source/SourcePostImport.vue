@@ -1074,7 +1074,7 @@
 
 <script>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
@@ -1087,6 +1087,10 @@ import {
   createApiErrorFromResponse,
   extractApiErrorMessages
 } from '@/utils/apiError'
+import {
+  restoreListSessionParams,
+  saveListSessionParams
+} from '@/composables/useListSessionParams'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -1141,6 +1145,7 @@ export default {
     TranslationEntryMeta
   },
   setup() {
+    const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
     const sourcePostList = ref([])
@@ -1189,6 +1194,7 @@ export default {
       type: '',
       status: ''
     })
+    restoreListSessionParams(route, params)
 
     const languageDialogTitle = computed(() => {
       if (languageAction.value === 'overwrite') {
@@ -1277,6 +1283,7 @@ export default {
           sourcePostList.value = responseData.list || []
           total.value = responseData.total || 0
           tableRef.value?.scrollTo({ top: 0 })
+          saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)
