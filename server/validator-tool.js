@@ -532,6 +532,72 @@ function validateDualMongoFoundation() {
   validateSourceReadOnlyFiles()
 }
 
+function validateMultilingualBackupScope() {
+  const serverDir = path.join(rootDir, 'server')
+  const backupPath = path.join(serverDir, 'utils', 'backup.js')
+  const backupWorkerPath = path.join(
+    serverDir,
+    'utils',
+    'workers',
+    'backupWorker.js'
+  )
+  const restoreWorkerPath = path.join(
+    serverDir,
+    'utils',
+    'workers',
+    'restoreWorker.js'
+  )
+  const restoreBackupPath = path.join(
+    serverDir,
+    'api',
+    'admin',
+    'backup',
+    'restoreBackup.js'
+  )
+
+  assert(fs.existsSync(backupPath), '缺少 server/utils/backup.js')
+  assert(
+    fs.existsSync(backupWorkerPath),
+    '缺少 server/utils/workers/backupWorker.js'
+  )
+  assert(
+    fs.existsSync(restoreWorkerPath),
+    '缺少 server/utils/workers/restoreWorker.js'
+  )
+
+  assertFileIncludes(backupPath, [
+    "require('../mongodb/multilingualConnection')",
+    'MULTILINGUAL_BACKUP_SCOPE',
+    'DB_HOST_MULTILINGUAL',
+    'assertMultilingualDbConnection',
+    "archivePath: 'public'",
+    "archivePath: 'blog-public'",
+    "archivePath: 'blog-public-root'",
+    'validateBackupInfo',
+    'insertMany(documentBatch'
+  ])
+  assertFileNotIncludes(backupPath, [
+    'mongoose.connection.db',
+    'modelUtilMap',
+    "require('../mongodb/utils/aiUsageLogs')",
+    "require('../mongodb/sourceConnection')"
+  ])
+  assertFileIncludes(backupWorkerPath, [
+    "require('../../mongodb/multilingualConnection')",
+    'multilingualConnectionInfo.waitReady()'
+  ])
+  assertFileNotIncludes(backupWorkerPath, ["require('../../tools/mongodb')"])
+  assertFileIncludes(restoreWorkerPath, [
+    "require('../../mongodb/multilingualConnection')",
+    'multilingualConnectionInfo.waitReady()',
+    'validateBackupInfo(fullPath)',
+    'removeResourceContents()',
+    'restoreResources(fullPath)'
+  ])
+  assertFileNotIncludes(restoreWorkerPath, ["require('../../tools/mongodb')"])
+  assertFileIncludes(restoreBackupPath, ['refreshAllLanguageCache()'])
+}
+
 function validateLanguageCodeRules() {
   const adminConfigData = getAdminLanguageConfigData()
   const blogConfigData = getBlogLanguageConfigData()
@@ -2210,6 +2276,7 @@ const validateScopes = {
     validateLanguageCodeRules()
     validateBlogLanguageEntry()
     validateDualMongoFoundation()
+    validateMultilingualBackupScope()
     validateAdminPathMigration()
   },
   models() {

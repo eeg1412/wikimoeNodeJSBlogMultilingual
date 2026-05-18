@@ -152,15 +152,9 @@ module.exports = async function (req, res, next) {
             // 重新加载缓存
             // 更新时注意同时更新初始化数据库的地方
             await globalConfigUtils.initGlobalConfig()
-            cacheDataUtils.getNaviList()
-            cacheDataUtils.getSidebarList()
-            cacheDataUtils.getBannerList()
-            cacheDataUtils.getSortList()
-            cacheDataUtils.getPostArchiveList()
-            cacheDataUtils.getBangumiYearList()
-            cacheDataUtils.getMovieYearList()
-            rssToolUtils.reflushRSS()
-            sitemapToolUtils.reflushSitemap()
+            await cacheDataUtils.refreshAllLanguageCache()
+            await rssToolUtils.reflushRSS()
+            await sitemapToolUtils.reflushSitemap()
           })
 
           adminApiLog.info(`restore backup`)

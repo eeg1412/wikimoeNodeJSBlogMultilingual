@@ -1,25 +1,19 @@
 const { parentPort } = require('worker_threads')
 const backupTools = require('../backup')
-const db = require('../../tools/mongodb')
+const multilingualConnectionInfo = require('../../mongodb/multilingualConnection')
 
-const dbPromise = new Promise((resolve, reject) => {
-  db.once('open', () => {
-    resolve()
-  })
-  db.on('error', err => {
-    reject(err)
-  })
-})
+const dbPromise = multilingualConnectionInfo.waitReady()
 
 parentPort.on('message', async fullPath => {
   dbPromise
     .then(async () => {
       console.log('worker start')
       await backupTools.unzipBackup(fullPath)
+      await backupTools.validateBackupInfo(fullPath)
       await backupTools.clearCollections()
       await backupTools.restoreCollections(fullPath)
-      await backupTools.removePublicContents()
-      await backupTools.restorePublic(fullPath)
+      await backupTools.removeResourceContents()
+      await backupTools.restoreResources(fullPath)
       await backupTools.clearRestoreCache(fullPath)
       parentPort.postMessage({ status: 'success' })
       parentPort.close()
