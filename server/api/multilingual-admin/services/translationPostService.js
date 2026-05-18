@@ -4354,7 +4354,33 @@ async function ensureSourceSnapshotForAiImport(
   }
 }
 
-async function syncTranslationPostRelationsForAiImport(translationPost) {
+function collectAiImportRelationSyncFields(entries = []) {
+  const fieldSet = new Set()
+  entries.forEach(entry => {
+    if (!entry || entry.scope !== 'relation') {
+      return
+    }
+    const relationField = String(entry.relationField || '').trim()
+    if (!relationField || relationField === 'coverImages') {
+      return
+    }
+    if (!POST_RELATION_FIELDS.includes(relationField)) {
+      return
+    }
+    fieldSet.add(relationField)
+  })
+  return Array.from(fieldSet)
+}
+
+async function syncTranslationPostRelationsForAiImport(
+  translationPost,
+  selectedEntries = []
+) {
+  const relationFields = collectAiImportRelationSyncFields(selectedEntries)
+  if (relationFields.length === 0) {
+    return translationPost
+  }
+
   if (!translationPost || !translationPost.sourceSnapshotId) {
     return translationPost
   }
@@ -4370,7 +4396,11 @@ async function syncTranslationPostRelationsForAiImport(translationPost) {
     translationPost.languageCode,
     now
   )
-  const updateData = await buildPostRelationIndexUpdateData(sourcePost, context)
+  const updateData = await buildPostRelationIndexUpdateData(
+    sourcePost,
+    context,
+    relationFields
+  )
   updateData.lastChangDate = now
 
   const PostModel = getPostModel()
@@ -4473,7 +4503,8 @@ async function applySourcePostAiImport(body = {}, options = {}) {
       createResult.translationPostId
     )
     const translationPost = await syncTranslationPostRelationsForAiImport(
-      translationPostDetail.post
+      translationPostDetail.post,
+      item.payload.entries
     )
     const applyResult = await applyAiTranslationPayload({
       payload: item.payload,
@@ -4529,7 +4560,8 @@ async function applySourcePostAiImport(body = {}, options = {}) {
       )
       const relatedTranslationPost =
         await syncTranslationPostRelationsForAiImport(
-          relatedTranslationPostDetail.post
+          relatedTranslationPostDetail.post,
+          relatedItem.payload.entries
         )
       const relatedPublish = item.publish || relatedItem.publish
       const relatedApplyResult = await applyAiTranslationPayload({

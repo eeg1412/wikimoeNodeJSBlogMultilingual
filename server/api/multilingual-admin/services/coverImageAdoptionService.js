@@ -105,22 +105,6 @@ function assertArtifactAdoptable(artifact, previewEntry = null) {
       400
     )
   }
-  if (previewEntry?.adopted === true) {
-    throw new ApiError(
-      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
-      '该封面图条目已经采纳',
-      'entryKey',
-      409
-    )
-  }
-  if (artifact.adopted === true && !previewEntry) {
-    throw new ApiError(
-      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
-      '该封面图产物已经采纳',
-      'artifactId',
-      409
-    )
-  }
   if (!artifact.generatedImage || !artifact.generatedImage.tempFilePath) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
@@ -197,6 +181,25 @@ function buildAttachmentFile(artifact, fileData) {
     mimetype: fileData.mimeType || 'image/png',
     size: fileData.buffer.length,
     buffer: fileData.buffer
+  }
+}
+
+async function readGeneratedCoverBuffer(artifact, jobId = '') {
+  try {
+    return await coverImageTempFileService.readGeneratedCoverFile(
+      artifact,
+      jobId
+    )
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '封面图临时文件不存在，不能采纳',
+        'generatedImage.tempFilePath',
+        400
+      )
+    }
+    throw error
   }
 }
 
@@ -473,10 +476,7 @@ async function adoptCoverImage(body = {}, options = {}) {
     )
   }
   assertArtifactAdoptable(artifact, previewEntryBeforeAdopt)
-  const coverBuffer = await coverImageTempFileService.readGeneratedCoverFile(
-    artifact,
-    String(jobId)
-  )
+  const coverBuffer = await readGeneratedCoverBuffer(artifact, String(jobId))
   const fileData = {
     mimeType: artifact.generatedImage?.mimeType || 'image/png',
     buffer: coverBuffer
@@ -605,8 +605,7 @@ async function adoptPreviewCoverImage(body = {}) {
       : null
 
   assertArtifactAdoptable(artifact, previewEntry)
-  const coverBuffer =
-    await coverImageTempFileService.readGeneratedCoverFile(artifact)
+  const coverBuffer = await readGeneratedCoverBuffer(artifact)
   const fileData = {
     mimeType: artifact.generatedImage?.mimeType || 'image/png',
     buffer: coverBuffer

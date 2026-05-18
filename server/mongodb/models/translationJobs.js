@@ -347,6 +347,46 @@ const translationJobs = new Schema(
         default: {}
       }
     },
+    taskRelation: {
+      role: {
+        type: String,
+        enum: ['root', 'parent', 'child'],
+        default: 'root',
+        index: true
+      },
+      rootId: {
+        type: Schema.Types.ObjectId,
+        default: null,
+        index: true
+      },
+      parentId: {
+        type: Schema.Types.ObjectId,
+        default: null,
+        index: true
+      },
+      depth: {
+        type: Number,
+        default: 1,
+        index: true
+      },
+      sourcePostId: {
+        type: Schema.Types.ObjectId,
+        default: null,
+        index: true
+      },
+      childJobIds: {
+        type: [Schema.Types.ObjectId],
+        default: []
+      },
+      plannedRelatedSourceIdsByLanguage: {
+        type: Schema.Types.Mixed,
+        default: {}
+      },
+      plan: {
+        type: Schema.Types.Mixed,
+        default: {}
+      }
+    },
     progress: {
       currentStep: {
         type: String,
@@ -464,7 +504,19 @@ const translationJobs = new Schema(
         type: [Schema.Types.Mixed],
         default: []
       },
+      aiJsonLogStorage: {
+        type: Schema.Types.Mixed,
+        default: null
+      },
+      aiJsonLogCount: {
+        type: Number,
+        default: 0
+      },
       relatedResults: {
+        type: [Schema.Types.Mixed],
+        default: []
+      },
+      childTaskResults: {
         type: [Schema.Types.Mixed],
         default: []
       },
@@ -608,6 +660,13 @@ translationJobs.index({ 'source.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.postId': 1, jobType: 1, createdAt: -1 })
 translationJobs.index({ 'target.languageCode': 1, status: 1, createdAt: -1 })
 translationJobs.index({ 'target.languageCodes': 1, status: 1, createdAt: -1 })
+translationJobs.index({ 'taskRelation.parentId': 1, createdAt: -1 })
+translationJobs.index({ 'taskRelation.rootId': 1, createdAt: -1 })
+translationJobs.index({
+  'taskRelation.parentId': 1,
+  'source.postId': 1,
+  jobType: 1
+})
 
 module.exports = require('../modelFactory/defaultModel')(
   'translationJobs',

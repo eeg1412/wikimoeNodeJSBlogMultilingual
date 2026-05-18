@@ -317,6 +317,7 @@ function parseInput(body = {}) {
     entries,
     targetTitle,
     translateCoverImage,
+    translationJobId: String(body.translationJobId || '').trim(),
     cacheKey: String(body.cacheKey || '').trim(),
     cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
@@ -371,6 +372,7 @@ function parseGenericInput(body = {}) {
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
     properNounScopeKey: String(body.properNounScopeKey || '').trim(),
+    translationJobId: String(body.translationJobId || '').trim(),
     cacheKey: String(body.cacheKey || '').trim(),
     cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
@@ -433,6 +435,7 @@ function parseProperNounOrganizeInput(body = {}) {
     prompt: '',
     entries,
     properNounScopeKey: `sourcePostImport:${sourceId}`,
+    translationJobId: String(body.translationJobId || '').trim(),
     cacheKey: String(body.cacheKey || '').trim(),
     cacheScopeKey: String(body.cacheScopeKey || '').trim(),
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
@@ -1912,6 +1915,7 @@ async function recordTermExtractionUsage({
     usage: responseData.usage || {},
     rawResponse: responseData,
     meta: {
+      jobId: input.translationJobId || input.cacheKey || '',
       httpStatusCode,
       packageIndex,
       packageCount,
@@ -2710,6 +2714,7 @@ async function filterExistingTermCandidatesWithAi({
           usage: responseData.usage || {},
           rawResponse: responseData,
           meta: {
+            jobId: input.translationJobId || input.cacheKey || '',
             httpStatusCode: response.statusCode,
             sourceTermCount: sourceTextItems.length,
             candidateTermCount: candidateTerms.length,
@@ -4714,6 +4719,7 @@ async function recordTranslationUsage({
     usage: responseData.usage || {},
     rawResponse: responseData,
     meta: {
+      jobId: input.translationJobId || input.cacheKey || '',
       httpStatusCode,
       stream: Boolean(stream),
       parseError: Boolean(parseError),
@@ -4763,6 +4769,7 @@ async function translatePostEntries(body = {}) {
     usage: responseData.usage || {},
     rawResponse: responseData,
     meta: {
+      jobId: input.translationJobId || input.cacheKey || '',
       httpStatusCode: deepSeekResponse.statusCode,
       parseError: Boolean(deepSeekResponse.parseError),
       entryCount: input.entries.length

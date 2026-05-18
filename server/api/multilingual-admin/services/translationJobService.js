@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const aiLogFileService = require('./aiLogFileService')
 const coverImageTempFileService = require('./coverImageTempFileService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const translationAiWorkflowViewService = require('./translationAiWorkflowViewService')
@@ -268,10 +269,16 @@ function normalizeAiChunkCacheOptions(value) {
     return null
   }
 
+  const cacheKey = toTrimmedString(value.cacheKey)
   const scopeKey = toTrimmedString(value.scopeKey)
   const chunkIndex = Number(value.chunkIndex)
   const chunkInputHash = toTrimmedString(value.chunkInputHash)
-  if (!scopeKey || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+  if (
+    !cacheKey ||
+    !scopeKey ||
+    !Number.isInteger(chunkIndex) ||
+    chunkIndex < 0
+  ) {
     return null
   }
   if (!chunkInputHash) {
@@ -279,6 +286,7 @@ function normalizeAiChunkCacheOptions(value) {
   }
 
   return {
+    cacheKey,
     scopeKey,
     chunkIndex,
     chunkInputHash
@@ -310,6 +318,7 @@ function isSameAiChunkCacheRecord(record, cacheOptions) {
     return false
   }
   return (
+    toTrimmedString(record.cacheKey) === cacheOptions.cacheKey &&
     toTrimmedString(record.scopeKey) === cacheOptions.scopeKey &&
     Number(record.chunkIndex) === cacheOptions.chunkIndex
   )
@@ -332,6 +341,7 @@ function buildAiChunkCacheRecord(cacheRecord, cacheOptions) {
   return {
     schema: AI_CHUNK_CACHE_SCHEMA,
     version: AI_CHUNK_CACHE_VERSION,
+    cacheKey: cacheOptions.cacheKey,
     scopeKey: cacheOptions.scopeKey,
     chunkIndex: cacheOptions.chunkIndex,
     chunkInputHash: cacheOptions.chunkInputHash,
@@ -339,13 +349,19 @@ function buildAiChunkCacheRecord(cacheRecord, cacheOptions) {
     response: translationAiJsonLogService.sanitizeAiJsonValue(
       cacheRecord.response || null
     ),
-    resultData: translationAiJsonLogService.sanitizeAiJsonValue(
-      cacheRecord.resultData || null
-    ),
+    resultData: cloneSerializableValue(cacheRecord.resultData || null),
     aiJsonLog: translationAiJsonLogService.sanitizeAiJsonValue(
       cacheRecord.aiJsonLog || null
     )
   }
+}
+
+function cloneSerializableValue(value) {
+  if (typeof value === 'undefined') {
+    return value
+  }
+
+  return JSON.parse(JSON.stringify(value))
 }
 
 function normalizeJobType(value) {
@@ -592,6 +608,53 @@ function normalizeRequest(requestInput, target) {
   }
 }
 
+function normalizeTaskRelation(taskRelationInput, source) {
+  const taskRelation = normalizeObject(taskRelationInput, 'taskRelation')
+  let role = toTrimmedString(taskRelation.role) || 'root'
+  if (!['root', 'parent', 'child'].includes(role)) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      'taskRelation.role 不支持',
+      'taskRelation.role',
+      400
+    )
+  }
+
+  let depth = Number(taskRelation.depth || 1)
+  if (!Number.isInteger(depth) || depth < 1) {
+    depth = 1
+  }
+
+  const childJobIds = []
+  if (Array.isArray(taskRelation.childJobIds)) {
+    taskRelation.childJobIds.forEach((item, index) => {
+      const id = toObjectId(item, `taskRelation.childJobIds.${index}`)
+      if (id) {
+        childJobIds.push(id)
+      }
+    })
+  }
+
+  const sourcePostId =
+    toObjectId(taskRelation.sourcePostId, 'taskRelation.sourcePostId') ||
+    source.postId ||
+    null
+
+  return {
+    role,
+    rootId: toObjectId(taskRelation.rootId, 'taskRelation.rootId'),
+    parentId: toObjectId(taskRelation.parentId, 'taskRelation.parentId'),
+    depth,
+    sourcePostId,
+    childJobIds,
+    plannedRelatedSourceIdsByLanguage: normalizeObject(
+      taskRelation.plannedRelatedSourceIdsByLanguage,
+      'taskRelation.plannedRelatedSourceIdsByLanguage'
+    ),
+    plan: normalizeObject(taskRelation.plan, 'taskRelation.plan')
+  }
+}
+
 function validateExecutableRequest(jobType, request) {
   if (jobType !== TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION) {
     if (jobType !== TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION) {
@@ -638,6 +701,7 @@ async function createTranslationJob(body = {}, options = {}) {
   const target = normalizeTarget(body.target, body.request, jobType)
   const source = normalizeSource(body.source, jobType)
   const request = normalizeRequest(body.request, target)
+  const taskRelation = normalizeTaskRelation(body.taskRelation, source)
   validateExecutableRequest(jobType, request)
   const priority = Number(body.priority || 0)
   if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
@@ -662,6 +726,7 @@ async function createTranslationJob(body = {}, options = {}) {
     source,
     target,
     request,
+    taskRelation,
     progress: {
       currentStep: '等待后台 worker 领取',
       currentStage: 'pending',
@@ -787,6 +852,11 @@ function getListProjection() {
     'target.title': 1,
     'target.languageCode': 1,
     'target.languageCodes': 1,
+    'taskRelation.role': 1,
+    'taskRelation.rootId': 1,
+    'taskRelation.parentId': 1,
+    'taskRelation.depth': 1,
+    'taskRelation.childJobIds': 1,
     'queueControl.active': 1,
     'queueControl.deferred': 1,
     'queueControl.priority': 1,
@@ -896,9 +966,14 @@ function buildListItemSummary(item, queuePositionMap) {
   const queueControl = item.queueControl || {}
   const progress = item.progress || {}
   const failure = item.failure || {}
+  const taskRelation = item.taskRelation || {}
   let targetLanguageCodes = []
   if (Array.isArray(target.languageCodes)) {
     targetLanguageCodes = target.languageCodes
+  }
+  let childJobCount = 0
+  if (Array.isArray(taskRelation.childJobIds)) {
+    childJobCount = taskRelation.childJobIds.length
   }
 
   return {
@@ -912,6 +987,13 @@ function buildListItemSummary(item, queuePositionMap) {
       title: target.title || '',
       languageCode: target.languageCode || '',
       languageCodes: targetLanguageCodes
+    },
+    taskRelation: {
+      role: taskRelation.role || 'root',
+      rootId: taskRelation.rootId || null,
+      parentId: taskRelation.parentId || null,
+      depth: Number(taskRelation.depth || 1),
+      childJobCount
     },
     queueControl: {
       deferred: queueControl.deferred === true
@@ -983,24 +1065,29 @@ async function getTranslationJobStorageSummary() {
   const table = await buildTranslationJobCollectionStorageSummary()
   const coverImageTempStorage =
     await coverImageTempFileService.getCoverImageTempStorageSummary()
+  const aiLogStorage = await aiLogFileService.getAiLogStorageSummary()
   const updatedAt = new Date()
   const databaseSizeBytes = table.totalSizeBytes
   const cacheSizeBytes = coverImageTempStorage.totalSizeBytes
+  const aiLogSizeBytes = aiLogStorage.totalSizeBytes
+  const fileStorageSizeBytes = cacheSizeBytes + aiLogSizeBytes
 
   return {
     updatedAt,
     tables: [table],
-    fileCaches: [coverImageTempStorage],
+    fileCaches: [coverImageTempStorage, aiLogStorage],
     totals: {
       tableCount: 1,
       documentCount: table.documentCount,
-      fileCacheCount: 1,
+      fileCacheCount: 2,
       sizeBytes: table.sizeBytes,
       storageSizeBytes: table.storageSizeBytes,
       indexSizeBytes: table.indexSizeBytes,
       databaseSizeBytes,
       cacheSizeBytes,
-      totalSizeBytes: databaseSizeBytes + cacheSizeBytes
+      aiLogSizeBytes,
+      fileStorageSizeBytes,
+      totalSizeBytes: databaseSizeBytes + fileStorageSizeBytes
     }
   }
 }
@@ -1015,7 +1102,7 @@ async function getTranslationJobDetail(query = {}) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
-  return attachRuntimeDisplay(buildTranslationJobDetailResponse(job), {})
+  return attachRuntimeDisplay(await buildTranslationJobDetailResponse(job), {})
 }
 
 function buildPayloadSummary(payload) {
@@ -1035,13 +1122,28 @@ function buildPayloadSummary(payload) {
   }
 }
 
-function buildTranslationJobDetailResponse(job) {
+async function getTranslationJobAiJsonLogs(result) {
+  if (result?.aiJsonLogStorage?.storage === 'file') {
+    return await aiLogFileService.readTranslationJobAiJsonLogs(
+      result.aiJsonLogStorage
+    )
+  }
+
+  if (Array.isArray(result?.aiJsonLogs)) {
+    return result.aiJsonLogs
+  }
+
+  return []
+}
+
+async function buildTranslationJobDetailResponse(job) {
   const result = job.result || {}
-  const aiJsonLogs = Array.isArray(result.aiJsonLogs) ? result.aiJsonLogs : []
+  const aiJsonLogs = await getTranslationJobAiJsonLogs(result)
   const workflowJob = {
     ...job,
     result: {
       ...result,
+      aiJsonLogs,
       aiJsonLogCount: aiJsonLogs.length
     }
   }
@@ -1056,6 +1158,7 @@ function buildTranslationJobDetailResponse(job) {
       payloadSummary: buildPayloadSummary(result.payload),
       aiJsonLogs: [],
       aiJsonLogCount: aiJsonLogs.length,
+      aiJsonLogStorage: result.aiJsonLogStorage || null,
       aiWorkflow,
       relatedResults: [],
       languageResults: [],
@@ -1182,6 +1285,12 @@ async function cleanupJobAiChunkCache(job) {
   return await tryClearTranslationJobAiChunkCacheById(String(job?._id || ''))
 }
 
+async function cleanupJobAiLogDirectoryBeforeDelete(job) {
+  return await aiLogFileService.deleteTranslationJobAiLogDirectory(
+    String(job?._id || '')
+  )
+}
+
 async function deferTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertStatus(job, [TRANSLATION_JOB_STATUS.PENDING], '暂时跳过')
@@ -1272,6 +1381,7 @@ async function deleteTranslationJob(body = {}, options = {}) {
   assertCanDeleteTranslationJob(job)
   const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
   const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
+  const aiLogCleanupResult = await cleanupJobAiLogDirectoryBeforeDelete(job)
 
   const JobModel = getTranslationJobModel()
   const deleteResult = await JobModel.deleteOne({
@@ -1285,7 +1395,8 @@ async function deleteTranslationJob(body = {}, options = {}) {
     id: job._id,
     deleted: true,
     cleanupStatus: cleanupResult.cleanupStatus,
-    aiChunkCacheCleanup: aiChunkCacheCleanupResult
+    aiChunkCacheCleanup: aiChunkCacheCleanupResult,
+    aiLogCleanup: aiLogCleanupResult
   }
 }
 
@@ -1371,11 +1482,13 @@ async function batchDeleteTranslationJobs(body = {}, options = {}) {
   for (const job of jobs) {
     const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
     const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
+    const aiLogCleanupResult = await cleanupJobAiLogDirectoryBeforeDelete(job)
     items.push({
       id: job._id,
       deleted: true,
       cleanupStatus: cleanupResult.cleanupStatus,
-      aiChunkCacheCleanup: aiChunkCacheCleanupResult
+      aiChunkCacheCleanup: aiChunkCacheCleanupResult,
+      aiLogCleanup: aiLogCleanupResult
     })
   }
 
@@ -1934,7 +2047,7 @@ async function readRunningTranslationJobAiChunkCache(options = {}) {
       'runtime.attempts': Number(options.attemptNo)
     },
     {
-      'progress.stageState.aiChunkCache': 1
+      _id: 1
     }
   ).lean()
 
@@ -1947,18 +2060,10 @@ async function readRunningTranslationJobAiChunkCache(options = {}) {
     )
   }
 
-  let records = []
-  if (Array.isArray(job.progress?.stageState?.aiChunkCache?.records)) {
-    records = job.progress.stageState.aiChunkCache.records
-  }
-  const record = records.find(item => {
-    return isMatchedAiChunkCacheRecord(item, cacheOptions)
+  return await aiLogFileService.readTranslationJobAiChunkCacheRecordByOptions({
+    jobId: cacheOptions.cacheKey,
+    cacheOptions
   })
-  if (!record) {
-    return null
-  }
-
-  return translationAiJsonLogService.sanitizeAiJsonValue(record)
 }
 
 async function saveRunningTranslationJobAiChunkCache(options = {}) {
@@ -1994,7 +2099,15 @@ async function saveRunningTranslationJobAiChunkCache(options = {}) {
   const nextRecords = cacheState.records.filter(record => {
     return !isSameAiChunkCacheRecord(record, cacheOptions)
   })
-  nextRecords.push(buildAiChunkCacheRecord(cacheRecord, cacheOptions))
+  const cacheFileRecord =
+    await aiLogFileService.writeTranslationJobAiChunkCacheRecord({
+      jobId: cacheOptions.cacheKey,
+      cacheOptions,
+      cacheRecord: buildAiChunkCacheRecord(cacheRecord, cacheOptions),
+      schema: AI_CHUNK_CACHE_SCHEMA,
+      version: AI_CHUNK_CACHE_VERSION
+    })
+  nextRecords.push(cacheFileRecord)
   cacheState.records = nextRecords
   cacheState.updatedAt = new Date()
   stageState.aiChunkCache = cacheState
@@ -2006,6 +2119,7 @@ async function saveRunningTranslationJobAiChunkCache(options = {}) {
 
   return {
     saved: true,
+    cacheKey: cacheOptions.cacheKey,
     scopeKey: cacheOptions.scopeKey,
     chunkIndex: cacheOptions.chunkIndex
   }
@@ -2023,10 +2137,14 @@ async function clearTranslationJobAiChunkCacheById(id) {
       }
     }
   )
+  const fileCleanup = await aiLogFileService.deleteTranslationJobAiChunkCache(
+    String(id || '')
+  )
 
   return {
     deleted: result.matchedCount === 1,
-    modifiedCount: result.modifiedCount || 0
+    modifiedCount: result.modifiedCount || 0,
+    fileCleanup
   }
 }
 
@@ -2041,6 +2159,22 @@ async function tryClearTranslationJobAiChunkCacheById(id) {
   }
 }
 
+function stripLanguageResultAiJsonLogs(languageResults) {
+  if (!Array.isArray(languageResults)) {
+    return []
+  }
+
+  return languageResults.map(item => {
+    const nextItem = cloneSerializableValue(item)
+    const nestedLogs = nextItem?.result?.aiJsonLogs
+    if (nextItem?.result && Array.isArray(nestedLogs)) {
+      nextItem.result.aiJsonLogCount = nestedLogs.length
+      nextItem.result.aiJsonLogs = []
+    }
+    return nextItem
+  })
+}
+
 async function completeRunningTranslationJobForReview(options = {}) {
   const resultData = normalizeObject(options.result, 'result')
   if (!resultData.payload || !Array.isArray(resultData.previewEntries)) {
@@ -2053,6 +2187,15 @@ async function completeRunningTranslationJobForReview(options = {}) {
   }
 
   const now = new Date()
+  const aiJsonLogs = translationAiJsonLogService.sanitizeAiJsonValue(
+    resultData.aiJsonLogs || []
+  )
+  const aiJsonLogStorage = await aiLogFileService.writeTranslationJobAiJsonLogs(
+    {
+      jobId: String(options.id || ''),
+      logs: aiJsonLogs
+    }
+  )
   const isProperNounOrganizeJob =
     options.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE
   let nextStatus = TRANSLATION_JOB_STATUS.WAITING_REVIEW
@@ -2078,11 +2221,14 @@ async function completeRunningTranslationJobForReview(options = {}) {
     'result.previewEntries': resultData.previewEntries,
     'result.warningList': resultData.warningList || [],
     'result.aiSkipList': resultData.aiSkipList || [],
-    'result.aiJsonLogs': translationAiJsonLogService.sanitizeAiJsonValue(
-      resultData.aiJsonLogs || []
-    ),
+    'result.aiJsonLogs': [],
+    'result.aiJsonLogStorage': aiJsonLogStorage,
+    'result.aiJsonLogCount': aiJsonLogs.length,
     'result.relatedResults': resultData.relatedResults || [],
-    'result.languageResults': resultData.languageResults || [],
+    'result.childTaskResults': resultData.childTaskResults || [],
+    'result.languageResults': stripLanguageResultAiJsonLogs(
+      resultData.languageResults || []
+    ),
     'result.translationPostMap': resultData.translationPostMap || {},
     'result.coverImageArtifacts':
       translationAiJsonLogService.sanitizeAiJsonValue(
@@ -2150,7 +2296,12 @@ async function completeRunningTranslationJobForReview(options = {}) {
       499
     )
   }
-  await tryClearTranslationJobAiChunkCacheById(String(options.id || ''))
+  const hasChildTaskResults =
+    Array.isArray(resultData.childTaskResults) &&
+    resultData.childTaskResults.length > 0
+  if (!hasChildTaskResults) {
+    await tryClearTranslationJobAiChunkCacheById(String(options.id || ''))
+  }
 }
 
 async function failRunningTranslationJob(options = {}) {

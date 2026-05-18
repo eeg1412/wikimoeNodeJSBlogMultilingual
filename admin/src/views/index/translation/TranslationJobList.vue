@@ -93,7 +93,7 @@
     >
       <div class="translation-job-storage-header">
         <div>
-          <div class="translation-job-storage-title">AI 翻译任务相关表存储</div>
+          <div class="translation-job-storage-title">AI 翻译任务与日志存储</div>
           <div class="translation-job-storage-subtitle">
             {{ jobStorageUpdatedText }}
           </div>
@@ -116,6 +116,10 @@
         <div class="translation-job-storage-metric">
           <span>缓存图片</span>
           <strong>{{ formatBytes(jobStorageTotals.cacheSizeBytes) }}</strong>
+        </div>
+        <div class="translation-job-storage-metric">
+          <span>AI日志</span>
+          <strong>{{ formatBytes(jobStorageTotals.aiLogSizeBytes) }}</strong>
         </div>
         <div class="translation-job-storage-metric">
           <span>表内文档</span>
@@ -144,7 +148,7 @@
         >
           <div>
             <strong>{{ cacheItem.label }}</strong>
-            <span>临时文件</span>
+            <span>{{ getFileCacheTypeText(cacheItem) }}</span>
           </div>
           <div>
             文件 {{ cacheItem.fileCount || 0 }}，目录
@@ -178,6 +182,12 @@
             <div class="source-meta">{{ row._id }}</div>
             <div class="source-meta">
               {{ getJobTypeText(row.jobType) }}
+            </div>
+            <div
+              v-if="getTaskRelationText(row.taskRelation)"
+              class="translation-task-relation"
+            >
+              {{ getTaskRelationText(row.taskRelation) }}
             </div>
           </template>
         </ResponsiveTableColumn>
@@ -1837,21 +1847,24 @@ export default {
       if (!entry?.id || !entry?.artifactId) {
         return false
       }
-      if (entry.isApplied === true) {
-        return false
-      }
       if (entry.status !== 'generated') {
         return false
       }
       return Boolean(entry.generatedCoverUrl)
     }
 
-    const setCoverImageSelected = (entry, checked) => {
+    const setCoverImageSelected = async (entry, checked) => {
       const entryKey = String(entry?.id || '')
       if (!entryKey || !canSelectCoverImage(entry)) {
         return
       }
       if (checked) {
+        if (entry.isApplied === true) {
+          const confirmed = await confirmAppliedEntrySelection([entry])
+          if (confirmed === false) {
+            return
+          }
+        }
         if (!selectedEntryKeys.value.includes(entryKey)) {
           selectedEntryKeys.value = selectedEntryKeys.value.concat(entryKey)
         }
@@ -2414,6 +2427,20 @@ export default {
       )
     }
 
+    const getTaskRelationText = taskRelation => {
+      if (!taskRelation || taskRelation.role === 'root') {
+        return ''
+      }
+      if (taskRelation.role === 'parent') {
+        const count = Number(taskRelation.childJobCount || 0)
+        return `父任务，已拆解 ${count} 个子任务`
+      }
+      if (taskRelation.role === 'child') {
+        return `子任务，深度 ${Number(taskRelation.depth || 1)}`
+      }
+      return ''
+    }
+
     const getLanguageText = languageCode => {
       if (languageCode === '__default') {
         return '全部'
@@ -2517,6 +2544,13 @@ export default {
         fractionDigits = 1
       }
       return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
+    }
+
+    const getFileCacheTypeText = cacheItem => {
+      if (cacheItem?.key === 'aiLogs') {
+        return cacheItem.root || 'server/ailog'
+      }
+      return '临时文件'
     }
 
     const formatDate = value => {
@@ -2708,6 +2742,7 @@ export default {
       getCoverImageStatusText,
       getFailureCodeLabel,
       getFailureCodeMeaning,
+      getFileCacheTypeText,
       getFailureSubtitle,
       getFailureReasonText,
       getLanguageText,
@@ -2715,6 +2750,7 @@ export default {
       getProgressStageText,
       getSelectedEntryCount,
       getStatusTagType,
+      getTaskRelationText,
       getWorkflowStepClass,
       getWorkflowStepCurrentText,
       getWorkflowStepStatusTagType,
@@ -2818,7 +2854,7 @@ export default {
 .translation-job-storage-metrics {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   margin-top: 14px;
 }
 
@@ -2887,6 +2923,14 @@ html.dark .translation-job-storage-panel {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
+}
+
+.translation-task-relation {
+  color: var(--el-color-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .job-progress-step {
