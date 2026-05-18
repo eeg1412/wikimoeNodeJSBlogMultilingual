@@ -2,17 +2,10 @@
 const { parentPort } = require('worker_threads')
 const backupTools = require('../backup')
 const moment = require('moment')
-const db = require('../../tools/mongodb')
 const mongoose = require('mongoose')
+const multilingualConnectionInfo = require('../../mongodb/multilingualConnection')
 
-const dbPromise = new Promise((resolve, reject) => {
-  db.once('open', () => {
-    resolve()
-  })
-  db.on('error', err => {
-    reject(err)
-  })
-})
+const dbPromise = multilingualConnectionInfo.waitReady()
 
 parentPort.on('message', async _id => {
   dbPromise

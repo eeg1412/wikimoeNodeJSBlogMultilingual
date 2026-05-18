@@ -17,7 +17,10 @@ const BSON_BATCH_SIZE = 100
 
 const noDropCollections = ['backups']
 const excludedCollections = ['readerlogs']
-const ignoredCollections = new Set([...noDropCollections, ...excludedCollections])
+const ignoredCollections = new Set([
+  ...noDropCollections,
+  ...excludedCollections
+])
 
 const RESOURCE_DIRECTORIES = [
   {
@@ -182,7 +185,9 @@ function assertBackupResourceDirectories(fullPath, backupInfo) {
 
   for (const resourceDirectory of RESOURCE_DIRECTORIES) {
     if (!archivePathSet.has(resourceDirectory.archivePath)) {
-      throw new Error(`备份文件缺少资源目录记录: ${resourceDirectory.archivePath}`)
+      throw new Error(
+        `备份文件缺少资源目录记录: ${resourceDirectory.archivePath}`
+      )
     }
 
     const sourceDir = path.join(
@@ -261,7 +266,9 @@ async function restoreCollectionDocuments(nativeDb, collectionName, filePath) {
 
 function validateRestoreCollectionFiles(backupInfo, files) {
   const expectedCollections = new Set(backupInfo.collections)
-  const actualCollections = new Set(files.map(file => file.replace('.bson', '')))
+  const actualCollections = new Set(
+    files.map(file => file.replace('.bson', ''))
+  )
 
   for (const collectionName of expectedCollections) {
     if (!actualCollections.has(collectionName)) {
@@ -353,7 +360,10 @@ exports.backupToZip = async pathname => {
   const archivePromise = pipeline(archive, output)
   archive.directory(dir, false)
   for (const resourceDirectory of RESOURCE_DIRECTORIES) {
-    archive.directory(resourceDirectory.sourcePath, resourceDirectory.archivePath)
+    archive.directory(
+      resourceDirectory.sourcePath,
+      resourceDirectory.archivePath
+    )
   }
 
   archive.finalize()
@@ -446,7 +456,10 @@ exports.validateBackupInfo = async fullPath => {
   const backupInfo = readBackupInfoFromCacheDir(getRestoreCacheDir(fullPath))
   assertBackupInfo(backupInfo)
 
-  if (backupInfo.databaseName && backupInfo.databaseName !== nativeDb.databaseName) {
+  if (
+    backupInfo.databaseName &&
+    backupInfo.databaseName !== nativeDb.databaseName
+  ) {
     throw new Error(
       `备份数据库为 ${backupInfo.databaseName}，当前多语言数据库为 ${nativeDb.databaseName}，已拒绝还原`
     )
