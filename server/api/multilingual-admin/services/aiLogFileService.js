@@ -5,7 +5,6 @@ const path = require('path')
 const AI_LOG_ROOT_DIR = path.resolve(__dirname, '..', '..', '..', 'ailog')
 const SERVER_RELATIVE_ROOT = 'server/ailog'
 const TRANSLATION_JOB_LOG_SCHEMA = 'wikimoe.ai.log.translation-job'
-const AI_USAGE_RAW_RESPONSE_SCHEMA = 'wikimoe.ai.log.ai-usage.raw-response'
 const CHUNK_CACHE_SCHEMA = 'wikimoe.ai.log.translation-job.chunk-cache'
 const FILE_REF_SCHEMA = 'wikimoe.ai.log.file-ref'
 const FILE_REF_VERSION = 1
@@ -218,89 +217,6 @@ async function readTranslationJobAiChunkCacheRecordByOptions({
   }
 }
 
-function getDatePathParts(date) {
-  const value = date instanceof Date ? date : new Date()
-  const year = String(value.getFullYear())
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return { year, month, day }
-}
-
-function getTranslationJobIdFromMeta(meta) {
-  const candidateList = [
-    meta?.translationJobId,
-    meta?.jobId,
-    meta?.context?.translationJobId,
-    meta?.context?.jobId
-  ]
-  for (const candidate of candidateList) {
-    const text = normalizeText(candidate)
-    if (text) {
-      return text
-    }
-  }
-  return ''
-}
-
-async function writeAiUsageRawResponse({
-  id,
-  provider,
-  operation,
-  model,
-  requestId,
-  rawResponse,
-  meta,
-  date
-}) {
-  const usageId = getSafePathPart(id, crypto.randomUUID())
-  const translationJobId = getTranslationJobIdFromMeta(meta || {})
-  let relativePath = ''
-  if (translationJobId) {
-    relativePath = [
-      getTranslationJobBaseDir(translationJobId),
-      'ai-usage',
-      `${usageId}.json`
-    ].join('/')
-  } else {
-    const dateParts = getDatePathParts(date)
-    relativePath = [
-      'ai-usage',
-      dateParts.year,
-      dateParts.month,
-      dateParts.day,
-      `${usageId}.json`
-    ].join('/')
-  }
-
-  const now = new Date()
-  const fileResult = await writeJsonFile(relativePath, {
-    schema: AI_USAGE_RAW_RESPONSE_SCHEMA,
-    version: 1,
-    id: normalizeText(id),
-    provider: normalizeText(provider),
-    operation: normalizeText(operation),
-    model: normalizeText(model),
-    requestId: normalizeText(requestId),
-    translationJobId,
-    rawResponse,
-    createdAt: now,
-    updatedAt: now
-  })
-  return buildFileRef({
-    type: 'ai-usage-raw-response',
-    relativePath: fileResult.relativePath,
-    sizeBytes: fileResult.sizeBytes,
-    count: 1,
-    meta: {
-      id: normalizeText(id),
-      provider: normalizeText(provider),
-      operation: normalizeText(operation),
-      requestId: normalizeText(requestId),
-      translationJobId
-    }
-  })
-}
-
 async function removeDirectory(relativePath) {
   const absolutePath = resolveInsideRoot(relativePath)
   await fs.rm(absolutePath, { recursive: true, force: true })
@@ -386,7 +302,6 @@ module.exports = {
   readTranslationJobAiChunkCacheRecord,
   readTranslationJobAiChunkCacheRecordByOptions,
   readTranslationJobAiJsonLogs,
-  writeAiUsageRawResponse,
   writeTranslationJobAiChunkCacheRecord,
   writeTranslationJobAiJsonLogs
 }

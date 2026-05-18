@@ -1,5 +1,7 @@
 const mongoose = require('mongoose')
-const aiLogFileService = require('./aiLogFileService')
+const {
+  buildAiUsageResponseSummary
+} = require('./aiUsageResponseSummaryService')
 
 const DEFAULT_PERIOD_DAYS = 30
 const MAX_PERIOD_DAYS = 366
@@ -61,17 +63,13 @@ async function recordAiUsageLog(data = {}) {
   const AiUsageLogModel = getAiUsageLogModel()
   const recordId = new mongoose.Types.ObjectId()
   const usage = cloneSerializableValue(data.usage || {}) || {}
-  const rawResponse = cloneSerializableValue(data.rawResponse || {}) || {}
   const meta = cloneSerializableValue(data.meta || {}) || {}
-  const rawResponseStorage = await aiLogFileService.writeAiUsageRawResponse({
-    id: recordId,
+  const responseSummary = buildAiUsageResponseSummary({
     provider: data.provider || 'unknown',
     model: data.model || '',
     operation: data.operation || '',
     requestId: data.requestId || '',
-    rawResponse,
-    meta,
-    date: data.date || new Date()
+    rawResponse: data.rawResponse
   })
   const record = await new AiUsageLogModel({
     _id: recordId,
@@ -87,8 +85,7 @@ async function recordAiUsageLog(data = {}) {
     targetLanguageCode: data.targetLanguageCode || '',
     usage,
     tokenUsage: flattenNumericUsage(usage),
-    rawResponse: {},
-    rawResponseStorage,
+    responseSummary,
     meta,
     date: data.date || new Date()
   }).save()

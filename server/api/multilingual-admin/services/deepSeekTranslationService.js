@@ -4668,27 +4668,105 @@ function appendTranslationChunkState({
   })
 }
 
-function buildAggregateRawResponse({
+function buildAiUsageTextDigest(value) {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const digest = {
+    length: value.length,
+    sizeBytes: Buffer.byteLength(value, 'utf8')
+  }
+  if (value.length > 0) {
+    digest.sha256 = crypto.createHash('sha256').update(value).digest('hex')
+  }
+  return digest
+}
+
+function buildDeepSeekUsageMessageSummary(message) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return null
+  }
+
+  const summary = {}
+  if (message.role) {
+    summary.role = String(message.role).trim()
+  }
+  if (typeof message.content === 'string') {
+    summary.content = buildAiUsageTextDigest(message.content)
+  }
+  if (typeof message.reasoning_content === 'string') {
+    summary.reasoningContent = buildAiUsageTextDigest(message.reasoning_content)
+  }
+  if (Array.isArray(message.tool_calls)) {
+    summary.toolCallCount = message.tool_calls.length
+  }
+  return summary
+}
+
+function buildDeepSeekUsageChoiceSummary(choice) {
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+    return null
+  }
+
+  const summary = {}
+  const index = Number(choice.index)
+  if (Number.isFinite(index)) {
+    summary.index = index
+  }
+  if (choice.finish_reason) {
+    summary.finishReason = String(choice.finish_reason).trim()
+  }
+  const messageSummary = buildDeepSeekUsageMessageSummary(choice.message)
+  if (messageSummary) {
+    summary.message = messageSummary
+  }
+  return summary
+}
+
+function buildDeepSeekChunkUsageSummary(responseData, chunkIndex) {
+  const data = responseData || {}
+  const summary = {
+    index: chunkIndex,
+    object: data.object || '',
+    id: data.id || '',
+    model: data.model || '',
+    usage: data.usage || {}
+  }
+  if (Array.isArray(data.choices)) {
+    summary.choiceCount = data.choices.length
+    summary.choices = data.choices
+      .slice(0, 8)
+      .map(buildDeepSeekUsageChoiceSummary)
+      .filter(Boolean)
+  }
+  return summary
+}
+
+function buildAggregateUsageResponseData({
   chunkResponses,
   usage,
   model,
   requestId,
   error
 }) {
-  const rawResponse = {
+  const responseData = {
     object: 'chat.completion.stream.batch',
     id: requestId || '',
     model: model || '',
     usage: usage || {},
-    chunks: chunkResponses.map(item => item.data)
+    chunkCount: chunkResponses.length,
+    chunks: chunkResponses.map((item, index) => {
+      return buildDeepSeekChunkUsageSummary(item.data, index)
+    })
   }
   if (error) {
-    rawResponse.error = {
+    responseData.error = {
       message: error.message || 'AI 翻译失败',
       code: error.code || ERROR_CODES.AI_TRANSLATION_FAILED
     }
   }
-  return rawResponse
+  return responseData
 }
 
 async function recordTranslationUsage({
@@ -5047,7 +5125,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       throwIfCancellationRequested(handlers)
     }
 
-    const responseData = buildAggregateRawResponse({
+    const responseData = buildAggregateUsageResponseData({
       chunkResponses,
       usage: state.combinedUsage,
       model: state.responseModel,
@@ -5079,7 +5157,7 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     return data
   } catch (error) {
     const isCancelled = error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
-    const responseData = buildAggregateRawResponse({
+    const responseData = buildAggregateUsageResponseData({
       chunkResponses,
       usage: state.combinedUsage,
       model: state.responseModel,

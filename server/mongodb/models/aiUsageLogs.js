@@ -70,13 +70,9 @@ var aiUsageLogs = new Schema(
         }
       }
     ],
-    rawResponse: {
+    responseSummary: {
       type: Schema.Types.Mixed,
       default: {}
-    },
-    rawResponseStorage: {
-      type: Schema.Types.Mixed,
-      default: null
     },
     meta: {
       type: Schema.Types.Mixed,
