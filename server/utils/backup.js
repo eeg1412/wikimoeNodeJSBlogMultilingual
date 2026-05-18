@@ -17,7 +17,7 @@ const MONGODB_ARCHIVE_DIR = 'mongodb'
 const BSON_BATCH_SIZE = 100
 
 const noDropCollections = ['backups']
-const excludedCollections = ['readerlogs']
+const excludedCollections = ['readerlogs', 'aiusagelogs']
 const ignoredCollections = new Set([
   ...noDropCollections,
   ...excludedCollections
