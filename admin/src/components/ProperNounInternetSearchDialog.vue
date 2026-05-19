@@ -95,6 +95,12 @@
               <div class="proper-noun-internet-search-translation">
                 {{ row.translatedText }}
               </div>
+              <div
+                v-if="row.translationNote"
+                class="proper-noun-internet-search-translation-note"
+              >
+                译名备注：{{ row.translationNote }}
+              </div>
               <el-tag
                 v-if="row.shouldUpdateTermNote"
                 size="small"
@@ -193,6 +199,7 @@ function buildPreviewRows(terms) {
   }
   terms.forEach(term => {
     const translations = term?.translations || {}
+    const translationNotes = term?.translationNotes || {}
     Object.keys(translations).forEach(languageCode => {
       const translatedText = normalizeString(translations[languageCode])
       if (!translatedText) {
@@ -206,6 +213,7 @@ function buildPreviewRows(terms) {
         languageCode,
         translatedText,
         note: term.note || '',
+        translationNote: normalizeString(translationNotes[languageCode]),
         shouldUpdateTermNote: term.shouldUpdateTermNote === true,
         searchMetadata: term.searchMetadata || {}
       })
@@ -230,11 +238,15 @@ function buildApplyTerms(rows) {
         shouldUpdateTermNote: row.shouldUpdateTermNote === true,
         translationSource: 'internetSearchAi',
         translations: {},
+        translationNotes: {},
         searchMetadata: row.searchMetadata || {}
       }
       termMap.set(termKey, term)
     }
     term.translations[row.languageCode] = row.translatedText
+    if (row.translationNote) {
+      term.translationNotes[row.languageCode] = row.translationNote
+    }
     if (row.shouldUpdateTermNote === true) {
       term.shouldUpdateTermNote = true
       term.note = row.note
@@ -603,7 +615,8 @@ export default {
   overflow-wrap: anywhere;
 }
 
-.proper-noun-internet-search-note {
+.proper-noun-internet-search-note,
+.proper-noun-internet-search-translation-note {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.5;

@@ -325,6 +325,27 @@ function isSameSourceAndTranslatedText(sourceText, translatedText) {
   return normalizedSourceText === normalizedTranslatedText
 }
 
+function hasTranslationNote(value) {
+  return Boolean(normalizeString(value, 2000))
+}
+
+function shouldTreatTranslationAsMissing(sourceText, translation = {}) {
+  if (!isSameSourceAndTranslatedText(sourceText, translation.translatedText)) {
+    return false
+  }
+
+  const translationSource = normalizeTranslationSource(
+    translation.translationSource
+  )
+  if (translationSource === 'manual') {
+    return false
+  }
+  if (hasTranslationNote(translation.note)) {
+    return false
+  }
+  return true
+}
+
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -581,14 +602,6 @@ function buildTranslationPayload(data = {}, term) {
   }
 
   const sourceText = normalizeSourceText(term?.sourceText || data.sourceText)
-  if (isSameSourceAndTranslatedText(sourceText, translatedText)) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_FIELD_INVALID,
-      '源名词和译名不能完全一致',
-      'translatedText',
-      400
-    )
-  }
   return {
     termId: term?._id || parseObjectId(data.termId, 'termId'),
     languageCode,
@@ -1180,7 +1193,7 @@ async function getTranslationsForSourceTexts({
       termMap.get(normalizedSourceText)?.sourceText ||
       translation.sourceTextSnapshot ||
       ''
-    if (isSameSourceAndTranslatedText(sourceText, translation.translatedText)) {
+    if (shouldTreatTranslationAsMissing(sourceText, translation)) {
       return
     }
     const item = {
@@ -1421,20 +1434,20 @@ async function compareMatchedTermTranslationCoverage({
       if (!matchedSourceText) {
         matchedSourceText = sourceTextItem.sourceText
       }
-      let isSameTranslation = isSameSourceAndTranslatedText(
+      let shouldTreatAsMissing = shouldTreatTranslationAsMissing(
         matchedSourceText,
-        matchedTranslation.translation.translatedText
+        matchedTranslation.translation
       )
       if (
-        !isSameTranslation &&
+        !shouldTreatAsMissing &&
         matchedSourceText !== sourceTextItem.sourceText
       ) {
-        isSameTranslation = isSameSourceAndTranslatedText(
+        shouldTreatAsMissing = shouldTreatTranslationAsMissing(
           sourceTextItem.sourceText,
-          matchedTranslation.translation.translatedText
+          matchedTranslation.translation
         )
       }
-      if (isSameTranslation) {
+      if (shouldTreatAsMissing) {
         missingLanguageCodes.push(languageCode)
         return
       }
@@ -1602,7 +1615,49 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
   })
 }
 
-function buildWritableAiTranslationEntries(sourceText, translations) {
+function normalizeAiTranslationNoteMap(termItem = {}) {
+  const translationNoteMap = new Map()
+  const translationNotes = termItem?.translationNotes
+  if (
+    translationNotes &&
+    typeof translationNotes === 'object' &&
+    !Array.isArray(translationNotes)
+  ) {
+    Object.keys(translationNotes).forEach(languageCode => {
+      const normalizedLanguageCode = normalizeLanguageCode(languageCode)
+      if (!normalizedLanguageCode) {
+        return
+      }
+      const note = normalizeString(translationNotes[languageCode], 2000)
+      if (note) {
+        translationNoteMap.set(normalizedLanguageCode, note)
+      }
+    })
+  }
+
+  const sharedTranslationNote = normalizeString(termItem?.translationNote, 2000)
+  if (sharedTranslationNote) {
+    translationNoteMap.set('*', sharedTranslationNote)
+  }
+
+  return translationNoteMap
+}
+
+function getAiTranslationNoteForLanguage(translationNoteMap, languageCode) {
+  const languageNote = normalizeString(translationNoteMap.get(languageCode), 2000)
+  if (languageNote) {
+    return languageNote
+  }
+  return normalizeString(translationNoteMap.get('*'), 2000)
+}
+
+function buildWritableAiTranslationEntries(
+  sourceText,
+  termItem = {},
+  options = {}
+) {
+  const translations = termItem.translations || {}
+  const translationNoteMap = normalizeAiTranslationNoteMap(termItem)
   const translationEntries = []
   Object.keys(translations).forEach(languageCode => {
     const normalizedLanguageCode = normalizeLanguageCode(languageCode)
@@ -1613,12 +1668,22 @@ function buildWritableAiTranslationEntries(sourceText, translations) {
     if (!translatedText) {
       return
     }
+    const note = getAiTranslationNoteForLanguage(
+      translationNoteMap,
+      normalizedLanguageCode
+    )
     if (isSameSourceAndTranslatedText(sourceText, translatedText)) {
-      return
+      if (options.allowSameSourceTranslationWithNote !== true) {
+        return
+      }
+      if (!note) {
+        return
+      }
     }
     translationEntries.push({
       languageCode: normalizedLanguageCode,
-      translatedText
+      translatedText,
+      note
     })
   })
   return translationEntries
@@ -1630,16 +1695,19 @@ function buildAiSearchTranslationPayload({
   translationEntry,
   termItem,
   provider,
-  model
+  model,
+  allowSameSourceTranslationWithNote = false
 }) {
   const termSourceText = normalizeSourceText(term?.sourceText || sourceText)
   if (
-    isSameSourceAndTranslatedText(
-      termSourceText,
-      translationEntry.translatedText
-    )
+    isSameSourceAndTranslatedText(termSourceText, translationEntry.translatedText)
   ) {
-    return null
+    if (allowSameSourceTranslationWithNote !== true) {
+      return null
+    }
+    if (!hasTranslationNote(translationEntry.note)) {
+      return null
+    }
   }
 
   let searchMetadata = {}
@@ -1656,13 +1724,18 @@ function buildAiSearchTranslationPayload({
     translationSource: resolveAiTranslationSource(termItem),
     provider: normalizeString(provider, 80),
     model: normalizeString(model, 120),
-    note: normalizeString(termItem?.translationNote, 2000),
+    note: normalizeString(translationEntry.note, 2000),
     searchMetadata,
     enabled: true
   }
 }
 
-async function upsertAiSearchTerms({ terms = [], provider = '', model = '' }) {
+async function upsertAiSearchTerms({
+  terms = [],
+  provider = '',
+  model = '',
+  allowSameSourceTranslationWithNote = false
+}) {
   const TranslationModel = getTranslationModel()
   const savedTranslations = []
   const resolvedTermMap = new Map()
@@ -1682,7 +1755,8 @@ async function upsertAiSearchTerms({ terms = [], provider = '', model = '' }) {
     }
     const translationEntries = buildWritableAiTranslationEntries(
       sourceText,
-      translations
+      termItem,
+      { allowSameSourceTranslationWithNote }
     )
     if (translationEntries.length === 0) {
       continue
@@ -1704,7 +1778,8 @@ async function upsertAiSearchTerms({ terms = [], provider = '', model = '' }) {
         translationEntry,
         termItem,
         provider,
-        model
+        model,
+        allowSameSourceTranslationWithNote
       })
       if (!payload) {
         continue
@@ -1754,7 +1829,8 @@ function getGlossaryTranslationForSource({
     isSameSourceAndTranslatedText(
       sourceTextItem.sourceText,
       translation.translatedText
-    )
+    ) &&
+    shouldTreatTranslationAsMissing(sourceTextItem.sourceText, translation)
   ) {
     return null
   }
@@ -1766,7 +1842,8 @@ function pushSingleLanguageGlossaryRow({
   sourceTextItem,
   languageCode,
   translationMap,
-  includeNoteColumn
+  includeNoteColumn,
+  includeTranslationNoteColumn
 }) {
   const translation = getGlossaryTranslationForSource({
     sourceTextItem,
@@ -1779,6 +1856,9 @@ function pushSingleLanguageGlossaryRow({
       cells.push(translation.glossaryNote || '')
     }
     cells.push(translation.translatedText)
+    if (includeTranslationNoteColumn) {
+      cells.push(normalizeString(translation.note, 300))
+    }
     lines.push(buildMarkdownTableRow(cells))
     return
   }
@@ -1788,7 +1868,8 @@ function buildSingleLanguageGlossaryMarkdown({
   sourceTextItems,
   languageCode,
   translationMap,
-  includeNoteColumn
+  includeNoteColumn,
+  includeTranslationNoteColumn
 }) {
   const headerCells = ['原文']
   const separatorCells = ['---']
@@ -1798,6 +1879,10 @@ function buildSingleLanguageGlossaryMarkdown({
   }
   headerCells.push('译名')
   separatorCells.push('---')
+  if (includeTranslationNoteColumn) {
+    headerCells.push('译名备注')
+    separatorCells.push('---')
+  }
 
   const lines = [
     '## 专有名词翻译数据库',
@@ -1814,7 +1899,8 @@ function buildSingleLanguageGlossaryMarkdown({
       sourceTextItem,
       languageCode,
       translationMap,
-      includeNoteColumn
+      includeNoteColumn,
+      includeTranslationNoteColumn
     })
   })
 
@@ -1837,6 +1923,26 @@ function shouldIncludeGlossaryNoteColumn(
         return false
       }
       return Boolean(normalizeString(translation.glossaryNote, 300))
+    })
+  })
+}
+
+function shouldIncludeGlossaryTranslationNoteColumn(
+  sourceTextItems,
+  languageCodes,
+  translationMap
+) {
+  return sourceTextItems.some(sourceTextItem => {
+    return languageCodes.some(languageCode => {
+      const translation = getGlossaryTranslationForSource({
+        sourceTextItem,
+        languageCode,
+        translationMap
+      })
+      if (!translation) {
+        return false
+      }
+      return Boolean(normalizeString(translation.note, 300))
     })
   })
 }
@@ -1890,6 +1996,12 @@ function buildGlossaryMarkdown({
     languageCodes,
     translationMap
   )
+  const includeTranslationNoteColumn =
+    shouldIncludeGlossaryTranslationNoteColumn(
+      sourceTextItems,
+      languageCodes,
+      translationMap
+    )
   if (
     !hasGlossaryTranslationRows(sourceTextItems, languageCodes, translationMap)
   ) {
@@ -1900,7 +2012,8 @@ function buildGlossaryMarkdown({
       sourceTextItems,
       languageCode: languageCodes[0],
       translationMap,
-      includeNoteColumn
+      includeNoteColumn,
+      includeTranslationNoteColumn
     })
   }
 
@@ -1914,6 +2027,10 @@ function buildGlossaryMarkdown({
   headerCells.push('译名')
   separatorCells.push('---')
   separatorCells.push('---')
+  if (includeTranslationNoteColumn) {
+    headerCells.push('译名备注')
+    separatorCells.push('---')
+  }
 
   const lines = [
     '## 专有名词翻译数据库',
@@ -1936,6 +2053,9 @@ function buildGlossaryMarkdown({
         }
         cells.push(`${getLanguageText(languageCode)}（${languageCode}）`)
         cells.push(translation.translatedText)
+        if (includeTranslationNoteColumn) {
+          cells.push(normalizeString(translation.note, 300))
+        }
         lines.push(buildMarkdownTableRow(cells))
       }
     })
@@ -1965,6 +2085,7 @@ module.exports = {
   getTranslationList,
   getTranslationCandidatesForExtractedTerms,
   getTranslationsForSourceTexts,
+  isSameSourceAndTranslatedText,
   normalizeExtractedTermList,
   normalizeSourceText,
   scheduleProperNounTermCleanup,

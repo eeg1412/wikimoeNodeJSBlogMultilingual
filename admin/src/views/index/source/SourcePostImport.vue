@@ -385,6 +385,13 @@
                 active-text="联网检索官方译名"
               />
             </el-form-item>
+            <el-form-item label="AI判断翻译必要性">
+              <el-switch
+                v-model="aiForm.allowAiKeepOriginalJudgement"
+                :disabled="isAiImportBusy"
+                active-text="允许AI判断"
+              />
+            </el-form-item>
             <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
               <el-switch
                 v-model="aiForm.syncRelatedPosts"
@@ -1185,6 +1192,7 @@ export default {
       prompt: '',
       coverImageTranslationMode: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER,
       searchOfficialTermTranslations: false,
+      allowAiKeepOriginalJudgement: false,
       syncRelatedPosts: true
     })
     const params = reactive({
@@ -1410,6 +1418,7 @@ export default {
       aiForm.prompt = ''
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
+      aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -1462,6 +1471,7 @@ export default {
       aiForm.prompt = ''
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       aiForm.searchOfficialTermTranslations = false
+      aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
@@ -2591,7 +2601,10 @@ export default {
       })
       const entries = deduplicationResult.entries.map(entry => {
         const aiEntry = { ...entry }
-        if (canAiKeepOriginalEntry(entry)) {
+        if (
+          aiForm.allowAiKeepOriginalJudgement === true &&
+          canAiKeepOriginalEntry(entry)
+        ) {
           aiEntry.skipAllowed = true
         }
         return aiEntry
@@ -2623,6 +2636,8 @@ export default {
             skipUsageLog: true,
             searchOfficialTermTranslations:
               aiForm.searchOfficialTermTranslations,
+            allowAiKeepOriginalJudgement:
+              aiForm.allowAiKeepOriginalJudgement === true,
             translateCoverImage: false,
             allowEmptyEntries: true,
             entries
@@ -3047,6 +3062,8 @@ export default {
               translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
                 aiForm.searchOfficialTermTranslations,
+              allowAiKeepOriginalJudgement:
+                aiForm.allowAiKeepOriginalJudgement === true,
               syncRelatedPosts:
                 showSyncRelatedPostsOption.value &&
                 aiForm.syncRelatedPosts === true

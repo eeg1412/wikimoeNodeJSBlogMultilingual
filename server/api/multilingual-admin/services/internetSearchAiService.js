@@ -46,6 +46,10 @@ const officialTermKnowledgeResponseJsonSchema = {
             type: 'object',
             additionalProperties: { type: 'string' }
           },
+          translationNotes: {
+            type: 'object',
+            additionalProperties: { type: 'string' }
+          },
           needsSearchLanguageCodes: {
             type: 'array',
             items: { type: 'string' }
@@ -73,6 +77,10 @@ const officialTermSearchResponseJsonSchema = {
             type: 'object',
             additionalProperties: { type: 'string' }
           },
+          translationNotes: {
+            type: 'object',
+            additionalProperties: { type: 'string' }
+          },
           noteNeedsUpdate: { type: 'boolean' },
           note: { type: 'string' }
         }
@@ -95,6 +103,10 @@ const officialTermSearchTranslationOnlyResponseJsonSchema = {
         properties: {
           sourceText: { type: 'string' },
           translations: {
+            type: 'object',
+            additionalProperties: { type: 'string' }
+          },
+          translationNotes: {
             type: 'object',
             additionalProperties: { type: 'string' }
           }
@@ -238,6 +250,54 @@ function countTermTranslationLanguagePairs(terms) {
   return count
 }
 
+function normalizeResultTranslationNotes(termItem, targetLanguageCodes) {
+  const translationNotes = {}
+  const sourceTranslationNotes = termItem?.translationNotes
+  if (
+    sourceTranslationNotes &&
+    typeof sourceTranslationNotes === 'object' &&
+    !Array.isArray(sourceTranslationNotes)
+  ) {
+    targetLanguageCodes.forEach(languageCode => {
+      const note = normalizeString(sourceTranslationNotes[languageCode], 2000)
+      if (note) {
+        translationNotes[languageCode] = note
+      }
+    })
+  }
+
+  const sharedTranslationNote = normalizeString(termItem?.translationNote, 2000)
+  if (sharedTranslationNote) {
+    targetLanguageCodes.forEach(languageCode => {
+      if (!translationNotes[languageCode]) {
+        translationNotes[languageCode] = sharedTranslationNote
+      }
+    })
+  }
+
+  return translationNotes
+}
+
+function shouldSkipSameSourceTranslation({
+  sourceText,
+  translatedText,
+  note,
+  allowSameSourceTranslationWithNote
+}) {
+  if (
+    !properNounTranslationService.isSameSourceAndTranslatedText(
+      sourceText,
+      translatedText
+    )
+  ) {
+    return false
+  }
+  if (allowSameSourceTranslationWithNote !== true) {
+    return true
+  }
+  return !normalizeString(note, 2000)
+}
+
 function buildTermRequestPromptRows(termRequests) {
   return termRequests.map(termRequest => {
     const row = {
@@ -281,9 +341,17 @@ function attachSearchQueryPolicy(requestData) {
     '每个 sourceText 的每种目标语言应尽可能只使用 1 次联网检索，最多不得超过 2 次。第一次查询必须同时包含 sourceText、稳定身份线索和目标语言译名意图；查询语言必须优先贴近目标语言的当地写法和当地内容生态，不要只用源文语言关键词检索目标语言结果。只有首轮结果互相矛盾或无法确认对象身份时，才允许第二次查询。禁止用过宽的普通词、截断后的短词或只包含系列母题的关键词反复检索。'
 }
 
-function attachSkipNoteRevisionInstruction(requestData) {
+function attachSkipNoteRevisionInstruction(
+  requestData,
+  allowSameSourceTranslationWithNote = false
+) {
+  if (allowSameSourceTranslationWithNote === true) {
+    requestData['备注处理要求'] =
+      'sourceTermRequests[].note 只用于识别对象和避免检索串词；本步骤不生成或修订词条备注。只有译名与原名文本完全一致时，必须在 translationNotes[languageCode] 返回译名备注。'
+    return
+  }
   requestData['备注处理要求'] =
-    'sourceTermRequests[].note 只用于识别对象和避免检索串词；本步骤只返回译名，不要生成、修订或返回任何备注字段。'
+    'sourceTermRequests[].note 只用于识别对象和避免检索串词；本步骤不生成、修订或返回任何备注字段。'
 }
 
 function attachTermTranslationQualityPolicy(requestData) {
@@ -294,7 +362,8 @@ function attachTermTranslationQualityPolicy(requestData) {
 function buildOfficialTermKnowledgePrompt({
   termRequests,
   sourceLanguageCode,
-  contextSummary
+  contextSummary,
+  allowSameSourceTranslationWithNote = false
 }) {
   const normalizedContextSummary =
     normalizeOfficialTermContextSummary(contextSummary)
@@ -317,11 +386,23 @@ function buildOfficialTermKnowledgePrompt({
     '必须优先让 needsSearchLanguageCodes 覆盖所有不确定语言，不要为了完整率补 translations。',
     '如果目标语言确实没有固定译名，但这一结论仍需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。',
     '必须返回每一个输入 sourceText；translations 只包含你完美确认的语言。',
-    '只返回合法 JSON，不要使用 Markdown，不要解释。',
-    'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"needsSearchLanguageCodes":["zh-HK"]}]}。',
-    '',
-    JSON.stringify(requestData, null, 2)
+    '只返回合法 JSON，不要使用 Markdown，不要解释。'
   ]
+
+  if (allowSameSourceTranslationWithNote === true) {
+    promptLines.push(
+      '特别重要：如果 translations 中某个目标语言的译名与 sourceText 文本完全一致，必须同时在 translationNotes[languageCode] 写中文译名备注，明确说明为什么该目标语言应保留原名。',
+      '再次强调：译名和原名完全一致但没有 translationNotes[languageCode]，后台会把该语言视为未翻译；如果不能确定保留原名是否正确，必须放入 needsSearchLanguageCodes。',
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationNotes":{"zh-CN":"译名与原名一致时的原因"},"needsSearchLanguageCodes":["zh-HK"]}]}。'
+    )
+  } else {
+    promptLines.push(
+      '本步骤属于正文 AI 翻译前的自动名词整理，禁止把与 sourceText 完全一致的文本写入 translations；遇到必须保留原名或目标语言没有固定译名的情况，必须放入 needsSearchLanguageCodes，不要写 translationNotes。',
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"needsSearchLanguageCodes":["zh-HK"]}]}。'
+    )
+  }
+
+  promptLines.push('', JSON.stringify(requestData, null, 2))
 
   return promptLines.join('\n')
 }
@@ -330,7 +411,8 @@ function buildOfficialTermSearchPrompt({
   termRequests,
   sourceLanguageCode,
   contextSummary,
-  includeTermNoteRevision = true
+  includeTermNoteRevision = true,
+  allowSameSourceTranslationWithNote = false
 }) {
   const normalizedContextSummary =
     normalizeOfficialTermContextSummary(contextSummary)
@@ -344,7 +426,10 @@ function buildOfficialTermSearchPrompt({
   if (includeTermNoteRevision) {
     attachSearchTermNoteRevisionInstruction(requestData, termRequests)
   } else {
-    attachSkipNoteRevisionInstruction(requestData)
+    attachSkipNoteRevisionInstruction(
+      requestData,
+      allowSameSourceTranslationWithNote
+    )
   }
   attachSearchQueryPolicy(requestData)
   if (normalizedContextSummary) {
@@ -365,10 +450,23 @@ function buildOfficialTermSearchPrompt({
     '短人名、昵称、单字名或同形异义词必须结合 contentContextSummary 检索，不要只按字面普通词或日常含义给译名。',
     '你需要为每个缺失项给出目标语言中的官方译名、正式译名、权威通行译名或稳定通用译名。',
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
-    '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
-    '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
     '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。'
   ]
+
+  if (allowSameSourceTranslationWithNote === true) {
+    promptLines.push(
+      '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
+      '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
+      '特别重要：只要某个 translations[languageCode] 与 sourceText 文本完全一致，就必须同时写 translationNotes[languageCode]，用中文说明检索证据为何支持保留原名。',
+      '再次强调：译名和原名完全一致但没有 translationNotes[languageCode]，后台会跳过该语言译名，按没有翻译处理。'
+    )
+  } else {
+    promptLines.push(
+      '本步骤属于正文 AI 翻译前的自动名词整理，禁止把与 sourceText 完全一致的文本写入 translations。',
+      '如果检索结果证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，或者证据不足以确认对象身份或译名状态，不要写入 translations；后台会按该语言未取得译名处理。',
+      '禁止返回 translationNotes。'
+    )
+  }
 
   if (includeTermNoteRevision) {
     promptLines.push(
@@ -376,15 +474,31 @@ function buildOfficialTermSearchPrompt({
       '如果 note 对实体身份、作品归属、角色定位、组织类型、产品类型或地理属性的描述有误，或者含有“文中提及”“本文”“正文”“本次内容”等上下文依赖表述，noteNeedsUpdate 必须为 true。',
       '修订后的 note 必须是中文词库消歧备注，只写可脱离本文单独成立的稳定身份线索；不要写翻译方法，不要写目标语言译名，不要写搜索过程。',
       '如果原 note 已准确可用，noteNeedsUpdate 必须为 false，note 返回原 note。',
-      '只返回合法 JSON，不要使用 Markdown，不要解释。',
-      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。'
+      '只返回合法 JSON，不要使用 Markdown，不要解释。'
     )
+    if (allowSameSourceTranslationWithNote === true) {
+      promptLines.push(
+        'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationNotes":{"zh-CN":"译名与原名一致时的原因"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。'
+      )
+    } else {
+      promptLines.push(
+        'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"noteNeedsUpdate":true,"note":"修订后的中文词库消歧备注"}]}。'
+      )
+    }
   } else {
-    promptLines.push(
-      'sourceTermRequests[].note 只用于判断名词指向，严禁在响应中返回 note、noteNeedsUpdate、translationNote 或其它备注字段。',
-      '只返回合法 JSON，不要使用 Markdown，不要解释。',
-      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。'
-    )
+    if (allowSameSourceTranslationWithNote === true) {
+      promptLines.push(
+        'sourceTermRequests[].note 只用于判断名词指向，严禁在响应中返回 note、noteNeedsUpdate 或其它词条备注字段；只有译名与原名完全一致时，必须返回 translationNotes[languageCode] 作为译名备注。',
+        '只返回合法 JSON，不要使用 Markdown，不要解释。',
+        'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationNotes":{"zh-CN":"译名与原名一致时的原因"}}]}。'
+      )
+    } else {
+      promptLines.push(
+        'sourceTermRequests[].note 只用于判断名词指向，严禁在响应中返回 note、noteNeedsUpdate、translationNotes 或其它备注字段。',
+        '只返回合法 JSON，不要使用 Markdown，不要解释。',
+        'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"}}]}。'
+      )
+    }
   }
 
   promptLines.push('', JSON.stringify(requestData, null, 2))
@@ -510,8 +624,10 @@ function buildRequestedTermMap(termRequests) {
   return requestedTermMap
 }
 
-function normalizeKnowledgeTerms(resultData, termRequests) {
+function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
   normalizeResultRoot(resultData, 'Gemini 名词知识库整理')
+  const allowSameSourceTranslationWithNote =
+    options.allowSameSourceTranslationWithNote === true
 
   const requestedTermMap = buildRequestedTermMap(termRequests)
   const resultTermMap = new Map()
@@ -530,6 +646,11 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
       termItem?.needsSearchLanguageCodes
     )
     const translations = {}
+    const translationNotes = {}
+    const resultTranslationNotes = normalizeResultTranslationNotes(
+      termItem,
+      termRequest.targetLanguageCodes
+    )
     termRequest.targetLanguageCodes.forEach(languageCode => {
       if (needsSearchLanguageCodes.includes(languageCode)) {
         return
@@ -539,7 +660,24 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
         300
       )
       if (translatedText) {
+        const translationNote = normalizeString(
+          resultTranslationNotes[languageCode],
+          2000
+        )
+        if (
+          shouldSkipSameSourceTranslation({
+            sourceText: termRequest.sourceText,
+            translatedText,
+            note: translationNote,
+            allowSameSourceTranslationWithNote
+          })
+        ) {
+          return
+        }
         translations[languageCode] = translatedText
+        if (allowSameSourceTranslationWithNote === true && translationNote) {
+          translationNotes[languageCode] = translationNote
+        }
       }
     })
     resultTermMap.set(normalizedSourceText, {
@@ -547,6 +685,7 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
       termId: termRequest.termId || '',
       note: termRequest.note || '',
       translations,
+      translationNotes,
       translationSource: TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE
     })
   })
@@ -584,6 +723,8 @@ function normalizeKnowledgeTerms(resultData, termRequests) {
 function normalizeSearchTerms(resultData, termRequests, options = {}) {
   normalizeResultRoot(resultData, 'Gemini 联网搜索')
   const includeTermNoteRevision = options.includeTermNoteRevision !== false
+  const allowSameSourceTranslationWithNote =
+    options.allowSameSourceTranslationWithNote === true
 
   const requestedTermMap = buildRequestedTermMap(termRequests)
 
@@ -599,13 +740,37 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
       return
     }
     const translations = {}
+    const translationNotes = {}
+    const skippedSameWithoutNoteLanguageCodes = []
+    const resultTranslationNotes = normalizeResultTranslationNotes(
+      termItem,
+      termRequest.targetLanguageCodes
+    )
     termRequest.targetLanguageCodes.forEach(languageCode => {
       const translatedText = normalizeString(
         termItem?.translations?.[languageCode],
         300
       )
       if (translatedText) {
+        const translationNote = normalizeString(
+          resultTranslationNotes[languageCode],
+          2000
+        )
+        if (
+          shouldSkipSameSourceTranslation({
+            sourceText: termRequest.sourceText,
+            translatedText,
+            note: translationNote,
+            allowSameSourceTranslationWithNote
+          })
+        ) {
+          skippedSameWithoutNoteLanguageCodes.push(languageCode)
+          return
+        }
         translations[languageCode] = translatedText
+        if (allowSameSourceTranslationWithNote === true && translationNote) {
+          translationNotes[languageCode] = translationNote
+        }
       }
     })
     let termNote = termRequest.note || ''
@@ -639,6 +804,8 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
       note: termNote,
       shouldUpdateTermNote,
       translations,
+      translationNotes,
+      skippedSameWithoutNoteLanguageCodes,
       translationSource: TERM_TRANSLATION_SOURCE_INTERNET_SEARCH
     })
   })
@@ -652,6 +819,11 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
     }
     termRequest.targetLanguageCodes.forEach(languageCode => {
       if (!resultTerm.translations[languageCode]) {
+        if (
+          resultTerm.skippedSameWithoutNoteLanguageCodes.includes(languageCode)
+        ) {
+          return
+        }
         missingParts.push(`${termRequest.sourceText}/${languageCode}`)
       }
     })
@@ -715,13 +887,15 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   requestUrl,
   cancellation,
   onStatus,
-  skipUsageLog
+  skipUsageLog,
+  allowSameSourceTranslationWithNote = false
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermKnowledgePrompt({
     termRequests,
     sourceLanguageCode,
-    contextSummary
+    contextSummary,
+    allowSameSourceTranslationWithNote
   })
   const requestBody = buildGeminiKnowledgeRequest(settings, prompt)
   const requestSummary = summarizeGeminiNativeRequestBody(
@@ -744,7 +918,9 @@ async function resolveOfficialTermTranslationsFromKnowledge({
           extractedText?.text || '',
           'Gemini 名词知识库整理'
         )
-        const result = normalizeKnowledgeTerms(resultData, termRequests)
+        const result = normalizeKnowledgeTerms(resultData, termRequests, {
+          allowSameSourceTranslationWithNote
+        })
         await recordUsage({
           settings,
           operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
@@ -836,14 +1012,16 @@ async function searchOfficialTermTranslationsWithInternet({
   cancellation,
   onStatus,
   skipUsageLog,
-  includeTermNoteRevision = true
+  includeTermNoteRevision = true,
+  allowSameSourceTranslationWithNote = false
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermSearchPrompt({
     termRequests,
     sourceLanguageCode,
     contextSummary,
-    includeTermNoteRevision
+    includeTermNoteRevision,
+    allowSameSourceTranslationWithNote
   })
   const requestBody = buildGeminiSearchRequest(settings, prompt, {
     includeTermNoteRevision
@@ -867,7 +1045,8 @@ async function searchOfficialTermTranslationsWithInternet({
         const resultData = parseSearchResponseText(extractedText?.text || '')
         const groundingMetadata = summarizeGroundingMetadata(response)
         const terms = normalizeSearchTerms(resultData, termRequests, {
-          includeTermNoteRevision
+          includeTermNoteRevision,
+          allowSameSourceTranslationWithNote
         }).map(term => {
           return {
             ...term,
@@ -980,6 +1159,8 @@ async function searchOfficialTermTranslations(options = {}) {
   const requestTargetLanguageCodes =
     getTermRequestTargetLanguageCodes(termRequests)
   const includeTermNoteRevision = options.includeTermNoteRevision !== false
+  const allowSameSourceTranslationWithNote =
+    options.allowSameSourceTranslationWithNote === true
 
   const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
   const timeoutSeconds = Number(options.timeoutSeconds)
@@ -1011,7 +1192,8 @@ async function searchOfficialTermTranslations(options = {}) {
       requestUrl,
       cancellation: options.cancellation,
       onStatus: options.onStatus,
-      skipUsageLog: options.skipUsageLog
+      skipUsageLog: options.skipUsageLog,
+      allowSameSourceTranslationWithNote
     })
   }
 
@@ -1030,7 +1212,8 @@ async function searchOfficialTermTranslations(options = {}) {
       cancellation: options.cancellation,
       onStatus: options.onStatus,
       skipUsageLog: options.skipUsageLog,
-      includeTermNoteRevision
+      includeTermNoteRevision,
+      allowSameSourceTranslationWithNote
     })
   }
 
@@ -1043,6 +1226,7 @@ async function searchOfficialTermTranslations(options = {}) {
       targetLanguageCodes: requestTargetLanguageCodes,
       skipKnowledgeBase: options.skipKnowledgeBase === true,
       includeTermNoteRevision,
+      allowSameSourceTranslationWithNote,
       aiKnowledgeBaseTermCount: knowledgeResult.terms.length,
       aiKnowledgeBaseTranslationCount: countTermTranslationLanguagePairs(
         knowledgeResult.terms

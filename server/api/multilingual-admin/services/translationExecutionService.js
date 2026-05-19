@@ -166,6 +166,11 @@ function shouldSearchOfficialTermTranslations(job) {
   return options.searchOfficialTermTranslations === true
 }
 
+function shouldAllowAiKeepOriginalJudgement(job) {
+  const options = job?.request?.options || {}
+  return options.allowAiKeepOriginalJudgement === true
+}
+
 function getJobTargetLanguageCodes(job) {
   const languageCodes = []
   const targetLanguageCode = String(job?.target?.languageCode || '').trim()
@@ -1050,7 +1055,11 @@ async function translateSourcePostForLanguage({
     )
   const mappedResult = translationEntryBuildService.buildMappedEntries(
     sourceEntries,
-    targetEntries
+    targetEntries,
+    {
+      allowAiKeepOriginalJudgement:
+        shouldAllowAiKeepOriginalJudgement(job)
+    }
   )
   let relatedSourceIds = []
   const plannedRelatedSourceIds = getPlannedRelatedSourceIds(job, languageCode)

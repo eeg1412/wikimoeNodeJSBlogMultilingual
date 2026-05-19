@@ -713,7 +713,15 @@ function buildTranslationEntryMatchKeys(entry) {
   return [key]
 }
 
-function buildMappedSourceEntry(sourceEntry, targetEntry) {
+function normalizeMappedEntryOptions(options = {}) {
+  return {
+    allowAiKeepOriginalJudgement:
+      options.allowAiKeepOriginalJudgement === true
+  }
+}
+
+function buildMappedSourceEntry(sourceEntry, targetEntry, options = {}) {
+  const normalizedOptions = normalizeMappedEntryOptions(options)
   const value = cloneSerializableValue(sourceEntry.value)
   const mappedEntry = {
     ...targetEntry,
@@ -729,6 +737,7 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
     sourcePreviewHtml: sourceEntry.previewHtml || ''
   }
   if (
+    normalizedOptions.allowAiKeepOriginalJudgement &&
     sourceEntry.scope !== 'post' &&
     sourceEntry.valueType !== 'richTextDocument'
   ) {
@@ -737,7 +746,8 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
   return mappedEntry
 }
 
-function buildMappedEntries(sourceEntries, targetEntries) {
+function buildMappedEntries(sourceEntries, targetEntries, options = {}) {
+  const normalizedOptions = normalizeMappedEntryOptions(options)
   const targetEntryMap = new Map()
   targetEntries.forEach(entry => {
     buildTranslationEntryMatchKeys(entry).forEach(key => {
@@ -777,7 +787,9 @@ function buildMappedEntries(sourceEntries, targetEntries) {
       return
     }
 
-    entries.push(buildMappedSourceEntry(sourceEntry, targetEntry))
+    entries.push(
+      buildMappedSourceEntry(sourceEntry, targetEntry, normalizedOptions)
+    )
   })
 
   return { entries, skippedEntries }
@@ -838,7 +850,9 @@ async function buildPostJobEntries(job) {
   )
   const sourceEntries = buildPostTranslationEntries(sourceDetail)
   const targetEntries = buildPostTranslationEntries(targetDetail, true)
-  const mappedResult = buildMappedEntries(sourceEntries, targetEntries)
+  const mappedResult = buildMappedEntries(sourceEntries, targetEntries, {
+    allowAiKeepOriginalJudgement: true
+  })
   const sourcePostId = normalizeString(sourceDetail.post?.sourceId)
   const entries = filterRequestedEntries(
     mappedResult.entries,
@@ -884,7 +898,9 @@ async function buildContentJobEntries(job) {
     collectionName,
     true
   )
-  const mappedResult = buildMappedEntries(sourceEntries, targetEntries)
+  const mappedResult = buildMappedEntries(sourceEntries, targetEntries, {
+    allowAiKeepOriginalJudgement: true
+  })
   const sourcePostId = normalizeString(
     sourceRecord.sourceId || sourceRecord._id
   )

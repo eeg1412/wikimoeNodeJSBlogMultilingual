@@ -627,7 +627,7 @@ function buildNameTranslationPrompt() {
     '翻译专有名词、昵称、地名、名称或标题时，要保留指代对象身份，同时产出目标语言表达。',
     '优先使用目标语言既有译名；疑似需要官方译名、权威译名或稳定通用译名的名称，如果名词数据库没有提供译名，不得凭记忆、直译、音译、意译或本地化习惯创造译名。',
     '对名词数据库标记为未确认官方译名的名称，必须保留原文表面形式；只有明显不是稳定实体、只是普通可读词语或描述性短语时，才按目标语言常规表达翻译。',
-    '禁止用专有名词、昵称、作者名、分类名、标签名、地名、中文地名、媒体标题、无需翻译、字段类型不需要翻译等理由保留 v。'
+    '禁止用专有名词、昵称、作者名、分类名、标签名、地名、中文地名、媒体标题、无需翻译、字段类型不需要翻译等理由保留 v；如果名词数据库中当前目标语言的译名与原文完全一致且有译名备注，必须按该数据库译名处理。'
   ])
 }
 
@@ -647,6 +647,7 @@ function buildOfficialTermGlossaryPrompt(input) {
     '这份名词数据库只包含当前目标语言，不包含其他语言的译名。',
     '翻译正文、标题、摘要、关联内容和递归关联文章时，必须优先使用表格中的译名。',
     '同一个原文名词在同一次请求的所有条目、富文本片段和关联字段中必须保持同一译法。',
+    '如果表格包含“译名备注”，它说明对应译名的选择原因；当译名与原文完全一致时，译名备注表示该同名译名已经过专门整理确认，不要误判为缺失译名，也不要自行改成直译、音译、意译或本地化写法。',
     '译名为“未收录”的名词表示本次没有可验证译名；不得把它当成已确认的官方译名、权威译名或稳定通用译名处理。',
     '处理“未收录”名词时，必须保留原文表面形式；禁止凭空直译、音译、意译、本地化、改写或声称官方用法。'
   ]
@@ -2203,7 +2204,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   targetLanguageCodes,
   properNounScopeKey = '',
   sourceLanguageCode = '',
-  usageTracker
+  usageTracker,
+  allowSameSourceTranslationWithNote = false
 }) {
   if (!Array.isArray(terms) || terms.length === 0) {
     return {
@@ -2220,7 +2222,8 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
     await properNounTranslationService.upsertAiSearchTerms({
       terms,
       provider,
-      model
+      model,
+      allowSameSourceTranslationWithNote
     })
   const nextMatchedTermLinks = mergeMatchedTermLinks({
     matchedTermLinks,
@@ -2868,7 +2871,8 @@ async function resolveOfficialTermGlossaryCacheData({
   settings,
   url,
   handlers,
-  targetLanguageCodes
+  targetLanguageCodes,
+  allowSameSourceTranslationWithNote = false
 }) {
   const extractionResult = await extractProperNounKeywords({
     input,
@@ -2999,7 +3003,8 @@ async function resolveOfficialTermGlossaryCacheData({
         contextSummary: officialTermContextSummary,
         skipUsageLog: input.skipUsageLog,
         onStatus: handlers.onStatus,
-        cancellation: handlers.cancellation
+        cancellation: handlers.cancellation,
+        allowSameSourceTranslationWithNote
       })
     aiKnowledgeBaseTermCount = searchResult.stats?.aiKnowledgeBaseTermCount || 0
     aiKnowledgeBaseTranslationCount =
@@ -3059,7 +3064,8 @@ async function resolveOfficialTermGlossaryCacheData({
         targetLanguageCodes,
         properNounScopeKey: getOfficialTermGlossaryScopeKey(input),
         sourceLanguageCode: input.sourceLanguageCode,
-        usageTracker
+        usageTracker,
+        allowSameSourceTranslationWithNote
       })
     matchedTermIds = searchSaveResult.matchedTermIds
     matchedTermLinks = searchSaveResult.matchedTermLinks
@@ -5262,7 +5268,8 @@ async function organizeProperNounTerms(body = {}, handlers = {}) {
     settings,
     url,
     handlers,
-    targetLanguageCodes: input.targetLanguageCodes
+    targetLanguageCodes: input.targetLanguageCodes,
+    allowSameSourceTranslationWithNote: true
   })
   return {
     sourceId: input.sourceId,

@@ -104,6 +104,23 @@ function resolveTranslateCoverImage(body, coverImageTranslationMode) {
   return body.translateCoverImage !== false
 }
 
+function normalizeEntriesForAiKeepOriginalJudgement(
+  entries,
+  allowAiKeepOriginalJudgement
+) {
+  if (allowAiKeepOriginalJudgement === true) {
+    return entries
+  }
+  return entries.map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return entry
+    }
+    const nextEntry = { ...entry }
+    delete nextEntry.skipAllowed
+    return nextEntry
+  })
+}
+
 function parseInput(body = {}) {
   const sourceId = String(body.sourceId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
@@ -135,7 +152,13 @@ function parseInput(body = {}) {
     )
   }
 
-  const entries = Array.isArray(body.entries) ? body.entries : []
+  const rawEntries = Array.isArray(body.entries) ? body.entries : []
+  const allowAiKeepOriginalJudgement =
+    body.allowAiKeepOriginalJudgement === true
+  const entries = normalizeEntriesForAiKeepOriginalJudgement(
+    rawEntries,
+    allowAiKeepOriginalJudgement
+  )
   const coverImageTranslationMode = normalizeCoverImageTranslationMode(body)
   const translateCoverImage = resolveTranslateCoverImage(
     body,
@@ -165,7 +188,9 @@ function parseInput(body = {}) {
     translateCoverImage,
     allowEmptyEntries,
     skipUsageLog: body.skipUsageLog === true,
-    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
+    searchOfficialTermTranslations:
+      body.searchOfficialTermTranslations === true,
+    allowAiKeepOriginalJudgement
   }
 }
 

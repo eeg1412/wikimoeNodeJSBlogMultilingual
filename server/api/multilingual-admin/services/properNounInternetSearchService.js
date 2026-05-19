@@ -228,6 +228,7 @@ function getOriginalTermNote(term, noteMap) {
 
 function normalizePreviewTerm(term, noteMap = null) {
   const translations = {}
+  const translationNotes = {}
   if (term?.translations && typeof term.translations === 'object') {
     Object.keys(term.translations).forEach(languageCode => {
       const normalizedLanguageCode = normalizeLanguageCode(languageCode)
@@ -237,6 +238,13 @@ function normalizePreviewTerm(term, noteMap = null) {
       )
       if (normalizedLanguageCode && translatedText) {
         translations[normalizedLanguageCode] = translatedText
+        const translationNote = normalizeString(
+          term?.translationNotes?.[normalizedLanguageCode],
+          2000
+        )
+        if (translationNote) {
+          translationNotes[normalizedLanguageCode] = translationNote
+        }
       }
     })
   }
@@ -249,6 +257,7 @@ function normalizePreviewTerm(term, noteMap = null) {
     shouldUpdateTermNote: false,
     translationSource: 'internetSearchAi',
     translations,
+    translationNotes,
     searchMetadata:
       term?.searchMetadata && typeof term.searchMetadata === 'object'
         ? term.searchMetadata
@@ -305,6 +314,7 @@ async function searchInternetTranslations(body = {}, options = {}) {
       }),
       skipKnowledgeBase: true,
       includeTermNoteRevision: false,
+      allowSameSourceTranslationWithNote: true,
       timeoutSeconds: REALTIME_INTERNET_SEARCH_TIMEOUT_SECONDS,
       onStatus: options.onStatus,
       cancellation: options.cancellation
@@ -355,7 +365,8 @@ async function applyInternetTranslations(body = {}) {
     await properNounTranslationService.upsertAiSearchTerms({
       terms,
       provider: normalizeString(body.provider, 80) || 'gemini',
-      model: normalizeString(body.model, 120)
+      model: normalizeString(body.model, 120),
+      allowSameSourceTranslationWithNote: true
     })
   return {
     savedCount: savedTranslations.length,
