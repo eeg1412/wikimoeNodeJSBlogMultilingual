@@ -50,7 +50,8 @@ async function createOrganizeJob(req) {
         targetLanguageCodes: body.targetLanguageCodes || [],
         options: {
           searchOfficialTermTranslations:
-            body.searchOfficialTermTranslations === true
+            body.searchOfficialTermTranslations === true,
+          syncRelatedPosts: body.syncRelatedPosts === true
         }
       }
     },
@@ -73,8 +74,5 @@ module.exports = {
     getTermList,
     'source post proper noun term list get fail'
   ),
-  unbindTerm: controller(
-    unbindTerm,
-    'source post proper noun term unbind fail'
-  )
+  unbindTerm: controller(unbindTerm, 'source post proper noun term unbind fail')
 }

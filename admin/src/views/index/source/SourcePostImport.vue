@@ -1122,6 +1122,11 @@ import {
   buildTranslationEntryDeduplicationKey,
   buildTranslationPostForm
 } from '@/utils/translationPostAiWorkflow'
+import {
+  collectRelatedPostSourceIds,
+  getRelatedPostSourceId,
+  hasPostRelatedSourcePosts
+} from '@/utils/sourcePostRelatedPosts'
 
 const SOURCE_IMPORT_LANGUAGE_STORAGE_KEY = 'wikimoe-source-import-language'
 const AI_IMPORT_SOURCE_LANGUAGE_STORAGE_KEY =
@@ -1137,13 +1142,6 @@ const AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS = [
   { label: '是', value: AI_COVER_IMAGE_TRANSLATION_MODE_ALWAYS },
   { label: '否', value: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER }
 ]
-const POST_RELATION_FIELD_LIST = [
-  'postList',
-  'tweetList',
-  'contentPostList',
-  'contentTweetList'
-]
-
 export default {
   components: {
     PostRelationSummary,
@@ -1908,78 +1906,16 @@ export default {
       })
     }
 
-    const getRecordSourceId = record => {
-      if (!record || typeof record !== 'object') {
-        return ''
-      }
-      const sourceId = String(record.sourceId || record._id || '').trim()
-      if (!sourceId) {
-        return ''
-      }
-      return sourceId
-    }
-
     const getAiResultPostTitle = post => {
       const title = normalizePreviewText(getPostDisplayTitle(post || {}))
       if (title && title !== '-') {
         return title
       }
-      const sourceId = getRecordSourceId(post)
+      const sourceId = getRelatedPostSourceId(post)
       if (sourceId) {
         return `${getRelatedPostTypeLabel(post)} ${sourceId}`
       }
       return getRelatedPostTypeLabel(post)
-    }
-
-    const getRelatedSourceIdsForTranslate = (sourcePost, targetPost) => {
-      const sourceIdSet = new Set()
-      POST_RELATION_FIELD_LIST.forEach(fieldName => {
-        const sourceRelationList = Array.isArray(sourcePost[fieldName])
-          ? sourcePost[fieldName]
-          : []
-        const targetRelationList = Array.isArray(targetPost[fieldName])
-          ? targetPost[fieldName]
-          : []
-        const targetRelationMap = new Map()
-        targetRelationList.forEach(record => {
-          const sourceId = getRecordSourceId(record)
-          if (!sourceId) {
-            return
-          }
-          targetRelationMap.set(sourceId, record)
-        })
-
-        sourceRelationList.forEach(record => {
-          const sourceId = getRecordSourceId(record)
-          if (!sourceId) {
-            return
-          }
-          const targetRecord = targetRelationMap.get(sourceId)
-          if (!targetRecord) {
-            sourceIdSet.add(sourceId)
-            return
-          }
-          if (targetRecord.aiTranslationSkip === true) {
-            return
-          }
-          sourceIdSet.add(sourceId)
-        })
-      })
-      return Array.from(sourceIdSet)
-    }
-
-    const hasPostRelatedSourcePosts = post => {
-      if (!post) {
-        return false
-      }
-      return POST_RELATION_FIELD_LIST.some(fieldName => {
-        const relationList = Array.isArray(post[fieldName])
-          ? post[fieldName]
-          : []
-        return relationList.some(record => {
-          return Boolean(getRecordSourceId(record))
-        })
-      })
     }
 
     const showSyncRelatedPostsOption = computed(() => {
@@ -2583,7 +2519,7 @@ export default {
         sourcePreviewPost,
         targetPreviewPost
       )
-      let relatedSourceIds = getRelatedSourceIdsForTranslate(
+      let relatedSourceIds = collectRelatedPostSourceIds(
         previewContext.sourcePost,
         targetPreviewPost
       )

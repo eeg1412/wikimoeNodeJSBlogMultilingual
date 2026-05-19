@@ -54,6 +54,13 @@
           inactive-text="关闭"
         />
       </el-form-item>
+      <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
+        <el-switch
+          v-model="form.syncRelatedPosts"
+          active-text="整理相关文章"
+          inactive-text="仅当前文章"
+        />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
@@ -75,6 +82,7 @@ import {
 } from '@/utils/multilingual'
 import { extractApiErrorMessages } from '@/utils/apiError'
 import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
+import { hasPostRelatedSourcePosts } from '@/utils/sourcePostRelatedPosts'
 
 function getSourcePostId(sourcePost) {
   return String(sourcePost?.sourceId || sourcePost?._id || '').trim()
@@ -106,7 +114,8 @@ export default {
     const form = reactive({
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
       targetLanguageCodes: getDefaultTargetLanguageCodes(DEFAULT_LANGUAGE_CODE),
-      searchOfficialTermTranslations: false
+      searchOfficialTermTranslations: false,
+      syncRelatedPosts: false
     })
 
     const dialogVisible = computed({
@@ -131,6 +140,9 @@ export default {
       }
       return getSourcePostId(props.sourcePost) || '-'
     })
+    const showSyncRelatedPostsOption = computed(() => {
+      return hasPostRelatedSourcePosts(props.sourcePost)
+    })
 
     function resetForm() {
       form.sourceLanguageCode = DEFAULT_LANGUAGE_CODE
@@ -138,6 +150,7 @@ export default {
         form.sourceLanguageCode
       )
       form.searchOfficialTermTranslations = false
+      form.syncRelatedPosts = false
       defaultLoading.value = false
       defaultRequestId += 1
     }
@@ -202,7 +215,9 @@ export default {
             sourceLanguageCode: form.sourceLanguageCode,
             targetLanguageCodes: form.targetLanguageCodes,
             title: sourcePostTitle.value,
-            searchOfficialTermTranslations: form.searchOfficialTermTranslations
+            searchOfficialTermTranslations: form.searchOfficialTermTranslations,
+            syncRelatedPosts:
+              showSyncRelatedPostsOption.value && form.syncRelatedPosts === true
           },
           true
         )
@@ -233,6 +248,7 @@ export default {
       form,
       handleSourceLanguageChange,
       languageOptions,
+      showSyncRelatedPostsOption,
       sourcePostTitle,
       submit,
       submitting,
