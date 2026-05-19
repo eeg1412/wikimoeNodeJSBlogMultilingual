@@ -385,11 +385,11 @@
                 active-text="联网检索官方译名"
               />
             </el-form-item>
-            <el-form-item label="AI判断翻译必要性">
+            <el-form-item label="AI判译">
               <el-switch
                 v-model="aiForm.allowAiKeepOriginalJudgement"
                 :disabled="isAiImportBusy"
-                active-text="允许AI判断"
+                active-text="允许AI自动判断字段翻译的必要性"
               />
             </el-form-item>
             <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
