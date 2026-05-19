@@ -145,6 +145,11 @@
             <div class="proper-noun-source-text">{{ row.sourceText }}</div>
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="原文语言" width="140">
+          <template #default="{ row }">
+            <span>{{ getSourceLanguageText(row.sourceLanguageCode) }}</span>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="译名" min-width="260">
           <template #default="{ row }">
             <div
@@ -944,6 +949,17 @@ export default {
       })
     }
 
+    function getSourceLanguageText(sourceLanguageCode) {
+      if (!sourceLanguageCode) {
+        return '-'
+      }
+      const languageText = getLanguageText(sourceLanguageCode)
+      if (!languageText || languageText === sourceLanguageCode) {
+        return sourceLanguageCode
+      }
+      return `${languageText}（${sourceLanguageCode}）`
+    }
+
     function getTranslationTagType(translation) {
       if (translation?.isMissingTranslation) {
         return 'danger'
@@ -982,6 +998,7 @@ export default {
       getDisplayedTranslationItems,
       getLastUsedAtText,
       getLanguageText,
+      getSourceLanguageText,
       getTermList,
       getTranslationList,
       getTranslationSourceText,

@@ -160,6 +160,14 @@ function normalizeTargetLanguageCodes(targetLanguageCodes) {
   return normalizedList
 }
 
+function normalizeOptionalTermSourceLanguageCode(value) {
+  const languageCode = normalizeLanguageCode(normalizeString(value, 20))
+  if (!languageCode) {
+    return ''
+  }
+  return languageCode
+}
+
 function buildTargetLanguagePromptRows(targetLanguageCodes) {
   return targetLanguageCodes.map(languageCode => {
     return {
@@ -189,11 +197,15 @@ function normalizeTermRequestList(termRequests) {
     if (targetLanguageCodes.length === 0) {
       return
     }
+    const sourceLanguageCode = normalizeOptionalTermSourceLanguageCode(
+      item?.sourceLanguageCode
+    )
     let termRequest = termRequestMap.get(normalizedSourceText)
     if (!termRequest) {
       termRequest = {
         sourceText,
         normalizedSourceText,
+        sourceLanguageCode,
         targetLanguageCodes: [],
         termId: normalizeString(item?.termId, 80),
         note: normalizeString(item?.note, 200)
@@ -205,6 +217,9 @@ function normalizeTermRequestList(termRequests) {
       }
       if (!termRequest.note) {
         termRequest.note = normalizeString(item?.note, 200)
+      }
+      if (!termRequest.sourceLanguageCode && sourceLanguageCode) {
+        termRequest.sourceLanguageCode = sourceLanguageCode
       }
     }
     targetLanguageCodes.forEach(languageCode => {
@@ -306,6 +321,15 @@ function buildTermRequestPromptRows(termRequests) {
         termRequest.targetLanguageCodes
       )
     }
+    const sourceLanguageCode = normalizeOptionalTermSourceLanguageCode(
+      termRequest.sourceLanguageCode
+    )
+    if (sourceLanguageCode) {
+      row.sourceLanguage = {
+        code: sourceLanguageCode,
+        label: getLanguageText(sourceLanguageCode)
+      }
+    }
     const note = normalizeString(termRequest.note, 200)
     if (note) {
       row.note = note
@@ -382,6 +406,7 @@ function buildOfficialTermKnowledgePrompt({
     '你是多语言博客 CMS 的专有名词译名整理助手。',
     '本步骤禁止联网检索，也没有任何搜索工具可用；只能使用你模型内置的可靠知识。',
     ...translationPromptPolicyService.getGeminiTermKnowledgePromptLines(),
+    '如果 sourceTermRequests[].sourceLanguage 存在，它表示 sourceText 表面形式所属原文语言；确认实体和官方译名时必须参考它。',
     'sourceTermRequests 旁可能包含 contentContextSummary；确认译名时必须优先按它和 note 识别对象身份，短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
     '必须优先让 needsSearchLanguageCodes 覆盖所有不确定语言，不要为了完整率补 translations。',
     '如果目标语言确实没有固定译名，但这一结论仍需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。',
@@ -443,6 +468,7 @@ function buildOfficialTermSearchPrompt({
     '每个 sourceText 的每种目标语言应尽可能只检索一次，最多不能超过两次；不要用大量低质量 query 试探。',
     '检索关键词必须高效：同时包含 sourceText、note 或 contentContextSummary 中的稳定身份线索，以及目标语言译名意图。',
     '为某个目标语言确认译名时，query 必须优先使用该目标语言的当地写法、当地语境词和当地站点常用表达；源文词只作为实体定位线索，不得成为唯一检索语言。',
+    '如果 sourceTermRequests[].sourceLanguage 存在，它表示 sourceText 表面形式所属原文语言；检索和筛选结果时必须参考它。',
     '如果目标语言使用不同文字系统，必须积极使用目标语言文字系统组织 query；不要只用源文语言关键词搜索目标语言译名。',
     '禁止把 sourceText 截短成过宽关键词检索；不得用系列母题、父级作品名、通用类型词或部分核心词替代完整 sourceText。',
     '只有首轮结果互相矛盾或无法确认对象身份时，才允许第二次检索；第二次必须针对矛盾点改进关键词。',
@@ -682,6 +708,7 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
     })
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
+      sourceLanguageCode: termRequest.sourceLanguageCode || '',
       termId: termRequest.termId || '',
       note: termRequest.note || '',
       translations,
@@ -707,6 +734,7 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
     if (missingLanguageCodes.length > 0) {
       missingTermRequests.push({
         sourceText: termRequest.sourceText,
+        sourceLanguageCode: termRequest.sourceLanguageCode || '',
         termId: termRequest.termId || '',
         note: termRequest.note || '',
         targetLanguageCodes: missingLanguageCodes
@@ -800,6 +828,7 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
     }
     resultTermMap.set(normalizedSourceText, {
       sourceText: termRequest.sourceText,
+      sourceLanguageCode: termRequest.sourceLanguageCode || '',
       termId: termRequest.termId || '',
       note: termNote,
       shouldUpdateTermNote,

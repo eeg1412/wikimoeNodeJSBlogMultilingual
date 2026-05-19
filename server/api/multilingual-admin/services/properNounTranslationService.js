@@ -1015,6 +1015,14 @@ function normalizeSourceTextList(sourceTexts) {
   )
 }
 
+function normalizeOptionalExtractedSourceLanguageCode(value) {
+  const languageCode = normalizeLanguageCode(normalizeString(value, 20))
+  if (!languageCode) {
+    return ''
+  }
+  return languageCode
+}
+
 function normalizeExtractedTermList(terms) {
   if (!Array.isArray(terms)) {
     return []
@@ -1026,10 +1034,14 @@ function normalizeExtractedTermList(terms) {
     let note = ''
     let importance = 0
     let searchKeywords = []
+    let sourceLanguageCode = ''
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       sourceText = normalizeSourceText(value.sourceText)
       note = normalizeString(value.note, MAX_EXTRACTED_TERM_NOTE_LENGTH)
       importance = Number(value.importance || 0)
+      sourceLanguageCode = normalizeOptionalExtractedSourceLanguageCode(
+        value.sourceLanguageCode
+      )
       searchKeywords = normalizeCandidateKeywordList(
         value.searchKeywords,
         sourceText
@@ -1051,6 +1063,7 @@ function normalizeExtractedTermList(terms) {
       normalizedMap.set(normalizedKey, {
         sourceText,
         normalizedSourceText,
+        sourceLanguageCode,
         note,
         importance,
         searchKeywords
@@ -1061,6 +1074,9 @@ function normalizeExtractedTermList(terms) {
     if (!existingTerm.note && note) {
       existingTerm.note = note
     }
+    if (!existingTerm.sourceLanguageCode && sourceLanguageCode) {
+      existingTerm.sourceLanguageCode = sourceLanguageCode
+    }
     existingTerm.searchKeywords = mergeCandidateKeywordList(
       existingTerm.searchKeywords,
       searchKeywords
@@ -1068,6 +1084,9 @@ function normalizeExtractedTermList(terms) {
     if (importance > existingTerm.importance) {
       existingTerm.sourceText = sourceText
       existingTerm.normalizedSourceText = normalizedSourceText
+      if (sourceLanguageCode) {
+        existingTerm.sourceLanguageCode = sourceLanguageCode
+      }
       existingTerm.importance = importance
     }
   })
@@ -1283,12 +1302,16 @@ async function getTranslationsForSourceTexts({
       termMap.get(normalizedSourceText)?.sourceText ||
       translation.sourceTextSnapshot ||
       ''
+    const sourceLanguageCode = normalizeOptionalExtractedSourceLanguageCode(
+      termMap.get(normalizedSourceText)?.sourceLanguageCode
+    )
     if (shouldTreatTranslationAsMissing(sourceText, translation)) {
       return
     }
     const item = {
       ...translation,
       normalizedSourceText,
+      sourceLanguageCode,
       sourceText
     }
     translationMap.set(
@@ -1368,6 +1391,11 @@ async function compareTermTranslationCoverage(options = {}) {
   result.sourceTextItems.forEach(sourceTextItem => {
     const existingTranslations = []
     const missingLanguageCodes = []
+    const matchedTerm = result.termMap.get(sourceTextItem.normalizedSourceText)
+    const sourceLanguageCode = getCoverageSourceLanguageCode(
+      sourceTextItem,
+      matchedTerm
+    )
     result.languageCodes.forEach(languageCode => {
       const key = buildTranslationKey(
         sourceTextItem.normalizedSourceText,
@@ -1385,6 +1413,7 @@ async function compareTermTranslationCoverage(options = {}) {
       existingTerms.push({
         sourceText: sourceTextItem.sourceText,
         normalizedSourceText: sourceTextItem.normalizedSourceText,
+        sourceLanguageCode,
         translations: existingTranslations
       })
     }
@@ -1392,6 +1421,7 @@ async function compareTermTranslationCoverage(options = {}) {
       missingTerms.push({
         sourceText: sourceTextItem.sourceText,
         normalizedSourceText: sourceTextItem.normalizedSourceText,
+        sourceLanguageCode,
         languageCodes: missingLanguageCodes
       })
     }
@@ -1465,6 +1495,19 @@ function buildGlossaryNote(sourceTextItem, term, matchedTermCount) {
     return termNote
   }
   return normalizeString(sourceTextItem.note, MAX_EXTRACTED_TERM_NOTE_LENGTH)
+}
+
+function getCoverageSourceLanguageCode(sourceTextItem, matchedTerm) {
+  const extractedSourceLanguageCode =
+    normalizeOptionalExtractedSourceLanguageCode(
+      sourceTextItem?.sourceLanguageCode
+    )
+  if (extractedSourceLanguageCode) {
+    return extractedSourceLanguageCode
+  }
+  return normalizeOptionalExtractedSourceLanguageCode(
+    matchedTerm?.sourceLanguageCode
+  )
 }
 
 function findMatchedTranslationForLanguage({
@@ -1546,6 +1589,10 @@ async function compareMatchedTermTranslationCoverage({
         ...matchedTranslation.translation,
         termId: matchedTranslation.term._id,
         normalizedSourceText: sourceTextItem.normalizedSourceText,
+        sourceLanguageCode: getCoverageSourceLanguageCode(
+          sourceTextItem,
+          matchedTranslation.term
+        ),
         sourceText: matchedSourceText,
         termNote: normalizeString(
           matchedTranslation.term.note,
@@ -1569,6 +1616,10 @@ async function compareMatchedTermTranslationCoverage({
       existingTerms.push({
         sourceText: sourceTextItem.sourceText,
         normalizedSourceText: sourceTextItem.normalizedSourceText,
+        sourceLanguageCode: getCoverageSourceLanguageCode(
+          sourceTextItem,
+          matchedTerms[0]
+        ),
         note: sourceTextItem.note,
         matchedTermIds: matchedTerms.map(term => String(term._id || '')),
         translations: existingTranslations
@@ -1578,6 +1629,10 @@ async function compareMatchedTermTranslationCoverage({
       missingTerms.push({
         sourceText: sourceTextItem.sourceText,
         normalizedSourceText: sourceTextItem.normalizedSourceText,
+        sourceLanguageCode: getCoverageSourceLanguageCode(
+          sourceTextItem,
+          matchedTerms[0]
+        ),
         note: sourceTextItem.note,
         glossaryNote: buildGlossaryNote(
           sourceTextItem,
@@ -1620,6 +1675,9 @@ async function createTermForSourceText(sourceText, options = {}) {
 
 async function findOrCreateTermForSourceText(sourceText, options = {}) {
   const normalizedSourceText = buildNormalizedSourceText(sourceText)
+  const sourceLanguageCode = normalizeOptionalExtractedSourceLanguageCode(
+    options.sourceLanguageCode
+  )
   const TermModel = getTermModel()
   return await utils.executeInLock(
     `properNounTerm:${normalizedSourceText}`,
@@ -1630,6 +1688,11 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
       if (existing) {
         const note = normalizeString(options.note, 2000)
         const currentNote = normalizeString(existing.note, 2000)
+        const currentSourceLanguageCode =
+          normalizeOptionalExtractedSourceLanguageCode(
+            existing.sourceLanguageCode
+          )
+        const updateData = {}
         let shouldUpdateNote = false
         if (note && !currentNote) {
           shouldUpdateNote = true
@@ -1642,9 +1705,15 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
           shouldUpdateNote = true
         }
         if (shouldUpdateNote) {
+          updateData.note = note
+        }
+        if (sourceLanguageCode && !currentSourceLanguageCode) {
+          updateData.sourceLanguageCode = sourceLanguageCode
+        }
+        if (Object.keys(updateData).length > 0) {
           const updatedTerm = await TermModel.findOneAndUpdate(
             { _id: existing._id },
-            { $set: { note } },
+            { $set: updateData },
             { new: true }
           ).lean()
           if (updatedTerm) {
@@ -1655,7 +1724,10 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
       }
 
       try {
-        return await createTermForSourceText(sourceText, options)
+        return await createTermForSourceText(sourceText, {
+          ...options,
+          sourceLanguageCode
+        })
       } catch (error) {
         if (error && error.code === 11000) {
           return await TermModel.findOne({ normalizedSourceText })
@@ -1670,10 +1742,16 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
 
 async function resolveTermForAiSearchTerm(termItem, sourceText) {
   const termId = normalizeString(termItem?.termId, 80)
+  const sourceLanguageCode = normalizeOptionalExtractedSourceLanguageCode(
+    termItem?.sourceLanguageCode
+  )
   if (termId) {
     const term = await findTermById(termId)
     const note = normalizeString(termItem?.note, 2000)
     const currentNote = normalizeString(term.note, 2000)
+    const currentSourceLanguageCode =
+      normalizeOptionalExtractedSourceLanguageCode(term.sourceLanguageCode)
+    const updateData = {}
     let shouldUpdateNote = false
     if (note && !currentNote) {
       shouldUpdateNote = true
@@ -1686,10 +1764,16 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
       shouldUpdateNote = true
     }
     if (shouldUpdateNote) {
+      updateData.note = note
+    }
+    if (sourceLanguageCode && !currentSourceLanguageCode) {
+      updateData.sourceLanguageCode = sourceLanguageCode
+    }
+    if (Object.keys(updateData).length > 0) {
       const TermModel = getTermModel()
       const updatedTerm = await TermModel.findOneAndUpdate(
         { _id: term._id },
-        { $set: { note } },
+        { $set: updateData },
         { new: true }
       ).lean()
       if (updatedTerm) {
@@ -1701,6 +1785,7 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
 
   return await findOrCreateTermForSourceText(sourceText, {
     note: termItem?.note,
+    sourceLanguageCode,
     shouldUpdateTermNote: termItem?.shouldUpdateTermNote === true
   })
 }
@@ -1888,6 +1973,9 @@ async function upsertAiSearchTerms({
       savedTranslations.push({
         ...record,
         sourceText: term.sourceText,
+        sourceLanguageCode: normalizeOptionalExtractedSourceLanguageCode(
+          term.sourceLanguageCode
+        ),
         normalizedSourceText: term.normalizedSourceText
       })
     }
@@ -1933,11 +2021,36 @@ function getGlossaryTranslationForSource({
   return translation
 }
 
+function getGlossarySourceLanguageCode(sourceTextItem, translation) {
+  const sourceTextItemLanguageCode =
+    normalizeOptionalExtractedSourceLanguageCode(
+      sourceTextItem?.sourceLanguageCode
+    )
+  if (sourceTextItemLanguageCode) {
+    return sourceTextItemLanguageCode
+  }
+  return normalizeOptionalExtractedSourceLanguageCode(
+    translation?.sourceLanguageCode
+  )
+}
+
+function getGlossarySourceLanguageText(sourceTextItem, translation) {
+  const sourceLanguageCode = getGlossarySourceLanguageCode(
+    sourceTextItem,
+    translation
+  )
+  if (!sourceLanguageCode) {
+    return ''
+  }
+  return `${getLanguageText(sourceLanguageCode)}（${sourceLanguageCode}）`
+}
+
 function pushSingleLanguageGlossaryRow({
   lines,
   sourceTextItem,
   languageCode,
   translationMap,
+  includeSourceLanguageColumn,
   includeNoteColumn,
   includeTranslationNoteColumn
 }) {
@@ -1948,6 +2061,9 @@ function pushSingleLanguageGlossaryRow({
   })
   if (translation) {
     const cells = [sourceTextItem.sourceText]
+    if (includeSourceLanguageColumn) {
+      cells.push(getGlossarySourceLanguageText(sourceTextItem, translation))
+    }
     if (includeNoteColumn) {
       cells.push(translation.glossaryNote || '')
     }
@@ -1964,11 +2080,16 @@ function buildSingleLanguageGlossaryMarkdown({
   sourceTextItems,
   languageCode,
   translationMap,
+  includeSourceLanguageColumn,
   includeNoteColumn,
   includeTranslationNoteColumn
 }) {
   const headerCells = ['原文']
   const separatorCells = ['---']
+  if (includeSourceLanguageColumn) {
+    headerCells.push('原文语言')
+    separatorCells.push('---')
+  }
   if (includeNoteColumn) {
     headerCells.push('备注')
     separatorCells.push('---')
@@ -1995,6 +2116,7 @@ function buildSingleLanguageGlossaryMarkdown({
       sourceTextItem,
       languageCode,
       translationMap,
+      includeSourceLanguageColumn,
       includeNoteColumn,
       includeTranslationNoteColumn
     })
@@ -2043,6 +2165,26 @@ function shouldIncludeGlossaryTranslationNoteColumn(
   })
 }
 
+function shouldIncludeGlossarySourceLanguageColumn(
+  sourceTextItems,
+  languageCodes,
+  translationMap
+) {
+  return sourceTextItems.some(sourceTextItem => {
+    return languageCodes.some(languageCode => {
+      const translation = getGlossaryTranslationForSource({
+        sourceTextItem,
+        languageCode,
+        translationMap
+      })
+      if (!translation) {
+        return false
+      }
+      return Boolean(getGlossarySourceLanguageCode(sourceTextItem, translation))
+    })
+  })
+}
+
 function hasGlossaryTranslationRows(
   sourceTextItems,
   languageCodes,
@@ -2087,6 +2229,11 @@ function buildGlossaryMarkdown({
       translation
     )
   })
+  const includeSourceLanguageColumn = shouldIncludeGlossarySourceLanguageColumn(
+    sourceTextItems,
+    languageCodes,
+    translationMap
+  )
   const includeNoteColumn = shouldIncludeGlossaryNoteColumn(
     sourceTextItems,
     languageCodes,
@@ -2108,6 +2255,7 @@ function buildGlossaryMarkdown({
       sourceTextItems,
       languageCode: languageCodes[0],
       translationMap,
+      includeSourceLanguageColumn,
       includeNoteColumn,
       includeTranslationNoteColumn
     })
@@ -2115,6 +2263,10 @@ function buildGlossaryMarkdown({
 
   const headerCells = ['原文']
   const separatorCells = ['---']
+  if (includeSourceLanguageColumn) {
+    headerCells.push('原文语言')
+    separatorCells.push('---')
+  }
   if (includeNoteColumn) {
     headerCells.push('备注')
     separatorCells.push('---')
@@ -2144,6 +2296,9 @@ function buildGlossaryMarkdown({
       })
       if (translation) {
         const cells = [sourceTextItem.sourceText]
+        if (includeSourceLanguageColumn) {
+          cells.push(getGlossarySourceLanguageText(sourceTextItem, translation))
+        }
         if (includeNoteColumn) {
           cells.push(translation.glossaryNote || '')
         }

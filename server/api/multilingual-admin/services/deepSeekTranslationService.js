@@ -1531,6 +1531,7 @@ function buildTermExtractionRequestData(
           itemType: 'object',
           requiredFields: [
             'sourceText',
+            'sourceLanguageCode',
             'searchKeywords',
             'importance',
             'note'
@@ -1538,6 +1539,8 @@ function buildTermExtractionRequestData(
           itemSchema: {
             sourceText:
               '原文中需要联网确认官方译名的专有名词、作品名、角色名、地名、组织名或产品名',
+            sourceLanguageCode:
+              '该 sourceText 表面形式所属语言 code，必须使用系统支持的语言 code；无法判断时使用空字符串',
             searchKeywords:
               '1-6 个用于数据库模糊查询同一实体的原文核心关键词数组；去掉书名号、引号、感叹号等装饰标点，包含常见简称或无标点写法；不要放普通词或过宽关键词',
             importance: '1-100 的整数，数值越高越需要联网确认官方译名',
@@ -1549,6 +1552,13 @@ function buildTermExtractionRequestData(
       },
       sourceLanguageCode: input.sourceLanguageCode || '',
       targetLanguageCodes: getStableTermTargetLanguageCodes(input),
+      supportedLanguageCodes:
+        properNounTranslationService.SUPPORTED_LANGUAGE_CODES.map(code => {
+          return {
+            code,
+            label: getLanguageText(code)
+          }
+        }),
       packageType: termPackage.packageType,
       packageTitle: termPackage.title,
       previousContextSummary: normalizeTermContextSummary(
@@ -1574,8 +1584,9 @@ function buildTermExtractionMessages(
         '你是多语言博客 CMS 的官方译名联网检索候选词筛选器。',
         '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
         `JSON 根节点必须包含 schema、version、terms 和 contextSummary，schema 固定为 ${TERM_EXTRACTION_RESULT_SCHEMA}。`,
-        `返回 JSON 格式固定为：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"稳定身份线索"}],"contextSummary":"用于后续消歧的上下文摘要"}。`,
-        'terms 中每项必须包含 sourceText、searchKeywords、importance 和 note；contextSummary 必须是用于后续消歧的稳定上下文摘要。',
+        `返回 JSON 格式固定为：{"schema":"${TERM_EXTRACTION_RESULT_SCHEMA}","version":1,"terms":[{"sourceText":"原文词条","sourceLanguageCode":"zh-CN","searchKeywords":["原文词条","核心简称"],"importance":90,"note":"稳定身份线索"}],"contextSummary":"用于后续消歧的上下文摘要"}。`,
+        'terms 中每项必须包含 sourceText、sourceLanguageCode、searchKeywords、importance 和 note；contextSummary 必须是用于后续消歧的稳定上下文摘要。',
+        'sourceLanguageCode 必须标注 sourceText 表面形式所属语言，只能使用 supportedLanguageCodes 中给出的 code；无法判断时写空字符串。',
         '只抽取后续翻译需要联网确认官方译名、正式译名或权威通行译名的原文词条。',
         '抽取阶段必须把疑似需要官方译名的专有名词交给词库或联网流程；不要把它留给正文翻译阶段自由处理。',
         '如果词条只是普通词、普通地点描述、通用设施或无稳定实体指向的短语，且不需要核对既有译名，才不要抽取。'
@@ -1696,6 +1707,14 @@ function normalizeTermImportance(value, index) {
   return importance
 }
 
+function normalizeExtractedTermSourceLanguageCode(value) {
+  const languageCode = normalizeLanguageCode(normalizeString(value, 20))
+  if (!languageCode) {
+    return ''
+  }
+  return languageCode
+}
+
 function normalizeTermSearchKeywordList(item, index) {
   if (!Array.isArray(item.searchKeywords)) {
     throw new ApiError(
@@ -1813,6 +1832,9 @@ function normalizeExtractedTermItem(item, index) {
   return {
     sourceText,
     normalizedSourceText,
+    sourceLanguageCode: normalizeExtractedTermSourceLanguageCode(
+      item.sourceLanguageCode
+    ),
     searchKeywords: normalizeTermSearchKeywordList(item, index),
     importance: normalizeTermImportance(item.importance, index),
     note
@@ -1842,6 +1864,10 @@ function normalizeExtractedTermList(resultData) {
       return
     }
     if (termItem.importance > existingTerm.importance) {
+      let sourceLanguageCode = termItem.sourceLanguageCode
+      if (!sourceLanguageCode) {
+        sourceLanguageCode = existingTerm.sourceLanguageCode || ''
+      }
       existingTerm.searchKeywords.forEach(keyword => {
         if (!termItem.searchKeywords.includes(keyword)) {
           termItem.searchKeywords.push(keyword)
@@ -1850,6 +1876,7 @@ function normalizeExtractedTermList(resultData) {
       if (!termItem.note && existingTerm.note) {
         termItem.note = existingTerm.note
       }
+      termItem.sourceLanguageCode = sourceLanguageCode
       termMap.set(termKey, termItem)
       return
     }
@@ -1860,6 +1887,9 @@ function normalizeExtractedTermList(resultData) {
     })
     if (!existingTerm.note && termItem.note) {
       existingTerm.note = termItem.note
+    }
+    if (!existingTerm.sourceLanguageCode && termItem.sourceLanguageCode) {
+      existingTerm.sourceLanguageCode = termItem.sourceLanguageCode
     }
   })
 
@@ -1885,6 +1915,7 @@ function buildSelectedExtractedTermsFromMap(termMap) {
     return {
       sourceText: item.sourceText,
       normalizedSourceText: item.normalizedSourceText,
+      sourceLanguageCode: item.sourceLanguageCode || '',
       searchKeywords: item.searchKeywords || [],
       importance: item.importance,
       note: item.note
@@ -2086,12 +2117,21 @@ async function extractProperNounKeywords({ input, settings, url, handlers }) {
         return
       }
       if (termItem.importance > existingTerm.importance) {
+        let sourceLanguageCode = termItem.sourceLanguageCode
+        if (!sourceLanguageCode) {
+          sourceLanguageCode = existingTerm.sourceLanguageCode || ''
+        }
         termMap.set(termItem.normalizedSourceText, {
           ...existingTerm,
           sourceText: termItem.sourceText,
+          sourceLanguageCode,
           importance: termItem.importance,
           note: termItem.note
         })
+        return
+      }
+      if (!existingTerm.sourceLanguageCode && termItem.sourceLanguageCode) {
+        existingTerm.sourceLanguageCode = termItem.sourceLanguageCode
       }
     })
   }
@@ -2120,6 +2160,7 @@ function buildMissingTermRequests(missingTerms) {
       termRequest = {
         sourceText: item.sourceText,
         normalizedSourceText,
+        sourceLanguageCode: item.sourceLanguageCode || '',
         targetLanguageCodes: [],
         note: normalizeString(item.note).slice(
           0,
