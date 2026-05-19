@@ -148,19 +148,16 @@
         <ResponsiveTableColumn label="译名" min-width="260">
           <template #default="{ row }">
             <div
-              v-if="getDisplayedTranslations(row).length > 0"
+              v-if="getDisplayedTranslationItems(row).length > 0"
               class="proper-noun-translation-list"
             >
-              <!-- 暂时关闭译名 enabled 视觉区分：:type="translation.enabled ? 'primary' : 'info'" -->
               <el-tag
-                v-for="translation in getDisplayedTranslations(row)"
-                :key="translation._id"
-                type="primary"
+                v-for="translation in getDisplayedTranslationItems(row)"
+                :key="translation.displayKey"
+                :type="getTranslationTagType(translation)"
                 effect="plain"
               >
-                {{ getLanguageText(translation.languageCode) }}：{{
-                  translation.translatedText
-                }}
+                {{ getTranslationTagText(translation) }}
               </el-tag>
             </div>
             <span v-else class="table-empty-text">暂无译名</span>
@@ -289,6 +286,7 @@
       title="译名管理"
       width="min(920px, 96vw)"
       append-to-body
+      align-center
       destroy-on-close
     >
       <div v-if="activeTerm" class="proper-noun-translation-header">
@@ -296,7 +294,7 @@
         <el-button
           type="primary"
           size="small"
-          @click="openCreateTranslationDialog"
+          @click="openCreateTranslationDialog()"
         >
           <el-icon><Plus /></el-icon>
           新增译名
@@ -304,24 +302,40 @@
       </div>
       <ResponsiveTable
         v-loading="translationLoading"
-        :data="translationList"
+        :data="translationDisplayList"
         row-key="_id"
         border
       >
         <ResponsiveTableColumn label="语言" width="150">
           <template #default="{ row }">
-            {{ getLanguageText(row.languageCode) }}
+            {{ row.languageLabel || getLanguageText(row.languageCode) }}
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="译名" min-width="220">
           <template #default="{ row }">
-            <div class="proper-noun-source-text">{{ row.translatedText }}</div>
-            <div v-if="row.note" class="proper-noun-note">{{ row.note }}</div>
+            <el-tag
+              v-if="row.isMissingTranslation"
+              type="danger"
+              effect="plain"
+            >
+              缺少译名
+            </el-tag>
+            <template v-else>
+              <div class="proper-noun-source-text">
+                {{ row.translatedText }}
+              </div>
+              <div v-if="row.note" class="proper-noun-note">
+                {{ row.note }}
+              </div>
+            </template>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="来源" width="150">
           <template #default="{ row }">
-            <el-tag effect="plain">{{
+            <span v-if="row.isMissingTranslation" class="table-empty-text">
+              -
+            </span>
+            <el-tag v-else effect="plain">{{
               getTranslationSourceText(row.translationSource)
             }}</el-tag>
           </template>
@@ -338,7 +352,10 @@
         -->
         <ResponsiveTableColumn label="使用情况" width="170">
           <template #default="{ row }">
-            <div class="proper-noun-usage">
+            <span v-if="row.isMissingTranslation" class="table-empty-text">
+              -
+            </span>
+            <div v-else class="proper-noun-usage">
               <div class="proper-noun-usage-count">
                 {{ getUsedCountText(row.usedCount) }} 次
               </div>
@@ -350,16 +367,26 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openEditTranslationDialog(row)">
-              编辑
-            </el-button>
             <el-button
-              type="danger"
+              v-if="row.isMissingTranslation"
+              type="primary"
               size="small"
-              @click="deleteTranslation(row)"
+              @click="openCreateTranslationDialog(row.languageCode)"
             >
-              删除
+              添加译名
             </el-button>
+            <template v-else>
+              <el-button size="small" @click="openEditTranslationDialog(row)">
+                编辑
+              </el-button>
+              <el-button
+                type="danger"
+                size="small"
+                @click="deleteTranslation(row)"
+              >
+                删除
+              </el-button>
+            </template>
           </template>
         </ResponsiveTableColumn>
       </ResponsiveTable>
@@ -437,9 +464,9 @@ import {
 } from '@/composables/useListSessionParams'
 import {
   getLanguageText,
-  sortBySupportedLanguageOrder,
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
+import { buildProperNounTranslationDisplayItems } from '@/utils/properNounTranslation'
 import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
 import ProperNounStarButton from '@/components/ProperNounStarButton.vue'
 
@@ -563,6 +590,13 @@ export default {
         return [params.languageCode]
       }
       return []
+    })
+    const translationDisplayList = computed(() => {
+      return buildProperNounTranslationDisplayItems({
+        translations: translationList.value,
+        languageOptions,
+        sourceLanguageCode: activeTerm.value?.sourceLanguageCode
+      })
     })
 
     function assignReactive(target, source) {
@@ -795,10 +829,7 @@ export default {
         .getProperNounTranslationList({ termId: activeTerm.value._id }, true)
         .then(response => {
           const data = response.data.data || {}
-          translationList.value = sortBySupportedLanguageOrder(
-            data.list,
-            item => item.languageCode
-          )
+          translationList.value = data.list || []
         })
         .finally(() => {
           translationLoading.value = false
@@ -812,9 +843,16 @@ export default {
       }
     }
 
-    function openCreateTranslationDialog() {
+    function openCreateTranslationDialog(languageCode = '') {
       resetTranslationForm()
       translationMode.value = 'create'
+      let selectedLanguageCode = ''
+      if (typeof languageCode === 'string') {
+        selectedLanguageCode = languageCode.trim()
+      }
+      if (selectedLanguageCode) {
+        translationForm.languageCode = selectedLanguageCode
+      }
       translationEditDialogVisible.value = true
     }
 
@@ -897,22 +935,29 @@ export default {
       return formatDate(value)
     }
 
-    function getDisplayedTranslations(row) {
-      const translations = Array.isArray(row.translations)
-        ? row.translations
-        : []
-      if (params.languageCode) {
-        return sortBySupportedLanguageOrder(
-          translations.filter(
-            item => item.languageCode === params.languageCode
-          ),
-          item => item.languageCode
-        )
+    function getDisplayedTranslationItems(row) {
+      return buildProperNounTranslationDisplayItems({
+        translations: row?.translations,
+        languageOptions,
+        selectedLanguageCode: params.languageCode,
+        sourceLanguageCode: row?.sourceLanguageCode
+      })
+    }
+
+    function getTranslationTagType(translation) {
+      if (translation?.isMissingTranslation) {
+        return 'danger'
       }
-      return sortBySupportedLanguageOrder(
-        translations,
-        item => item.languageCode
-      )
+      return 'primary'
+    }
+
+    function getTranslationTagText(translation) {
+      const languageText =
+        translation?.languageLabel || getLanguageText(translation?.languageCode)
+      if (translation?.isMissingTranslation) {
+        return `${languageText}：缺少译名`
+      }
+      return `${languageText}：${translation?.translatedText || ''}`
     }
 
     watch(
@@ -934,12 +979,14 @@ export default {
       deleteTerm,
       deleteSelectedTerms,
       deleteTranslation,
-      getDisplayedTranslations,
+      getDisplayedTranslationItems,
       getLastUsedAtText,
       getLanguageText,
       getTermList,
       getTranslationList,
       getTranslationSourceText,
+      getTranslationTagText,
+      getTranslationTagType,
       getUsedCountText,
       handleInternetSearchApplied,
       handleTermSelectionChange,
@@ -968,6 +1015,7 @@ export default {
       total,
       translationDialogTitle,
       translationDialogVisible,
+      translationDisplayList,
       translationEditDialogVisible,
       translationForm,
       translationList,
