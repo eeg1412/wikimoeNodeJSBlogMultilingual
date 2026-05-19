@@ -57,8 +57,7 @@
       <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
         <el-switch
           v-model="form.syncRelatedPosts"
-          active-text="整理相关文章"
-          inactive-text="仅当前文章"
+          active-text="同步整理相关文章"
         />
       </el-form-item>
     </el-form>
@@ -115,7 +114,7 @@ export default {
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
       targetLanguageCodes: getDefaultTargetLanguageCodes(DEFAULT_LANGUAGE_CODE),
       searchOfficialTermTranslations: false,
-      syncRelatedPosts: false
+      syncRelatedPosts: true
     })
 
     const dialogVisible = computed({
@@ -150,7 +149,7 @@ export default {
         form.sourceLanguageCode
       )
       form.searchOfficialTermTranslations = false
-      form.syncRelatedPosts = false
+      form.syncRelatedPosts = true
       defaultLoading.value = false
       defaultRequestId += 1
     }
