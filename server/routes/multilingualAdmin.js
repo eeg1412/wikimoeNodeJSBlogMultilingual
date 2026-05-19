@@ -154,6 +154,12 @@ const multilingualAdminRouteSetting = [
     controller: properNounTranslationController.updateTerm
   },
   {
+    path: '/proper-noun/term/star',
+    method: 'put',
+    middleware: [checkAuth],
+    controller: properNounTranslationController.updateTermStar
+  },
+  {
     path: '/proper-noun/term/delete',
     method: 'delete',
     middleware: [checkAuth],

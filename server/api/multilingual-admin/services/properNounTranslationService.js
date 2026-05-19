@@ -14,6 +14,7 @@ const utils = require('../../../utils/utils')
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 const MAX_TERM_COUNT = 10000
+const MAX_STARRED_TERM_COUNT = 9000
 const MAX_BATCH_DELETE_TERM_COUNT = 100
 const MAX_CANDIDATE_EXTRA_COUNT = 50
 const MAX_CANDIDATE_QUERY_LIMIT = 100
@@ -21,6 +22,7 @@ const MAX_CANDIDATE_KEYWORD_COUNT = 8
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 200
 const CLEANUP_DEBOUNCE_MS = 30 * 1000
 const CLEANUP_LOCK_KEY = 'properNounTermCleanup'
+const STARRED_TERM_LOCK_KEY = 'properNounTermStarred'
 const TRANSLATION_SOURCE_VALUES = [
   'manual',
   'internetSearchAi',
@@ -118,7 +120,10 @@ async function enforceProperNounTermLimit() {
     }
 
     const deleteCount = total - MAX_TERM_COUNT
-    const staleTermList = await TermModel.find({}, { _id: 1 })
+    const staleTermList = await TermModel.find(
+      { isStarred: { $ne: true } },
+      { _id: 1 }
+    )
       .sort(getCleanupSort())
       .limit(deleteCount)
       .lean()
@@ -141,12 +146,14 @@ async function enforceProperNounTermLimit() {
     const termDeleteResult = await TermModel.deleteMany({
       _id: { $in: termIdList }
     })
+    const protectedCount = total - staleTermList.length
 
     return {
       total,
       deletedCount: termDeleteResult.deletedCount || 0,
       translationDeletedCount: translationDeleteResult.deletedCount || 0,
-      relationDeletedCount: relationDeleteResult.deletedCount || 0
+      relationDeletedCount: relationDeleteResult.deletedCount || 0,
+      protectedCount
     }
   })
 }
@@ -401,6 +408,27 @@ function normalizeBoolean(value, defaultValue = true) {
   return defaultValue
 }
 
+function normalizeBooleanFilter(value) {
+  if (value === true || value === 'true' || value === 1 || value === '1') {
+    return true
+  }
+  if (value === false || value === 'false' || value === 0 || value === '0') {
+    return false
+  }
+  return null
+}
+
+function buildTermStarredMatch(value) {
+  const isStarred = normalizeBooleanFilter(value)
+  if (isStarred === true) {
+    return { isStarred: true }
+  }
+  if (isStarred === false) {
+    return { isStarred: { $ne: true } }
+  }
+  return {}
+}
+
 function normalizeTranslationSource(value) {
   const translationSource = normalizeString(value, 60)
   if (TRANSLATION_SOURCE_VALUES.includes(translationSource)) {
@@ -556,6 +584,8 @@ function buildTermSearchMatch(query = {}) {
     ]
   }
 
+  Object.assign(match, buildTermStarredMatch(query.isStarred))
+
   /*
   if (query.enabled === 'true' || query.enabled === true) {
     match.enabled = true
@@ -666,6 +696,7 @@ async function getTermList(query = {}) {
   const TranslationModel = getTranslationModel()
 
   const termCount = await TermModel.countDocuments({})
+  const starredTermCount = await TermModel.countDocuments({ isStarred: true })
   const total = await TermModel.countDocuments(match)
   const termList = await TermModel.find(match)
     .sort({ updatedAt: -1, _id: -1 })
@@ -686,9 +717,68 @@ async function getTermList(query = {}) {
     total,
     termCount,
     maxTermCount: MAX_TERM_COUNT,
+    starredTermCount,
+    maxStarredTermCount: MAX_STARRED_TERM_COUNT,
     page,
     limit
   }
+}
+
+async function updateTermStar(body = {}) {
+  const id = parseObjectId(body.id || body._id || body.termId, 'id')
+  const isStarred = normalizeBoolean(body.isStarred, false)
+  const TermModel = getTermModel()
+
+  return await utils.executeInLock(STARRED_TERM_LOCK_KEY, async () => {
+    const existingTerm = await TermModel.findOne({ _id: id }).lean()
+    if (!existingTerm) {
+      throw new ApiError(ERROR_CODES.CONTENT_NOT_FOUND, '名词不存在', 'id', 404)
+    }
+
+    if (existingTerm.isStarred === isStarred) {
+      const starredTermCount = await TermModel.countDocuments({
+        isStarred: true
+      })
+      return {
+        term: existingTerm,
+        starredTermCount,
+        maxStarredTermCount: MAX_STARRED_TERM_COUNT
+      }
+    }
+
+    if (isStarred) {
+      const starredTermCount = await TermModel.countDocuments({
+        isStarred: true,
+        _id: { $ne: id }
+      })
+      if (starredTermCount >= MAX_STARRED_TERM_COUNT) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_FIELD_INVALID,
+          `最多只能标星 ${MAX_STARRED_TERM_COUNT} 个专有名词`,
+          'isStarred',
+          400,
+          {
+            starredTermCount,
+            maxStarredTermCount: MAX_STARRED_TERM_COUNT
+          }
+        )
+      }
+    }
+
+    const term = await TermModel.findOneAndUpdate(
+      { _id: id },
+      { $set: { isStarred } },
+      { new: true }
+    ).lean()
+    const starredTermCount = await TermModel.countDocuments({
+      isStarred: true
+    })
+    return {
+      term,
+      starredTermCount,
+      maxStarredTermCount: MAX_STARRED_TERM_COUNT
+    }
+  })
 }
 
 async function getTermDetail(query = {}) {
@@ -1644,7 +1734,10 @@ function normalizeAiTranslationNoteMap(termItem = {}) {
 }
 
 function getAiTranslationNoteForLanguage(translationNoteMap, languageCode) {
-  const languageNote = normalizeString(translationNoteMap.get(languageCode), 2000)
+  const languageNote = normalizeString(
+    translationNoteMap.get(languageCode),
+    2000
+  )
   if (languageNote) {
     return languageNote
   }
@@ -1700,7 +1793,10 @@ function buildAiSearchTranslationPayload({
 }) {
   const termSourceText = normalizeSourceText(term?.sourceText || sourceText)
   if (
-    isSameSourceAndTranslatedText(termSourceText, translationEntry.translatedText)
+    isSameSourceAndTranslatedText(
+      termSourceText,
+      translationEntry.translatedText
+    )
   ) {
     if (allowSameSourceTranslationWithNote !== true) {
       return null
@@ -2068,6 +2164,7 @@ module.exports = {
   SUPPORTED_LANGUAGE_CODES,
   TRANSLATION_SOURCE_VALUES,
   buildGlossaryMarkdown,
+  buildTermStarredMatch,
   buildLooseSourceTextIdentity,
   buildNormalizedSourceText,
   batchDeleteTerms,
@@ -2090,6 +2187,7 @@ module.exports = {
   normalizeSourceText,
   scheduleProperNounTermCleanup,
   updateTerm,
+  updateTermStar,
   updateTranslation,
   upsertAiSearchTerms
 }

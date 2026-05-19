@@ -66,6 +66,17 @@
             </el-select>
           </el-form-item>
           <el-form-item>
+            <el-select
+              v-model="params.isStarred"
+              placeholder="标星状态"
+              clearable
+              style="width: 130px"
+            >
+              <el-option label="已标星" value="true" />
+              <el-option label="未标星" value="false" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
             <el-button type="primary" @click="getTermList(true)">
               搜索
             </el-button>
@@ -97,6 +108,16 @@
         @selection-change="handleTermSelectionChange"
       >
         <ResponsiveTableColumn type="selection" width="48" reserve-selection />
+        <ResponsiveTableColumn label="标星" width="84" align="center">
+          <template #default="{ row }">
+            <ProperNounStarButton
+              :is-starred="isTermStarred(row)"
+              :loading="starUpdatingId === row._id"
+              :disabled="Boolean(starUpdatingId) && starUpdatingId !== row._id"
+              @click="toggleTermStar(row)"
+            />
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="原文名词" min-width="240">
           <template #default="{ row }">
             <div class="source-post-term-source-text">
@@ -403,6 +424,7 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
 import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
+import ProperNounStarButton from '@/components/ProperNounStarButton.vue'
 import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 
 const TRANSLATION_SOURCE_TEXT_MAP = {
@@ -443,6 +465,7 @@ export default {
     Plus,
     Refresh,
     ProperNounInternetSearchButton,
+    ProperNounStarButton,
     SourcePostTermOrganizeDialog
   },
   setup() {
@@ -455,12 +478,14 @@ export default {
     const relationCount = ref(0)
     const sourcePost = ref(null)
     const selectedTermRows = ref([])
+    const starUpdatingId = ref('')
     const organizeDialogVisible = ref(false)
     const params = reactive({
       page: 1,
       limit: 20,
       keyword: '',
-      languageCode: ''
+      languageCode: '',
+      isStarred: ''
     })
 
     const termDialogVisible = ref(false)
@@ -532,7 +557,8 @@ export default {
         page: 1,
         limit: 20,
         keyword: '',
-        languageCode: ''
+        languageCode: '',
+        isStarred: ''
       })
       restoreListSessionParams(route, params, [], listSessionKey.value)
     }
@@ -548,6 +574,9 @@ export default {
       }
       if (params.languageCode) {
         requestParams.languageCode = params.languageCode
+      }
+      if (params.isStarred !== '') {
+        requestParams.isStarred = params.isStarred
       }
       return requestParams
     }
@@ -684,6 +713,35 @@ export default {
     function clearTermSelection() {
       selectedTermRows.value = []
       tableRef.value?.clearSelection()
+    }
+
+    function isTermStarred(row) {
+      return row?.isStarred === true
+    }
+
+    async function toggleTermStar(row) {
+      const id = String(row?._id || '')
+      if (!id || starUpdatingId.value) {
+        return
+      }
+
+      const isStarred = !isTermStarred(row)
+      starUpdatingId.value = id
+      try {
+        const response = await multilingualApi.updateProperNounTermStar(
+          { id, isStarred },
+          true
+        )
+        const data = response.data.data || {}
+        const term = data.term || {}
+        row.isStarred = term.isStarred === true
+        ElMessage.success(isStarred ? '名词已标星' : '名词已取消标星')
+        if (params.isStarred !== '') {
+          getTermList(false)
+        }
+      } finally {
+        starUpdatingId.value = ''
+      }
     }
 
     function openTranslationDialog(row) {
@@ -892,6 +950,7 @@ export default {
       handleInternetSearchApplied,
       handleTermSelectionChange,
       internetSearchDefaultLanguageCodes,
+      isTermStarred,
       languageOptions,
       loading,
       openCreateTermDialog,
@@ -907,6 +966,7 @@ export default {
       sourceId,
       sourcePost,
       sourcePostTitle,
+      starUpdatingId,
       submitTerm,
       submitTranslation,
       tableRef,
@@ -924,6 +984,7 @@ export default {
       translationLoading,
       translationMode,
       translationSaving,
+      toggleTermStar,
       unbindTerm
     }
   }

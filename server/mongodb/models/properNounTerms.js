@@ -33,6 +33,11 @@ var properNounTerms = new Schema(
       default: 0,
       index: true
     },
+    isStarred: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     enabled: {
       type: Boolean,
       default: true,

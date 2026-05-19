@@ -40,6 +40,17 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="params.isStarred"
+              placeholder="标星状态"
+              clearable
+              style="width: 130px"
+            >
+              <el-option label="已标星" value="true" />
+              <el-option label="未标星" value="false" />
+            </el-select>
+          </el-form-item>
           <!--
           <el-form-item>
             <el-select
@@ -66,7 +77,7 @@
       </div>
       <div class="fr proper-noun-actions">
         <div class="proper-noun-limit-summary">
-          专有名词 {{ termLimitText }}
+          专有名词 {{ termLimitText }}，标星 {{ starLimitText }}
         </div>
         <div class="proper-noun-action-buttons">
           <ProperNounInternetSearchButton
@@ -119,6 +130,16 @@
         @selection-change="handleTermSelectionChange"
       >
         <ResponsiveTableColumn type="selection" width="48" reserve-selection />
+        <ResponsiveTableColumn label="标星" width="84" align="center">
+          <template #default="{ row }">
+            <ProperNounStarButton
+              :is-starred="isTermStarred(row)"
+              :loading="starUpdatingId === row._id"
+              :disabled="Boolean(starUpdatingId) && starUpdatingId !== row._id"
+              @click="toggleTermStar(row)"
+            />
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="原文名词" min-width="240">
           <template #default="{ row }">
             <div class="proper-noun-source-text">{{ row.sourceText }}</div>
@@ -420,6 +441,7 @@ import {
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
 import ProperNounInternetSearchButton from '@/components/ProperNounInternetSearchButton.vue'
+import ProperNounStarButton from '@/components/ProperNounStarButton.vue'
 
 const TRANSLATION_SOURCE_TEXT_MAP = {
   manual: '手动维护',
@@ -453,6 +475,7 @@ export default {
   name: 'ProperNounTranslationList',
   components: {
     ProperNounInternetSearchButton,
+    ProperNounStarButton,
     Plus,
     Refresh
   },
@@ -461,18 +484,22 @@ export default {
     const tableRef = ref(null)
     const loading = ref(false)
     const batchDeleting = ref(false)
+    const starUpdatingId = ref('')
     const termList = ref([])
     const total = ref(0)
     const selectedTermRows = ref([])
     const termSummary = reactive({
       count: 0,
-      maxCount: 0
+      maxCount: 0,
+      starredCount: 0,
+      maxStarredCount: 0
     })
     const params = reactive({
       page: 1,
       limit: 20,
       keyword: '',
-      languageCode: ''
+      languageCode: '',
+      isStarred: ''
       // enabled: ''
     })
     restoreListSessionParams(route, params)
@@ -523,6 +550,14 @@ export default {
       }
       return `${count}/${maxCount}`
     })
+    const starLimitText = computed(() => {
+      const count = getCountText(termSummary.starredCount)
+      const maxCount = getCountText(termSummary.maxStarredCount)
+      if (maxCount === '0') {
+        return `${count}/-`
+      }
+      return `${count}/${maxCount}`
+    })
     const internetSearchDefaultLanguageCodes = computed(() => {
       if (params.languageCode) {
         return [params.languageCode]
@@ -546,6 +581,9 @@ export default {
       }
       if (params.languageCode) {
         requestParams.languageCode = params.languageCode
+      }
+      if (params.isStarred !== '') {
+        requestParams.isStarred = params.isStarred
       }
       /*
       if (params.enabled !== '') {
@@ -572,6 +610,8 @@ export default {
           total.value = data.total || 0
           termSummary.count = data.termCount || 0
           termSummary.maxCount = data.maxTermCount || 0
+          termSummary.starredCount = data.starredTermCount || 0
+          termSummary.maxStarredCount = data.maxStarredTermCount || 0
           tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
@@ -655,6 +695,41 @@ export default {
     function clearTermSelection() {
       selectedTermRows.value = []
       tableRef.value?.clearSelection()
+    }
+
+    function isTermStarred(row) {
+      return row?.isStarred === true
+    }
+
+    async function toggleTermStar(row) {
+      const id = String(row?._id || '')
+      if (!id || starUpdatingId.value) {
+        return
+      }
+
+      const isStarred = !isTermStarred(row)
+      starUpdatingId.value = id
+      try {
+        const response = await multilingualApi.updateProperNounTermStar(
+          { id, isStarred },
+          true
+        )
+        const data = response.data.data || {}
+        const term = data.term || {}
+        row.isStarred = term.isStarred === true
+        if (typeof data.starredTermCount === 'number') {
+          termSummary.starredCount = data.starredTermCount
+        }
+        if (typeof data.maxStarredTermCount === 'number') {
+          termSummary.maxStarredCount = data.maxStarredTermCount
+        }
+        ElMessage.success(isStarred ? '名词已标星' : '名词已取消标星')
+        if (params.isStarred !== '') {
+          getTermList(false)
+        }
+      } finally {
+        starUpdatingId.value = ''
+      }
     }
 
     async function deleteSelectedTerms() {
@@ -869,6 +944,7 @@ export default {
       handleInternetSearchApplied,
       handleTermSelectionChange,
       internetSearchDefaultLanguageCodes,
+      isTermStarred,
       languageOptions,
       loading,
       openCreateTermDialog,
@@ -878,6 +954,8 @@ export default {
       openTranslationDialog,
       params,
       selectedTermIds,
+      starLimitText,
+      starUpdatingId,
       submitTerm,
       submitTranslation,
       tableRef,
@@ -895,7 +973,8 @@ export default {
       translationList,
       translationLoading,
       translationMode,
-      translationSaving
+      translationSaving,
+      toggleTermStar
     }
   }
 }

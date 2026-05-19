@@ -353,6 +353,7 @@ async function getSourcePostTermList(query = {}) {
   const termMatch = {
     _id: { $in: relationTermIdList },
     enabled: true,
+    ...properNounTranslationService.buildTermStarredMatch(query.isStarred),
     ...buildTermKeywordMatch(query.keyword)
   }
   const matchedTerms = await TermModel.find(termMatch)

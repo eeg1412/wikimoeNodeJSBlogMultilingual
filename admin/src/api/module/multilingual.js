@@ -135,6 +135,12 @@ export default function (api) {
         noLoading
       })
     },
+    updateProperNounTermStar(data, noLoading = false) {
+      return api.put('/proper-noun/term/star', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     deleteProperNounTerm(data, noLoading = false) {
       return api.delete('/proper-noun/term/delete', {
         params: data,
