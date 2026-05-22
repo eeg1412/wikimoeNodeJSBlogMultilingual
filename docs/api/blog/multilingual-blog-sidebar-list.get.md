@@ -1,0 +1,47 @@
+# GET /api/multilingual-blog/sidebar/list
+
+## 概述
+
+- 接口类型：多语言 Blog API
+- 说明：获取侧边栏配置列表。
+- 访问路径：`/api/multilingual-blog/sidebar/list`
+- 上游路径：同访问路径
+- 控制器：`server/api/blog/sidebar/getSidebarList.js`
+- 前端封装：`blog/app/api/sidebar.js#getSidebarListApi`
+
+## 请求
+
+- Method：`GET`
+- URL：`/api/multilingual-blog/sidebar/list`
+
+### 参数
+
+| 名称 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `languageCode` | Query/Body | string | 否 | 语言代码；前端 `multilingualRequest` 会自动补齐，缺省时服务端使用默认语言。 |
+
+## 行为
+
+- 优先读取语言缓存 `languageCache.sidebarList`，缓存不存在时重新构建。
+
+## 成功响应
+
+```json
+[
+  {
+    "_id": "ObjectId",
+    "type": 12,
+    "count": 5
+  }
+]
+```
+
+## 错误响应
+
+- 503: 服务未就绪时由 `checkIsReady` 返回 `Service Unavailable`。
+- 400: 请求参数校验失败或服务处于备份维护状态时返回 `{ errors: [{ message }] }`。
+- 多语言接口会先校验 `languageCode` 是否可用于 Blog；未启用时返回 404。
+
+## 备注
+
+- 无。
