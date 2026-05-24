@@ -134,12 +134,13 @@
             class="w_10"
           />
 
-          <div class="translation-json-group ai-cover-translation-group">
+          <div
+            v-if="showAiCoverImageTranslationOption"
+            class="translation-json-group ai-cover-translation-group"
+          >
             <div class="translation-json-group-header">
               <div class="translation-json-group-heading">
-                <div class="translation-json-group-title">
-                  {{ form.type === 2 ? '封面媒体处理' : '封面图处理' }}
-                </div>
+                <div class="translation-json-group-title">封面图处理</div>
                 <div class="translation-dialog-intro-text">
                   直接对照当前语言内容与源内容的封面图，决定是否识别并翻译图中标题。
                 </div>
@@ -152,12 +153,12 @@
             >
               <el-checkbox
                 v-model="aiTranslateCoverImage"
-                :disabled="isAiBusy"
+                :disabled="isAiCoverImageTranslationDisabled"
                 class="translation-json-entry"
               >
                 <div class="ai-cover-translation-entry-body">
                   <div class="ai-cover-translation-entry-title">
-                    {{ form.type === 2 ? '封面媒体标题' : '封面图标题' }}
+                    封面图标题
                   </div>
                   <div class="translation-entry-preview-rows">
                     <div class="translation-entry-preview-row">
@@ -230,11 +231,7 @@
                             v-if="currentAiCoverImageList.length === 0"
                             class="translation-media-empty cGray666"
                           >
-                            {{
-                              form.type === 2
-                                ? '未关联媒体内容'
-                                : '未关联封面图'
-                            }}
+                            未关联封面图
                           </span>
                         </div>
                       </div>
@@ -308,11 +305,7 @@
                             v-if="sourceAiCoverImageList.length === 0"
                             class="translation-media-empty cGray666"
                           >
-                            {{
-                              form.type === 2
-                                ? '未关联媒体内容'
-                                : '未关联封面图'
-                            }}
+                            未关联封面图
                           </span>
                         </div>
                       </div>
@@ -320,6 +313,9 @@
                   </div>
                 </div>
               </el-checkbox>
+              <AiFeatureUnavailableTip
+                :message="aiCoverImageTranslationUnavailableReason"
+              />
             </div>
           </div>
 
@@ -327,8 +323,11 @@
             <el-form-item label="名词检索">
               <el-switch
                 v-model="aiSearchOfficialTermTranslations"
-                :disabled="isAiBusy || officialTermSearchDefaultLoading"
+                :disabled="isOfficialTermSearchDisabled"
                 active-text="联网检索官方译名"
+              />
+              <AiFeatureUnavailableTip
+                :message="officialTermSearchUnavailableReason"
               />
             </el-form-item>
             <el-form-item label="此次提示词">
@@ -613,12 +612,14 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, VideoPlay } from '@element-plus/icons-vue'
 import store from '@/store'
 import { multilingualApi } from '@/api'
+import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
   getLanguageText,
   getPostDisplayTitle,
   getRelationDisplayName,
+  isCoverImageTranslationSupportedPostType,
   SUPPORTED_LANGUAGE_OPTIONS
 } from '@/utils/multilingual'
 import {
@@ -626,7 +627,13 @@ import {
   extractApiErrorMessages
 } from '@/utils/apiError'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
-import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
+import {
+  createAiSettingsAvailability,
+  createAiSettingsLoadErrorAvailability,
+  getImageGenerationUnavailableReason,
+  getInternetSearchUnavailableReason,
+  loadAiSettingsAvailability
+} from '@/utils/aiSettingsAvailability'
 import { loadAndOpenImg } from '@/utils/utils'
 import {
   buildSourceToTargetTranslationEntries,
@@ -871,6 +878,7 @@ function getRelationRecordDisplayName(record, field = {}) {
 export default {
   name: 'TranslationPostAiTranslationDialog',
   components: {
+    AiFeatureUnavailableTip,
     Document,
     TranslationEntryMeta,
     TranslationEntrySelectableGroups,
@@ -902,6 +910,7 @@ export default {
     const aiSourceLanguageCode = ref('')
     const aiTranslateCoverImage = ref(false)
     const aiSearchOfficialTermTranslations = ref(false)
+    const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
@@ -952,6 +961,30 @@ export default {
       }
       return sourceReferencePost.value.coverImages.filter(Boolean)
     })
+    const showAiCoverImageTranslationOption = computed(() => {
+      return isCoverImageTranslationSupportedPostType(form.type)
+    })
+    const aiCoverImageTranslationUnavailableReason = computed(() => {
+      if (!showAiCoverImageTranslationOption.value) {
+        return ''
+      }
+      return getImageGenerationUnavailableReason(aiSettingsAvailability.value)
+    })
+    const isAiCoverImageTranslationDisabled = computed(() => {
+      if (isAiBusy.value) {
+        return true
+      }
+      if (officialTermSearchDefaultLoading.value) {
+        return true
+      }
+      return Boolean(aiCoverImageTranslationUnavailableReason.value)
+    })
+    const hasSourceCoverTranslationCandidate = computed(() => {
+      if (!showAiCoverImageTranslationOption.value) {
+        return false
+      }
+      return sourceAiCoverImageList.value.length > 0
+    })
     const creatableAiSkippedEntries = computed(() => {
       return aiSkippedEntries.value.filter(item => {
         return canCreateSkippedTranslation(item)
@@ -961,6 +994,12 @@ export default {
       return selectedAiEntryIds.value.length > 0
     })
     const hasSelectedAiCoverImage = computed(() => {
+      if (!showAiCoverImageTranslationOption.value) {
+        return false
+      }
+      if (aiCoverImageTranslationUnavailableReason.value) {
+        return false
+      }
       return aiTranslateCoverImage.value === true
     })
     const canCreateAiTranslationJob = computed(() => {
@@ -975,6 +1014,51 @@ export default {
     const currentAiSourceLanguageCode = computed(() => {
       return aiSourceLanguageCode.value
     })
+    const officialTermSearchUnavailableReason = computed(() => {
+      return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
+    })
+    const isOfficialTermSearchDisabled = computed(() => {
+      if (isAiBusy.value) {
+        return true
+      }
+      if (officialTermSearchDefaultLoading.value) {
+        return true
+      }
+      return Boolean(officialTermSearchUnavailableReason.value)
+    })
+
+    function shouldSearchOfficialTermTranslations() {
+      if (officialTermSearchUnavailableReason.value) {
+        return false
+      }
+      return aiSearchOfficialTermTranslations.value === true
+    }
+
+    function shouldTranslateAiCoverImage() {
+      if (!showAiCoverImageTranslationOption.value) {
+        return false
+      }
+      if (aiCoverImageTranslationUnavailableReason.value) {
+        return false
+      }
+      return aiTranslateCoverImage.value === true
+    }
+
+    function enforceAiCoverImageTranslationAvailability() {
+      if (showAiCoverImageTranslationOption.value) {
+        if (!aiCoverImageTranslationUnavailableReason.value) {
+          return
+        }
+      }
+      aiTranslateCoverImage.value = false
+    }
+
+    function enforceOfficialTermSearchAvailability() {
+      if (!officialTermSearchUnavailableReason.value) {
+        return
+      }
+      aiSearchOfficialTermTranslations.value = false
+    }
 
     function getDefaultAiSourceLanguageCode() {
       return form.sourceLanguageCode || ''
@@ -1379,6 +1463,7 @@ export default {
       aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
       aiTranslateCoverImage.value = false
       aiSearchOfficialTermTranslations.value = false
+      aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
       aiImportPreview.value = null
@@ -1396,17 +1481,23 @@ export default {
       officialTermSearchDefaultRequestId = requestId
       officialTermSearchDefaultLoading.value = true
       try {
-        const defaultValue =
-          await getOfficialTermSearchDefaultValue(multilingualApi)
+        const availability = await loadAiSettingsAvailability(multilingualApi)
         if (requestId !== officialTermSearchDefaultRequestId) {
           return
         }
         if (!visible.value) {
           return
         }
-        aiSearchOfficialTermTranslations.value = defaultValue
+        aiSettingsAvailability.value = availability
+        aiSearchOfficialTermTranslations.value =
+          availability.internetSearchEnabled === true
+        enforceAiCoverImageTranslationAvailability()
       } catch (error) {
         if (requestId === officialTermSearchDefaultRequestId) {
+          aiSettingsAvailability.value =
+            createAiSettingsLoadErrorAvailability(error)
+          aiSearchOfficialTermTranslations.value = false
+          enforceAiCoverImageTranslationAvailability()
           extractApiErrorMessages(error).forEach(message => {
             ElMessage.error(message)
           })
@@ -1842,7 +1933,7 @@ export default {
       }
       if (
         selectedAiEntryIds.value.length === 0 &&
-        !aiTranslateCoverImage.value
+        !shouldTranslateAiCoverImage()
       ) {
         ElMessage.warning('请至少选择一项翻译内容')
         return
@@ -1879,9 +1970,9 @@ export default {
               targetLanguageCode: form.languageCode,
               prompt: aiPrompt.value,
               entries: selectedEntries,
-              translateCoverImage: aiTranslateCoverImage.value,
+              translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
-                aiSearchOfficialTermTranslations.value
+                shouldSearchOfficialTermTranslations()
             })
           }
         )
@@ -1908,7 +1999,7 @@ export default {
     async function createAiTranslationJob() {
       if (
         selectedAiEntryIds.value.length === 0 &&
-        !aiTranslateCoverImage.value
+        !shouldTranslateAiCoverImage()
       ) {
         ElMessage.warning('请至少选择一项翻译内容')
         return
@@ -1946,9 +2037,9 @@ export default {
             prompt: aiPrompt.value,
             baseMode: aiBaseMode.value,
             options: {
-              translateCoverImage: aiTranslateCoverImage.value,
+              translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
-                aiSearchOfficialTermTranslations.value
+                shouldSearchOfficialTermTranslations()
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
@@ -2161,14 +2252,14 @@ export default {
       refreshAiTranslationCandidates().then(() => {
         if (
           aiEntryList.value.length === 0 &&
-          sourceAiCoverImageList.value.length === 0
+          !hasSourceCoverTranslationCandidate.value
         ) {
           ElMessage.warning('没有找到可提交给 AI 的源内容条目')
           return
         }
         if (
           aiEntryList.value.length === 0 &&
-          sourceAiCoverImageList.value.length > 0
+          hasSourceCoverTranslationCandidate.value
         ) {
           ElMessage.info('当前没有可翻译正文条目，仍可仅翻译封面图')
         }
@@ -2186,6 +2277,18 @@ export default {
       }
     )
 
+    watch(showAiCoverImageTranslationOption, () => {
+      enforceAiCoverImageTranslationAvailability()
+    })
+
+    watch(aiCoverImageTranslationUnavailableReason, () => {
+      enforceAiCoverImageTranslationAvailability()
+    })
+
+    watch(officialTermSearchUnavailableReason, () => {
+      enforceOfficialTermSearchAvailability()
+    })
+
     return {
       Document,
       VideoPlay,
@@ -2197,6 +2300,7 @@ export default {
       aiImportPreviewCoverEntries,
       aiImportPreviewGroups,
       aiImportPreviewTotalChangeCount,
+      aiCoverImageTranslationUnavailableReason,
       aiLoading,
       aiPrompt,
       aiSearchOfficialTermTranslations,
@@ -2230,18 +2334,22 @@ export default {
       handleAiBaseModeChange,
       handleAiDialogBeforeClose,
       handleAiSourceLanguageChange,
+      isAiCoverImageTranslationDisabled,
       isAiBusy,
+      isOfficialTermSearchDisabled,
       isImageAttachment,
       isSkippedTranslationCreating,
       isVideoAttachment,
       languageOptions,
       officialTermSearchDefaultLoading,
+      officialTermSearchUnavailableReason,
       openMediaPreview,
       requestAiTranslation,
       resetAiTranslationPreview,
       selectAllAiEntries,
       selectedAiEntryIds,
       sourceAiCoverImageList,
+      showAiCoverImageTranslationOption,
       stopAiTranslation,
       visible
     }

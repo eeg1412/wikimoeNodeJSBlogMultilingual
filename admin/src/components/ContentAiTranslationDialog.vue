@@ -57,8 +57,11 @@
             <el-form-item label="名词检索">
               <el-switch
                 v-model="searchOfficialTermTranslations"
-                :disabled="isBusy || officialTermSearchDefaultLoading"
+                :disabled="isOfficialTermSearchDisabled"
                 active-text="联网检索官方译名"
+              />
+              <AiFeatureUnavailableTip
+                :message="officialTermSearchUnavailableReason"
               />
             </el-form-item>
           </el-form>
@@ -219,6 +222,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import store from '@/store'
 import { multilingualApi } from '@/api'
+import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
@@ -230,7 +234,12 @@ import {
   extractApiErrorMessages
 } from '@/utils/apiError'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
-import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
+import {
+  createAiSettingsAvailability,
+  createAiSettingsLoadErrorAvailability,
+  getInternetSearchUnavailableReason,
+  loadAiSettingsAvailability
+} from '@/utils/aiSettingsAvailability'
 import { renderRichTextDocument } from '@/utils/translationJson'
 
 function stringifyValue(valueType, value) {
@@ -290,6 +299,7 @@ function applyUrlListTextPatch(payload, item) {
 export default {
   name: 'ContentAiTranslationDialog',
   components: {
+    AiFeatureUnavailableTip,
     TranslationEntryMeta,
     TranslationEntrySelectableGroups
   },
@@ -316,6 +326,7 @@ export default {
     const selectedEntryIds = ref([])
     const prompt = ref('')
     const searchOfficialTermTranslations = ref(false)
+    const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
     const preview = ref(null)
     const streamStatusList = ref([])
@@ -344,9 +355,28 @@ export default {
     const requestSourceLanguageCode = computed(
       () => selectedSourceLanguageCode.value
     )
+    const officialTermSearchUnavailableReason = computed(() => {
+      return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
+    })
+    const isOfficialTermSearchDisabled = computed(() => {
+      if (isBusy.value) {
+        return true
+      }
+      if (officialTermSearchDefaultLoading.value) {
+        return true
+      }
+      return Boolean(officialTermSearchUnavailableReason.value)
+    })
 
     function getDefaultSourceLanguageCode() {
       return props.sourceLanguageCode || ''
+    }
+
+    function shouldSearchOfficialTermTranslations() {
+      if (officialTermSearchUnavailableReason.value) {
+        return false
+      }
+      return searchOfficialTermTranslations.value === true
     }
 
     function resetState() {
@@ -361,6 +391,7 @@ export default {
       selectedEntryIds.value = []
       prompt.value = ''
       searchOfficialTermTranslations.value = false
+      aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
       preview.value = null
@@ -373,17 +404,21 @@ export default {
       officialTermSearchDefaultRequestId = requestId
       officialTermSearchDefaultLoading.value = true
       try {
-        const defaultValue =
-          await getOfficialTermSearchDefaultValue(multilingualApi)
+        const availability = await loadAiSettingsAvailability(multilingualApi)
         if (requestId !== officialTermSearchDefaultRequestId) {
           return
         }
         if (!visible.value) {
           return
         }
-        searchOfficialTermTranslations.value = defaultValue
+        aiSettingsAvailability.value = availability
+        searchOfficialTermTranslations.value =
+          availability.internetSearchEnabled === true
       } catch (error) {
         if (requestId === officialTermSearchDefaultRequestId) {
+          aiSettingsAvailability.value =
+            createAiSettingsLoadErrorAvailability(error)
+          searchOfficialTermTranslations.value = false
           extractApiErrorMessages(error).forEach(message => {
             ElMessage.error(message)
           })
@@ -715,7 +750,7 @@ export default {
               snapshotVersion: props.snapshotVersion,
               prompt: prompt.value,
               searchOfficialTermTranslations:
-                searchOfficialTermTranslations.value,
+                shouldSearchOfficialTermTranslations(),
               entries: selectedEntries
             })
           }
@@ -780,7 +815,7 @@ export default {
             baseMode: baseMode.value,
             options: {
               searchOfficialTermTranslations:
-                searchOfficialTermTranslations.value
+                shouldSearchOfficialTermTranslations()
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
@@ -848,6 +883,13 @@ export default {
       }
     )
 
+    watch(officialTermSearchUnavailableReason, reason => {
+      if (!reason) {
+        return
+      }
+      searchOfficialTermTranslations.value = false
+    })
+
     return {
       applying,
       baseMode,
@@ -859,9 +901,11 @@ export default {
       getLanguageText,
       handleSourceLanguageChange,
       isBusy,
+      isOfficialTermSearchDisabled,
       languageOptions,
       loading,
       officialTermSearchDefaultLoading,
+      officialTermSearchUnavailableReason,
       preview,
       prompt,
       reloadEntries,

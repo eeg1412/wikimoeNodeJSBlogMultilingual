@@ -50,8 +50,12 @@
         <el-switch
           v-model="form.searchOfficialTermTranslations"
           :loading="defaultLoading"
+          :disabled="isOfficialTermSearchDisabled"
           active-text="开启"
           inactive-text="关闭"
+        />
+        <AiFeatureUnavailableTip
+          :message="officialTermSearchUnavailableReason"
         />
       </el-form-item>
       <el-form-item v-if="showSyncRelatedPostsOption" label="相关文章">
@@ -74,13 +78,19 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
+import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import {
   DEFAULT_LANGUAGE_CODE,
   SUPPORTED_LANGUAGE_OPTIONS,
   getPostDisplayTitle
 } from '@/utils/multilingual'
 import { extractApiErrorMessages } from '@/utils/apiError'
-import { getOfficialTermSearchDefaultValue } from '@/utils/internetSearchAiSettings'
+import {
+  createAiSettingsAvailability,
+  createAiSettingsLoadErrorAvailability,
+  getInternetSearchUnavailableReason,
+  loadAiSettingsAvailability
+} from '@/utils/aiSettingsAvailability'
 import { hasPostRelatedSourcePosts } from '@/utils/sourcePostRelatedPosts'
 
 function getSourcePostId(sourcePost) {
@@ -95,6 +105,9 @@ function getDefaultTargetLanguageCodes(sourceLanguageCode) {
 
 export default {
   name: 'SourcePostTermOrganizeDialog',
+  components: {
+    AiFeatureUnavailableTip
+  },
   props: {
     modelValue: {
       type: Boolean,
@@ -109,6 +122,7 @@ export default {
   setup(props, { emit }) {
     const submitting = ref(false)
     const defaultLoading = ref(false)
+    const aiSettingsAvailability = ref(createAiSettingsAvailability())
     let defaultRequestId = 0
     const form = reactive({
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
@@ -142,6 +156,22 @@ export default {
     const showSyncRelatedPostsOption = computed(() => {
       return hasPostRelatedSourcePosts(props.sourcePost)
     })
+    const officialTermSearchUnavailableReason = computed(() => {
+      return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
+    })
+    const isOfficialTermSearchDisabled = computed(() => {
+      if (defaultLoading.value) {
+        return true
+      }
+      return Boolean(officialTermSearchUnavailableReason.value)
+    })
+
+    function shouldSearchOfficialTermTranslations() {
+      if (officialTermSearchUnavailableReason.value) {
+        return false
+      }
+      return form.searchOfficialTermTranslations === true
+    }
 
     function resetForm() {
       form.sourceLanguageCode = DEFAULT_LANGUAGE_CODE
@@ -149,6 +179,7 @@ export default {
         form.sourceLanguageCode
       )
       form.searchOfficialTermTranslations = false
+      aiSettingsAvailability.value = createAiSettingsAvailability()
       form.syncRelatedPosts = true
       defaultLoading.value = false
       defaultRequestId += 1
@@ -170,17 +201,21 @@ export default {
       defaultRequestId = requestId
       defaultLoading.value = true
       try {
-        const defaultValue =
-          await getOfficialTermSearchDefaultValue(multilingualApi)
+        const availability = await loadAiSettingsAvailability(multilingualApi)
         if (requestId !== defaultRequestId) {
           return
         }
         if (!dialogVisible.value) {
           return
         }
-        form.searchOfficialTermTranslations = defaultValue
+        aiSettingsAvailability.value = availability
+        form.searchOfficialTermTranslations =
+          availability.internetSearchEnabled === true
       } catch (error) {
         if (requestId === defaultRequestId) {
+          aiSettingsAvailability.value =
+            createAiSettingsLoadErrorAvailability(error)
+          form.searchOfficialTermTranslations = false
           extractApiErrorMessages(error).forEach(message => {
             ElMessage.error(message)
           })
@@ -214,7 +249,8 @@ export default {
             sourceLanguageCode: form.sourceLanguageCode,
             targetLanguageCodes: form.targetLanguageCodes,
             title: sourcePostTitle.value,
-            searchOfficialTermTranslations: form.searchOfficialTermTranslations,
+            searchOfficialTermTranslations:
+              shouldSearchOfficialTermTranslations(),
             syncRelatedPosts:
               showSyncRelatedPostsOption.value && form.syncRelatedPosts === true
           },
@@ -241,12 +277,21 @@ export default {
       }
     )
 
+    watch(officialTermSearchUnavailableReason, reason => {
+      if (!reason) {
+        return
+      }
+      form.searchOfficialTermTranslations = false
+    })
+
     return {
       defaultLoading,
       dialogVisible,
       form,
       handleSourceLanguageChange,
+      isOfficialTermSearchDisabled,
       languageOptions,
+      officialTermSearchUnavailableReason,
       showSyncRelatedPostsOption,
       sourcePostTitle,
       submit,

@@ -255,6 +255,17 @@ export function getPostTypeTagType(value) {
   return undefined
 }
 
+export function isCoverImageTranslationSupportedPostType(value) {
+  const postType = Number(value)
+  if (postType === 1) {
+    return true
+  }
+  if (postType === 3) {
+    return true
+  }
+  return false
+}
+
 export function getPostStatusText(value) {
   const option = findOption(POST_STATUS_OPTIONS, Number(value))
   if (option) {

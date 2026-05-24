@@ -181,7 +181,7 @@ async function getSourcePostSummary(sourceId) {
   const repository = getSourcePostRepository()
   const sourcePost = await repository.findOne(
     { _id: sourceId },
-    '_id title alias type status sourceLanguageCode updatedAt createdAt',
+    '_id title excerpt alias type status sourceLanguageCode updatedAt createdAt',
     { lean: true }
   )
   if (!sourcePost) {
@@ -196,6 +196,7 @@ async function getSourcePostSummary(sourceId) {
     _id: sourcePost._id,
     sourceId: sourcePost._id,
     title: sourcePost.title || '',
+    excerpt: sourcePost.excerpt || '',
     alias: sourcePost.alias || '',
     type: sourcePost.type,
     status: sourcePost.status,
