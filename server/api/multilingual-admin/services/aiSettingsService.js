@@ -974,6 +974,18 @@ function normalizeBooleanValue(value) {
 }
 
 function normalizeLanguagePromptMap(inputValue) {
+  if (typeof inputValue === 'string') {
+    const trimmedValue = inputValue.trim()
+    if (trimmedValue) {
+      try {
+        inputValue = JSON.parse(trimmedValue)
+      } catch (error) {
+        inputValue = {}
+      }
+    } else {
+      inputValue = {}
+    }
+  }
   if (
     !inputValue ||
     typeof inputValue !== 'object' ||
