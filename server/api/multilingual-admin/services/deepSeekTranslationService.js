@@ -45,6 +45,10 @@ const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 3000
 const MIN_AI_REQUEST_TEXT_LENGTH = 600
 const MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH = 400
 const AI_RESPONSE_JSON_TOKEN_RESERVE = 1024
+const AI_THINKING_TOKEN_RESERVE_RATIO = 0.35
+const AI_THINKING_MAX_EFFORT_TOKEN_RESERVE_RATIO = 0.5
+const AI_THINKING_TOKEN_RESERVE_MIN = 2048
+const AI_THINKING_MAX_EFFORT_TOKEN_RESERVE_MIN = 3072
 const AI_OUTPUT_TEXT_TOKEN_RATIO = 0.55
 const RICH_TEXT_SEGMENT_TEXT_RATIO = 0.75
 const RICH_TEXT_SEGMENT_CONTEXT_LENGTH = 160
@@ -55,6 +59,8 @@ const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 120
 const MAX_TERM_SEARCH_KEYWORD_COUNT = 6
 const MAX_TERM_FILTER_TOKENS = 2048
+const MAX_TERM_FILTER_THINKING_TOKENS = 4096
+const MAX_TERM_FILTER_MAX_EFFORT_TOKENS = 6144
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
@@ -960,11 +966,49 @@ function getConfiguredMaxTokens(settings = {}) {
   return 8192
 }
 
+function isDeepSeekThinkingEnabled(settings = {}) {
+  return (
+    getProviderCodeBySettings(settings) === 'deepseek' &&
+    normalizeString(settings.deepSeekThinkingType).trim() === 'enabled'
+  )
+}
+
+function getDeepSeekThinkingTokenReserve(settings = {}) {
+  if (!isDeepSeekThinkingEnabled(settings)) {
+    return 0
+  }
+
+  const maxTokens = getConfiguredMaxTokens(settings)
+  const reasoningEffort = normalizeString(settings.deepSeekReasoningEffort)
+    .trim()
+    .toLowerCase()
+
+  let reserveRatio = AI_THINKING_TOKEN_RESERVE_RATIO
+  let reserveFloor = AI_THINKING_TOKEN_RESERVE_MIN
+  if (reasoningEffort === 'max') {
+    reserveRatio = AI_THINKING_MAX_EFFORT_TOKEN_RESERVE_RATIO
+    reserveFloor = AI_THINKING_MAX_EFFORT_TOKEN_RESERVE_MIN
+  }
+
+  const reservedTokens = Math.max(
+    reserveFloor,
+    Math.floor(maxTokens * reserveRatio)
+  )
+  const maxReasonableReserve =
+    maxTokens - AI_RESPONSE_JSON_TOKEN_RESERVE - MIN_AI_REQUEST_TEXT_LENGTH
+  if (maxReasonableReserve <= 0) {
+    return 0
+  }
+  return Math.min(reservedTokens, maxReasonableReserve)
+}
+
 function getTranslationChunkTextLimit(settings = {}) {
   const maxTokens = getConfiguredMaxTokens(settings)
+  const reservedTokens =
+    AI_RESPONSE_JSON_TOKEN_RESERVE + getDeepSeekThinkingTokenReserve(settings)
   const usableOutputTokens = Math.max(
     MIN_AI_REQUEST_TEXT_LENGTH,
-    maxTokens - AI_RESPONSE_JSON_TOKEN_RESERVE
+    maxTokens - reservedTokens
   )
   const outputTextLimit = Math.floor(
     usableOutputTokens * AI_OUTPUT_TEXT_TOKEN_RATIO
@@ -2618,6 +2662,25 @@ function buildExistingTermFilterMessages({
 
 function getTermFilterMaxTokens(settings) {
   const configuredMaxTokens = Number(settings.deepSeekMaxTokens || 0)
+
+  if (isDeepSeekThinkingEnabled(settings)) {
+    let thinkingMaxTokens = MAX_TERM_FILTER_THINKING_TOKENS
+    const reasoningEffort = normalizeString(settings.deepSeekReasoningEffort)
+      .trim()
+      .toLowerCase()
+    if (reasoningEffort === 'max') {
+      thinkingMaxTokens = MAX_TERM_FILTER_MAX_EFFORT_TOKENS
+    }
+    if (
+      Number.isFinite(configuredMaxTokens) &&
+      configuredMaxTokens > 0 &&
+      configuredMaxTokens < thinkingMaxTokens
+    ) {
+      return configuredMaxTokens
+    }
+    return thinkingMaxTokens
+  }
+
   if (
     Number.isFinite(configuredMaxTokens) &&
     configuredMaxTokens > 0 &&
@@ -5040,49 +5103,66 @@ async function translatePostEntries(body = {}) {
   })
   aiInput.aiProvider = getProviderCodeBySettings(settings)
   const requestConfig = buildTranslationRequestConfig(settings, aiInput, false)
-  const responseResult = await requestProviderJson(
-    settings,
-    requestConfig.requestBody,
-    requestConfig.requestUrl
-  )
-  const isSuccessStatus =
-    responseResult.statusCode >= 200 && responseResult.statusCode < 300
-  let usageStatus = 'error'
-  if (isSuccessStatus && !responseResult.parseError) {
-    usageStatus = 'success'
-  }
-  await recordTranslationUsage({
-    post,
-    input: {
-      ...input,
-      aiProvider: aiInput.aiProvider
+  const translationStepResult = await runAiStepWithRetry(
+    async () => {
+      const responseResult = await requestProviderJson(
+        settings,
+        requestConfig.requestBody,
+        requestConfig.requestUrl
+      )
+      const isSuccessStatus =
+        responseResult.statusCode >= 200 && responseResult.statusCode < 300
+      let usageStatus = 'error'
+      if (isSuccessStatus && !responseResult.parseError) {
+        usageStatus = 'success'
+      }
+      await recordTranslationUsage({
+        post,
+        input: {
+          ...input,
+          aiProvider: aiInput.aiProvider
+        },
+        responseResult,
+        status: usageStatus,
+        httpStatusCode: responseResult.statusCode,
+        parseError: Boolean(responseResult.parseError)
+      })
+
+      if (responseResult.parseError) {
+        throw createProviderApiError(
+          settings,
+          `${getProviderLabelBySettings(settings)} 返回内容不是 JSON`
+        )
+      }
+
+      if (!isSuccessStatus) {
+        const message =
+          responseResult.rawResponse?.error?.message ||
+          responseResult.rawResponse?.message ||
+          `${getProviderLabelBySettings(settings)} 请求失败：${responseResult.statusCode}`
+        throw createProviderApiError(settings, message)
+      }
+
+      const resultData = parseAiContentText(
+        responseResult.contentText,
+        settings,
+        responseResult.finishReason
+      )
+      return {
+        responseResult,
+        resultData
+      }
     },
-    responseResult,
-    status: usageStatus,
-    httpStatusCode: responseResult.statusCode,
-    parseError: Boolean(responseResult.parseError)
-  })
-
-  if (responseResult.parseError) {
-    throw createProviderApiError(
-      settings,
-      `${getProviderLabelBySettings(settings)} 返回内容不是 JSON`
-    )
-  }
-
-  if (!isSuccessStatus) {
-    const message =
-      responseResult.rawResponse?.error?.message ||
-      responseResult.rawResponse?.message ||
-      `${getProviderLabelBySettings(settings)} 请求失败：${responseResult.statusCode}`
-    throw createProviderApiError(settings, message)
-  }
-
-  const resultData = parseAiContentText(
-    responseResult.contentText,
-    settings,
-    responseResult.finishReason
+    {
+      stepKey: 'translation.post',
+      stepLabel: '整篇翻译',
+      field: getProviderFieldBySettings(settings),
+      sourceLanguageCode: input.sourceLanguageCode,
+      targetLanguageCode: input.targetLanguageCode
+    }
   )
+  const responseResult = translationStepResult.responseResult
+  const resultData = translationStepResult.resultData
   const payload = buildTranslatedPayload(aiInput, post, resultData)
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
     aiInput.aiJsonLogs,

@@ -37,22 +37,13 @@ const DEEPSEEK_MODEL_OPTIONS = [
     value: 'deepseek-v4-pro',
     supportsJsonOutput: true,
     supportsThinking: true
-  },
-  {
-    label: 'DeepSeek Chat',
-    value: 'deepseek-chat',
-    supportsJsonOutput: true,
-    supportsThinking: false,
-    deprecatedAt: '2026-07-24'
-  },
-  {
-    label: 'DeepSeek Reasoner',
-    value: 'deepseek-reasoner',
-    supportsJsonOutput: true,
-    supportsThinking: true,
-    deprecatedAt: '2026-07-24'
   }
 ]
+
+const DEEPSEEK_DEPRECATED_MODEL_VALUES = new Set([
+  'deepseek-chat',
+  'deepseek-reasoner'
+])
 
 const GEMINI_IMAGE_GENERATION_MODEL_OPTIONS = [
   {
@@ -1064,6 +1055,30 @@ function normalizeTrimmedString(value, maxLength = 12000) {
   return String(value).trim().slice(0, maxLength)
 }
 
+function isDeepSeekModelField(field = {}) {
+  return /DeepSeekModel$/.test(normalizeTrimmedString(field.name, 120))
+}
+
+function assertDeepSeekModelNotDeprecated(
+  model,
+  fieldName,
+  errorCode = ERROR_CODES.SETTINGS_VALUES_INVALID
+) {
+  const normalizedModel = normalizeTrimmedString(model, 200)
+  if (!normalizedModel) {
+    return ''
+  }
+  if (!DEEPSEEK_DEPRECATED_MODEL_VALUES.has(normalizedModel)) {
+    return normalizedModel
+  }
+  throw new ApiError(
+    errorCode,
+    'deepseek-chat 和 deepseek-reasoner 已弃用，请改用 deepseek-v4-flash，并通过思考模式切换普通/思考模式。',
+    fieldName,
+    400
+  )
+}
+
 function cloneSerializableValue(value) {
   if (Array.isArray(value)) {
     return value.map(item => cloneSerializableValue(item))
@@ -1272,6 +1287,10 @@ async function updateAiSettings(values = {}) {
       continue
     }
 
+    if (isDeepSeekModelField(field)) {
+      assertDeepSeekModelNotDeprecated(values[field.name], field.name)
+    }
+
     const normalizedValue = normalizeValue(field, values[field.name])
     await OptionModel.findOneAndUpdate(
       {
@@ -1368,10 +1387,17 @@ async function getDeepSeekRuntimeSettings() {
     )
   }
 
+  const model = assertDeepSeekModelNotDeprecated(
+    values.deepSeekModel,
+    'deepSeekModel',
+    ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED
+  )
+
   return {
     ...values,
     provider: 'deepseek',
-    model: normalizeTrimmedString(values.deepSeekModel),
+    model,
+    deepSeekModel: model,
     maxTokens: values.deepSeekMaxTokens,
     timeoutSeconds: values.deepSeekTimeoutSeconds,
     temperature: values.deepSeekTemperature
@@ -1406,6 +1432,11 @@ function buildDeepSeekWorkflowRuntimeSettings(values, workflowKey) {
     workflowKey,
     'DeepSeekTemperature'
   )
+  const model = assertDeepSeekModelNotDeprecated(
+    values[modelFieldName],
+    modelFieldName,
+    ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED
+  )
 
   return {
     provider: 'deepseek',
@@ -1417,7 +1448,7 @@ function buildDeepSeekWorkflowRuntimeSettings(values, workflowKey) {
       values[
         buildWorkflowFieldName(workflowKey, 'DeepSeekUseCloudflareAiGateway')
       ] === true,
-    model: normalizeTrimmedString(values[modelFieldName]),
+    model,
     maxTokens: values[maxTokensFieldName],
     timeoutSeconds: values[timeoutFieldName],
     temperature: values[temperatureFieldName],
@@ -1429,7 +1460,7 @@ function buildDeepSeekWorkflowRuntimeSettings(values, workflowKey) {
       values[
         buildWorkflowFieldName(workflowKey, 'DeepSeekUseCloudflareAiGateway')
       ] === true,
-    deepSeekModel: normalizeTrimmedString(values[modelFieldName]),
+    deepSeekModel: model,
     deepSeekThinkingType: normalizeTrimmedString(
       values[buildWorkflowFieldName(workflowKey, 'DeepSeekThinkingType')],
       40

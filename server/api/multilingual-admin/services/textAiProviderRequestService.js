@@ -39,6 +39,20 @@ function getProviderErrorField(settings = {}) {
   return 'deepSeek'
 }
 
+function isDeepSeekThinkingEnabled(settings = {}) {
+  return (
+    getProviderCode(settings) === 'deepseek' &&
+    normalizeTrimmedString(settings.deepSeekThinkingType, 40) === 'enabled'
+  )
+}
+
+function buildDeepSeekResponseFormat(settings = {}) {
+  if (isDeepSeekThinkingEnabled(settings)) {
+    return { type: 'text' }
+  }
+  return { type: 'json_object' }
+}
+
 function buildDeepSeekChatCompletionUrl(settings = {}) {
   const baseUrl = normalizeTrimmedString(
     settings.deepSeekBaseUrl || settings.baseUrl,
@@ -645,13 +659,15 @@ function buildJsonRequestBody(settings, messages, options = {}) {
   const requestBody = {
     model: settings.deepSeekModel || settings.model,
     messages,
-    response_format: { type: 'json_object' },
+    response_format: buildDeepSeekResponseFormat(settings),
     stream: options.stream === true
   }
   if (Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0) {
     requestBody.max_tokens = configuredMaxTokens
   }
-  if (settings.deepSeekThinkingType === 'enabled') {
+  if (isDeepSeekThinkingEnabled(settings)) {
+    // DeepSeek docs state JSON Output may occasionally return empty content.
+    // In thinking mode we keep the JSON contract in prompts and parse locally.
     requestBody.thinking = { type: 'enabled' }
     requestBody.reasoning_effort = settings.deepSeekReasoningEffort
   } else {
