@@ -149,6 +149,29 @@ function normalizeStorageString(value) {
   return String(value)
 }
 
+function buildWorkflowPromptText(
+  defaultPrompt,
+  languagePromptMap,
+  targetLanguageCode
+) {
+  const promptParts = []
+  const normalizedDefaultPrompt = normalizeStorageString(defaultPrompt).trim()
+  if (normalizedDefaultPrompt) {
+    promptParts.push(normalizedDefaultPrompt)
+  }
+  const normalizedTargetLanguageCode =
+    normalizeStorageString(targetLanguageCode).trim()
+  const targetLanguagePrompt = normalizeStorageString(
+    languagePromptMap?.[normalizedTargetLanguageCode]
+  ).trim()
+  if (targetLanguagePrompt) {
+    promptParts.push(
+      `以下是目标语言 ${normalizedTargetLanguageCode} 的流程补充提示词：\n${targetLanguagePrompt}`
+    )
+  }
+  return promptParts.join('\n\n')
+}
+
 function summarizeRecognitionDataUrl(dataUrl) {
   const text = normalizeStorageString(dataUrl)
   const match = text.match(/^data:([^;]+);base64,(.*)$/i)
@@ -1026,7 +1049,11 @@ async function runRecognition({
         sourceFilePath: coverInfo.sourceFilePath
       })
     const prompt = coverImagePromptService.buildCoverRecognitionPrompt({
-      basePrompt: recognitionSettings.prompt,
+      basePrompt: buildWorkflowPromptText(
+        recognitionSettings.imageRecognitionDefaultPrompt,
+        recognitionSettings.imageRecognitionLanguagePrompts,
+        targetLanguageCode
+      ),
       sourceTitle: sourcePost.title || '',
       sourceLanguageCode,
       targetLanguageCode,
@@ -1177,7 +1204,11 @@ async function runGeneration({
     )
     const generationPrompt = coverImagePromptService.buildCoverGenerationPrompt(
       {
-        basePrompt: generationSettings.promptPrefix,
+        basePrompt: buildWorkflowPromptText(
+          generationSettings.imageGenerationDefaultPrompt,
+          generationSettings.imageGenerationLanguagePrompts,
+          targetLanguageCode
+        ),
         provider: generationSettings.provider,
         sourceTitle: sourcePost.title || '',
         recognizedTitleText: recognition.recognizedTitleText || '',

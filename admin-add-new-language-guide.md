@@ -130,7 +130,19 @@ admin/src/utils/multilingual.js
 
 - 多语言站点配置：标题、副标题、SEO、Logo、Favicon、默认封面、页脚、RSS、Sitemap。
 - 博客端语言启用状态：新增语言默认开启；关闭后只影响 Blog 前台和 Blog API，不影响 Admin 继续维护内容。
-- AI 设置：补新语言 `deepSeekLanguagePrompts`，明确目标地区用词和专有名词规则。
+- AI 设置：新增语言后，必须把 6 条流程逐条检查完，确认新语言在对应的按语言提示词映射里已经出现；如果该流程没有额外要求，也要保留该语言对应的空字符串，不要漏掉该语言键。各流程通用要求分别放在对应的默认提示词字段里。
+
+| 流程                      | 必查字段                              | 检查要求                   |
+| ------------------------- | ------------------------------------- | -------------------------- |
+| 主翻译 AI                 | `mainTranslationLanguagePrompts`      | 必须出现新语言 code 对应项 |
+| 专有名词预处理 AI         | `properNounPreprocessLanguagePrompts` | 必须出现新语言 code 对应项 |
+| 专有名词本地知识库查询 AI | `properNounKnowledgeLanguagePrompts`  | 必须出现新语言 code 对应项 |
+| 专有名词联网搜索 AI       | `internetSearchLanguagePrompts`       | 必须出现新语言 code 对应项 |
+| 图片识别 AI               | `imageRecognitionLanguagePrompts`     | 必须出现新语言 code 对应项 |
+| 图片生成 AI               | `imageGenerationLanguagePrompts`      | 必须出现新语言 code 对应项 |
+
+不要只检查主翻译 AI。少任何一条流程，都视为新增语言手顺未完成。
+
 - 导航：创建或复制并翻译新语言导航。
 - Banner：创建或复制并翻译新语言 Banner。
 - 侧边栏：创建或复制并翻译新语言侧边栏。

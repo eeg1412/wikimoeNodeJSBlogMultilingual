@@ -4,7 +4,7 @@ const {
   ApiError,
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
-const deepSeekTranslationService = require('./deepSeekTranslationService')
+const translationWorkflowAiService = require('./translationWorkflowAiService')
 const coverImageTranslationService = require('./coverImageTranslationService')
 const translationPostService = require('./translationPostService')
 
@@ -208,7 +208,7 @@ async function translateSourcePostAiImportEntriesStream(
 
   let data = null
   if (input.entries.length > 0) {
-    data = await deepSeekTranslationService.translateContentEntriesStream(
+    data = await translationWorkflowAiService.translateContentEntriesStream(
       {
         contentId: String(previewContext.targetPost?._id || input.sourceId),
         contentType: 'sourcePostImport',

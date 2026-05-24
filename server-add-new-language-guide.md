@@ -136,7 +136,18 @@ Server 只认后端语言。完整新增一种站点语言时，还必须同步�
 - 关联翻译：作者、分类、标签、地点、番剧、电影、游戏、书籍、活动、投票等。
 - 媒体：远程快照或本地化媒体。
 - 专有名词：`properNounTranslations`。
-- AI 设置：`deepSeekLanguagePrompts` 中的新语言 prompt。
+- AI 设置：新增语言后，必须把 6 条流程逐条检查完，确认新语言在对应的按语言提示词映射里已经出现；如果该流程没有额外规则，也要保留该语言对应的空字符串，不要漏掉该语言键。各流程通用规则分别使用对应默认提示词字段。
+
+| 流程                      | 必查字段                              | 检查要求                   |
+| ------------------------- | ------------------------------------- | -------------------------- |
+| 主翻译 AI                 | `mainTranslationLanguagePrompts`      | 必须出现新语言 code 对应项 |
+| 专有名词预处理 AI         | `properNounPreprocessLanguagePrompts` | 必须出现新语言 code 对应项 |
+| 专有名词本地知识库查询 AI | `properNounKnowledgeLanguagePrompts`  | 必须出现新语言 code 对应项 |
+| 专有名词联网搜索 AI       | `internetSearchLanguagePrompts`       | 必须出现新语言 code 对应项 |
+| 图片识别 AI               | `imageRecognitionLanguagePrompts`     | 必须出现新语言 code 对应项 |
+| 图片生成 AI               | `imageGenerationLanguagePrompts`      | 必须出现新语言 code 对应项 |
+
+不要只检查主翻译 AI。少任何一条流程，都视为新增语言手顺未完成。
 
 新语言没有内容时，列表为空或详情 404 是正确表现。
 

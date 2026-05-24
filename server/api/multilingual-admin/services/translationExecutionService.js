@@ -1,4 +1,4 @@
-const deepSeekTranslationService = require('./deepSeekTranslationService')
+const translationWorkflowAiService = require('./translationWorkflowAiService')
 const mongoose = require('mongoose')
 const { getLanguageText } = require('../../../utils/language')
 const {
@@ -584,7 +584,7 @@ async function executePostAiTranslation(job, context) {
       currentStep: '正在执行文章 AI 翻译',
       percent: 20
     })
-    data = await deepSeekTranslationService.translatePostEntriesStream(
+    data = await translationWorkflowAiService.translatePostEntriesStream(
       {
         postId: String(job.target.postId),
         sourceLanguageCode: job.source.languageCode,
@@ -635,7 +635,7 @@ async function executeContentAiTranslation(job, context) {
     currentStep: '正在执行通用内容 AI 翻译',
     percent: 20
   })
-  const data = await deepSeekTranslationService.translateContentEntriesStream(
+  const data = await translationWorkflowAiService.translateContentEntriesStream(
     {
       contentId: String(contentId || ''),
       contentType,
@@ -1133,7 +1133,7 @@ async function translateSourcePostForLanguage({
       currentStep: `正在执行 ${getLanguageText(languageCode)} AI 翻译`,
       percent: getRangePercent(progressRange, 0.05, 0.08)
     })
-    data = await deepSeekTranslationService.translateContentEntriesStream(
+    data = await translationWorkflowAiService.translateContentEntriesStream(
       {
         contentId: String(previewContext.targetPost._id),
         contentType: 'sourcePostImport',
@@ -2046,7 +2046,7 @@ async function organizeOneSourcePostProperNouns({
   })
 
   const organizeResult =
-    await deepSeekTranslationService.organizeProperNounTerms(
+    await translationWorkflowAiService.organizeProperNounTerms(
       {
         sourceId: sourcePostStableId,
         sourceLanguageCode: job.source.languageCode,

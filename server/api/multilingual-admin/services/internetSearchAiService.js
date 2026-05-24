@@ -7,6 +7,7 @@ const {
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 const aiSettingsService = require('./aiSettingsService')
+const aiUsageService = require('./aiUsageService')
 const properNounTranslationService = require('./properNounTranslationService')
 const {
   applyGeminiThinkingConfig,
@@ -21,6 +22,12 @@ const { recordGeminiUsageLog } = require('./geminiUsageLogService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
 const translationPromptPolicyService = require('./translationPromptPolicyService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const {
+  buildJsonRequestBody,
+  getProviderErrorField,
+  getProviderLabel,
+  requestProviderJson
+} = require('./textAiProviderRequestService')
 
 const OPERATION_OFFICIAL_TERM_KNOWLEDGE =
   'proper-noun.official-translation.knowledge'
@@ -383,7 +390,43 @@ function attachTermTranslationQualityPolicy(requestData) {
     translationPromptPolicyService.getTermTranslationQualityPolicyText()
 }
 
+function buildWorkflowPromptLines(
+  settings,
+  targetLanguageCodes,
+  defaultFieldName,
+  languageFieldName
+) {
+  const promptLines = []
+  const defaultPrompt = normalizeString(settings?.[defaultFieldName], 12000)
+  if (defaultPrompt) {
+    promptLines.push('以下是管理员为当前流程配置的默认提示词。', defaultPrompt)
+  }
+
+  const languagePromptMap =
+    settings?.[languageFieldName] &&
+    typeof settings[languageFieldName] === 'object' &&
+    !Array.isArray(settings[languageFieldName])
+      ? settings[languageFieldName]
+      : {}
+  normalizeTargetLanguageCodes(targetLanguageCodes).forEach(languageCode => {
+    const targetLanguagePrompt = normalizeString(
+      languagePromptMap[languageCode],
+      12000
+    )
+    if (!targetLanguagePrompt) {
+      return
+    }
+    promptLines.push(
+      `以下是目标语言 ${getLanguageText(languageCode)}（${languageCode}）的流程补充提示词。`,
+      targetLanguagePrompt
+    )
+  })
+
+  return promptLines
+}
+
 function buildOfficialTermKnowledgePrompt({
+  settings,
   termRequests,
   sourceLanguageCode,
   contextSummary,
@@ -391,6 +434,7 @@ function buildOfficialTermKnowledgePrompt({
 }) {
   const normalizedContextSummary =
     normalizeOfficialTermContextSummary(contextSummary)
+  const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const requestData = {
     task: 'resolve_official_term_translations_from_model_knowledge',
     sourceLanguageCode: sourceLanguageCode || '',
@@ -427,12 +471,22 @@ function buildOfficialTermKnowledgePrompt({
     )
   }
 
+  promptLines.push(
+    ...buildWorkflowPromptLines(
+      settings,
+      targetLanguageCodes,
+      'properNounKnowledgeDefaultPrompt',
+      'properNounKnowledgeLanguagePrompts'
+    )
+  )
+
   promptLines.push('', JSON.stringify(requestData, null, 2))
 
   return promptLines.join('\n')
 }
 
 function buildOfficialTermSearchPrompt({
+  settings,
   termRequests,
   sourceLanguageCode,
   contextSummary,
@@ -527,6 +581,15 @@ function buildOfficialTermSearchPrompt({
     }
   }
 
+  promptLines.push(
+    ...buildWorkflowPromptLines(
+      settings,
+      getTermRequestTargetLanguageCodes(termRequests),
+      'internetSearchDefaultPrompt',
+      'internetSearchLanguagePrompts'
+    )
+  )
+
   promptLines.push('', JSON.stringify(requestData, null, 2))
 
   return promptLines.join('\n')
@@ -579,13 +642,43 @@ function buildGeminiSearchRequest(settings, prompt, options = {}) {
   }
 }
 
-function parseSearchResponseText(rawText, operationLabel = 'Gemini 联网搜索') {
+function buildKnowledgeMessages(prompt) {
+  return [
+    {
+      role: 'user',
+      content: prompt
+    }
+  ]
+}
+
+function buildProviderRequestSummary(settings, requestUrl) {
+  return {
+    provider: settings.provider,
+    model: settings.model || settings.deepSeekModel || '',
+    requestUrl: requestUrl ? String(requestUrl) : ''
+  }
+}
+
+function buildProviderResponseSummary(responseResult = {}) {
+  return {
+    statusCode: responseResult.statusCode || 0,
+    model: responseResult.model || '',
+    requestId: responseResult.requestId || '',
+    finishReason: responseResult.finishReason || ''
+  }
+}
+
+function parseSearchResponseText(
+  rawText,
+  operationLabel = 'AI 联网搜索',
+  errorField = 'geminiInternetSearch'
+) {
   const text = normalizeString(rawText, 200000)
   if (!text) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
       `${operationLabel}没有返回内容`,
-      'geminiInternetSearch',
+      errorField,
       502
     )
   }
@@ -596,7 +689,7 @@ function parseSearchResponseText(rawText, operationLabel = 'Gemini 联网搜索'
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
       `${operationLabel}返回的 JSON 解析失败`,
-      'geminiInternetSearch',
+      errorField,
       502
     )
   }
@@ -623,12 +716,16 @@ function summarizeGroundingMetadata(response) {
   }
 }
 
-function normalizeResultRoot(resultData, operationLabel) {
+function normalizeResultRoot(
+  resultData,
+  operationLabel,
+  errorField = 'geminiInternetSearch'
+) {
   if (!resultData || typeof resultData !== 'object') {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
       `${operationLabel} JSON 根节点必须是对象`,
-      'geminiInternetSearch',
+      errorField,
       502
     )
   }
@@ -636,7 +733,7 @@ function normalizeResultRoot(resultData, operationLabel) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
       `${operationLabel}结果缺少 terms 数组`,
-      'geminiInternetSearch',
+      errorField,
       502
     )
   }
@@ -651,7 +748,9 @@ function buildRequestedTermMap(termRequests) {
 }
 
 function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
-  normalizeResultRoot(resultData, 'Gemini 名词知识库整理')
+  const operationLabel = options.operationLabel || 'AI 名词知识库整理'
+  const errorField = options.errorField || 'geminiInternetSearch'
+  normalizeResultRoot(resultData, operationLabel, errorField)
   const allowSameSourceTranslationWithNote =
     options.allowSameSourceTranslationWithNote === true
 
@@ -749,7 +848,9 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
 }
 
 function normalizeSearchTerms(resultData, termRequests, options = {}) {
-  normalizeResultRoot(resultData, 'Gemini 联网搜索')
+  const operationLabel = options.operationLabel || 'AI 联网搜索'
+  const errorField = options.errorField || 'geminiInternetSearch'
+  normalizeResultRoot(resultData, operationLabel, errorField)
   const includeTermNoteRevision = options.includeTermNoteRevision !== false
   const allowSameSourceTranslationWithNote =
     options.allowSameSourceTranslationWithNote === true
@@ -807,8 +908,8 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
       if (typeof termItem?.noteNeedsUpdate !== 'boolean') {
         throw new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
-          `Gemini 联网搜索结果 ${sourceText} 缺少 noteNeedsUpdate 布尔值`,
-          'geminiInternetSearch',
+          `${operationLabel}结果 ${sourceText} 缺少 noteNeedsUpdate 布尔值`,
+          errorField,
           502
         )
       }
@@ -816,8 +917,8 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
       if (termItem.noteNeedsUpdate === true && !revisedNote) {
         throw new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
-          `Gemini 联网搜索结果 ${sourceText} 标记需要修订备注但没有返回 note`,
-          'geminiInternetSearch',
+          `${operationLabel}结果 ${sourceText} 标记需要修订备注但没有返回 note`,
+          errorField,
           502
         )
       }
@@ -860,8 +961,8 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
   if (missingParts.length > 0) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `Gemini 联网搜索结果缺少名词译名：${missingParts.join('，')}`,
-      'geminiInternetSearch',
+      `${operationLabel}结果缺少名词译名：${missingParts.join('，')}`,
+      errorField,
       502
     )
   }
@@ -893,6 +994,34 @@ async function recordUsage(options = {}) {
   if (contextSummary) {
     meta.contextSummary = contextSummary
   }
+  if (options.failureCode || options.failureReason) {
+    meta.failure = {
+      code: options.failureCode || '',
+      reason: options.failureReason || ''
+    }
+  }
+
+  if (options.settings?.provider !== 'gemini') {
+    const responseResult = options.responseResult || {}
+    await aiUsageService.recordAiUsageLog({
+      provider: options.settings?.provider || 'unknown',
+      model:
+        responseResult.model ||
+        options.settings?.model ||
+        options.settings?.deepSeekModel ||
+        '',
+      operation: options.operation || OPERATION_OFFICIAL_TERM_SEARCH,
+      status: options.status,
+      requestId: responseResult.requestId || '',
+      sourceLanguageCode: options.sourceLanguageCode,
+      targetLanguageCode: options.targetLanguageCodes?.join(','),
+      usage: responseResult.usage || {},
+      rawResponse: responseResult.rawResponse || options.response || null,
+      meta
+    })
+    return
+  }
+
   await recordGeminiUsageLog({
     settings: options.settings,
     operation: options.operation || OPERATION_OFFICIAL_TERM_SEARCH,
@@ -920,34 +1049,70 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   allowSameSourceTranslationWithNote = false
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
+  const providerLabel = getProviderLabel(settings)
+  const providerErrorField = getProviderErrorField(settings)
+  const operationLabel = `${providerLabel} 名词知识库整理`
   const prompt = buildOfficialTermKnowledgePrompt({
+    settings,
     termRequests,
     sourceLanguageCode,
     contextSummary,
     allowSameSourceTranslationWithNote
   })
-  const requestBody = buildGeminiKnowledgeRequest(settings, prompt)
-  const requestSummary = summarizeGeminiNativeRequestBody(
-    requestBody,
-    requestUrl
-  )
+  let requestBody = null
+  let requestSummary = null
+  if (settings.provider === 'gemini') {
+    requestBody = buildGeminiKnowledgeRequest(settings, prompt)
+    requestSummary = summarizeGeminiNativeRequestBody(requestBody, requestUrl)
+  } else {
+    const requestConfig = buildJsonRequestBody(
+      settings,
+      buildKnowledgeMessages(prompt),
+      {
+        responseJsonSchema: officialTermKnowledgeResponseJsonSchema
+      }
+    )
+    requestBody = requestConfig.requestBody
+    requestUrl = requestConfig.requestUrl
+    requestSummary = buildProviderRequestSummary(settings, requestUrl)
+  }
 
   return await runAiStepWithRetry(
     async () => {
       try {
-        const response = await sendGeminiNativeGenerateContentRequest(
-          settings,
-          requestBody,
-          requestUrl,
-          { cancellation }
-        )
-        const responseSummary = summarizeGeminiNativeResponse(response)
-        const extractedText = extractTextFromGeminiNativeResponse(response)
+        let response = null
+        let responseSummary = null
+        let responseResult = null
+        let extractedText = ''
+        if (settings.provider === 'gemini') {
+          response = await sendGeminiNativeGenerateContentRequest(
+            settings,
+            requestBody,
+            requestUrl,
+            { cancellation }
+          )
+          responseSummary = summarizeGeminiNativeResponse(response)
+          extractedText =
+            extractTextFromGeminiNativeResponse(response)?.text || ''
+        } else {
+          responseResult = await requestProviderJson(
+            settings,
+            requestBody,
+            requestUrl,
+            { cancellation }
+          )
+          response = responseResult.rawResponse
+          responseSummary = buildProviderResponseSummary(responseResult)
+          extractedText = responseResult.contentText || ''
+        }
         const resultData = parseSearchResponseText(
-          extractedText?.text || '',
-          'Gemini 名词知识库整理'
+          extractedText,
+          operationLabel,
+          providerErrorField
         )
         const result = normalizeKnowledgeTerms(resultData, termRequests, {
+          operationLabel,
+          errorField: providerErrorField,
           allowSameSourceTranslationWithNote
         })
         await recordUsage({
@@ -955,6 +1120,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
           operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
           status: 'success',
           response,
+          responseResult,
           sourceLanguageCode,
           targetLanguageCodes,
           termCount: termRequests.length,
@@ -971,8 +1137,18 @@ async function resolveOfficialTermTranslationsFromKnowledge({
             operation: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
             stage: 'ProperNounOfficialTranslationKnowledge',
             provider: settings.provider,
-            model: settings.model,
-            requestId: '',
+            model:
+              responseResult?.model ||
+              response?.modelVersion ||
+              response?.model ||
+              settings.model ||
+              settings.deepSeekModel ||
+              '',
+            requestId:
+              responseResult?.requestId ||
+              response?.responseId ||
+              response?.requestId ||
+              '',
             sourceLanguageCode,
             targetLanguageCode: targetLanguageCodes.join(','),
             meta: {
@@ -1016,8 +1192,8 @@ async function resolveOfficialTermTranslationsFromKnowledge({
         }
         throw new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
-          error?.message || 'Gemini 名词知识库整理请求失败',
-          'geminiInternetSearch',
+          error?.message || `${operationLabel}请求失败`,
+          providerErrorField,
           502
         )
       }
@@ -1025,7 +1201,7 @@ async function resolveOfficialTermTranslationsFromKnowledge({
     {
       stepKey: OPERATION_OFFICIAL_TERM_KNOWLEDGE,
       stepLabel: '专有名词 AI 知识库译名整理',
-      field: 'geminiInternetSearch',
+      field: providerErrorField,
       onStatus,
       cancellation
     }
@@ -1046,6 +1222,7 @@ async function searchOfficialTermTranslationsWithInternet({
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
   const prompt = buildOfficialTermSearchPrompt({
+    settings,
     termRequests,
     sourceLanguageCode,
     contextSummary,
@@ -1191,21 +1368,12 @@ async function searchOfficialTermTranslations(options = {}) {
   const allowSameSourceTranslationWithNote =
     options.allowSameSourceTranslationWithNote === true
 
-  const settings = await aiSettingsService.getInternetSearchRuntimeSettings()
+  const knowledgeSettings =
+    await aiSettingsService.getProperNounKnowledgeRuntimeSettings()
   const timeoutSeconds = Number(options.timeoutSeconds)
   if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
-    settings.timeoutSeconds = timeoutSeconds
+    knowledgeSettings.timeoutSeconds = timeoutSeconds
   }
-  if (settings.provider !== 'gemini') {
-    throw new ApiError(
-      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      '互联网搜索服务商暂不支持',
-      'internetSearchProvider',
-      400
-    )
-  }
-
-  const requestUrl = buildGeminiNativeGenerateContentUrl(settings)
   let knowledgeResult = {
     terms: [],
     missingTermRequests: termRequests,
@@ -1214,11 +1382,14 @@ async function searchOfficialTermTranslations(options = {}) {
   }
   if (options.skipKnowledgeBase !== true) {
     knowledgeResult = await resolveOfficialTermTranslationsFromKnowledge({
-      settings,
+      settings: knowledgeSettings,
       termRequests,
       sourceLanguageCode: options.sourceLanguageCode,
       contextSummary,
-      requestUrl,
+      requestUrl:
+        knowledgeSettings.provider === 'gemini'
+          ? buildGeminiNativeGenerateContentUrl(knowledgeSettings)
+          : null,
       cancellation: options.cancellation,
       onStatus: options.onStatus,
       skipUsageLog: options.skipUsageLog,
@@ -1231,13 +1402,26 @@ async function searchOfficialTermTranslations(options = {}) {
     rawResponse: null,
     aiJsonLog: null
   }
+  let searchSettings = null
   if (knowledgeResult.missingTermRequests.length > 0) {
+    searchSettings = await aiSettingsService.getInternetSearchRuntimeSettings()
+    if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+      searchSettings.timeoutSeconds = timeoutSeconds
+    }
+    if (searchSettings.provider !== 'gemini') {
+      throw new ApiError(
+        ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+        '互联网搜索服务商暂不支持',
+        'internetSearchProvider',
+        400
+      )
+    }
     searchResult = await searchOfficialTermTranslationsWithInternet({
-      settings,
+      settings: searchSettings,
       termRequests: knowledgeResult.missingTermRequests,
       sourceLanguageCode: options.sourceLanguageCode,
       contextSummary,
-      requestUrl,
+      requestUrl: buildGeminiNativeGenerateContentUrl(searchSettings),
       cancellation: options.cancellation,
       onStatus: options.onStatus,
       skipUsageLog: options.skipUsageLog,
@@ -1247,8 +1431,12 @@ async function searchOfficialTermTranslations(options = {}) {
   }
 
   return {
-    provider: settings.provider,
-    model: settings.model,
+    provider:
+      searchResult.terms.length > 0 ? 'gemini' : knowledgeSettings.provider,
+    model:
+      searchResult.terms.length > 0
+        ? searchSettings?.model || ''
+        : knowledgeSettings.model || knowledgeSettings.deepSeekModel || '',
     terms: knowledgeResult.terms.concat(searchResult.terms),
     stats: {
       sourceTermCount: sourceTerms.length,

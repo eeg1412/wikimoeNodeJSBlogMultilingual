@@ -10,6 +10,11 @@ const {
 
 const OPTION_SCOPE = 'multilingualAi'
 
+const TEXT_PROVIDER_OPTIONS = [
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Gemini', value: 'gemini' }
+]
+
 const AI_PROVIDER_OPTIONS = [{ label: 'DeepSeek', value: 'deepseek' }]
 
 const IMAGE_GENERATION_PROVIDER_OPTIONS = [{ label: 'Gemini', value: 'gemini' }]
@@ -34,14 +39,14 @@ const DEEPSEEK_MODEL_OPTIONS = [
     supportsThinking: true
   },
   {
-    label: 'DeepSeek Chat（兼容名，2026-07-24 后弃用）',
+    label: 'DeepSeek Chat',
     value: 'deepseek-chat',
     supportsJsonOutput: true,
     supportsThinking: false,
     deprecatedAt: '2026-07-24'
   },
   {
-    label: 'DeepSeek Reasoner（兼容名，2026-07-24 后弃用）',
+    label: 'DeepSeek Reasoner',
     value: 'deepseek-reasoner',
     supportsJsonOutput: true,
     supportsThinking: true,
@@ -110,6 +115,30 @@ const GEMINI_INTERNET_SEARCH_MODEL_OPTIONS = [
   }
 ]
 
+const GEMINI_TEXT_MODEL_OPTIONS = [
+  {
+    label: 'Gemini 3.1 Flash-Lite（稳定）',
+    value: 'gemini-3.1-flash-lite'
+  },
+  {
+    label: 'Gemini 3 Flash Preview',
+    value: 'gemini-3-flash-preview',
+    tag: 'preview'
+  },
+  {
+    label: 'Gemini 2.5 Flash',
+    value: 'gemini-2.5-flash'
+  },
+  {
+    label: 'Gemini 2.5 Pro',
+    value: 'gemini-2.5-pro'
+  },
+  {
+    label: 'Gemini 2.5 Flash-Lite',
+    value: 'gemini-2.5-flash-lite'
+  }
+]
+
 const GEMINI_IMAGE_ASPECT_RATIO_OPTIONS = [
   { label: 'Auto', value: 'auto' },
   { label: '1:1', value: '1:1' },
@@ -157,14 +186,6 @@ const DEFAULT_IMAGE_RECOGNITION_PROMPT = [
   '当证据不足时明确标记不确定，不要用兜底结论替代判断。'
 ].join('\n')
 
-const LEGACY_AI_SETTING_MIGRATIONS = {
-  nanoBananaApiKey: 'geminiImageApiKey',
-  nanoBananaBaseUrl: 'geminiImageBaseUrl',
-  nanoBananaModel: 'geminiImageModel',
-  nanoBananaAspectRatio: 'geminiImageAspectRatio',
-  nanoBananaImageSize: 'geminiImageSize'
-}
-
 function buildGeminiThinkingLevelField(name, group) {
   return {
     name,
@@ -178,6 +199,205 @@ function buildGeminiThinkingLevelField(name, group) {
   }
 }
 
+const TEXT_WORKFLOW_CONFIGS = [
+  {
+    key: 'mainTranslation',
+    label: '主翻译',
+    defaultProvider: 'deepseek'
+  },
+  {
+    key: 'properNounPreprocess',
+    label: '专有名词预处理',
+    defaultProvider: 'deepseek'
+  },
+  {
+    key: 'properNounKnowledge',
+    label: '专有名词本地知识库查询',
+    defaultProvider: 'gemini'
+  }
+]
+
+function createTextWorkflowDeepSeekFields(config) {
+  const groupPrefix = `${config.key}Deepseek`
+  return [
+    {
+      name: `${config.key}DeepSeekApiKey`,
+      label: 'API Key / Token',
+      type: 'password',
+      group: groupPrefix,
+      defaultValue: '',
+      helpText:
+        '直连模型服务时填写服务商 API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+    },
+    {
+      name: `${config.key}DeepSeekUseCloudflareAiGateway`,
+      label: '使用 AI Gateway',
+      type: 'boolean',
+      group: groupPrefix,
+      defaultValue: false,
+      helpText: '开启后，通过 Cloudflare AI Gateway 转发当前流程的文本请求。'
+    },
+    {
+      name: `${config.key}DeepSeekBaseUrl`,
+      label: '服务地址',
+      type: 'string',
+      group: groupPrefix,
+      defaultValue: 'https://api.deepseek.com',
+      helpText:
+        '直连时填写模型服务地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat。'
+    },
+    {
+      name: `${config.key}DeepSeekModel`,
+      label: '模型',
+      type: 'modelSelect',
+      group: `${groupPrefix}Model`,
+      defaultValue: 'deepseek-v4-flash',
+      allowCreate: true,
+      options: DEEPSEEK_MODEL_OPTIONS
+    },
+    {
+      name: `${config.key}DeepSeekThinkingType`,
+      label: '思考模式',
+      type: 'radio',
+      group: `${groupPrefix}Model`,
+      defaultValue: 'disabled',
+      options: [
+        { label: '关闭', value: 'disabled' },
+        { label: '开启', value: 'enabled' }
+      ]
+    },
+    {
+      name: `${config.key}DeepSeekReasoningEffort`,
+      label: '思考强度',
+      type: 'radio',
+      group: `${groupPrefix}Model`,
+      defaultValue: 'high',
+      options: [
+        { label: 'High', value: 'high' },
+        { label: 'Max', value: 'max' }
+      ]
+    },
+    {
+      name: `${config.key}DeepSeekTemperature`,
+      label: 'Temperature',
+      type: 'float',
+      group: `${groupPrefix}Model`,
+      defaultValue: 0.2,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      precision: 2
+    },
+    {
+      name: `${config.key}DeepSeekMaxTokens`,
+      label: '最大输出 Token',
+      type: 'number',
+      group: `${groupPrefix}Model`,
+      defaultValue: 8192,
+      min: 256,
+      max: 384000
+    },
+    {
+      name: `${config.key}DeepSeekTimeoutSeconds`,
+      label: '请求超时',
+      type: 'number',
+      group: `${groupPrefix}Request`,
+      defaultValue: 300,
+      min: 10,
+      max: 600
+    }
+  ]
+}
+
+function createTextWorkflowGeminiFields(config) {
+  const groupPrefix = `${config.key}GeminiText`
+  return [
+    {
+      name: `${config.key}GeminiTextApiKey`,
+      label: 'API Key / Token',
+      type: 'password',
+      group: groupPrefix,
+      defaultValue: '',
+      helpText:
+        '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+    },
+    {
+      name: `${config.key}GeminiTextCloudflareAiGatewayEnabled`,
+      label: '使用 AI Gateway',
+      type: 'boolean',
+      group: groupPrefix,
+      defaultValue: false,
+      helpText:
+        '开启后，通过 Cloudflare AI Gateway 转发当前流程的 Gemini 文本请求。'
+    },
+    {
+      name: `${config.key}GeminiTextBaseUrl`,
+      label: '服务地址',
+      type: 'string',
+      group: groupPrefix,
+      defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
+      helpText:
+        '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
+    },
+    {
+      name: `${config.key}GeminiTextModel`,
+      label: '模型',
+      type: 'modelSelect',
+      group: groupPrefix,
+      defaultValue: 'gemini-3.1-flash-lite',
+      allowCreate: true,
+      options: GEMINI_TEXT_MODEL_OPTIONS
+    },
+    buildGeminiThinkingLevelField(
+      `${config.key}GeminiTextThinkingLevel`,
+      groupPrefix
+    ),
+    {
+      name: `${config.key}GeminiTextTemperature`,
+      label: 'Temperature',
+      type: 'float',
+      group: `${groupPrefix}Request`,
+      defaultValue: 0.2,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      precision: 2
+    },
+    {
+      name: `${config.key}GeminiTextMaxOutputTokens`,
+      label: '最大输出 Token',
+      type: 'number',
+      group: `${groupPrefix}Request`,
+      defaultValue: 8192,
+      min: 256,
+      max: 65536
+    },
+    {
+      name: `${config.key}GeminiTextTimeoutSeconds`,
+      label: '请求超时',
+      type: 'number',
+      group: `${groupPrefix}Request`,
+      defaultValue: 300,
+      min: 10,
+      max: 600
+    }
+  ]
+}
+
+const TEXT_WORKFLOW_PROVIDER_FIELDS = TEXT_WORKFLOW_CONFIGS.flatMap(config => {
+  return createTextWorkflowDeepSeekFields(config).concat(
+    createTextWorkflowGeminiFields(config)
+  )
+})
+
+function buildDefaultLanguagePromptMap() {
+  const promptMap = {}
+  SUPPORTED_LANGUAGE_CODES.forEach(languageCode => {
+    promptMap[languageCode] = ''
+  })
+  return promptMap
+}
+
 const AI_SETTING_FIELDS = [
   {
     name: 'aiProvider',
@@ -185,8 +405,80 @@ const AI_SETTING_FIELDS = [
     type: 'select',
     group: 'provider',
     defaultValue: 'deepseek',
-    options: AI_PROVIDER_OPTIONS
+    options: AI_PROVIDER_OPTIONS,
+    hiddenInSettings: true
   },
+  {
+    name: 'mainTranslationProvider',
+    label: '主翻译 AI provider',
+    type: 'select',
+    group: 'mainTranslationWorkflow',
+    defaultValue: 'deepseek',
+    options: TEXT_PROVIDER_OPTIONS,
+    helpText: '选择文章翻译与通用内容翻译使用的文本 AI Provider。'
+  },
+  {
+    name: 'mainTranslationDefaultPrompt',
+    label: '主翻译默认提示词',
+    type: 'textarea',
+    group: 'mainTranslationPrompt',
+    defaultValue:
+      '请保持原文语气与专有名词一致，翻译成目标语言。不要增删事实，不要解释，不要改写 HTML 结构字段。'
+  },
+  {
+    name: 'mainTranslationLanguagePrompts',
+    label: '主翻译按目标语言默认提示词',
+    type: 'languagePromptMap',
+    group: 'mainTranslationPrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
+  },
+  {
+    name: 'properNounPreprocessProvider',
+    label: '专有名词预处理 AI provider',
+    type: 'select',
+    group: 'properNounPreprocessWorkflow',
+    defaultValue: 'deepseek',
+    options: TEXT_PROVIDER_OPTIONS,
+    helpText: '控制专有名词抽取和候选消歧阶段使用的文本 AI provider。'
+  },
+  {
+    name: 'properNounPreprocessDefaultPrompt',
+    label: '专有名词预处理默认提示词',
+    type: 'textarea',
+    group: 'properNounPreprocessPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'properNounPreprocessLanguagePrompts',
+    label: '专有名词预处理按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'properNounPreprocessPrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
+  },
+  {
+    name: 'properNounKnowledgeProvider',
+    label: '专有名词本地知识库查询 AI provider',
+    type: 'select',
+    group: 'properNounKnowledgeWorkflow',
+    defaultValue: 'gemini',
+    options: TEXT_PROVIDER_OPTIONS,
+    helpText: '选择不联网的专有名词知识确认阶段使用的文本 AI Provider。'
+  },
+  {
+    name: 'properNounKnowledgeDefaultPrompt',
+    label: '专有名词本地知识库查询默认提示词',
+    type: 'textarea',
+    group: 'properNounKnowledgePrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'properNounKnowledgeLanguagePrompts',
+    label: '专有名词本地知识库查询按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'properNounKnowledgePrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
+  },
+  ...TEXT_WORKFLOW_PROVIDER_FIELDS,
   {
     name: 'deepSeekEnabled',
     label: '启用 DeepSeek',
@@ -286,14 +578,82 @@ const AI_SETTING_FIELDS = [
     type: 'textarea',
     group: 'prompt',
     defaultValue:
-      '请保持原文语气与专有名词一致，翻译成目标语言。不要增删事实，不要解释，不要改写 HTML 结构字段。'
+      '请保持原文语气与专有名词一致，翻译成目标语言。不要增删事实，不要解释，不要改写 HTML 结构字段。',
+    hiddenInSettings: true
   },
   {
     name: 'deepSeekLanguagePrompts',
     label: '按目标语言默认提示词',
     type: 'languagePromptMap',
     group: 'prompt',
-    defaultValue: buildDefaultLanguagePromptMap()
+    defaultValue: buildDefaultLanguagePromptMap(),
+    hiddenInSettings: true
+  },
+  {
+    name: 'geminiTextApiKey',
+    label: 'API Key / Token',
+    type: 'password',
+    group: 'geminiText',
+    defaultValue: '',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  {
+    name: 'geminiTextCloudflareAiGatewayEnabled',
+    label: '使用 AI Gateway',
+    type: 'boolean',
+    group: 'geminiText',
+    defaultValue: false,
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发 Gemini 文本请求。'
+  },
+  {
+    name: 'geminiTextBaseUrl',
+    label: 'Gemini Base URL',
+    type: 'string',
+    group: 'geminiText',
+    defaultValue: 'https://generativelanguage.googleapis.com/v1beta',
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
+  },
+  {
+    name: 'geminiTextModel',
+    label: 'Gemini 文本模型',
+    type: 'modelSelect',
+    group: 'geminiText',
+    defaultValue: 'gemini-3.1-flash-lite',
+    allowCreate: true,
+    options: GEMINI_TEXT_MODEL_OPTIONS,
+    helpText: '当文本类流程选择 Gemini 时，会使用这里的模型。'
+  },
+  buildGeminiThinkingLevelField('geminiTextThinkingLevel', 'geminiText'),
+  {
+    name: 'geminiTextTemperature',
+    label: 'Gemini Temperature',
+    type: 'float',
+    group: 'geminiTextRequest',
+    defaultValue: 0.2,
+    min: 0,
+    max: 2,
+    step: 0.1,
+    precision: 2
+  },
+  {
+    name: 'geminiTextMaxOutputTokens',
+    label: 'Gemini 最大输出 Token',
+    type: 'number',
+    group: 'geminiTextRequest',
+    defaultValue: 8192,
+    min: 256,
+    max: 65536
+  },
+  {
+    name: 'geminiTextTimeoutSeconds',
+    label: 'Gemini 请求超时',
+    type: 'number',
+    group: 'geminiTextRequest',
+    defaultValue: 300,
+    min: 10,
+    max: 600
   },
   {
     name: 'imageGenerationEnabled',
@@ -301,8 +661,7 @@ const AI_SETTING_FIELDS = [
     type: 'boolean',
     group: 'imageProvider',
     defaultValue: false,
-    helpText:
-      '启用后，后续图像生成能力会读取本模块的 provider、模型和请求参数。'
+    helpText: '启用后，封面图生成会使用这里的 Provider、模型和请求参数。'
   },
   {
     name: 'imageGenerationProvider',
@@ -328,8 +687,23 @@ const AI_SETTING_FIELDS = [
     type: 'textarea',
     group: 'imagePrompt',
     defaultValue: '',
+    hiddenInSettings: true,
     helpText:
       '会作为业务提示词前置补充，适合配置站点统一风格、版权边界和输出规范。'
+  },
+  {
+    name: 'imageGenerationDefaultPrompt',
+    label: '图像生成默认提示词',
+    type: 'textarea',
+    group: 'imagePrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'imageGenerationLanguagePrompts',
+    label: '图像生成按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'imagePrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
   },
   {
     name: 'geminiImageApiKey',
@@ -365,8 +739,7 @@ const AI_SETTING_FIELDS = [
     defaultValue: 'gemini-3.1-flash-image-preview',
     allowCreate: true,
     options: GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
-    helpText:
-      'Gemini 图像生成统一走原生 generateContent；默认使用 gemini-3.1-flash-image-preview。'
+    helpText: '选择用于封面图生成的 Gemini 模型。'
   },
   buildGeminiThinkingLevelField('geminiImageThinkingLevel', 'geminiImage'),
   {
@@ -413,8 +786,7 @@ const AI_SETTING_FIELDS = [
     defaultValue: 120,
     min: 10,
     max: 300,
-    helpText:
-      '封面图识别主要用于判断是否需要生成翻译图，超时会记录任务警告，不应静默改用其他 provider。'
+    helpText: '封面图识别主要用于判断是否需要生成翻译图，请预留足够超时时间。'
   },
   {
     name: 'imageRecognitionConfidenceThreshold',
@@ -434,8 +806,23 @@ const AI_SETTING_FIELDS = [
     type: 'textarea',
     group: 'imageRecognitionPrompt',
     defaultValue: DEFAULT_IMAGE_RECOGNITION_PROMPT,
-    helpText:
-      '只用于约束图像识别通用行为；具体业务场景、输出 schema 和字段要求由服务端任务提示词动态追加。'
+    hiddenInSettings: true,
+    helpText: '用于约束图像识别的通用行为。'
+  },
+  {
+    name: 'imageRecognitionDefaultPrompt',
+    label: '图像识别默认提示词',
+    type: 'textarea',
+    group: 'imageRecognitionPrompt',
+    defaultValue: DEFAULT_IMAGE_RECOGNITION_PROMPT,
+    helpText: '用于约束图像识别的通用行为。'
+  },
+  {
+    name: 'imageRecognitionLanguagePrompts',
+    label: '图像识别按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'imageRecognitionPrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
   },
   {
     name: 'geminiImageRecognitionApiKey',
@@ -504,7 +891,7 @@ const AI_SETTING_FIELDS = [
     group: 'internetSearchProvider',
     defaultValue: 'gemini',
     options: INTERNET_SEARCH_PROVIDER_OPTIONS,
-    helpText: '当前仅开放 Gemini，后续可在服务层扩展其他支持联网搜索的 AI。'
+    helpText: '当前仅支持 Gemini。'
   },
   {
     name: 'internetSearchTimeoutSeconds',
@@ -516,6 +903,20 @@ const AI_SETTING_FIELDS = [
     max: 600,
     helpText:
       'Gemini 使用 google_search 工具时可能执行多次搜索，请为批量名词检索保留足够时间。'
+  },
+  {
+    name: 'internetSearchDefaultPrompt',
+    label: '互联网搜索默认提示词',
+    type: 'textarea',
+    group: 'internetSearchPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'internetSearchLanguagePrompts',
+    label: '互联网搜索按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'internetSearchPrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
   },
   {
     name: 'geminiInternetSearchApiKey',
@@ -551,42 +952,13 @@ const AI_SETTING_FIELDS = [
     defaultValue: 'gemini-3-flash-preview',
     allowCreate: true,
     options: GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
-    helpText:
-      'Google Search grounding 当前模型使用 tools: [{ google_search: {} }]；默认采用文档示例的 gemini-3-flash-preview。'
+    helpText: '选择用于专有名词联网搜索的 Gemini 模型。'
   },
   buildGeminiThinkingLevelField(
     'geminiInternetSearchThinkingLevel',
     'geminiInternetSearch'
   )
 ]
-
-const AI_SETTING_FIELD_MAP = AI_SETTING_FIELDS.reduce((map, item) => {
-  map[item.name] = item
-  return map
-}, {})
-
-function applyLegacyAiSettingValues(
-  values,
-  configuredNames,
-  legacyValues = {}
-) {
-  Object.entries(LEGACY_AI_SETTING_MIGRATIONS).forEach(
-    ([legacyName, targetName]) => {
-      if (configuredNames.includes(targetName)) {
-        return
-      }
-      if (!Object.prototype.hasOwnProperty.call(legacyValues, legacyName)) {
-        return
-      }
-      const targetField = AI_SETTING_FIELD_MAP[targetName]
-      if (!targetField) {
-        return
-      }
-      values[targetName] = normalizeValue(targetField, legacyValues[legacyName])
-      configuredNames.push(targetName)
-    }
-  )
-}
 
 function getOptionModel() {
   const repository = global.$mongodDB.multilingual.repositories.options
@@ -601,73 +973,7 @@ function normalizeBooleanValue(value) {
   return value === true || value === 'true' || value === '1'
 }
 
-function clampNumber(field, numberValue) {
-  let normalizedValue = numberValue
-  if (field.min !== undefined && normalizedValue < field.min) {
-    normalizedValue = field.min
-  }
-  if (field.max !== undefined && normalizedValue > field.max) {
-    normalizedValue = field.max
-  }
-  return normalizedValue
-}
-
-function normalizeNumberValue(field, value) {
-  const numberValue = Number(value)
-  if (!Number.isFinite(numberValue)) {
-    return field.defaultValue
-  }
-
-  return Math.round(clampNumber(field, numberValue))
-}
-
-function normalizeFloatValue(field, value) {
-  const numberValue = Number(value)
-  if (!Number.isFinite(numberValue)) {
-    return field.defaultValue
-  }
-
-  const normalizedValue = clampNumber(field, numberValue)
-  const precision = Number.isInteger(field.precision) ? field.precision : 2
-  const multiple = Math.pow(10, precision)
-  return Math.round(normalizedValue * multiple) / multiple
-}
-
-function normalizeSelectValue(field, value) {
-  const text = String(value || '').trim()
-  if (!text) {
-    return field.defaultValue
-  }
-
-  if (field.allowCreate) {
-    return text
-  }
-
-  const matched = (field.options || []).some(option => option.value === text)
-  if (!matched) {
-    return field.defaultValue
-  }
-
-  return text
-}
-
-function buildDefaultLanguagePromptMap() {
-  return SUPPORTED_LANGUAGE_CODES.reduce((map, languageCode) => {
-    map[languageCode] = ''
-    return map
-  }, {})
-}
-
-function normalizeLanguagePromptMap(value) {
-  let inputValue = value
-  if (typeof inputValue === 'string') {
-    try {
-      inputValue = inputValue.trim() ? JSON.parse(inputValue) : {}
-    } catch (error) {
-      inputValue = {}
-    }
-  }
-
+function normalizeLanguagePromptMap(inputValue) {
   if (
     !inputValue ||
     typeof inputValue !== 'object' ||
@@ -689,11 +995,74 @@ function normalizeLanguagePromptMap(value) {
   return promptMap
 }
 
+function normalizeNumberValue(field, value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return field.defaultValue
+  }
+
+  let normalizedValue = Math.round(numberValue)
+  if (typeof field.min === 'number' && normalizedValue < field.min) {
+    normalizedValue = field.min
+  }
+  if (typeof field.max === 'number' && normalizedValue > field.max) {
+    normalizedValue = field.max
+  }
+  return normalizedValue
+}
+
+function normalizeFloatValue(field, value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) {
+    return field.defaultValue
+  }
+
+  let normalizedValue = numberValue
+  if (Number.isInteger(field.precision) && field.precision >= 0) {
+    normalizedValue = Number(numberValue.toFixed(field.precision))
+  }
+  if (typeof field.min === 'number' && normalizedValue < field.min) {
+    normalizedValue = field.min
+  }
+  if (typeof field.max === 'number' && normalizedValue > field.max) {
+    normalizedValue = field.max
+  }
+  return normalizedValue
+}
+
+function normalizeSelectValue(field, value) {
+  const normalizedValue = normalizeTrimmedString(value, 200)
+  const optionList = Array.isArray(field.options) ? field.options : []
+  const matchedOption = optionList.find(option => {
+    return normalizeTrimmedString(option.value, 200) === normalizedValue
+  })
+  if (matchedOption) {
+    return matchedOption.value
+  }
+  if (field.allowCreate && normalizedValue) {
+    return normalizedValue
+  }
+  return field.defaultValue
+}
+
 function normalizeTrimmedString(value, maxLength = 12000) {
   if (value === null || typeof value === 'undefined') {
     return ''
   }
   return String(value).trim().slice(0, maxLength)
+}
+
+function cloneSerializableValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => cloneSerializableValue(item))
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value).reduce((result, key) => {
+      result[key] = cloneSerializableValue(value[key])
+      return result
+    }, {})
+  }
+  return value
 }
 
 function isGemini25Model(model) {
@@ -746,10 +1115,7 @@ function buildGeminiThinkingConfig(model, thinkingLevel, fieldName) {
     )
   }
 
-  if (
-    normalizedThinkingLevel === 'minimal' &&
-    isGemini3ProModel(model)
-  ) {
+  if (normalizedThinkingLevel === 'minimal' && isGemini3ProModel(model)) {
     throw new ApiError(
       ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
       'Gemini 3 Pro 不支持 Minimal 思考深度；请选择 Low、Medium、High 或默认。',
@@ -814,9 +1180,7 @@ function buildDefaultValues() {
 
 async function getAiSettings() {
   const OptionModel = getOptionModel()
-  const nameList = AI_SETTING_FIELDS.map(item => item.name).concat(
-    Object.keys(LEGACY_AI_SETTING_MIGRATIONS)
-  )
+  const nameList = AI_SETTING_FIELDS.map(item => item.name)
   const optionList = await OptionModel.find({
     scope: OPTION_SCOPE,
     languageCode: DEFAULT_LANGUAGE_CODE,
@@ -827,24 +1191,16 @@ async function getAiSettings() {
 
   const values = buildDefaultValues()
   const configuredNames = []
-  const legacyValues = {}
   for (const item of optionList) {
-    const field = AI_SETTING_FIELD_MAP[item.name]
+    const field = AI_SETTING_FIELDS.find(candidate => {
+      return candidate.name === item.name
+    })
     if (!field) {
-      if (
-        Object.prototype.hasOwnProperty.call(
-          LEGACY_AI_SETTING_MIGRATIONS,
-          item.name
-        )
-      ) {
-        legacyValues[item.name] = item.value
-      }
       continue
     }
     values[item.name] = normalizeValue(field, item.value)
     configuredNames.push(item.name)
   }
-  applyLegacyAiSettingValues(values, configuredNames, legacyValues)
 
   return {
     fields: AI_SETTING_FIELDS,
@@ -854,6 +1210,13 @@ async function getAiSettings() {
       deepSeekBaseUrl: 'https://api.deepseek.com',
       jsonOutputResponseFormat: { type: 'json_object' },
       modelOptions: DEEPSEEK_MODEL_OPTIONS,
+      textProviders: TEXT_PROVIDER_OPTIONS,
+      geminiText: {
+        geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        geminiDefaultModel: 'gemini-3.1-flash-lite',
+        geminiModelOptions: GEMINI_TEXT_MODEL_OPTIONS,
+        geminiThinkingLevelOptions: GEMINI_THINKING_LEVEL_OPTIONS
+      },
       imageGeneration: {
         geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         geminiDefaultModel: 'gemini-3.1-flash-image-preview',
@@ -926,12 +1289,6 @@ async function updateAiSettings(values = {}) {
     )
   }
 
-  await OptionModel.deleteMany({
-    scope: OPTION_SCOPE,
-    languageCode: DEFAULT_LANGUAGE_CODE,
-    name: { $in: Object.keys(LEGACY_AI_SETTING_MIGRATIONS) }
-  })
-
   const currentSettings = await getAiSettings()
   currentSettings.values = {
     ...currentSettings.values,
@@ -940,10 +1297,49 @@ async function updateAiSettings(values = {}) {
   return currentSettings
 }
 
+function buildWorkflowPromptSettings(
+  values,
+  defaultFieldName,
+  languageFieldName
+) {
+  return {
+    defaultPrompt: normalizeTrimmedString(values[defaultFieldName], 12000),
+    languagePrompts: normalizeLanguagePromptMap(values[languageFieldName])
+  }
+}
+
+function attachWorkflowPromptSettings(
+  runtimeSettings,
+  values,
+  defaultFieldName,
+  languageFieldName
+) {
+  const promptSettings = buildWorkflowPromptSettings(
+    values,
+    defaultFieldName,
+    languageFieldName
+  )
+  runtimeSettings[defaultFieldName] = promptSettings.defaultPrompt
+  runtimeSettings[languageFieldName] = promptSettings.languagePrompts
+  return runtimeSettings
+}
+
+function normalizeWorkflowProviderValue(value) {
+  const normalizedValue = normalizeTrimmedString(value, 40).toLowerCase()
+  if (normalizedValue === 'deepseek' || normalizedValue === 'gemini') {
+    return normalizedValue
+  }
+  return ''
+}
+
+function getWorkflowProviderFieldName(fieldName) {
+  return normalizeTrimmedString(fieldName, 80) || 'provider'
+}
+
 async function getDeepSeekRuntimeSettings() {
   const settings = await getAiSettings()
   const values = settings.values
-  if (values.aiProvider !== 'deepseek' || values.deepSeekEnabled !== true) {
+  if (values.deepSeekEnabled !== true) {
     throw new ApiError(
       ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
       '请先在 AI 设置中启用 DeepSeek',
@@ -960,7 +1356,223 @@ async function getDeepSeekRuntimeSettings() {
     )
   }
 
-  return values
+  return {
+    ...values,
+    provider: 'deepseek',
+    model: normalizeTrimmedString(values.deepSeekModel),
+    maxTokens: values.deepSeekMaxTokens,
+    timeoutSeconds: values.deepSeekTimeoutSeconds,
+    temperature: values.deepSeekTemperature
+  }
+}
+
+function buildWorkflowFieldName(workflowKey, suffix) {
+  return `${workflowKey}${suffix}`
+}
+
+function buildDeepSeekWorkflowRuntimeSettings(values, workflowKey) {
+  const apiKeyFieldName = buildWorkflowFieldName(workflowKey, 'DeepSeekApiKey')
+  if (!normalizeTrimmedString(values[apiKeyFieldName])) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      '请先配置 DeepSeek API Key',
+      apiKeyFieldName,
+      400
+    )
+  }
+
+  const modelFieldName = buildWorkflowFieldName(workflowKey, 'DeepSeekModel')
+  const maxTokensFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'DeepSeekMaxTokens'
+  )
+  const timeoutFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'DeepSeekTimeoutSeconds'
+  )
+  const temperatureFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'DeepSeekTemperature'
+  )
+
+  return {
+    provider: 'deepseek',
+    apiKey: normalizeTrimmedString(values[apiKeyFieldName]),
+    baseUrl: normalizeTrimmedString(
+      values[buildWorkflowFieldName(workflowKey, 'DeepSeekBaseUrl')]
+    ),
+    useCloudflareAiGateway:
+      values[
+        buildWorkflowFieldName(workflowKey, 'DeepSeekUseCloudflareAiGateway')
+      ] === true,
+    model: normalizeTrimmedString(values[modelFieldName]),
+    maxTokens: values[maxTokensFieldName],
+    timeoutSeconds: values[timeoutFieldName],
+    temperature: values[temperatureFieldName],
+    deepSeekApiKey: normalizeTrimmedString(values[apiKeyFieldName]),
+    deepSeekBaseUrl: normalizeTrimmedString(
+      values[buildWorkflowFieldName(workflowKey, 'DeepSeekBaseUrl')]
+    ),
+    deepSeekUseCloudflareAiGateway:
+      values[
+        buildWorkflowFieldName(workflowKey, 'DeepSeekUseCloudflareAiGateway')
+      ] === true,
+    deepSeekModel: normalizeTrimmedString(values[modelFieldName]),
+    deepSeekThinkingType: normalizeTrimmedString(
+      values[buildWorkflowFieldName(workflowKey, 'DeepSeekThinkingType')],
+      40
+    ),
+    deepSeekReasoningEffort: normalizeTrimmedString(
+      values[buildWorkflowFieldName(workflowKey, 'DeepSeekReasoningEffort')],
+      40
+    ),
+    deepSeekTemperature: values[temperatureFieldName],
+    deepSeekMaxTokens: values[maxTokensFieldName],
+    deepSeekTimeoutSeconds: values[timeoutFieldName]
+  }
+}
+
+function buildGeminiTextWorkflowRuntimeSettings(values, workflowKey) {
+  const apiKeyFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'GeminiTextApiKey'
+  )
+  if (!normalizeTrimmedString(values[apiKeyFieldName])) {
+    throw new ApiError(
+      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+      '请先配置 Gemini 文本 API Key',
+      apiKeyFieldName,
+      400
+    )
+  }
+
+  const modelFieldName = buildWorkflowFieldName(workflowKey, 'GeminiTextModel')
+  const maxTokensFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'GeminiTextMaxOutputTokens'
+  )
+  const timeoutFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'GeminiTextTimeoutSeconds'
+  )
+  const temperatureFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'GeminiTextTemperature'
+  )
+  const thinkingLevelFieldName = buildWorkflowFieldName(
+    workflowKey,
+    'GeminiTextThinkingLevel'
+  )
+
+  const model = normalizeTrimmedString(values[modelFieldName])
+  const thinkingLevel = values[thinkingLevelFieldName]
+  let deepSeekThinkingType = 'enabled'
+  if (
+    thinkingLevel === GEMINI_THINKING_LEVEL_DEFAULT ||
+    !normalizeTrimmedString(thinkingLevel, 40)
+  ) {
+    deepSeekThinkingType = 'disabled'
+  }
+  const runtimeSettings = {
+    provider: 'gemini',
+    apiKey: normalizeTrimmedString(values[apiKeyFieldName]),
+    baseUrl: normalizeTrimmedString(
+      values[buildWorkflowFieldName(workflowKey, 'GeminiTextBaseUrl')]
+    ),
+    useCloudflareAiGateway:
+      values[
+        buildWorkflowFieldName(
+          workflowKey,
+          'GeminiTextCloudflareAiGatewayEnabled'
+        )
+      ] === true,
+    model,
+    maxTokens: values[maxTokensFieldName],
+    timeoutSeconds: values[timeoutFieldName],
+    temperature: values[temperatureFieldName],
+    requestOptions: {
+      thinkingConfig: buildGeminiThinkingConfig(
+        model,
+        thinkingLevel,
+        thinkingLevelFieldName
+      )
+    },
+    deepSeekModel: model,
+    deepSeekMaxTokens: values[maxTokensFieldName],
+    deepSeekTimeoutSeconds: values[timeoutFieldName],
+    deepSeekTemperature: values[temperatureFieldName],
+    deepSeekThinkingType
+  }
+  return runtimeSettings
+}
+
+function buildTextRuntimeSettingsForProvider(
+  values,
+  provider,
+  fieldName,
+  workflowKey
+) {
+  const normalizedProvider = normalizeWorkflowProviderValue(provider)
+  if (normalizedProvider === 'deepseek') {
+    return buildDeepSeekWorkflowRuntimeSettings(values, workflowKey)
+  }
+  if (normalizedProvider === 'gemini') {
+    return buildGeminiTextWorkflowRuntimeSettings(values, workflowKey)
+  }
+  throw new ApiError(
+    ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
+    '文本 AI provider 配置无效',
+    getWorkflowProviderFieldName(fieldName),
+    400
+  )
+}
+
+async function getMainTranslationRuntimeSettings() {
+  const settings = await getAiSettings()
+  const values = settings.values
+  return attachWorkflowPromptSettings(
+    buildTextRuntimeSettingsForProvider(
+      values,
+      values.mainTranslationProvider,
+      'mainTranslationProvider',
+      'mainTranslation'
+    ),
+    values,
+    'mainTranslationDefaultPrompt',
+    'mainTranslationLanguagePrompts'
+  )
+}
+
+async function getProperNounPreprocessRuntimeSettings() {
+  const settings = await getAiSettings()
+  const values = settings.values
+  return attachWorkflowPromptSettings(
+    buildTextRuntimeSettingsForProvider(
+      values,
+      values.properNounPreprocessProvider,
+      'properNounPreprocessProvider',
+      'properNounPreprocess'
+    ),
+    values,
+    'properNounPreprocessDefaultPrompt',
+    'properNounPreprocessLanguagePrompts'
+  )
+}
+
+async function getProperNounKnowledgeRuntimeSettings() {
+  const settings = await getAiSettings()
+  const values = settings.values
+  return attachWorkflowPromptSettings(
+    buildTextRuntimeSettingsForProvider(
+      values,
+      values.properNounKnowledgeProvider,
+      'properNounKnowledgeProvider',
+      'properNounKnowledge'
+    ),
+    values,
+    'properNounKnowledgeDefaultPrompt',
+    'properNounKnowledgeLanguagePrompts'
+  )
 }
 
 function buildGeminiImageRuntimeSettings(values) {
@@ -973,25 +1585,30 @@ function buildGeminiImageRuntimeSettings(values) {
     )
   }
 
-  return {
-    provider: 'gemini',
-    apiKey: normalizeTrimmedString(values.geminiImageApiKey),
-    baseUrl: normalizeTrimmedString(values.geminiImageBaseUrl),
-    useCloudflareAiGateway:
-      values.geminiImageCloudflareAiGatewayEnabled === true,
-    model: normalizeTrimmedString(values.geminiImageModel),
-    timeoutSeconds: values.imageGenerationTimeoutSeconds,
-    promptPrefix: normalizeTrimmedString(values.imageGenerationPromptPrefix),
-    requestOptions: {
-      aspectRatio: values.geminiImageAspectRatio,
-      imageSize: values.geminiImageSize,
-      thinkingConfig: buildGeminiThinkingConfig(
-        values.geminiImageModel,
-        values.geminiImageThinkingLevel,
-        'geminiImageThinkingLevel'
-      )
-    }
-  }
+  return attachWorkflowPromptSettings(
+    {
+      provider: 'gemini',
+      apiKey: normalizeTrimmedString(values.geminiImageApiKey),
+      baseUrl: normalizeTrimmedString(values.geminiImageBaseUrl),
+      useCloudflareAiGateway:
+        values.geminiImageCloudflareAiGatewayEnabled === true,
+      model: normalizeTrimmedString(values.geminiImageModel),
+      timeoutSeconds: values.imageGenerationTimeoutSeconds,
+      promptPrefix: normalizeTrimmedString(values.imageGenerationDefaultPrompt),
+      requestOptions: {
+        aspectRatio: values.geminiImageAspectRatio,
+        imageSize: values.geminiImageSize,
+        thinkingConfig: buildGeminiThinkingConfig(
+          values.geminiImageModel,
+          values.geminiImageThinkingLevel,
+          'geminiImageThinkingLevel'
+        )
+      }
+    },
+    values,
+    'imageGenerationDefaultPrompt',
+    'imageGenerationLanguagePrompts'
+  )
 }
 
 async function getImageGenerationRuntimeSettings() {
@@ -1028,25 +1645,30 @@ function buildGeminiImageRecognitionRuntimeSettings(values) {
     )
   }
 
-  return {
-    provider: 'gemini',
-    apiKey: normalizeTrimmedString(values.geminiImageRecognitionApiKey),
-    baseUrl: normalizeTrimmedString(values.geminiImageRecognitionBaseUrl),
-    useCloudflareAiGateway:
-      values.geminiImageRecognitionCloudflareAiGatewayEnabled === true,
-    model: normalizeTrimmedString(values.geminiImageRecognitionModel),
-    timeoutSeconds: values.imageRecognitionTimeoutSeconds,
-    confidenceThreshold: values.imageRecognitionConfidenceThreshold,
-    prompt: normalizeTrimmedString(values.imageRecognitionPrompt),
-    requestOptions: {
-      mediaResolution: values.geminiImageRecognitionMediaResolution,
-      thinkingConfig: buildGeminiThinkingConfig(
-        values.geminiImageRecognitionModel,
-        values.geminiImageRecognitionThinkingLevel,
-        'geminiImageRecognitionThinkingLevel'
-      )
-    }
-  }
+  return attachWorkflowPromptSettings(
+    {
+      provider: 'gemini',
+      apiKey: normalizeTrimmedString(values.geminiImageRecognitionApiKey),
+      baseUrl: normalizeTrimmedString(values.geminiImageRecognitionBaseUrl),
+      useCloudflareAiGateway:
+        values.geminiImageRecognitionCloudflareAiGatewayEnabled === true,
+      model: normalizeTrimmedString(values.geminiImageRecognitionModel),
+      timeoutSeconds: values.imageRecognitionTimeoutSeconds,
+      confidenceThreshold: values.imageRecognitionConfidenceThreshold,
+      prompt: normalizeTrimmedString(values.imageRecognitionDefaultPrompt),
+      requestOptions: {
+        mediaResolution: values.geminiImageRecognitionMediaResolution,
+        thinkingConfig: buildGeminiThinkingConfig(
+          values.geminiImageRecognitionModel,
+          values.geminiImageRecognitionThinkingLevel,
+          'geminiImageRecognitionThinkingLevel'
+        )
+      }
+    },
+    values,
+    'imageRecognitionDefaultPrompt',
+    'imageRecognitionLanguagePrompts'
+  )
 }
 
 async function getImageRecognitionRuntimeSettings() {
@@ -1083,23 +1705,28 @@ function buildGeminiInternetSearchRuntimeSettings(values) {
     )
   }
 
-  return {
-    provider: 'gemini',
-    apiKey: normalizeTrimmedString(values.geminiInternetSearchApiKey),
-    baseUrl: normalizeTrimmedString(values.geminiInternetSearchBaseUrl),
-    useCloudflareAiGateway:
-      values.geminiInternetSearchCloudflareAiGatewayEnabled === true,
-    model: normalizeTrimmedString(values.geminiInternetSearchModel),
-    timeoutSeconds: values.internetSearchTimeoutSeconds,
-    requestOptions: {
-      tool: 'google_search',
-      thinkingConfig: buildGeminiThinkingConfig(
-        values.geminiInternetSearchModel,
-        values.geminiInternetSearchThinkingLevel,
-        'geminiInternetSearchThinkingLevel'
-      )
-    }
-  }
+  return attachWorkflowPromptSettings(
+    {
+      provider: 'gemini',
+      apiKey: normalizeTrimmedString(values.geminiInternetSearchApiKey),
+      baseUrl: normalizeTrimmedString(values.geminiInternetSearchBaseUrl),
+      useCloudflareAiGateway:
+        values.geminiInternetSearchCloudflareAiGatewayEnabled === true,
+      model: normalizeTrimmedString(values.geminiInternetSearchModel),
+      timeoutSeconds: values.internetSearchTimeoutSeconds,
+      requestOptions: {
+        tool: 'google_search',
+        thinkingConfig: buildGeminiThinkingConfig(
+          values.geminiInternetSearchModel,
+          values.geminiInternetSearchThinkingLevel,
+          'geminiInternetSearchThinkingLevel'
+        )
+      }
+    },
+    values,
+    'internetSearchDefaultPrompt',
+    'internetSearchLanguagePrompts'
+  )
 }
 
 async function getInternetSearchRuntimeSettings() {
@@ -1114,7 +1741,9 @@ async function getInternetSearchRuntimeSettings() {
     )
   }
 
-  if (values.internetSearchProvider === 'gemini') {
+  if (
+    normalizeWorkflowProviderValue(values.internetSearchProvider) === 'gemini'
+  ) {
     return buildGeminiInternetSearchRuntimeSettings(values)
   }
 
@@ -1128,15 +1757,20 @@ async function getInternetSearchRuntimeSettings() {
 
 module.exports = {
   AI_SETTING_FIELDS,
+  TEXT_PROVIDER_OPTIONS,
   IMAGE_GENERATION_PROVIDER_OPTIONS,
   IMAGE_RECOGNITION_PROVIDER_OPTIONS,
   INTERNET_SEARCH_PROVIDER_OPTIONS,
+  GEMINI_TEXT_MODEL_OPTIONS,
   GEMINI_IMAGE_GENERATION_MODEL_OPTIONS,
   GEMINI_IMAGE_RECOGNITION_MODEL_OPTIONS,
   GEMINI_INTERNET_SEARCH_MODEL_OPTIONS,
   DEEPSEEK_MODEL_OPTIONS,
   getAiSettings,
   getDeepSeekRuntimeSettings,
+  getMainTranslationRuntimeSettings,
+  getProperNounPreprocessRuntimeSettings,
+  getProperNounKnowledgeRuntimeSettings,
   getImageGenerationRuntimeSettings,
   getImageRecognitionRuntimeSettings,
   getInternetSearchRuntimeSettings,

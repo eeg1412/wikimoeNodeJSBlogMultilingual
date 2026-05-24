@@ -1,4 +1,4 @@
-const deepSeekTranslationService = require('../../services/deepSeekTranslationService')
+const translationWorkflowAiService = require('../../services/translationWorkflowAiService')
 
 function sendSseEvent(res, eventName, data) {
   res.write(`event: ${eventName}\n`)
@@ -107,24 +107,25 @@ module.exports = async function streamTranslateContent(req, res) {
   }
 
   try {
-    const data = await deepSeekTranslationService.translateContentEntriesStream(
-      req.body,
-      {
-        onStatus(status) {
-          send('status', status)
-        },
-        onChunk(chunk) {
-          send('chunk', chunk)
-        },
-        onChunkRollback(rollback) {
-          send('chunkRollback', rollback)
-        },
-        onResult(result) {
-          send('result', result)
-        },
-        cancellation
-      }
-    )
+    const data =
+      await translationWorkflowAiService.translateContentEntriesStream(
+        req.body,
+        {
+          onStatus(status) {
+            send('status', status)
+          },
+          onChunk(chunk) {
+            send('chunk', chunk)
+          },
+          onChunkRollback(rollback) {
+            send('chunkRollback', rollback)
+          },
+          onResult(result) {
+            send('result', result)
+          },
+          cancellation
+        }
+      )
     send('done', {
       requestId: data.requestId || null,
       model: data.model || ''

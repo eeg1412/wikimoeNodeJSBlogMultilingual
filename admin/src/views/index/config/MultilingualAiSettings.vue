@@ -9,30 +9,21 @@
 
     <el-skeleton v-if="loading" :rows="8" animated />
     <el-form v-else :model="settingsForm" label-width="180px">
-      <template v-for="group in fieldGroupOptions" :key="group.value">
-        <el-divider
-          v-if="isImageGenerationSectionStart(group)"
-          content-position="left"
-          class="ai-settings-section-divider"
+      <div
+        v-for="section in sectionList"
+        :key="section.key"
+        class="config-border-item ai-settings-section"
+      >
+        <div class="config-border-item-title mb10">{{ section.title }}</div>
+        <div v-if="section.description" class="ai-section-description">
+          {{ section.description }}
+        </div>
+        <div
+          v-for="group in section.groups"
+          :key="group.value"
+          class="ai-settings-group"
         >
-          图像生成
-        </el-divider>
-        <el-divider
-          v-if="isImageRecognitionSectionStart(group)"
-          content-position="left"
-          class="ai-settings-section-divider"
-        >
-          图像识别
-        </el-divider>
-        <el-divider
-          v-if="isInternetSearchSectionStart(group)"
-          content-position="left"
-          class="ai-settings-section-divider"
-        >
-          互联网搜索
-        </el-divider>
-        <div class="config-border-item ai-settings-group">
-          <div class="config-border-item-title mb10">{{ group.label }}</div>
+          <div class="ai-settings-group-title">{{ group.label }}</div>
           <el-row :gutter="18">
             <el-col
               v-for="field in getFieldListByGroup(group.value)"
@@ -136,7 +127,7 @@
             </el-col>
           </el-row>
         </div>
-      </template>
+      </div>
 
       <el-form-item class="ai-settings-actions">
         <el-button @click="getAiSettings(false)">刷新</el-button>
@@ -154,24 +145,214 @@ import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
 import { SUPPORTED_LANGUAGE_OPTIONS } from '@/utils/multilingual'
 
-const FIELD_GROUP_OPTIONS = [
-  { label: '服务商', value: 'provider' },
-  { label: 'DeepSeek 连接', value: 'deepseek' },
-  { label: '模型与输出', value: 'model' },
-  { label: '请求控制', value: 'request' },
-  { label: '默认提示词', value: 'prompt' },
-  { label: '图像生成服务', value: 'imageProvider' },
-  { label: 'Gemini 图像生成', value: 'geminiImage' },
-  { label: '图像生成请求', value: 'imageRequest' },
-  { label: '图像生成提示词', value: 'imagePrompt' },
-  { label: '图像识别服务', value: 'imageRecognitionProvider' },
-  { label: 'Gemini 图像识别', value: 'geminiImageRecognition' },
-  { label: '图像识别请求', value: 'imageRecognitionRequest' },
-  { label: '图像识别提示词', value: 'imageRecognitionPrompt' },
-  { label: '互联网搜索服务', value: 'internetSearchProvider' },
-  { label: 'Gemini 互联网搜索', value: 'geminiInternetSearch' },
-  { label: '互联网搜索请求', value: 'internetSearchRequest' }
+function buildLocalLanguagePromptMap() {
+  return SUPPORTED_LANGUAGE_OPTIONS.reduce((result, language) => {
+    result[language.value] = ''
+    return result
+  }, {})
+}
+
+const TEXT_WORKFLOW_CONFIGS = [
+  { key: 'mainTranslation' },
+  { key: 'properNounPreprocess' },
+  { key: 'properNounKnowledge' }
 ]
+
+const TEXT_WORKFLOW_GROUP_LABEL_MAP = TEXT_WORKFLOW_CONFIGS.reduce(
+  (result, workflow) => {
+    result[`${workflow.key}Deepseek`] = 'DeepSeek 连接'
+    result[`${workflow.key}DeepseekModel`] = 'DeepSeek 模型与输出'
+    result[`${workflow.key}DeepseekRequest`] = 'DeepSeek 请求控制'
+    result[`${workflow.key}GeminiText`] = 'Gemini 连接'
+    result[`${workflow.key}GeminiTextRequest`] = 'Gemini 请求控制'
+    return result
+  },
+  {}
+)
+
+function buildLocalTextWorkflowProviderFields(docs = {}) {
+  const deepSeekModelOptions = docs.modelOptions || []
+  const geminiTextDocs = docs.geminiText || {}
+  const geminiModelOptions = geminiTextDocs.geminiModelOptions || []
+  const geminiThinkingLevelOptions =
+    geminiTextDocs.geminiThinkingLevelOptions || []
+
+  return TEXT_WORKFLOW_CONFIGS.flatMap(workflow => {
+    const groupPrefix = workflow.key
+    return [
+      {
+        name: `${groupPrefix}DeepSeekApiKey`,
+        label: 'API Key / Token',
+        type: 'password',
+        group: `${groupPrefix}Deepseek`,
+        defaultValue: ''
+      },
+      {
+        name: `${groupPrefix}DeepSeekUseCloudflareAiGateway`,
+        label: '使用 AI Gateway',
+        type: 'boolean',
+        group: `${groupPrefix}Deepseek`,
+        defaultValue: false
+      },
+      {
+        name: `${groupPrefix}DeepSeekBaseUrl`,
+        label: '服务地址',
+        type: 'string',
+        group: `${groupPrefix}Deepseek`,
+        defaultValue: 'https://api.deepseek.com'
+      },
+      {
+        name: `${groupPrefix}DeepSeekModel`,
+        label: '模型',
+        type: 'modelSelect',
+        group: `${groupPrefix}DeepseekModel`,
+        defaultValue: 'deepseek-v4-flash',
+        allowCreate: true,
+        options: deepSeekModelOptions
+      },
+      {
+        name: `${groupPrefix}DeepSeekThinkingType`,
+        label: '思考模式',
+        type: 'radio',
+        group: `${groupPrefix}DeepseekModel`,
+        defaultValue: 'disabled',
+        options: [
+          { label: '关闭', value: 'disabled' },
+          { label: '开启', value: 'enabled' }
+        ]
+      },
+      {
+        name: `${groupPrefix}DeepSeekReasoningEffort`,
+        label: '思考强度',
+        type: 'radio',
+        group: `${groupPrefix}DeepseekModel`,
+        defaultValue: 'high',
+        options: [
+          { label: 'High', value: 'high' },
+          { label: 'Max', value: 'max' }
+        ]
+      },
+      {
+        name: `${groupPrefix}DeepSeekTemperature`,
+        label: 'Temperature',
+        type: 'float',
+        group: `${groupPrefix}DeepseekModel`,
+        defaultValue: 0.2,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        precision: 2
+      },
+      {
+        name: `${groupPrefix}DeepSeekMaxTokens`,
+        label: '最大输出 Token',
+        type: 'number',
+        group: `${groupPrefix}DeepseekModel`,
+        defaultValue: 8192,
+        min: 256,
+        max: 384000
+      },
+      {
+        name: `${groupPrefix}DeepSeekTimeoutSeconds`,
+        label: '请求超时',
+        type: 'number',
+        group: `${groupPrefix}DeepseekRequest`,
+        defaultValue: 300,
+        min: 10,
+        max: 600
+      },
+      {
+        name: `${groupPrefix}GeminiTextApiKey`,
+        label: 'API Key / Token',
+        type: 'password',
+        group: `${groupPrefix}GeminiText`,
+        defaultValue: ''
+      },
+      {
+        name: `${groupPrefix}GeminiTextCloudflareAiGatewayEnabled`,
+        label: '使用 AI Gateway',
+        type: 'boolean',
+        group: `${groupPrefix}GeminiText`,
+        defaultValue: false
+      },
+      {
+        name: `${groupPrefix}GeminiTextBaseUrl`,
+        label: '服务地址',
+        type: 'string',
+        group: `${groupPrefix}GeminiText`,
+        defaultValue: 'https://generativelanguage.googleapis.com/v1beta'
+      },
+      {
+        name: `${groupPrefix}GeminiTextModel`,
+        label: '模型',
+        type: 'modelSelect',
+        group: `${groupPrefix}GeminiText`,
+        defaultValue: 'gemini-3.1-flash-lite',
+        allowCreate: true,
+        options: geminiModelOptions
+      },
+      {
+        name: `${groupPrefix}GeminiTextThinkingLevel`,
+        label: 'Gemini 思考深度',
+        type: 'radio',
+        group: `${groupPrefix}GeminiText`,
+        defaultValue: 'default',
+        options: geminiThinkingLevelOptions
+      },
+      {
+        name: `${groupPrefix}GeminiTextTemperature`,
+        label: 'Temperature',
+        type: 'float',
+        group: `${groupPrefix}GeminiTextRequest`,
+        defaultValue: 0.2,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        precision: 2
+      },
+      {
+        name: `${groupPrefix}GeminiTextMaxOutputTokens`,
+        label: '最大输出 Token',
+        type: 'number',
+        group: `${groupPrefix}GeminiTextRequest`,
+        defaultValue: 8192,
+        min: 256,
+        max: 65536
+      },
+      {
+        name: `${groupPrefix}GeminiTextTimeoutSeconds`,
+        label: '请求超时',
+        type: 'number',
+        group: `${groupPrefix}GeminiTextRequest`,
+        defaultValue: 300,
+        min: 10,
+        max: 600
+      }
+    ]
+  })
+}
+
+const FIELD_GROUP_LABEL_MAP = {
+  ...TEXT_WORKFLOW_GROUP_LABEL_MAP,
+  mainTranslationWorkflow: '选择 Provider',
+  mainTranslationPrompt: '提示词',
+  properNounPreprocessWorkflow: '选择 Provider',
+  properNounPreprocessPrompt: '提示词',
+  properNounKnowledgeWorkflow: '选择 Provider',
+  properNounKnowledgePrompt: '提示词',
+  internetSearchProvider: '选择 Provider',
+  internetSearchPrompt: '提示词',
+  geminiInternetSearch: 'Gemini 连接',
+  internetSearchRequest: 'Gemini 请求控制',
+  imageRecognitionProvider: '选择 Provider',
+  geminiImageRecognition: 'Gemini 连接',
+  imageRecognitionRequest: 'Gemini 请求控制',
+  imageRecognitionPrompt: '提示词',
+  imageProvider: '选择 Provider',
+  geminiImage: 'Gemini 连接',
+  imageRequest: 'Gemini 请求控制',
+  imagePrompt: '提示词'
+}
 
 const AI_GATEWAY_FIELD_LIST = [
   {
@@ -212,21 +393,184 @@ const AI_GATEWAY_FIELD_LIST = [
   }
 ]
 
+const WORKFLOW_PROMPT_FIELD_LIST = [
+  {
+    name: 'properNounPreprocessDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'properNounPreprocessPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'properNounPreprocessLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'properNounPreprocessPrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  },
+  {
+    name: 'properNounKnowledgeDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'properNounKnowledgePrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'properNounKnowledgeLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'properNounKnowledgePrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  },
+  {
+    name: 'internetSearchDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'internetSearchPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'internetSearchLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'internetSearchPrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  },
+  {
+    name: 'imageRecognitionDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'imageRecognitionPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'imageRecognitionLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'imageRecognitionPrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  },
+  {
+    name: 'imageGenerationDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'imagePrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'imageGenerationLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'imagePrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  }
+]
+
 const AI_FIELD_DISPLAY_OVERRIDES = {
   deepSeekApiKey: {
     label: 'API Key / Token',
     helpText:
       '直连模型服务时填写服务商 API Key；使用 AI Gateway 时填写 Cloudflare Token。'
   },
+  mainTranslationProvider: {
+    label: '选择 Provider'
+  },
+  properNounPreprocessProvider: {
+    label: '选择 Provider'
+  },
+  properNounKnowledgeProvider: {
+    label: '选择 Provider'
+  },
+  internetSearchProvider: {
+    label: '选择 Provider'
+  },
+  imageGenerationProvider: {
+    label: '选择 Provider'
+  },
+  imageRecognitionProvider: {
+    label: '选择 Provider'
+  },
   deepSeekUseCloudflareAiGateway: {
     label: '使用 AI Gateway',
     group: 'deepseek',
     helpText: '开启后，通过 Cloudflare AI Gateway 转发文本翻译请求。'
   },
+  deepSeekEnabled: {
+    label: '启用 DeepSeek',
+    hiddenInSettings: true
+  },
   deepSeekBaseUrl: {
-    label: 'Base URL',
+    label: '服务地址',
     helpText:
       '直连时填写模型服务地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat。'
+  },
+  deepSeekModel: {
+    label: '模型'
+  },
+  deepSeekMaxTokens: {
+    label: '最大输出 Token'
+  },
+  deepSeekTimeoutSeconds: {
+    label: '请求超时'
+  },
+  mainTranslationDefaultPrompt: {
+    label: '默认提示词'
+  },
+  mainTranslationLanguagePrompts: {
+    label: '按目标语言提示词'
+  },
+  properNounPreprocessDefaultPrompt: {
+    label: '默认提示词'
+  },
+  properNounPreprocessLanguagePrompts: {
+    label: '按目标语言提示词'
+  },
+  properNounKnowledgeDefaultPrompt: {
+    label: '默认提示词'
+  },
+  properNounKnowledgeLanguagePrompts: {
+    label: '按目标语言提示词'
+  },
+  geminiTextApiKey: {
+    label: 'API Key / Token',
+    helpText:
+      '直连 Gemini 时填写 Gemini API Key；使用 AI Gateway 时填写 Cloudflare Token。'
+  },
+  geminiTextCloudflareAiGatewayEnabled: {
+    label: '使用 AI Gateway',
+    group: 'geminiText',
+    helpText: '开启后，通过 Cloudflare AI Gateway 转发 Gemini 文本请求。'
+  },
+  geminiTextBaseUrl: {
+    helpText:
+      '直连时填写 Gemini API 地址；使用 AI Gateway 时填写 https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio。'
+  },
+  geminiTextModel: {
+    label: '模型'
+  },
+  geminiTextMaxOutputTokens: {
+    label: '最大输出 Token'
+  },
+  geminiTextTimeoutSeconds: {
+    label: '请求超时'
+  },
+  internetSearchDefaultPrompt: {
+    label: '默认提示词'
+  },
+  internetSearchLanguagePrompts: {
+    label: '按目标语言提示词'
+  },
+  imageGenerationDefaultPrompt: {
+    label: '默认提示词'
+  },
+  imageGenerationLanguagePrompts: {
+    label: '按目标语言提示词'
+  },
+  imageRecognitionDefaultPrompt: {
+    label: '默认提示词'
+  },
+  imageRecognitionLanguagePrompts: {
+    label: '按目标语言提示词'
   },
   geminiImageApiKey: {
     label: 'API Key / Token',
@@ -294,16 +638,47 @@ const INTERNET_SEARCH_PROVIDER_GROUPS = Object.values(
   INTERNET_SEARCH_PROVIDER_GROUP_MAP
 )
 
+const TEXT_WORKFLOW_PROVIDER_GROUP_MAP = {
+  mainTranslation: {
+    deepseek: [
+      'mainTranslationDeepseek',
+      'mainTranslationDeepseekModel',
+      'mainTranslationDeepseekRequest'
+    ],
+    gemini: ['mainTranslationGeminiText', 'mainTranslationGeminiTextRequest']
+  },
+  properNounPreprocess: {
+    deepseek: [
+      'properNounPreprocessDeepseek',
+      'properNounPreprocessDeepseekModel',
+      'properNounPreprocessDeepseekRequest'
+    ],
+    gemini: [
+      'properNounPreprocessGeminiText',
+      'properNounPreprocessGeminiTextRequest'
+    ]
+  },
+  properNounKnowledge: {
+    deepseek: [
+      'properNounKnowledgeDeepseek',
+      'properNounKnowledgeDeepseekModel',
+      'properNounKnowledgeDeepseekRequest'
+    ],
+    gemini: [
+      'properNounKnowledgeGeminiText',
+      'properNounKnowledgeGeminiTextRequest'
+    ]
+  }
+}
+
 export default {
   name: 'MultilingualAiSettings',
   setup() {
     const loading = ref(false)
     const saving = ref(false)
     const fieldList = ref([])
+    const settingsDocs = ref({})
     const settingsForm = reactive({})
-    const fieldGroupOptions = computed(() => {
-      return FIELD_GROUP_OPTIONS.filter(group => isVisibleFieldGroup(group))
-    })
     const languageOptions = SUPPORTED_LANGUAGE_OPTIONS
 
     function getSelectedImageProvider() {
@@ -313,7 +688,32 @@ export default {
       ) {
         return provider
       }
-      return 'gemini'
+      return ''
+    }
+
+    function normalizeTextProvider(provider) {
+      const normalizedProvider = String(provider || '')
+        .trim()
+        .toLowerCase()
+      if (
+        normalizedProvider === 'deepseek' ||
+        normalizedProvider === 'gemini'
+      ) {
+        return normalizedProvider
+      }
+      return ''
+    }
+
+    function getSelectedMainTranslationProvider() {
+      return normalizeTextProvider(settingsForm.mainTranslationProvider)
+    }
+
+    function getSelectedProperNounPreprocessProvider() {
+      return normalizeTextProvider(settingsForm.properNounPreprocessProvider)
+    }
+
+    function getSelectedProperNounKnowledgeProvider() {
+      return normalizeTextProvider(settingsForm.properNounKnowledgeProvider)
     }
 
     function getSelectedImageRecognitionProvider() {
@@ -328,7 +728,7 @@ export default {
       ) {
         return provider
       }
-      return 'gemini'
+      return ''
     }
 
     function getSelectedInternetSearchProvider() {
@@ -341,55 +741,140 @@ export default {
       ) {
         return provider
       }
-      return 'gemini'
+      return ''
     }
 
-    function isImageProviderGroup(groupValue) {
-      return IMAGE_PROVIDER_GROUPS.includes(groupValue)
+    function buildSectionGroups(groupValues = []) {
+      const seenGroups = new Set()
+      return groupValues
+        .filter(groupValue => {
+          if (!groupValue || seenGroups.has(groupValue)) {
+            return false
+          }
+          seenGroups.add(groupValue)
+          return getFieldListByGroup(groupValue).length > 0
+        })
+        .map(groupValue => {
+          return {
+            value: groupValue,
+            label: FIELD_GROUP_LABEL_MAP[groupValue] || groupValue
+          }
+        })
     }
 
-    function isImageRecognitionProviderGroup(groupValue) {
-      return IMAGE_RECOGNITION_PROVIDER_GROUPS.includes(groupValue)
+    function getTextWorkflowProviderGroups(workflowKey, provider) {
+      const normalizedProvider = normalizeTextProvider(provider)
+      const workflowGroupMap =
+        TEXT_WORKFLOW_PROVIDER_GROUP_MAP[workflowKey] || {}
+      return workflowGroupMap[normalizedProvider] || []
     }
 
-    function isInternetSearchProviderGroup(groupValue) {
-      return INTERNET_SEARCH_PROVIDER_GROUPS.includes(groupValue)
-    }
-
-    function isVisibleFieldGroup(group) {
-      if (!group) {
-        return true
+    function getImageProviderGroups(provider) {
+      const groupValue = IMAGE_PROVIDER_GROUP_MAP[provider]
+      if (!groupValue) {
+        return []
       }
+      return [groupValue]
+    }
 
-      if (isImageProviderGroup(group.value)) {
-        const provider = getSelectedImageProvider()
-        return IMAGE_PROVIDER_GROUP_MAP[provider] === group.value
+    function getImageRecognitionProviderGroups(provider) {
+      const groupValue = IMAGE_RECOGNITION_PROVIDER_GROUP_MAP[provider]
+      if (!groupValue) {
+        return []
       }
+      return [groupValue]
+    }
 
-      if (isImageRecognitionProviderGroup(group.value)) {
-        const provider = getSelectedImageRecognitionProvider()
-        return IMAGE_RECOGNITION_PROVIDER_GROUP_MAP[provider] === group.value
+    function getInternetSearchProviderGroups(provider) {
+      const groupValue = INTERNET_SEARCH_PROVIDER_GROUP_MAP[provider]
+      if (!groupValue) {
+        return []
       }
-
-      if (isInternetSearchProviderGroup(group.value)) {
-        const provider = getSelectedInternetSearchProvider()
-        return INTERNET_SEARCH_PROVIDER_GROUP_MAP[provider] === group.value
-      }
-
-      return true
+      return [groupValue]
     }
 
-    function isImageGenerationSectionStart(group) {
-      return group && group.value === 'imageProvider'
-    }
-
-    function isImageRecognitionSectionStart(group) {
-      return group && group.value === 'imageRecognitionProvider'
-    }
-
-    function isInternetSearchSectionStart(group) {
-      return group && group.value === 'internetSearchProvider'
-    }
+    const sectionList = computed(() => {
+      return [
+        {
+          key: 'mainTranslation',
+          title: '主翻译 AI',
+          description:
+            '用于正文与内容主翻译。先选 provider，再配置该 provider 的模型和请求参数。',
+          groups: buildSectionGroups([
+            'mainTranslationWorkflow',
+            ...getTextWorkflowProviderGroups(
+              'mainTranslation',
+              getSelectedMainTranslationProvider()
+            ),
+            'mainTranslationPrompt'
+          ])
+        },
+        {
+          key: 'properNounPreprocess',
+          title: '专有名词预处理 AI',
+          description: '用于从原文中抽取候选专有名词、筛掉已有词库命中项。',
+          groups: buildSectionGroups([
+            'properNounPreprocessWorkflow',
+            ...getTextWorkflowProviderGroups(
+              'properNounPreprocess',
+              getSelectedProperNounPreprocessProvider()
+            ),
+            'properNounPreprocessPrompt'
+          ])
+        },
+        {
+          key: 'properNounKnowledge',
+          title: '专有名词本地知识库查询 AI',
+          description:
+            '用于先走本地知识库语义整理，判断哪些语言还需要联网补充。',
+          groups: buildSectionGroups([
+            'properNounKnowledgeWorkflow',
+            ...getTextWorkflowProviderGroups(
+              'properNounKnowledge',
+              getSelectedProperNounKnowledgeProvider()
+            ),
+            'properNounKnowledgePrompt'
+          ])
+        },
+        {
+          key: 'internetSearch',
+          title: '专有名词联网搜索 AI',
+          description: '用于补齐本地知识库未确认的译名，目前仅支持 Gemini。',
+          groups: buildSectionGroups([
+            'internetSearchProvider',
+            ...getInternetSearchProviderGroups(
+              getSelectedInternetSearchProvider()
+            ),
+            'internetSearchRequest',
+            'internetSearchPrompt'
+          ])
+        },
+        {
+          key: 'imageRecognition',
+          title: '图片识别 AI',
+          description: '用于识别封面图中的文字和主题，目前仅支持 Gemini。',
+          groups: buildSectionGroups([
+            'imageRecognitionProvider',
+            ...getImageRecognitionProviderGroups(
+              getSelectedImageRecognitionProvider()
+            ),
+            'imageRecognitionRequest',
+            'imageRecognitionPrompt'
+          ])
+        },
+        {
+          key: 'imageGeneration',
+          title: '图片生成 AI',
+          description: '用于生成目标语言封面图，目前仅支持 Gemini。',
+          groups: buildSectionGroups([
+            'imageProvider',
+            ...getImageProviderGroups(getSelectedImageProvider()),
+            'imageRequest',
+            'imagePrompt'
+          ])
+        }
+      ].filter(section => section.groups.length > 0)
+    })
 
     function getDefaultValue(field) {
       if (field.type === 'boolean') {
@@ -426,11 +911,19 @@ export default {
       return displayField
     }
 
-    function mergeAiGatewayFields(apiFields) {
+    function getLocalFieldList() {
+      return AI_GATEWAY_FIELD_LIST.concat(WORKFLOW_PROMPT_FIELD_LIST).concat(
+        buildLocalTextWorkflowProviderFields(settingsDocs.value)
+      )
+    }
+
+    function mergeLocalFields(apiFields) {
       let apiFieldList = []
       if (Array.isArray(apiFields)) {
         apiFieldList = apiFields
       }
+
+      const localFieldList = getLocalFieldList()
 
       const apiFieldNames = new Set(apiFieldList.map(field => field.name))
       const insertedFieldNames = new Set()
@@ -438,7 +931,7 @@ export default {
 
       apiFieldList.forEach(field => {
         mergedFields.push(buildDisplayField(field))
-        AI_GATEWAY_FIELD_LIST.forEach(localField => {
+        localFieldList.forEach(localField => {
           if (apiFieldNames.has(localField.name)) {
             return
           }
@@ -453,7 +946,7 @@ export default {
         })
       })
 
-      AI_GATEWAY_FIELD_LIST.forEach(localField => {
+      localFieldList.forEach(localField => {
         if (apiFieldNames.has(localField.name)) {
           return
         }
@@ -467,7 +960,8 @@ export default {
     }
 
     function applySettingsData(data) {
-      fieldList.value = mergeAiGatewayFields(data.fields)
+      settingsDocs.value = data.docs || {}
+      fieldList.value = mergeLocalFields(data.fields)
       ensureFormFields()
       const values = data.values || {}
       fieldList.value.forEach(field => {
@@ -559,19 +1053,16 @@ export default {
     })
 
     return {
-      fieldGroupOptions,
       fieldList,
       getAiSettings,
       getColumnSpan,
       getFieldListByGroup,
-      isImageGenerationSectionStart,
-      isImageRecognitionSectionStart,
-      isInternetSearchSectionStart,
       getNumberPrecision,
       getNumberStep,
       isSelectField,
       languageOptions,
       loading,
+      sectionList,
       saving,
       settingsForm,
       submitAiSettings
@@ -585,12 +1076,30 @@ export default {
   max-width: 980px;
 }
 
+.ai-settings-section {
+  margin-bottom: 18px;
+}
+
+.ai-section-description {
+  margin-bottom: 16px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .ai-settings-group {
   margin-bottom: 18px;
 }
 
-.ai-settings-section-divider {
-  margin: 8px 0 22px;
+.ai-settings-group:last-child {
+  margin-bottom: 0;
+}
+
+.ai-settings-group-title {
+  margin-bottom: 10px;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .ai-settings-actions {

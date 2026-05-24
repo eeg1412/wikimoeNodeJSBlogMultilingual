@@ -1,4 +1,4 @@
-const deepSeekTranslationService = require('../../services/deepSeekTranslationService')
+const translationWorkflowAiService = require('../../services/translationWorkflowAiService')
 
 function sendSseEvent(res, eventName, data) {
   res.write(`event: ${eventName}\n`)
@@ -107,7 +107,7 @@ module.exports = async function streamTranslatePost(req, res) {
   }
 
   try {
-    const data = await deepSeekTranslationService.translatePostEntriesStream(
+    const data = await translationWorkflowAiService.translatePostEntriesStream(
       req.body,
       {
         onStatus(status) {

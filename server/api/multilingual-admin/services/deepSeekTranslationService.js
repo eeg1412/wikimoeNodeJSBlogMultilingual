@@ -19,6 +19,14 @@ const sourcePostProperNounRelationService = require('./sourcePostProperNounRelat
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const translationPromptPolicyService = require('./translationPromptPolicyService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
+const {
+  buildJsonRequestBody,
+  getProviderCode,
+  getProviderErrorField,
+  getProviderLabel,
+  requestProviderJson,
+  requestProviderStream
+} = require('./textAiProviderRequestService')
 
 const TRANSLATION_JSON_SCHEMA = 'wikimoe.translation.post'
 const TRANSLATION_JSON_VERSION = 2
@@ -50,6 +58,28 @@ const MAX_TERM_FILTER_TOKENS = 2048
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
+
+function getProviderLabelBySettings(settings) {
+  return getProviderLabel(settings)
+}
+
+function getProviderFieldBySettings(settings) {
+  return getProviderErrorField(settings)
+}
+
+function getProviderCodeBySettings(settings) {
+  return getProviderCode(settings) || 'deepseek'
+}
+
+function createProviderApiError(settings, message, status = 502, extra = {}) {
+  return new ApiError(
+    ERROR_CODES.AI_TRANSLATION_FAILED,
+    message,
+    getProviderFieldBySettings(settings),
+    status,
+    extra
+  )
+}
 
 function getPostModel() {
   const repository = global.$mongodDB.multilingual.repositories.posts
@@ -300,7 +330,10 @@ function parseInput(body = {}) {
     )
   }
 
-  const entries = Array.isArray(body.entries) ? body.entries : []
+  let entries = []
+  if (Array.isArray(body.entries)) {
+    entries = body.entries
+  }
   entries.forEach((entry, index) => validateInputEntry(entry, index))
   const targetTitle = String(body.targetTitle || '').trim()
   const targetLanguageCodes = normalizeTargetLanguageCodeList({
@@ -414,7 +447,10 @@ function parseProperNounOrganizeInput(body = {}) {
       400
     )
   }
-  const entries = Array.isArray(body.entries) ? body.entries : []
+  let entries = []
+  if (Array.isArray(body.entries)) {
+    entries = body.entries
+  }
   if (entries.length === 0) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
@@ -499,16 +535,23 @@ function appendCoverImageResultToStreamData(
 ) {
   const nextData = {
     ...data,
-    aiJsonLogs: Array.isArray(data.aiJsonLogs) ? data.aiJsonLogs.slice() : [],
-    coverImagePreviewEntries: Array.isArray(data.coverImagePreviewEntries)
-      ? data.coverImagePreviewEntries.slice()
-      : [],
-    coverImageArtifacts: Array.isArray(data.coverImageArtifacts)
-      ? data.coverImageArtifacts.slice()
-      : [],
-    coverImageWarnings: Array.isArray(data.coverImageWarnings)
-      ? data.coverImageWarnings.slice()
-      : []
+    aiJsonLogs: [],
+    coverImagePreviewEntries: [],
+    coverImageArtifacts: [],
+    coverImageWarnings: []
+  }
+
+  if (Array.isArray(data.aiJsonLogs)) {
+    nextData.aiJsonLogs = data.aiJsonLogs.slice()
+  }
+  if (Array.isArray(data.coverImagePreviewEntries)) {
+    nextData.coverImagePreviewEntries = data.coverImagePreviewEntries.slice()
+  }
+  if (Array.isArray(data.coverImageArtifacts)) {
+    nextData.coverImageArtifacts = data.coverImageArtifacts.slice()
+  }
+  if (Array.isArray(data.coverImageWarnings)) {
+    nextData.coverImageWarnings = data.coverImageWarnings.slice()
   }
 
   if (coverResult?.previewEntry) {
@@ -719,7 +762,7 @@ function buildRichTextPolicyPrompt(input) {
 }
 
 function buildSitePrompt(settings) {
-  const defaultPrompt = normalizePrompt(settings.deepSeekDefaultPrompt)
+  const defaultPrompt = normalizePrompt(settings.mainTranslationDefaultPrompt)
   if (!defaultPrompt) {
     return ''
   }
@@ -732,12 +775,14 @@ function buildSitePrompt(settings) {
 }
 
 function buildTargetLanguageDefaultPrompt(settings, input) {
-  const languagePromptMap =
-    settings.deepSeekLanguagePrompts &&
-    typeof settings.deepSeekLanguagePrompts === 'object' &&
-    !Array.isArray(settings.deepSeekLanguagePrompts)
-      ? settings.deepSeekLanguagePrompts
-      : {}
+  let languagePromptMap = {}
+  if (
+    settings.mainTranslationLanguagePrompts &&
+    typeof settings.mainTranslationLanguagePrompts === 'object' &&
+    !Array.isArray(settings.mainTranslationLanguagePrompts)
+  ) {
+    languagePromptMap = settings.mainTranslationLanguagePrompts
+  }
   const targetLanguagePrompt = normalizePrompt(
     languagePromptMap[input.targetLanguageCode]
   )
@@ -751,6 +796,63 @@ function buildTargetLanguageDefaultPrompt(settings, input) {
     '目标语言默认提示词不得覆盖系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层、可选业务规则层或站点要求层。',
     targetLanguagePrompt
   ])
+}
+
+function getWorkflowTargetLanguageCodes(input) {
+  const languageCodes = []
+  const singleLanguageCode = normalizeLanguageCode(input?.targetLanguageCode)
+  if (singleLanguageCode) {
+    languageCodes.push(singleLanguageCode)
+  }
+  if (Array.isArray(input?.targetLanguageCodes)) {
+    input.targetLanguageCodes.forEach(languageCode => {
+      const normalizedLanguageCode = normalizeLanguageCode(languageCode)
+      if (normalizedLanguageCode) {
+        languageCodes.push(normalizedLanguageCode)
+      }
+    })
+  }
+  return Array.from(new Set(languageCodes))
+}
+
+function buildWorkflowPromptLayer(
+  settings,
+  input,
+  defaultFieldName,
+  languageFieldName,
+  title = '流程补充提示词层'
+) {
+  const promptLines = []
+  const defaultPrompt = normalizePrompt(settings?.[defaultFieldName])
+  if (defaultPrompt) {
+    promptLines.push('以下是管理员为当前流程配置的默认提示词。', defaultPrompt)
+  }
+
+  let languagePromptMap = {}
+  if (
+    settings?.[languageFieldName] &&
+    typeof settings[languageFieldName] === 'object' &&
+    !Array.isArray(settings[languageFieldName])
+  ) {
+    languagePromptMap = settings[languageFieldName]
+  }
+  getWorkflowTargetLanguageCodes(input).forEach(languageCode => {
+    const targetLanguagePrompt = normalizePrompt(
+      languagePromptMap[languageCode]
+    )
+    if (!targetLanguagePrompt) {
+      return
+    }
+    promptLines.push(
+      `以下是目标语言 ${getLanguageLabel(languageCode)}（${languageCode}）的流程补充提示词。`,
+      targetLanguagePrompt
+    )
+  })
+
+  if (promptLines.length === 0) {
+    return ''
+  }
+  return buildPromptLayer(title, promptLines)
 }
 
 function buildUserSupplementPrompt(input) {
@@ -1017,25 +1119,28 @@ function prepareAiInput(input, options = {}) {
       [],
       richTextSegmentTextLength
     )
-    const currentRichTextSegments =
+    let currentRichTextSegments = []
+    if (
       indexedEntry.currentValue &&
       typeof indexedEntry.currentValue === 'object' &&
       !Array.isArray(indexedEntry.currentValue)
-        ? collectRichTextSegments(
-            indexedEntry.currentValue,
-            [],
-            [],
-            richTextSegmentTextLength
-          )
-        : []
+    ) {
+      currentRichTextSegments = collectRichTextSegments(
+        indexedEntry.currentValue,
+        [],
+        [],
+        richTextSegmentTextLength
+      )
+    }
+    let aiCurrentValue = undefined
+    if (currentRichTextSegments.length > 0) {
+      aiCurrentValue = buildIndexedRichTextValue(currentRichTextSegments)
+    }
     return {
       ...indexedEntry,
       richTextSegments,
       aiValue: buildIndexedRichTextValue(richTextSegments),
-      aiCurrentValue:
-        currentRichTextSegments.length > 0
-          ? buildIndexedRichTextValue(currentRichTextSegments)
-          : undefined
+      aiCurrentValue
     }
   })
 
@@ -1573,6 +1678,7 @@ function buildTermExtractionRequestData(
 }
 
 function buildTermExtractionMessages(
+  settings,
   input,
   termPackage,
   previousContextSummary
@@ -1623,6 +1729,15 @@ function buildTermExtractionMessages(
       ])
     },
     {
+      role: 'system',
+      content: buildWorkflowPromptLayer(
+        settings,
+        input,
+        'properNounPreprocessDefaultPrompt',
+        'properNounPreprocessLanguagePrompts'
+      )
+    },
+    {
       role: 'user',
       content: buildTermExtractionRequestData(
         input,
@@ -1630,36 +1745,27 @@ function buildTermExtractionMessages(
         previousContextSummary
       )
     }
-  ]
+  ].filter(message => {
+    return Boolean(message.content)
+  })
 }
 
-function buildTermExtractionRequestBody(
+function buildTermExtractionRequestConfig(
   settings,
   input,
   termPackage,
   previousContextSummary
 ) {
-  const requestBody = {
-    model: settings.deepSeekModel,
-    messages: buildTermExtractionMessages(
+  return buildJsonRequestBody(
+    settings,
+    buildTermExtractionMessages(
+      settings,
       input,
       termPackage,
       previousContextSummary
     ),
-    response_format: { type: 'json_object' },
-    max_tokens: settings.deepSeekMaxTokens,
-    stream: false
-  }
-
-  if (settings.deepSeekThinkingType === 'enabled') {
-    requestBody.thinking = { type: 'enabled' }
-    requestBody.reasoning_effort = settings.deepSeekReasoningEffort
-    return requestBody
-  }
-
-  requestBody.thinking = { type: 'disabled' }
-  requestBody.temperature = settings.deepSeekTemperature
-  return requestBody
+    { stream: false }
+  )
 }
 
 function getTermArrayFromExtractionResult(resultData) {
@@ -1926,7 +2032,7 @@ function buildSelectedExtractedTermsFromMap(termMap) {
 async function recordTermExtractionUsage({
   input,
   settings,
-  responseData,
+  responseResult,
   status,
   httpStatusCode,
   packageIndex,
@@ -1937,15 +2043,15 @@ async function recordTermExtractionUsage({
     return
   }
   await aiUsageService.recordAiUsageLog({
-    provider: 'deepseek',
-    model: responseData.model || settings.deepSeekModel,
+    provider: getProviderCodeBySettings(settings),
+    model: responseResult.model || settings.deepSeekModel || settings.model,
     operation: 'proper-noun.keyword.extract',
     status,
-    requestId: responseData.id || '',
+    requestId: responseResult.requestId || '',
     sourceLanguageCode: input.sourceLanguageCode,
     targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
-    usage: responseData.usage || {},
-    rawResponse: responseData,
+    usage: responseResult.usage || {},
+    rawResponse: responseResult.rawResponse,
     meta: {
       jobId: input.translationJobId || input.cacheKey || '',
       httpStatusCode,
@@ -1970,53 +2076,56 @@ async function extractTermsFromPackage({
 }) {
   return await runAiStepWithRetry(
     async () => {
-      const requestBody = buildTermExtractionRequestBody(
+      const requestConfig = buildTermExtractionRequestConfig(
         settings,
         input,
         termPackage,
         previousContextSummary
       )
-      const response = await requestJson(url, requestBody, settings, handlers)
-      const responseData = response.data
+      const responseResult = await requestProviderJson(
+        settings,
+        requestConfig.requestBody,
+        requestConfig.requestUrl,
+        handlers
+      )
       const isSuccessStatus =
-        response.statusCode >= 200 && response.statusCode < 300
+        responseResult.statusCode >= 200 && responseResult.statusCode < 300
       let usageStatus = 'error'
-      if (isSuccessStatus && !response.parseError) {
+      if (isSuccessStatus && !responseResult.parseError) {
         usageStatus = 'success'
       }
       await recordTermExtractionUsage({
         input,
         settings,
-        responseData,
+        responseResult,
         status: usageStatus,
-        httpStatusCode: response.statusCode,
+        httpStatusCode: responseResult.statusCode,
         packageIndex,
         packageCount,
         termPackage
       })
 
-      if (response.parseError) {
+      if (responseResult.parseError) {
         throw new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
-          'DeepSeek 名词抽取返回内容不是 JSON',
-          'deepSeek',
+          `${getProviderLabelBySettings(settings)} 名词抽取返回内容不是 JSON`,
+          getProviderFieldBySettings(settings),
           502
         )
       }
       if (!isSuccessStatus) {
         const message =
-          responseData.error?.message ||
-          responseData.message ||
-          `DeepSeek 名词抽取请求失败：${response.statusCode}`
-        throw new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          message,
-          'deepSeek',
-          502
-        )
+          responseResult.rawResponse?.error?.message ||
+          responseResult.rawResponse?.message ||
+          `${getProviderLabelBySettings(settings)} 名词抽取请求失败：${responseResult.statusCode}`
+        throw createProviderApiError(settings, message)
       }
 
-      const resultData = parseAiContent(responseData)
+      const resultData = parseAiContentText(
+        responseResult.contentText,
+        settings,
+        responseResult.finishReason
+      )
       const terms = normalizeExtractedTermList(resultData)
       const contextSummary =
         getTermContextSummaryFromExtractionResult(resultData)
@@ -2026,9 +2135,10 @@ async function extractTermsFromPackage({
         aiJsonLog: translationAiJsonLogService.createAiJsonLog({
           operation: 'proper-noun.keyword.extract',
           stage: 'ProperNounKeywordExtract',
-          provider: 'deepseek',
-          model: responseData.model || settings.deepSeekModel,
-          requestId: responseData.id || '',
+          provider: getProviderCodeBySettings(settings),
+          model:
+            responseResult.model || settings.deepSeekModel || settings.model,
+          requestId: responseResult.requestId || '',
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
           meta: {
@@ -2041,7 +2151,7 @@ async function extractTermsFromPackage({
             contextSummaryLength: contextSummary.length
           },
           input: {
-            requestBody
+            requestBody: requestConfig.requestBody
           },
           json: {
             result: resultData,
@@ -2315,9 +2425,10 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
 function groupCandidateTermsByNormalizedSourceText(candidateTerms) {
   const candidateMap = new Map()
   candidateTerms.forEach(term => {
-    const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
-      ? term.matchedSourceTextItems
-      : []
+    let matchedSourceTextItems = []
+    if (Array.isArray(term.matchedSourceTextItems)) {
+      matchedSourceTextItems = term.matchedSourceTextItems
+    }
     const normalizedSourceTextList = matchedSourceTextItems
       .map(item => String(item?.normalizedSourceText || ''))
       .filter(Boolean)
@@ -2449,6 +2560,7 @@ function buildExistingTermFilterRequestData({
 }
 
 function buildExistingTermFilterMessages({
+  settings,
   input,
   sourceTextItems,
   candidateTerms,
@@ -2482,6 +2594,15 @@ function buildExistingTermFilterMessages({
       ])
     },
     {
+      role: 'system',
+      content: buildWorkflowPromptLayer(
+        settings,
+        input,
+        'properNounPreprocessDefaultPrompt',
+        'properNounPreprocessLanguagePrompts'
+      )
+    },
+    {
       role: 'user',
       content: buildExistingTermFilterRequestData({
         input,
@@ -2490,7 +2611,9 @@ function buildExistingTermFilterMessages({
         contextSummary
       })
     }
-  ]
+  ].filter(message => {
+    return Boolean(message.content)
+  })
 }
 
 function getTermFilterMaxTokens(settings) {
@@ -2505,35 +2628,27 @@ function getTermFilterMaxTokens(settings) {
   return MAX_TERM_FILTER_TOKENS
 }
 
-function buildExistingTermFilterRequestBody({
+function buildExistingTermFilterRequestConfig({
   settings,
   input,
   sourceTextItems,
   candidateTerms,
   contextSummary
 }) {
-  const requestBody = {
-    model: settings.deepSeekModel,
-    messages: buildExistingTermFilterMessages({
+  return buildJsonRequestBody(
+    settings,
+    buildExistingTermFilterMessages({
+      settings,
       input,
       sourceTextItems,
       candidateTerms,
       contextSummary
     }),
-    response_format: { type: 'json_object' },
-    max_tokens: getTermFilterMaxTokens(settings),
-    stream: false
-  }
-
-  if (settings.deepSeekThinkingType === 'enabled') {
-    requestBody.thinking = { type: 'enabled' }
-    requestBody.reasoning_effort = settings.deepSeekReasoningEffort
-    return requestBody
-  }
-
-  requestBody.thinking = { type: 'disabled' }
-  requestBody.temperature = 0
-  return requestBody
+    {
+      stream: false,
+      maxTokens: getTermFilterMaxTokens(settings)
+    }
+  )
 }
 
 function findSourceTextItemForMatchedTerm(matchItem, sourceTextItems) {
@@ -2564,9 +2679,10 @@ function findSourceTextItemForMatchedTerm(matchItem, sourceTextItems) {
 }
 
 function isCandidateMatchedToSourceText(term, normalizedSourceText) {
-  const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
-    ? term.matchedSourceTextItems
-    : []
+  let matchedSourceTextItems = []
+  if (Array.isArray(term.matchedSourceTextItems)) {
+    matchedSourceTextItems = term.matchedSourceTextItems
+  }
   if (matchedSourceTextItems.length === 0) {
     return term.normalizedSourceText === normalizedSourceText
   }
@@ -2664,11 +2780,12 @@ function buildMatchedCandidateTerms(candidateTerms, matchedTermLinks) {
       if (!normalizedSourceTextSet) {
         return null
       }
-      const matchedSourceTextItems = Array.isArray(term.matchedSourceTextItems)
-        ? term.matchedSourceTextItems.filter(item => {
-            return normalizedSourceTextSet.has(item.normalizedSourceText)
-          })
-        : []
+      let matchedSourceTextItems = []
+      if (Array.isArray(term.matchedSourceTextItems)) {
+        matchedSourceTextItems = term.matchedSourceTextItems.filter(item => {
+          return normalizedSourceTextSet.has(item.normalizedSourceText)
+        })
+      }
       if (matchedSourceTextItems.length === 0) {
         return null
       }
@@ -2731,35 +2848,40 @@ async function filterExistingTermCandidatesWithAi({
 
   return await runAiStepWithRetry(
     async () => {
-      const requestBody = buildExistingTermFilterRequestBody({
+      const requestConfig = buildExistingTermFilterRequestConfig({
         settings,
         input,
         sourceTextItems,
         candidateTerms,
         contextSummary
       })
-      const response = await requestJson(url, requestBody, settings, handlers)
-      const responseData = response.data
+      const responseResult = await requestProviderJson(
+        settings,
+        requestConfig.requestBody,
+        requestConfig.requestUrl,
+        handlers
+      )
       const isSuccessStatus =
-        response.statusCode >= 200 && response.statusCode < 300
+        responseResult.statusCode >= 200 && responseResult.statusCode < 300
       let usageStatus = 'error'
-      if (isSuccessStatus && !response.parseError) {
+      if (isSuccessStatus && !responseResult.parseError) {
         usageStatus = 'success'
       }
       if (input.skipUsageLog !== true) {
         await aiUsageService.recordAiUsageLog({
-          provider: 'deepseek',
-          model: responseData.model || settings.deepSeekModel,
+          provider: getProviderCodeBySettings(settings),
+          model:
+            responseResult.model || settings.deepSeekModel || settings.model,
           operation: 'proper-noun.existing-term.filter',
           status: usageStatus,
-          requestId: responseData.id || '',
+          requestId: responseResult.requestId || '',
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
-          usage: responseData.usage || {},
-          rawResponse: responseData,
+          usage: responseResult.usage || {},
+          rawResponse: responseResult.rawResponse,
           meta: {
             jobId: input.translationJobId || input.cacheKey || '',
-            httpStatusCode: response.statusCode,
+            httpStatusCode: responseResult.statusCode,
             sourceTermCount: sourceTextItems.length,
             candidateTermCount: candidateTerms.length,
             contextSummaryLength:
@@ -2768,28 +2890,27 @@ async function filterExistingTermCandidatesWithAi({
         })
       }
 
-      if (response.parseError) {
+      if (responseResult.parseError) {
         throw new ApiError(
           ERROR_CODES.AI_TRANSLATION_FAILED,
-          'DeepSeek 专有名词候选消歧返回内容不是 JSON',
-          'deepSeek',
+          `${getProviderLabelBySettings(settings)} 专有名词候选消歧返回内容不是 JSON`,
+          getProviderFieldBySettings(settings),
           502
         )
       }
       if (!isSuccessStatus) {
         const message =
-          responseData.error?.message ||
-          responseData.message ||
-          `DeepSeek 专有名词候选消歧请求失败：${response.statusCode}`
-        throw new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          message,
-          'deepSeek',
-          502
-        )
+          responseResult.rawResponse?.error?.message ||
+          responseResult.rawResponse?.message ||
+          `${getProviderLabelBySettings(settings)} 专有名词候选消歧请求失败：${responseResult.statusCode}`
+        throw createProviderApiError(settings, message)
       }
 
-      const resultData = parseAiContent(responseData)
+      const resultData = parseAiContentText(
+        responseResult.contentText,
+        settings,
+        responseResult.finishReason
+      )
       const matchedTermLinks = normalizeMatchedExistingTermLinks({
         resultData,
         candidateTerms,
@@ -2814,9 +2935,10 @@ async function filterExistingTermCandidatesWithAi({
         aiJsonLog: translationAiJsonLogService.createAiJsonLog({
           operation: 'proper-noun.existing-term.filter',
           stage: 'ProperNounExistingTermFilter',
-          provider: 'deepseek',
-          model: responseData.model || settings.deepSeekModel,
-          requestId: responseData.id || '',
+          provider: getProviderCodeBySettings(settings),
+          model:
+            responseResult.model || settings.deepSeekModel || settings.model,
+          requestId: responseResult.requestId || '',
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
           meta: {
@@ -2827,7 +2949,7 @@ async function filterExistingTermCandidatesWithAi({
               normalizeTermContextSummary(contextSummary).length
           },
           input: {
-            requestBody
+            requestBody: requestConfig.requestBody
           },
           json: {
             result: resultData,
@@ -3169,12 +3291,12 @@ async function resolveOfficialTermGlossaryCacheData({
 
 async function getOfficialTermGlossaryCacheData({
   input,
-  settings,
-  url,
   handlers,
   targetLanguageCodes,
   taskCache
 }) {
+  const settings =
+    await aiSettingsService.getProperNounPreprocessRuntimeSettings()
   const cacheKey = buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes)
   const cachedPromise = getOfficialTermGlossaryCache(taskCache, cacheKey)
   if (cachedPromise) {
@@ -3193,7 +3315,6 @@ async function getOfficialTermGlossaryCacheData({
   const promise = resolveOfficialTermGlossaryCacheData({
     input,
     settings,
-    url,
     handlers,
     targetLanguageCodes
   })
@@ -3202,8 +3323,6 @@ async function getOfficialTermGlossaryCacheData({
 
 async function prepareOfficialTermGlossaryForAiInput({
   input,
-  settings,
-  url,
   handlers,
   taskCache
 }) {
@@ -3220,8 +3339,6 @@ async function prepareOfficialTermGlossaryForAiInput({
   }
   const glossaryData = await getOfficialTermGlossaryCacheData({
     input,
-    settings,
-    url,
     handlers,
     targetLanguageCodes,
     taskCache
@@ -3281,6 +3398,16 @@ function buildDeepSeekMessages(settings, input) {
   })
 
   return messages
+}
+
+function buildTranslationRequestConfig(settings, input, stream = false) {
+  return buildJsonRequestBody(
+    settings,
+    buildDeepSeekMessages(settings, input),
+    {
+      stream
+    }
+  )
 }
 
 function buildDeepSeekRequestBody(settings, input) {
@@ -3404,9 +3531,10 @@ function bindCancellation(request, options = {}) {
 }
 
 function createDeepSeekResponseInterruptedError(message, error = null) {
-  const detailMessage = error?.message
-    ? `${message}：${error.message}`
-    : message
+  let detailMessage = message
+  if (error?.message) {
+    detailMessage = `${message}：${error.message}`
+  }
   return new ApiError(
     ERROR_CODES.AI_TRANSLATION_FAILED,
     detailMessage,
@@ -3419,7 +3547,10 @@ function createDeepSeekResponseInterruptedError(message, error = null) {
 function requestJson(url, requestBody, settings, options = {}) {
   throwIfCancellationRequested(options)
   const requestText = JSON.stringify(requestBody)
-  const client = url.protocol === 'http:' ? http : https
+  let client = https
+  if (url.protocol === 'http:') {
+    client = http
+  }
   const timeout = Number(settings.deepSeekTimeoutSeconds || 120) * 1000
 
   return new Promise((resolve, reject) => {
@@ -3540,7 +3671,10 @@ function requestStream(
 ) {
   throwIfCancellationRequested(options)
   const requestText = JSON.stringify(requestBody)
-  const client = url.protocol === 'http:' ? http : https
+  let client = https
+  if (url.protocol === 'http:') {
+    client = http
+  }
   const timeout = Number(settings.deepSeekTimeoutSeconds || 300) * 1000
 
   return new Promise((resolve, reject) => {
@@ -3911,6 +4045,36 @@ function buildJsonContentCandidates(content) {
   return candidateList
 }
 
+function parseAiContentText(content, settings, finishReason = '') {
+  if (!content || typeof content !== 'string') {
+    throw createProviderApiError(
+      settings,
+      `${getProviderLabelBySettings(settings)} 没有返回可用内容`
+    )
+  }
+
+  const candidateList = buildJsonContentCandidates(content)
+  for (const candidate of candidateList) {
+    try {
+      return JSON.parse(candidate)
+    } catch (error) {
+      continue
+    }
+  }
+
+  const preview = getAiResponseContentPreview(content)
+  let message = `${getProviderLabelBySettings(settings)} 返回的 JSON 内容解析失败`
+  const extra = { finishReason }
+  if (finishReason === 'length') {
+    message = `${getProviderLabelBySettings(settings)} 返回内容被最大输出 Token 截断，JSON 内容解析失败`
+    extra.retryable = false
+  }
+  if (preview) {
+    message = `${message}，内容开头：${preview}`
+  }
+  throw createProviderApiError(settings, message, 502, extra)
+}
+
 function getDeepSeekFinishReason(responseData) {
   return String(responseData?.choices?.[0]?.finish_reason || '').trim()
 }
@@ -4101,7 +4265,10 @@ function normalizeIndexedRichTextSegments(entry, value) {
       502
     )
   }
-  const segmentList = Array.isArray(value.segments) ? value.segments : value.s
+  let segmentList = value.s
+  if (Array.isArray(value.segments)) {
+    segmentList = value.segments
+  }
   if (!Array.isArray(segmentList)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
@@ -4513,7 +4680,7 @@ function buildTranslatedPayload(input, post, resultData) {
         post?.snapshotVersion || preparedInput.snapshotVersion || 1
       ),
       exportedAt: new Date().toISOString(),
-      generatedBy: 'deepseek',
+      generatedBy: String(preparedInput.aiProvider || 'deepseek'),
       richTextFormat: 'structured-html-dom-v1',
       richTextInstruction:
         '富文本字段使用结构化 JSON。AI 只允许翻译 text 与 translatableAttrs 中的自然语言，不允许修改 tag、attrs、children、src、href、style、data-* 等结构字段。'
@@ -4572,7 +4739,10 @@ function mergeChunkResultEntry(resultMap, entry) {
     value.type === RICH_TEXT_INDEXED_VALUE_TYPE &&
     (Array.isArray(value.segments) || Array.isArray(value.s))
   ) {
-    const segmentList = Array.isArray(value.segments) ? value.segments : value.s
+    let segmentList = value.s
+    if (Array.isArray(value.segments)) {
+      segmentList = value.segments
+    }
     if (!resultMap.has(entryKey)) {
       resultMap.set(entryKey, {
         i: entryKey,
@@ -4620,7 +4790,7 @@ function getTranslationChunkCacheOptions({ input, chunkInput, chunkIndex }) {
 
 function buildTranslationChunkAiJsonLog({
   input,
-  responseData,
+  responseResult,
   responseModel,
   requestBody,
   resultData,
@@ -4632,9 +4802,9 @@ function buildTranslationChunkAiJsonLog({
   return translationAiJsonLogService.createAiJsonLog({
     operation: input.operation || 'translation.post',
     stage: 'TranslationChunk',
-    provider: 'deepseek',
-    model: responseData.model || responseModel,
-    requestId: responseData.id || '',
+    provider: getProviderCodeBySettings({ provider: input.aiProvider }),
+    model: responseResult.model || responseModel,
+    requestId: responseResult.requestId || '',
     sourceLanguageCode: input.sourceLanguageCode,
     targetLanguageCode: input.targetLanguageCode,
     meta: {
@@ -4819,7 +4989,7 @@ function buildAggregateUsageResponseData({
 async function recordTranslationUsage({
   post,
   input,
-  responseData,
+  responseResult,
   status,
   httpStatusCode,
   stream,
@@ -4831,18 +5001,18 @@ async function recordTranslationUsage({
   }
 
   await aiUsageService.recordAiUsageLog({
-    provider: 'deepseek',
-    model: responseData.model || '',
+    provider: getProviderCodeBySettings({ provider: input.aiProvider }),
+    model: responseResult.model || '',
     operation: input.operation || 'translation.post',
     status,
-    requestId: responseData.id || '',
+    requestId: responseResult.requestId || '',
     postId: post?._id,
     translationGroupId: post?.translationGroupId,
     sourceSnapshotId: post?.sourceSnapshotId || input.sourceSnapshotId,
     sourceLanguageCode: input.sourceLanguageCode,
     targetLanguageCode: input.targetLanguageCode,
-    usage: responseData.usage || {},
-    rawResponse: responseData,
+    usage: responseResult.usage || {},
+    rawResponse: responseResult.rawResponse,
     meta: {
       jobId: input.translationJobId || input.cacheKey || '',
       httpStatusCode,
@@ -4860,70 +5030,59 @@ async function translatePostEntries(body = {}) {
   if (post.sourceId && mongoose.Types.ObjectId.isValid(String(post.sourceId))) {
     input.properNounScopeKey = `sourcePostImport:${String(post.sourceId)}`
   }
-  const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
-  const url = buildChatCompletionUrl(settings)
+  const settings = await aiSettingsService.getMainTranslationRuntimeSettings()
   const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
   let aiInput = prepareAiInput(input)
   aiInput = await prepareOfficialTermGlossaryForAiInput({
     input: aiInput,
-    settings,
-    url,
     handlers: {},
     taskCache: officialTermGlossaryTaskCache
   })
-  const requestBody = buildDeepSeekRequestBody(settings, aiInput)
-  const deepSeekResponse = await requestJson(url, requestBody, settings)
-  const responseData = deepSeekResponse.data
+  aiInput.aiProvider = getProviderCodeBySettings(settings)
+  const requestConfig = buildTranslationRequestConfig(settings, aiInput, false)
+  const responseResult = await requestProviderJson(
+    settings,
+    requestConfig.requestBody,
+    requestConfig.requestUrl
+  )
   const isSuccessStatus =
-    deepSeekResponse.statusCode >= 200 && deepSeekResponse.statusCode < 300
+    responseResult.statusCode >= 200 && responseResult.statusCode < 300
   let usageStatus = 'error'
-  if (isSuccessStatus && !deepSeekResponse.parseError) {
+  if (isSuccessStatus && !responseResult.parseError) {
     usageStatus = 'success'
   }
-  await aiUsageService.recordAiUsageLog({
-    provider: 'deepseek',
-    model: responseData.model || settings.deepSeekModel,
-    operation: 'translation.post',
+  await recordTranslationUsage({
+    post,
+    input: {
+      ...input,
+      aiProvider: aiInput.aiProvider
+    },
+    responseResult,
     status: usageStatus,
-    requestId: responseData.id || '',
-    postId: post._id,
-    translationGroupId: post.translationGroupId,
-    sourceSnapshotId: post.sourceSnapshotId,
-    sourceLanguageCode: input.sourceLanguageCode,
-    targetLanguageCode: input.targetLanguageCode,
-    usage: responseData.usage || {},
-    rawResponse: responseData,
-    meta: {
-      jobId: input.translationJobId || input.cacheKey || '',
-      httpStatusCode: deepSeekResponse.statusCode,
-      parseError: Boolean(deepSeekResponse.parseError),
-      entryCount: input.entries.length
-    }
+    httpStatusCode: responseResult.statusCode,
+    parseError: Boolean(responseResult.parseError)
   })
 
-  if (deepSeekResponse.parseError) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 返回内容不是 JSON',
-      'deepSeek',
-      502
+  if (responseResult.parseError) {
+    throw createProviderApiError(
+      settings,
+      `${getProviderLabelBySettings(settings)} 返回内容不是 JSON`
     )
   }
 
   if (!isSuccessStatus) {
     const message =
-      responseData.error?.message ||
-      responseData.message ||
-      `DeepSeek 请求失败：${deepSeekResponse.statusCode}`
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      message,
-      'deepSeek',
-      502
-    )
+      responseResult.rawResponse?.error?.message ||
+      responseResult.rawResponse?.message ||
+      `${getProviderLabelBySettings(settings)} 请求失败：${responseResult.statusCode}`
+    throw createProviderApiError(settings, message)
   }
 
-  const resultData = parseAiContent(responseData)
+  const resultData = parseAiContentText(
+    responseResult.contentText,
+    settings,
+    responseResult.finishReason
+  )
   const payload = buildTranslatedPayload(aiInput, post, resultData)
   const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
     aiInput.aiJsonLogs,
@@ -4931,9 +5090,9 @@ async function translatePostEntries(body = {}) {
       translationAiJsonLogService.createAiJsonLog({
         operation: 'translation.post',
         stage: 'PostTranslation',
-        provider: 'deepseek',
-        model: responseData.model || settings.deepSeekModel,
-        requestId: responseData.id || '',
+        provider: aiInput.aiProvider,
+        model: responseResult.model || settings.deepSeekModel || settings.model,
+        requestId: responseResult.requestId || '',
         sourceLanguageCode: input.sourceLanguageCode,
         targetLanguageCode: input.targetLanguageCode,
         meta: {
@@ -4941,7 +5100,7 @@ async function translatePostEntries(body = {}) {
           entryCount: input.entries.length
         },
         input: {
-          requestBody
+          requestBody: requestConfig.requestBody
         },
         json: resultData
       })
@@ -4950,9 +5109,9 @@ async function translatePostEntries(body = {}) {
 
   return {
     payload,
-    model: responseData.model || settings.deepSeekModel,
-    usage: responseData.usage || null,
-    requestId: responseData.id || null,
+    model: responseResult.model || settings.deepSeekModel || settings.model,
+    usage: responseResult.usage || null,
+    requestId: responseResult.requestId || null,
     aiJsonLogs
   }
 }
@@ -5001,12 +5160,16 @@ async function translateStreamChunkWithRetry({
         contentLength: 0,
         reasoningLength: 0
       }
-      const requestBody = buildDeepSeekStreamRequestBody(settings, chunkInput)
+      const requestConfig = buildTranslationRequestConfig(
+        settings,
+        chunkInput,
+        true
+      )
       try {
-        const deepSeekResponse = await requestStream(
-          url,
-          requestBody,
+        const responseResult = await requestProviderStream(
           settings,
+          requestConfig.requestBody,
+          requestConfig.requestUrl,
           {
             onStatus: handlers.onStatus,
             onChunk(chunk) {
@@ -5029,30 +5192,27 @@ async function translateStreamChunkWithRetry({
           },
           handlers
         )
-        const responseData = deepSeekResponse.data
         const isSuccessStatus =
-          deepSeekResponse.statusCode >= 200 &&
-          deepSeekResponse.statusCode < 300
+          responseResult.statusCode >= 200 && responseResult.statusCode < 300
         if (!isSuccessStatus) {
           const message =
-            responseData.error?.message ||
-            responseData.message ||
-            `DeepSeek 请求失败：${deepSeekResponse.statusCode}`
-          throw new ApiError(
-            ERROR_CODES.AI_TRANSLATION_FAILED,
-            message,
-            'deepSeek',
-            502
-          )
+            responseResult.rawResponse?.error?.message ||
+            responseResult.rawResponse?.message ||
+            `${getProviderLabelBySettings(settings)} 请求失败：${responseResult.statusCode}`
+          throw createProviderApiError(settings, message)
         }
 
-        const resultData = parseAiContent(responseData)
+        const resultData = parseAiContentText(
+          responseResult.contentText,
+          settings,
+          responseResult.finishReason
+        )
         buildTranslatedEntries(chunkInput, resultData)
         const aiJsonLog = buildTranslationChunkAiJsonLog({
           input,
-          responseData,
+          responseResult,
           responseModel: state.responseModel,
-          requestBody,
+          requestBody: requestConfig.requestBody,
           resultData,
           chunkInput,
           chunkIndex,
@@ -5062,14 +5222,46 @@ async function translateStreamChunkWithRetry({
         if (cacheOptions && typeof handlers.writeAiChunkCache === 'function') {
           await handlers.writeAiChunkCache({
             ...cacheOptions,
-            response: buildTranslationChunkCacheResponse(deepSeekResponse),
+            response: buildTranslationChunkCacheResponse({
+              statusCode: responseResult.statusCode,
+              data: {
+                id: responseResult.requestId,
+                model: responseResult.model,
+                usage: responseResult.usage,
+                choices: [
+                  {
+                    finish_reason: responseResult.finishReason || null,
+                    message: {
+                      content: responseResult.contentText,
+                      reasoning_content: responseResult.reasoningText
+                    }
+                  }
+                ]
+              }
+            }),
             resultData,
             aiJsonLog
           })
         }
         appendTranslationChunkState({
           state,
-          response: deepSeekResponse,
+          response: {
+            statusCode: responseResult.statusCode,
+            data: {
+              id: responseResult.requestId,
+              model: responseResult.model,
+              usage: responseResult.usage,
+              choices: [
+                {
+                  finish_reason: responseResult.finishReason || null,
+                  message: {
+                    content: responseResult.contentText,
+                    reasoning_content: responseResult.reasoningText
+                  }
+                }
+              ]
+            }
+          },
           resultData,
           aiJsonLog
         })
@@ -5105,8 +5297,7 @@ async function translateStreamChunkWithRetry({
 }
 
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
-  const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
-  const url = buildChatCompletionUrl(settings)
+  const settings = await aiSettingsService.getMainTranslationRuntimeSettings()
   const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
   const splitOptions = {
     maxRequestTextLength: getTranslationChunkTextLimit(settings),
@@ -5115,11 +5306,11 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
   let aiInput = prepareAiInput(input, splitOptions)
   aiInput = await prepareOfficialTermGlossaryForAiInput({
     input: aiInput,
-    settings,
-    url,
     handlers,
     taskCache: officialTermGlossaryTaskCache
   })
+  aiInput.aiProvider = getProviderCodeBySettings(settings)
+  input.aiProvider = aiInput.aiProvider
   const inputChunks = splitAiInput(aiInput, splitOptions)
   const chunkTotal = inputChunks.length
   const chunkResponses = []
@@ -5134,6 +5325,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     combinedUsage: {},
     responseModel: settings.deepSeekModel,
     responseId: ''
+  }
+  if (settings.model) {
+    state.responseModel = settings.model
   }
 
   if (handlers.onStatus) {
@@ -5155,7 +5349,6 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       await translateStreamChunkWithRetry({
         input,
         settings,
-        url,
         chunkInput,
         chunkIndex: index,
         chunkTotal,
@@ -5180,8 +5373,16 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     })
     await recordTranslationUsage({
       post,
-      input,
-      responseData,
+      input: {
+        ...input,
+        aiProvider: aiInput.aiProvider
+      },
+      responseResult: {
+        model: state.responseModel,
+        requestId: state.responseId,
+        usage: state.combinedUsage,
+        rawResponse: responseData
+      },
       status: 'success',
       httpStatusCode: 200,
       stream: true,
@@ -5204,6 +5405,12 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     return data
   } catch (error) {
     const isCancelled = error?.code === ERROR_CODES.AI_TRANSLATION_CANCELLED
+    let usageStatus = 'error'
+    let usageHttpStatusCode = error?.statusCode || 502
+    if (isCancelled) {
+      usageStatus = 'cancelled'
+      usageHttpStatusCode = 499
+    }
     const responseData = buildAggregateUsageResponseData({
       chunkResponses,
       usage: state.combinedUsage,
@@ -5213,10 +5420,18 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     })
     await recordTranslationUsage({
       post,
-      input,
-      responseData,
-      status: isCancelled ? 'cancelled' : 'error',
-      httpStatusCode: isCancelled ? 499 : error?.statusCode || 502,
+      input: {
+        ...input,
+        aiProvider: aiInput.aiProvider
+      },
+      responseResult: {
+        model: state.responseModel,
+        requestId: state.responseId,
+        usage: state.combinedUsage,
+        rawResponse: responseData
+      },
+      status: usageStatus,
+      httpStatusCode: usageHttpStatusCode,
       stream: true,
       chunkCount: inputChunks.length
     })
@@ -5254,15 +5469,17 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
       data.coverImageWarnings = ['源文章快照不存在，不能处理封面图翻译']
     } else {
       const registry = coverImageTranslationService.createCoverImageRegistry()
+      let previewEntries = []
+      if (Array.isArray(data.payload?.entries)) {
+        previewEntries = data.payload.entries
+      }
       const coverResult =
         await coverImageTranslationService.processCoverImageTranslation({
           job: requestContext,
           registry,
           sourcePost,
           targetPost: post,
-          previewEntries: Array.isArray(data.payload?.entries)
-            ? data.payload.entries
-            : [],
+          previewEntries,
           targetTitle: input.targetTitle,
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: input.targetLanguageCode,
@@ -5299,15 +5516,14 @@ async function translateContentEntriesStream(body = {}, handlers = {}) {
 
 async function organizeProperNounTerms(body = {}, handlers = {}) {
   const input = parseProperNounOrganizeInput(body)
-  const settings = await aiSettingsService.getDeepSeekRuntimeSettings()
-  const url = buildChatCompletionUrl(settings)
+  const settings =
+    await aiSettingsService.getProperNounPreprocessRuntimeSettings()
   if (handlers.onStatus) {
     handlers.onStatus({ message: '正在整理文章专有名词' })
   }
   const glossaryData = await resolveOfficialTermGlossaryCacheData({
     input,
     settings,
-    url,
     handlers,
     targetLanguageCodes: input.targetLanguageCodes,
     allowSameSourceTranslationWithNote: true
