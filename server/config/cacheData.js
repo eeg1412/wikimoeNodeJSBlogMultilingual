@@ -15,6 +15,9 @@ const {
   SUPPORTED_LANGUAGE_CODES,
   normalizeLanguageCode
 } = require('../utils/language')
+const {
+  getSourceSeoSettings
+} = require('../utils/sourceSeoSettings')
 
 function getLanguageCode(languageCodeInput) {
   if (
@@ -340,8 +343,8 @@ exports.getPostArchiveList = async function (
   const languageCode = getLanguageCode(languageCodeInput)
   const languageCache = getLanguageCache(languageCode)
   console.info(`postArchive get:${languageCode}`)
-  const siteTimeZone =
-    global.$globalConfig.siteSettings.siteTimeZone || 'Asia/Shanghai'
+  const sourceSettings = await getSourceSeoSettings()
+  const siteTimeZone = sourceSettings.siteTimeZone || 'Asia/Shanghai'
   const promise = new Promise((resolve, reject) => {
     postUtils
       .aggregate([

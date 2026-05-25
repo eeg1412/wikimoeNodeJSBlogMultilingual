@@ -9,6 +9,9 @@ const {
   sortPostListBySourceInteractionStats,
   syncSourcePostInteractionStats
 } = require('../../../utils/sourcePostInteractionStats')
+const {
+  getSourceSeoSettings
+} = require('../../../utils/sourceSeoSettings')
 const log4js = require('log4js')
 const userApiLog = log4js.getLogger('userApi')
 const moment = require('moment-timezone')
@@ -36,7 +39,8 @@ module.exports = async function (req, res, next) {
     month
   } = req.query
   page = parseInt(page)
-  const size = global.$globalConfig?.siteSettings?.sitePageSize || 1
+  const sourceSettings = await getSourceSeoSettings()
+  const size = sourceSettings.sitePageSize || 1
   // 判断page和size是否为数字
   if (!utils.isNumber(page)) {
     res.status(400).json({
@@ -353,8 +357,7 @@ module.exports = async function (req, res, next) {
       return
     }
     // 时区
-    const siteTimeZone =
-      global.$globalConfig.siteSettings.siteTimeZone || 'Asia/Shanghai'
+    const siteTimeZone = sourceSettings.siteTimeZone || 'Asia/Shanghai'
     // 根据年月和时区查询整月的开始时间和结束时间
     const startDate = moment
       .tz([year, month], siteTimeZone)

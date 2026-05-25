@@ -7,15 +7,45 @@ const {
 
 const adminApiLog = log4js.getLogger('adminApi')
 
-function getLoginAttemptLimitSettings() {
-  return {
-    siteAdminLoginAttemptTime:
-      Number(global.$globalConfig?.otherSettings?.siteAdminLoginAttemptTime) ||
-      5,
-    siteAdminLoginMaxAttempts:
-      Number(global.$globalConfig?.otherSettings?.siteAdminLoginMaxAttempts) ||
-      3
+const LOGIN_LIMIT_DEFAULTS = {
+  siteAdminLoginAttemptTime: 5,
+  siteAdminLoginMaxAttempts: 3
+}
+
+function normalizeLoginLimitNumber(value, defaultValue) {
+  const numberValue = Number(value)
+  if (Number.isFinite(numberValue) && numberValue > 0) {
+    return numberValue
   }
+
+  return defaultValue
+}
+
+async function getLoginAttemptLimitSettings() {
+  const settings = { ...LOGIN_LIMIT_DEFAULTS }
+  const optionRepository = global.$mongodDB.source.repositories.options
+  const optionList = await optionRepository.find(
+    {
+      name: {
+        $in: Object.keys(LOGIN_LIMIT_DEFAULTS)
+      }
+    },
+    'name value',
+    { lean: true }
+  )
+
+  optionList.forEach(item => {
+    if (!Object.prototype.hasOwnProperty.call(settings, item.name)) {
+      return
+    }
+
+    settings[item.name] = normalizeLoginLimitNumber(
+      item.value,
+      LOGIN_LIMIT_DEFAULTS[item.name]
+    )
+  })
+
+  return settings
 }
 
 function getUserLoginLogModel() {
@@ -47,7 +77,7 @@ module.exports = async function multilingualAdminLogin(req, res) {
     const deviceInfo = utils.deviceUAInfoUtils(req)
 
     const { siteAdminLoginAttemptTime, siteAdminLoginMaxAttempts } =
-      getLoginAttemptLimitSettings()
+      await getLoginAttemptLimitSettings()
     const timeThreshold = new Date(
       Date.now() - siteAdminLoginAttemptTime * 60 * 1000
     )

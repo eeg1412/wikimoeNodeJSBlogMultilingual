@@ -1,24 +1,31 @@
 const SOURCE_SEO_SETTING_DEFAULTS = {
   siteTitle: '',
-  siteSubTitle: '',
   siteDescription: '',
-  siteKeywords: '',
   siteLogo: '',
   siteFavicon: '',
   siteUrl: '',
   siteTimeZone: '',
-  siteEnableRss: false,
-  siteRssMaxCount: 10,
-  siteRssTweetTitleType: 1,
-  siteShowRssInFooter: false,
-  siteEnableSitemap: false,
-  siteShowSitemapInFooter: false
+  sitePageSize: 10,
+  sitePostRandomSimilarCount: 0,
+  sitePostRandomSimilarRange: [],
+  sitePostRandomSimilarShowRange: []
 }
 
 const SOURCE_SEO_SETTING_NAMES = Object.keys(SOURCE_SEO_SETTING_DEFAULTS)
 
 function getSourceOptionRepository() {
   return global.$mongodDB?.source?.repositories?.options
+}
+
+function buildDefaultSourceSeoSettings() {
+  const settings = { ...SOURCE_SEO_SETTING_DEFAULTS }
+  SOURCE_SEO_SETTING_NAMES.forEach(name => {
+    if (Array.isArray(SOURCE_SEO_SETTING_DEFAULTS[name])) {
+      settings[name] = [...SOURCE_SEO_SETTING_DEFAULTS[name]]
+    }
+  })
+
+  return settings
 }
 
 function normalizeSiteUrl(siteUrl) {
@@ -50,11 +57,22 @@ function normalizeSourceOptionValue(defaultValue, value) {
     return defaultValue
   }
 
+  if (Array.isArray(defaultValue)) {
+    if (Array.isArray(value)) {
+      return value.map(item => String(item).trim()).filter(Boolean)
+    }
+
+    return String(value || '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
   return String(value || '')
 }
 
 async function getSourceSeoSettings() {
-  const settings = { ...SOURCE_SEO_SETTING_DEFAULTS }
+  const settings = buildDefaultSourceSeoSettings()
   const repository = getSourceOptionRepository()
   if (!repository) {
     return settings

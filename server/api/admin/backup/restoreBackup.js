@@ -6,7 +6,7 @@ const { Worker } = require('worker_threads')
 const fs = require('fs')
 const moment = require('moment')
 const cacheDataUtils = require('../../../config/cacheData')
-const globalConfigUtils = require('../../../config/globalConfig')
+const languageSettingsService = require('../../multilingual-admin/services/languageSettingsService')
 const rssToolUtils = require('../../../utils/rss')
 const sitemapToolUtils = require('../../../utils/sitemap')
 
@@ -151,7 +151,7 @@ module.exports = async function (req, res, next) {
               })
             // 重新加载缓存
             // 更新时注意同时更新初始化数据库的地方
-            await globalConfigUtils.initGlobalConfig()
+            await languageSettingsService.refreshLanguageSettingsCache()
             await cacheDataUtils.refreshAllLanguageCache()
             await rssToolUtils.reflushRSS()
             await sitemapToolUtils.reflushSitemap()

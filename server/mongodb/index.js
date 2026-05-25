@@ -1,5 +1,5 @@
-const globalConfigUtils = require('../config/globalConfig')
 const cacheDataUtils = require('../config/cacheData')
+const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
 const rssToolUtils = require('../utils/rss')
 const sitemapToolUtils = require('../utils/sitemap')
 const sourceConnectionInfo = require('./sourceConnection')
@@ -67,7 +67,7 @@ async function initializeMultilingualRuntime() {
     await logMongoDBVersion()
     mongodbErrorCount = 0
     // 更新时注意同时更新还原时的缓存
-    await globalConfigUtils.initGlobalConfig()
+    await languageSettingsService.refreshLanguageSettingsCache()
     await cacheDataUtils.refreshAllLanguageCache()
     await rssToolUtils.reflushRSS()
     await sitemapToolUtils.reflushSitemap()

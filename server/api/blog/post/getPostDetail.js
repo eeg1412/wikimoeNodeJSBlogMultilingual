@@ -8,6 +8,9 @@ const {
   applySourcePostStats,
   buildSourcePostStatsMap
 } = require('../../../utils/sourcePostInteractionStats')
+const {
+  getSourceSeoSettings
+} = require('../../../utils/sourceSeoSettings')
 
 module.exports = async function (req, res, next) {
   const languageCode = cacheDataUtils.getRequestLanguageCode(req)
@@ -92,11 +95,12 @@ module.exports = async function (req, res, next) {
       const jsonData = data.toJSON()
       const sourcePostStatsMap = await buildSourcePostStatsMap([jsonData])
       applySourcePostStats(jsonData, sourcePostStatsMap)
+      const sourceSettings = await getSourceSeoSettings()
       const type = jsonData.type
       const sitePostRandomSimilarCount =
-        global.$globalConfig?.sitePostSettings?.sitePostRandomSimilarCount || 0
+        sourceSettings.sitePostRandomSimilarCount || 0
       const sitePostRandomSimilarRange =
-        global.$globalConfig?.sitePostSettings?.sitePostRandomSimilarRange || []
+        sourceSettings.sitePostRandomSimilarRange || []
       const findType = []
       // 遍历sitePostRandomSimilarRange，如果有'1',添加1，如果有'2',添加2
       sitePostRandomSimilarRange.forEach(item => {
@@ -113,8 +117,7 @@ module.exports = async function (req, res, next) {
         }
       })
       const sitePostRandomSimilarShowRange =
-        global.$globalConfig?.sitePostSettings.sitePostRandomSimilarShowRange ||
-        []
+        sourceSettings.sitePostRandomSimilarShowRange || []
       // 判断sitePostRandomSimilarShowRange是否包含type其中sitePostRandomSimilarShowRange是字符串数组，type是数字
       const isShow = sitePostRandomSimilarShowRange.includes(String(type))
       if (

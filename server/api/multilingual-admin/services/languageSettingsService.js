@@ -1,11 +1,16 @@
 const utils = require('../../../utils/utils')
-const { normalizeLanguageCode } = require('../../../utils/language')
+const {
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('../../../utils/language')
 const {
   ApiError,
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
 
 const OPTION_SCOPE = 'multilingual'
+const LANGUAGE_SETTINGS_CACHE_KEY = '$multilingualLanguageSettings'
+let languageSettingsCacheLoadPromise = null
 const IMAGE_FIELD_NAMES = new Set([
   'siteLogo',
   'siteDarkLogo',
@@ -307,15 +312,54 @@ function buildDefaultValues() {
 }
 
 function getSupportedLanguageCodes() {
-  const enumValues =
-    global.$mongodDB.multilingual.repositories.options.model.schema.path(
-      'languageCode'
-    ).enumValues
-
-  return enumValues.slice()
+  return SUPPORTED_LANGUAGE_CODES.slice()
 }
 
-async function getLanguageSettingsList() {
+function buildDefaultConfiguredNames() {
+  const configuredNames = {}
+  const languageCodes = getSupportedLanguageCodes()
+  for (const languageCode of languageCodes) {
+    configuredNames[languageCode] = []
+  }
+
+  return configuredNames
+}
+
+function getLanguageSettingsCache() {
+  return global[LANGUAGE_SETTINGS_CACHE_KEY] || null
+}
+
+function setLanguageSettingsCache(cacheData) {
+  global[LANGUAGE_SETTINGS_CACHE_KEY] = {
+    fields: LANGUAGE_SETTING_FIELDS,
+    languages: cacheData.languages.slice(),
+    settings: cacheData.settings,
+    configuredNames: cacheData.configuredNames,
+    updatedAt: new Date()
+  }
+}
+
+function cloneLanguageSettingsList(cacheData) {
+  const settings = {}
+  const configuredNames = {}
+  for (const languageCode of cacheData.languages) {
+    settings[languageCode] = {
+      ...(cacheData.settings[languageCode] || buildDefaultValues())
+    }
+    configuredNames[languageCode] = (
+      cacheData.configuredNames[languageCode] || []
+    ).slice()
+  }
+
+  return {
+    fields: cacheData.fields,
+    languages: cacheData.languages.slice(),
+    settings,
+    configuredNames
+  }
+}
+
+async function loadLanguageSettingsListFromDatabase() {
   const OptionModel = getOptionModel()
   const languageCodes = getSupportedLanguageCodes()
   const nameList = LANGUAGE_SETTING_FIELDS.map(item => item.name)
@@ -328,6 +372,7 @@ async function getLanguageSettingsList() {
     .lean()
 
   const settings = {}
+  const configuredNames = buildDefaultConfiguredNames()
   for (const languageCode of languageCodes) {
     settings[languageCode] = buildDefaultValues()
   }
@@ -340,62 +385,101 @@ async function getLanguageSettingsList() {
     }
 
     languageValues[item.name] = normalizeValue(field, item.value)
+    configuredNames[item.languageCode].push(item.name)
   }
 
   return {
     fields: LANGUAGE_SETTING_FIELDS,
     languages: languageCodes,
-    settings
+    settings,
+    configuredNames
   }
+}
+
+async function refreshLanguageSettingsCache() {
+  const languageSettingsList = await loadLanguageSettingsListFromDatabase()
+  setLanguageSettingsCache(languageSettingsList)
+  return cloneLanguageSettingsList(getLanguageSettingsCache())
+}
+
+async function ensureLanguageSettingsCache() {
+  const cacheData = getLanguageSettingsCache()
+  if (cacheData) {
+    return cacheData
+  }
+
+  if (!languageSettingsCacheLoadPromise) {
+    languageSettingsCacheLoadPromise = refreshLanguageSettingsCache()
+  }
+
+  try {
+    await languageSettingsCacheLoadPromise
+  } finally {
+    languageSettingsCacheLoadPromise = null
+  }
+
+  return getLanguageSettingsCache()
+}
+
+async function getLanguageSettingsList() {
+  const cacheData = await ensureLanguageSettingsCache()
+  return cloneLanguageSettingsList(cacheData)
 }
 
 async function getLanguageSettings(languageCodeInput) {
   const languageCode = normalizeSupportedLanguageCode(languageCodeInput)
-  const OptionModel = getOptionModel()
-  const values = buildDefaultValues()
-  const configuredNames = []
-  const nameList = LANGUAGE_SETTING_FIELDS.map(item => item.name)
-  const optionList = await OptionModel.find({
-    scope: OPTION_SCOPE,
-    languageCode,
-    name: { $in: nameList }
-  })
-    .select('name value languageCode scope')
-    .lean()
-
-  for (const item of optionList) {
-    const field = LANGUAGE_SETTING_FIELD_MAP[item.name]
-    if (!field) {
-      continue
-    }
-
-    values[item.name] = normalizeValue(field, item.value)
-    configuredNames.push(item.name)
-  }
+  const cacheData = await ensureLanguageSettingsCache()
+  const values = cacheData.settings[languageCode] || buildDefaultValues()
+  const configuredNames = cacheData.configuredNames[languageCode] || []
 
   return {
-    values,
-    configuredNames
+    values: { ...values },
+    configuredNames: configuredNames.slice()
   }
 }
 
 async function isBlogLanguageEnabled(languageCodeInput) {
   const languageCode = normalizeSupportedLanguageCode(languageCodeInput)
-  const OptionModel = getOptionModel()
-  const field = LANGUAGE_SETTING_FIELD_MAP.blogLanguageEnabled
-  const record = await OptionModel.findOne({
-    scope: OPTION_SCOPE,
-    languageCode,
-    name: 'blogLanguageEnabled'
-  })
-    .select('value')
-    .lean()
+  const cacheData = await ensureLanguageSettingsCache()
+  const values = cacheData.settings[languageCode] || buildDefaultValues()
 
-  if (!record) {
-    return true
+  return values.blogLanguageEnabled === true
+}
+
+async function getBlogEnabledLanguageCodes() {
+  const cacheData = await ensureLanguageSettingsCache()
+  const enabledLanguageCodes = []
+  for (const languageCode of cacheData.languages) {
+    const values = cacheData.settings[languageCode]
+    if (values && values.blogLanguageEnabled === true) {
+      enabledLanguageCodes.push(languageCode)
+    }
   }
 
-  return normalizeValue(field, record.value) === true
+  return enabledLanguageCodes
+}
+
+function applyLanguageSettingsCacheUpdate(languageCode, updateItems) {
+  const cacheData = getLanguageSettingsCache()
+  if (!cacheData) {
+    return false
+  }
+
+  if (!cacheData.settings[languageCode]) {
+    cacheData.settings[languageCode] = buildDefaultValues()
+  }
+  if (!cacheData.configuredNames[languageCode]) {
+    cacheData.configuredNames[languageCode] = []
+  }
+
+  for (const item of updateItems) {
+    cacheData.settings[languageCode][item.name] = item.value
+    if (!cacheData.configuredNames[languageCode].includes(item.name)) {
+      cacheData.configuredNames[languageCode].push(item.name)
+    }
+  }
+  cacheData.updatedAt = new Date()
+  return true
 }
 
 async function updateLanguageSettings(body = {}) {
@@ -451,19 +535,27 @@ async function updateLanguageSettings(body = {}) {
     })
   }
 
+  const updatedValues = result.reduce((map, item) => {
+    map[item.name] = item.value
+    return map
+  }, {})
+  const cacheUpdated = applyLanguageSettingsCacheUpdate(languageCode, result)
+  if (!cacheUpdated) {
+    await refreshLanguageSettingsCache()
+  }
+
   return {
     languageCode,
-    values: result.reduce((map, item) => {
-      map[item.name] = item.value
-      return map
-    }, {})
+    values: updatedValues
   }
 }
 
 module.exports = {
   LANGUAGE_SETTING_FIELDS,
+  getBlogEnabledLanguageCodes,
   getLanguageSettings,
   getLanguageSettingsList,
   isBlogLanguageEnabled,
+  refreshLanguageSettingsCache,
   updateLanguageSettings
 }

@@ -259,7 +259,6 @@ function normalizeRequiredSiteUrl(value, message, field) {
 
 async function resolveSiteUrls(body = {}) {
   const sourceSettings = await getSourceSeoSettings()
-  const siteSettings = global.$globalConfig?.siteSettings || {}
   const sourceSiteUrl = normalizeRequiredSiteUrl(
     body.sourceSiteUrl || sourceSettings.siteUrl,
     '源站站点地址未配置，无法判断哪些链接属于源站',
@@ -273,11 +272,6 @@ async function resolveSiteUrls(body = {}) {
       '替换目标站点地址无效，无法生成替换预览',
       'targetSiteUrl'
     )
-  } else {
-    const configuredSiteUrl = normalizeSiteUrl(siteSettings.siteUrl)
-    if (configuredSiteUrl) {
-      targetSiteUrl = configuredSiteUrl
-    }
   }
 
   return {

@@ -42,25 +42,17 @@ async function getLanguageSeoSettings(languageCode) {
     languageValues[name] = values[name]
   })
   const languageRssSettings = pickLanguageRssSettings(values)
-  const siteSettings = {
-    ...(global.$globalConfig?.siteSettings || {}),
-    ...(global.$globalConfig?.rssSettings || {})
-  }
   const siteUrl = normalizeSiteUrl(
-    sourceSettings.siteUrl || siteSettings.siteUrl || languageValues.siteUrl
+    sourceSettings.siteUrl || languageValues.siteUrl
   )
 
   return {
     ...sourceSettings,
-    ...siteSettings,
     ...languageValues,
     ...languageRssSettings,
     siteUrl,
     siteTimeZone:
-      languageValues.siteTimeZone ||
-      sourceSettings.siteTimeZone ||
-      siteSettings.siteTimeZone ||
-      ''
+      languageValues.siteTimeZone || sourceSettings.siteTimeZone || ''
   }
 }
 
@@ -178,11 +170,6 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
       let newTitle = title
       let newContent = content
       if (type === 2) {
-        // 推文时，标题为【nickname在xxxx年xx月xx日xx点xx分发表了推文】
-        // const authorName = author.nickname
-        // const siteTimeZone = global.$globalConfig.siteSettings.siteTimeZone || 'Asia/Shanghai'
-        // const dateStr = moment(date).tz(siteTimeZone).format('YYYY年M月D日H点m分')
-        // newTitle = `${authorName}在${dateStr}发布了一篇推文`
         if (siteRssTweetTitleType === 2) {
           // 推文标题类型为日期
           const dateStr = utils.formatDateByTimezone(

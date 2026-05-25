@@ -7,10 +7,6 @@ const fsExtra = require('fs-extra')
 const path = require('path')
 const { IP2Location } = require('ip2location-nodejs')
 const parser = require('ua-parser-js')
-const nodemailer = require('nodemailer')
-const emailSendHistoryUtils = require('../mongodb/utils/emailSendHistorys')
-const postUtils = require('../mongodb/utils/posts')
-const commentUtils = require('../mongodb/utils/comments')
 const referrerUtils = require('../mongodb/utils/referrers')
 const AsyncLock = require('async-lock')
 const lock = new AsyncLock({ timeout: 60000 })
@@ -632,309 +628,6 @@ exports.getTodayEndTime = function () {
   return date
 }
 
-// 写一个用nodemailer发送邮件的方法，参数是收件人邮箱和邮件内容和标题
-exports.sendEmail = function (to, content, subject) {
-  const emailSettings = global.$globalConfig.emailSettings
-  const siteSettings = global.$globalConfig.siteSettings
-  const { siteTitle } = siteSettings
-  if (!emailSettings) {
-    console.error('请在后台设置邮箱')
-    return
-  }
-  const {
-    emailSmtpHost,
-    emailSmtpPort,
-    emailSmtpSecure,
-    emailSender,
-    emailPassword
-  } = emailSettings
-  // 以上参数缺一不可
-  if (!emailSmtpHost || !emailSmtpPort || !emailSender || !emailPassword) {
-    console.error('请在后台设置邮箱')
-    return
-  }
-  // emailSender 和 to 不能相同
-  if (emailSender === to) {
-    console.error('emailSender 和 to 不能相同')
-    return
-  }
-  const transporter = nodemailer.createTransport({
-    host: emailSmtpHost,
-    port: emailSmtpPort,
-    secure: emailSmtpSecure || false, // true for 465, false for other ports
-    auth: {
-      user: emailSender,
-      pass: emailPassword
-    }
-  })
-  const mailOptions = {
-    from: emailSender,
-    to,
-    subject,
-    html: content
-  }
-  const promise = new Promise((resolve, reject) => {
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.error(error)
-        reject(error)
-        return
-      }
-      console.info('Message sent: %s', info.messageId)
-      resolve(info)
-    })
-  })
-  promise
-    .then(info => {
-      const emailSendHistory = {
-        to,
-        subject,
-        content,
-        status: 1
-      }
-      emailSendHistoryUtils.save(emailSendHistory)
-    })
-    .catch(err => {
-      let errInfo = ''
-      const errorType = typeof err
-      if (errorType === 'string') {
-        errInfo = err
-      }
-      if (errorType === 'object') {
-        errInfo = JSON.stringify(err)
-        if (err instanceof Error && errInfo === '{}') {
-          errInfo = err.message
-        }
-      }
-      const emailSendHistory = {
-        to,
-        content,
-        subject,
-        status: 0,
-        errInfo: errInfo
-      }
-      emailSendHistoryUtils.save(emailSendHistory)
-    })
-  return promise
-}
-// 发送评论添加通知，参数是文章信息post，评论信息comment
-exports.sendCommentAddNotice = function (post, comment) {
-  const siteSettings = global.$globalConfig.siteSettings
-  const emailSettings = global.$globalConfig.emailSettings
-  const {
-    emailSendToMeTemplate,
-    emailEnable,
-    emailSendOptions,
-    emailReceiver
-  } = emailSettings
-
-  // 如果没有设置emailSendToMeTemplate，就不发送邮件
-  if (!emailSendToMeTemplate) {
-    console.error('请在后台设置emailSendToMeTemplate')
-    return
-  }
-
-  // 判断emailEnable为true，且emailSendOptions包含字符串receiveComment
-  if (emailEnable && emailSendOptions.includes('receiveComment')) {
-    const { siteUrl, siteTitle } = siteSettings
-    const { title, excerpt } = post
-    let linkTitle = title || excerpt
-    if (linkTitle.length > 200) {
-      linkTitle = this.limitStr(linkTitle, 200)
-    }
-    let { nickname, content, user } = comment
-    content = this.escapeHtml(content)
-    if (user) {
-      nickname = user.nickname
-    }
-    nickname = this.escapeHtml(nickname)
-    const to = emailReceiver
-    const subject = `【${siteTitle}】的博文/推文有了新的评论`
-    let contentHtml = emailSendToMeTemplate
-    // 替换模板中的变量
-    // ${comment}为评论内容
-    // ${nickname}为评论者昵称
-    // ${title}为文章标题
-    // 其中${title}需要替换成a标签
-    // 其中${siteTitle}为站点名称需要替换成a标签
-    // 开始替换
-    contentHtml = contentHtml.replace(/\${comment}/g, content)
-    contentHtml = contentHtml.replace(/\${nickname}/g, nickname)
-    contentHtml = contentHtml.replace(
-      /\${title}/g,
-      `<a href="${this.getPostPagePath(post)}" target="_blank">${linkTitle}</a>`
-    )
-    contentHtml = contentHtml.replace(
-      /\${siteTitle}/g,
-      `<a href="${siteUrl}" target="_blank">${siteTitle}</a>`
-    )
-    this.sendEmail(to, contentHtml, subject)
-  }
-}
-// 评论撤回通知，参数是文章信息post，评论信息comment
-exports.sendRetractCommentNotice = function (post, comment) {
-  const siteSettings = global.$globalConfig.siteSettings
-  const emailSettings = global.$globalConfig.emailSettings
-  const {
-    emailRetractCommentTemplate,
-    emailEnable,
-    emailSendOptions,
-    emailReceiver
-  } = emailSettings
-
-  // 如果没有设置emailRetractCommentTemplate，就不发送邮件
-  if (!emailRetractCommentTemplate) {
-    console.error('请在后台设置emailRetractCommentTemplate')
-    return
-  }
-
-  // 判断emailEnable为true，且emailSendOptions包含字符串retractComment
-  if (emailEnable && emailSendOptions.includes('retractComment')) {
-    const { siteUrl, siteTitle } = siteSettings
-    const { title, excerpt } = post
-    let linkTitle = title || excerpt
-    if (linkTitle.length > 200) {
-      linkTitle = this.limitStr(linkTitle, 200)
-    }
-    let { nickname, content, user } = comment
-    content = this.escapeHtml(content)
-    if (user) {
-      nickname = user.nickname
-    }
-    nickname = this.escapeHtml(nickname)
-    const to = emailReceiver
-    const subject = `【${siteTitle}】的评论被评论者撤回`
-    let contentHtml = emailRetractCommentTemplate
-    // 替换模板中的变量
-    contentHtml = contentHtml.replace(/\${comment}/g, `${content}`)
-    contentHtml = contentHtml.replace(/\${nickname}/g, nickname)
-    contentHtml = contentHtml.replace(
-      /\${title}/g,
-      `<a href="${this.getPostPagePath(post)}" target="_blank">${linkTitle}</a>`
-    )
-    contentHtml = contentHtml.replace(
-      /\${siteTitle}/g,
-      `<a href="${siteUrl}" target="_blank">${siteTitle}</a>`
-    )
-    this.sendEmail(to, contentHtml, subject)
-  }
-}
-
-// 发送回复评论通知，参数是文章信息post，评论信息comment，父级评论信息parentComment
-exports.sendReplyCommentNotice = async function (post, comment) {
-  if (typeof comment === 'string') {
-    // 如果comment是字符串，说明是评论id，需要查询评论信息
-    comment = await commentUtils.findOne({ _id: comment }, '', {
-      userFilter: 'nickname _id email'
-    })
-  }
-  if (!comment) {
-    console.error('comment为必须参数')
-    return
-  }
-
-  // 如果不存在post就查询post
-  if (!post) {
-    post = await postUtils.findOne({ _id: comment.post })
-    if (!post) {
-      console.error('post不存在')
-      return
-    }
-  }
-
-  let parentComment = await commentUtils.findOne({ _id: comment.parent }, '', {
-    userFilter: 'nickname _id email'
-  })
-  if (!parentComment) {
-    console.error('parentComment不存在')
-    return
-  }
-
-  const parentCommentUser = parentComment.user || {}
-  const commentUser = comment.user || {}
-  const parentCommentIsAdmin = parentComment.user ? true : false
-  const commentIsAdmin = comment.user ? true : false
-
-  const parentCommentEmail = parentComment.email || parentCommentUser.email
-  const commentEmail = comment.email || commentUser.email
-
-  if (!parentCommentEmail) {
-    console.log('parentComment.email不存在')
-    return
-  }
-  if (parentCommentEmail === commentEmail) {
-    console.log('父级评论者邮箱和评论者邮箱相同，不发送邮件')
-    return
-  }
-  if (parentCommentIsAdmin) {
-    console.log('父级评论者是管理员，不发送邮件')
-    return
-  }
-  if (parentComment.status !== 1) {
-    console.log('父级评论未审核通过，不发送邮件')
-    return
-  }
-  const siteSettings = global.$globalConfig.siteSettings
-  const emailSettings = global.$globalConfig.emailSettings
-  const { emailSendToCommenterTemplate, emailEnable, emailSendOptions } =
-    emailSettings
-
-  // 如果没有设置emailSendToCommenterTemplate，就不发送邮件
-  if (!emailSendToCommenterTemplate) {
-    console.error('请在后台设置emailSendToCommenterTemplate')
-    return
-  }
-
-  // 判断emailEnable为true，且emailSendOptions包含字符串receiveComment
-  if (emailEnable && emailSendOptions.includes('replyComment')) {
-    const { siteUrl, siteTitle } = siteSettings
-    const { title, excerpt } = post
-    let linkTitle = title || excerpt
-    if (linkTitle.length > 200) {
-      linkTitle = this.limitStr(linkTitle, 200)
-    }
-    let { nickname, content } = comment
-    content = this.escapeHtml(content)
-    let { nickname: parentNickname, content: parentContent } = parentComment
-    parentContent = this.escapeHtml(parentContent)
-    if (commentIsAdmin) {
-      nickname = commentUser.nickname
-    }
-    nickname = this.escapeHtml(nickname)
-    if (parentCommentIsAdmin) {
-      parentNickname = parentCommentUser.nickname
-    }
-    parentNickname = this.escapeHtml(parentNickname)
-    const to = parentCommentEmail
-    const subject = `您在【${siteTitle}】发表的评论收到了回复`
-    let contentHtml = emailSendToCommenterTemplate
-    // 替换模板中的变量
-    // ${comment}为评论内容
-    // ${nickname}为评论者昵称
-    // ${title}为文章标题
-    // ${parentComment}为父级评论内容
-    // ${parentNickname}为父级评论者昵称
-    // 其中${title}需要替换成a标签
-    // 其中${siteTitle}为站点名称需要替换成a标签
-    // 开始替换
-    contentHtml = contentHtml.replace(/\${comment}/g, content)
-    contentHtml = contentHtml.replace(/\${nickname}/g, nickname)
-    contentHtml = contentHtml.replace(
-      /\${title}/g,
-      `<a href="${this.getPostPagePath(post)}/#comment-${
-        comment._id
-      }" target="_blank">${linkTitle}</a>`
-    )
-    contentHtml = contentHtml.replace(
-      /\${siteTitle}/g,
-      `<a href="${siteUrl}" target="_blank">${siteTitle}</a>`
-    )
-    contentHtml = contentHtml.replace(/\${parentComment}/g, parentContent)
-    contentHtml = contentHtml.replace(/\${parentNickname}/g, parentNickname)
-    this.sendEmail(to, contentHtml, subject)
-  }
-}
-
 exports.getPostTypeName = postData => {
   // 根据postData.type返回对应的名称
   const typeMap = {
@@ -949,89 +642,40 @@ exports.getPostTypeName = postData => {
   }
 }
 
-exports.getPostPagePath = postData => {
-  // 先判断type是1，2还是3，1和2跳转到/post/id，3跳转到/page/id
-  // 如果有别名，就跳转到别名，没有别名就跳转到id
-  const siteSettings = global.$globalConfig.siteSettings
-  const { siteUrl } = siteSettings
-  if (!siteUrl) {
-    throw new Error('siteUrl不存在,请在后台设置')
-  }
-  let path
-  if (postData.type === 1 || postData.type === 2) {
-    path = '/post/'
-  } else if (postData.type === 3) {
-    path = '/page/'
-  } else {
-    throw new Error('type类型错误')
-  }
-
-  if (postData.alias) {
-    path += postData.alias
-  } else {
-    path += postData._id
-  }
-  return siteUrl + path
-}
-
 const referrerRecordTimerMap = {}
 // 引用记录传入参数是referrer和type
 exports.referrerRecord = function (referrer, referrerType) {
-  // const siteUrl = global.$globalConfig?.siteSettings?.siteUrl
-  // if (!siteUrl) {
-  //   console.warn('siteUrl不存在,请在后台设置')
-  //   return
-  // }
-  // if (referrerDomainWhitelist.length === 0) {
-  //   console.warn('引用白名单为空，不记录referrer')
-  //   return
-  // }
   if (referrer) {
-    // 获取otherSettings siteReferrerWhiteList
-    const referrerDomainWhitelist =
-      global.$globalConfig?.otherSettings?.siteReferrerWhiteList || []
     const isReady = global.$isReady
     if (!isReady) {
       console.warn('未完全启动，不记录referrer')
       return
     }
-    // 如果referrer包含siteUrl，就不记录
-    // if (referrer.includes(siteUrl)) {
-    //   return
-    // }
     // referrer最大长度为300
     if (referrer.length > 300) {
       referrer = referrer.substring(0, 300)
     }
-    // 如果referrer存在，就判断referrer是否在referrerDomainWhitelist中
-    const isReferrerDomainWhitelist = referrerDomainWhitelist.some(item => {
-      // list中仅包含域名，不包含协议和路径
-      return referrer.includes(item)
-    })
-    // 如果referrer不在REFERRER_DOMAIN_WHITELIST中，就记录
-    if (!isReferrerDomainWhitelist) {
-      const md5Id = md5hex(`${referrerType}:${referrer}`)
-      // 判断是否存在计时器
-      if (referrerRecordTimerMap[md5Id]) {
-        // 如果存在计时器，就不操作
-        return
-      }
-      // 设置计时器
-      referrerRecordTimerMap[md5Id] = setTimeout(
-        () => {
-          // 如果计时器到期，就保存referrer
-          const params = {
-            referrer,
-            referrerType
-          }
-          console.log('referrer记录', params)
-          referrerUtils.save(params)
-          // 删除计时器
-          delete referrerRecordTimerMap[md5Id]
-        },
-        1000 * 60 * 60
-      )
+    const md5Id = md5hex(`${referrerType}:${referrer}`)
+    // 判断是否存在计时器
+    if (referrerRecordTimerMap[md5Id]) {
+      // 如果存在计时器，就不操作
+      return
     }
+    // 设置计时器
+    referrerRecordTimerMap[md5Id] = setTimeout(
+      () => {
+        // 如果计时器到期，就保存referrer
+        const params = {
+          referrer,
+          referrerType
+        }
+        console.log('referrer记录', params)
+        referrerUtils.save(params)
+        // 删除计时器
+        delete referrerRecordTimerMap[md5Id]
+      },
+      1000 * 60 * 60
+    )
   }
 }
 
