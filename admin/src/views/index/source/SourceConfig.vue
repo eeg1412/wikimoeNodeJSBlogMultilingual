@@ -14,13 +14,6 @@
       </div>
       <div class="fr">
         <el-button
-          title="重新读取缓存"
-          :loading="loading"
-          @click="getSourceConfig(false)"
-        >
-          <el-icon><Refresh /></el-icon>
-        </el-button>
-        <el-button
           type="primary"
           :loading="refreshing"
           @click="refreshSourceConfig"
@@ -41,7 +34,9 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="当前缓存值" min-width="280">
           <template #default="{ row }">
-            <div class="source-config-value">{{ formatValue(row.value) }}</div>
+            <div class="source-config-value">
+              {{ formatValue(row.name, row.value) }}
+            </div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="用途" min-width="320">
@@ -84,6 +79,17 @@ const SOURCE_CONFIG_FIELD_MAP = {
   sitePostRandomSimilarShowRange: {
     label: '相似内容显示范围',
     usage: '文章详情在哪些文章类型展示相似内容'
+  }
+}
+
+const SOURCE_CONFIG_VALUE_LABEL_MAP = {
+  sitePostRandomSimilarRange: {
+    1: '博文',
+    2: '推文'
+  },
+  sitePostRandomSimilarShowRange: {
+    1: '博文',
+    2: '推文'
   }
 }
 
@@ -155,12 +161,28 @@ export default {
       return SOURCE_CONFIG_FIELD_MAP[name]?.usage || '-'
     }
 
-    function formatValue(value) {
-      if (Array.isArray(value)) {
-        if (value.length === 0) {
-          return '-'
-        }
+    function formatArrayValue(name, value) {
+      const labelMap = SOURCE_CONFIG_VALUE_LABEL_MAP[name]
+
+      if (!Array.isArray(value) || value.length === 0) {
+        return '-'
+      }
+
+      if (!labelMap) {
         return value.join(', ')
+      }
+
+      return value
+        .map(item => {
+          const itemText = String(item)
+          return labelMap[itemText] || itemText
+        })
+        .join(', ')
+    }
+
+    function formatValue(name, value) {
+      if (Array.isArray(value)) {
+        return formatArrayValue(name, value)
       }
 
       if (value === null || typeof value === 'undefined' || value === '') {
