@@ -25,10 +25,10 @@
 
 合并后只有一套 blog 程序，但是有两种访问方式：
 
-| 访问方式 | 例子 | 应该走什么逻辑 |
-| --- | --- | --- |
-| 不带语言码 | `/`、`/post/list`、`/rss` | 源站现有 blog 逻辑。 |
-| 带语言码 | `/zh-CN`、`/en-US/post/list`、`/ja-JP/rss` | 多语言 blog 逻辑。 |
+| 访问方式   | 例子                                       | 应该走什么逻辑       |
+| ---------- | ------------------------------------------ | -------------------- |
+| 不带语言码 | `/`、`/post/list`、`/rss`                  | 源站现有 blog 逻辑。 |
+| 带语言码   | `/zh-CN`、`/en-US/post/list`、`/ja-JP/rss` | 多语言 blog 逻辑。   |
 
 后面的所有修改都按这个规则判断。看到一个 URL、接口、链接、缓存、SEO 时，先问一句：它现在有没有语言码？
 
@@ -52,11 +52,11 @@
 
 它至少要能返回这三个东西：
 
-| 值 | 不带语言码时 | 带语言码时 |
-| --- | --- | --- |
-| `isLocalizedRoute` | `false` | `true` |
-| `languageCode` | 默认语言，例如 `zh-CN` | URL 里的语言码 |
-| `localePath('/xxx')` | `/xxx` | `/zh-CN/xxx` |
+| 值                   | 不带语言码时           | 带语言码时     |
+| -------------------- | ---------------------- | -------------- |
+| `isLocalizedRoute`   | `false`                | `true`         |
+| `languageCode`       | 默认语言，例如 `zh-CN` | URL 里的语言码 |
+| `localePath('/xxx')` | `/xxx`                 | `/zh-CN/xxx`   |
 
 这一步做好后，组件才可以放心统一使用 `t()` 和 `localePath()`。
 
@@ -98,11 +98,11 @@
 
 API 也按“有没有语言码”判断：
 
-| 当前页面 | 请求应该怎么走 |
-| --- | --- |
-| 不带语言码 | 走源站现有 blog API。 |
+| 当前页面                                                             | 请求应该怎么走                                        |
+| -------------------------------------------------------------------- | ----------------------------------------------------- |
+| 不带语言码                                                           | 走源站现有 blog API。                                 |
 | 带语言码，并且请求文章、分类、标签、番剧、书籍、电影、游戏等翻译内容 | 走 `multilingual-blog`，请求参数里带 `languageCode`。 |
-| 带语言码，但请求评论、日志、链接、浏览量、点赞等公共行为 | 走原来的接口，不新增 `source-blog`。 |
+| 带语言码，但请求评论、日志、链接、浏览量、点赞等公共行为             | 走原来的接口，不新增 `source-blog`。                  |
 
 需要迁移这些文件：
 
@@ -175,10 +175,10 @@ API 也按“有没有语言码”判断：
 
 含义要记清楚：
 
-| 变量 | 含义 |
-| --- | --- |
-| `NUXT_API_DOMAIN` | 合并后 blog API 的域名，源站接口和 `multilingual-blog` 都从这里访问。 |
-| `NUXT_SOURCE_ASSET_DOMAIN` | 源站资源域名。只有上传资源和 `NUXT_API_DOMAIN` 不同域名时才需要填。 |
+| 变量                       | 含义                                                                  |
+| -------------------------- | --------------------------------------------------------------------- |
+| `NUXT_API_DOMAIN`          | 合并后 blog API 的域名，源站接口和 `multilingual-blog` 都从这里访问。 |
+| `NUXT_SOURCE_ASSET_DOMAIN` | 源站资源域名。只有上传资源和 `NUXT_API_DOMAIN` 不同域名时才需要填。   |
 
 不要再新增 `NUXT_SOURCE_API_DOMAIN`。这是 `source-blog` 回源用的，合并后不需要。
 
@@ -203,148 +203,148 @@ API 也按“有没有语言码”判断：
 
 这些文件是翻译站新增，源站没有。没有特别标注“不迁移”的文件，迁移时需要加到源站。
 
-| 文件 | 行段 | 为什么新增 |
-| --- | --- | --- |
-| `app/api/multilingual.js` | 翻译站 1-203 | 多语言内容 API 客户端，自动带 `languageCode`。 |
-| `app/composables/useLang.js` | 翻译站 1-90 | 当前语言、语言路径、语言 URL、文案函数。 |
-| `app/composables/useLocalizedText.js` | 翻译站 1-229 | 时间、数字、评分、复制提示等本地化格式。 |
-| `app/lang/index.js` | 翻译站 1-206 | 语言包加载、校验、默认语言读取。 |
-| `app/lang/en-US/*.js` | 翻译站 1-369 | 英语文案。 |
-| `app/lang/ja-JP/*.js` | 翻译站 1-372 | 日语文案。 |
-| `app/lang/ko-KR/*.js` | 翻译站 1-371 | 韩语文案。 |
-| `app/lang/zh-CN/*.js` | 翻译站 1-366 | 简体中文文案。 |
-| `app/lang/zh-HK/*.js` | 翻译站 1-366 | 香港繁中。 |
-| `app/lang/zh-SG/*.js` | 翻译站 1-366 | 新加坡简中。 |
-| `app/lang/zh-TW/*.js` | 翻译站 1-366 | 台湾繁中。 |
-| `app/middleware/language-active.global.js` | 翻译站 1-54 | 进入带 `code` 页面前校验语言是否支持、是否启用；合并时必须按第 3 步改成无 `code` 放行。 |
-| `app/pages/[[code]]/**` | 翻译站 1-57 | 带语言代码的页面入口，和源站 `app/pages/index/**` 并存，但业务内容复用同一套组件。 |
-| `public-root/.gitkeep` | 翻译站 1-0 | 只有采用“默认 public 改成 public-root，原 public 挂到 `/_multilingual_public`”这套资源方案时才需要。 |
-| `server/routes/[code]/rss*.js` | 翻译站 1-5 | 带语言代码的 RSS 代理。 |
-| `server/routes/[code]/sitemap.xml.js` | 翻译站 1-5 | 带语言代码的 sitemap 代理。 |
-| `server/routes/api/multilingual-asset/[...].js` | 翻译站 1-12 | 翻译站静态资源 API 代理。 |
-| `server/routes/api/multilingual-blog/[...].js` | 翻译站 1-7 | 多语言 blog API 代理，合并后仍然需要。 |
-| `server/routes/multilingual-assets/**` | 翻译站 1-5 | 翻译站服务端静态资源代理。 |
-| `server/utils/languageSeo.js` | 翻译站 1-47 | RSS/sitemap 的语言规范化和代理。 |
-| `server/utils/multilingualAssetProxy.js` | 翻译站 1-30 | 翻译站静态资源代理工具。 |
-| `server/utils/sourceAssetProxy.js` | 翻译站 1-81 | 源站上传资源代理工具。 |
-| `shared/languages.js` | 翻译站 1-33 | 支持语言列表和必需语言模块列表。 |
+| 文件                                            | 行段         | 为什么新增                                                                                           |
+| ----------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------- |
+| `app/api/multilingual.js`                       | 翻译站 1-203 | 多语言内容 API 客户端，自动带 `languageCode`。                                                       |
+| `app/composables/useLang.js`                    | 翻译站 1-90  | 当前语言、语言路径、语言 URL、文案函数。                                                             |
+| `app/composables/useLocalizedText.js`           | 翻译站 1-229 | 时间、数字、评分、复制提示等本地化格式。                                                             |
+| `app/lang/index.js`                             | 翻译站 1-206 | 语言包加载、校验、默认语言读取。                                                                     |
+| `app/lang/en-US/*.js`                           | 翻译站 1-369 | 英语文案。                                                                                           |
+| `app/lang/ja-JP/*.js`                           | 翻译站 1-372 | 日语文案。                                                                                           |
+| `app/lang/ko-KR/*.js`                           | 翻译站 1-371 | 韩语文案。                                                                                           |
+| `app/lang/zh-CN/*.js`                           | 翻译站 1-366 | 中国大陆简体中文文案。                                                                               |
+| `app/lang/zh-HK/*.js`                           | 翻译站 1-366 | 香港繁中。                                                                                           |
+| `app/lang/zh-SG/*.js`                           | 翻译站 1-366 | 新加坡简中。                                                                                         |
+| `app/lang/zh-TW/*.js`                           | 翻译站 1-366 | 台湾繁中。                                                                                           |
+| `app/middleware/language-active.global.js`      | 翻译站 1-54  | 进入带 `code` 页面前校验语言是否支持、是否启用；合并时必须按第 3 步改成无 `code` 放行。              |
+| `app/pages/[[code]]/**`                         | 翻译站 1-57  | 带语言代码的页面入口，和源站 `app/pages/index/**` 并存，但业务内容复用同一套组件。                   |
+| `public-root/.gitkeep`                          | 翻译站 1-0   | 只有采用“默认 public 改成 public-root，原 public 挂到 `/_multilingual_public`”这套资源方案时才需要。 |
+| `server/routes/[code]/rss*.js`                  | 翻译站 1-5   | 带语言代码的 RSS 代理。                                                                              |
+| `server/routes/[code]/sitemap.xml.js`           | 翻译站 1-5   | 带语言代码的 sitemap 代理。                                                                          |
+| `server/routes/api/multilingual-asset/[...].js` | 翻译站 1-12  | 翻译站静态资源 API 代理。                                                                            |
+| `server/routes/api/multilingual-blog/[...].js`  | 翻译站 1-7   | 多语言 blog API 代理，合并后仍然需要。                                                               |
+| `server/routes/multilingual-assets/**`          | 翻译站 1-5   | 翻译站服务端静态资源代理。                                                                           |
+| `server/utils/languageSeo.js`                   | 翻译站 1-47  | RSS/sitemap 的语言规范化和代理。                                                                     |
+| `server/utils/multilingualAssetProxy.js`        | 翻译站 1-30  | 翻译站静态资源代理工具。                                                                             |
+| `server/utils/sourceAssetProxy.js`              | 翻译站 1-81  | 源站上传资源代理工具。                                                                               |
+| `shared/languages.js`                           | 翻译站 1-33  | 支持语言列表和必需语言模块列表。                                                                     |
 
 ## 翻译站新增但合并后不迁移
 
 这些文件是翻译站为“两个 blog 分开部署”准备的回源层。合并后自己就是源站，不需要这些代理层。
 
-| 文件 | 行段 | 为什么不迁移 |
-| --- | --- | --- |
-| `app/api/source.js` | 翻译站 1-174 | 不再存在另一个源站 API；评论、日志、链接、浏览量、点赞等公共行为直接走原接口。 |
-| `server/routes/api/source-blog/[...].js` | 翻译站 1-11 | 不再存在 source-blog；合并后没有“另一个 blog”需要代理。 |
+| 文件                                     | 行段         | 为什么不迁移                                                                   |
+| ---------------------------------------- | ------------ | ------------------------------------------------------------------------------ |
+| `app/api/source.js`                      | 翻译站 1-174 | 不再存在另一个源站 API；评论、日志、链接、浏览量、点赞等公共行为直接走原接口。 |
+| `server/routes/api/source-blog/[...].js` | 翻译站 1-11  | 不再存在 source-blog；合并后没有“另一个 blog”需要代理。                        |
 
 ## 源站独有文件
 
 这些文件在源站存在，翻译站没有。按你的目标，迁移后它们大多需要保留，用来服务“无 `code` 的现有 blog 逻辑”。
 
-| 文件 | 行段 | 处理方式 |
-| --- | --- | --- |
-| `app/pages/index.vue` | 源站 1-7 | 保留，作为无 `code` 首页入口；页面内容复用同一套组件。 |
-| `app/pages/index/page/[id].vue` | 源站 1-9 | 保留，作为无 `code` 分页入口；页面内容复用同一套组件。 |
-| `app/pages/index/post/[id].vue` | 源站 1-9 | 保留，作为无 `code` 文章详情入口；页面内容复用同一套组件。 |
-| `app/pages/index/post/list*.vue` | 源站 1-54 | 保留，作为无 `code` 列表入口；页面内容复用同一套组件。 |
-| `server/routes/ads.txt.js` | 源站 1-7 | 保留无 `code` 根路径服务。 |
-| `server/routes/api/blog/[...].js` | 源站 1-7 | 保留，继续服务无 `code` 请求和评论、日志、链接、浏览量、点赞等公共行为。 |
-| `server/routes/robots.txt.js` | 源站 1-7 | 保留根路径 robots；内容要包含无 `code` 和带 `code` 的 sitemap 规则。 |
-| `server/routes/rss*.js` | 源站 1-7 | 保留无 `code` RSS；带 `code` RSS 使用 `server/routes/[code]/rss*.js`。 |
-| `server/routes/sitemap.xml.js` | 源站 1-7 | 保留无 `code` sitemap；带 `code` sitemap 使用 `server/routes/[code]/sitemap.xml.js`。 |
-| `server/routes/sitemap.xsl.js` | 源站 1-7 | 保留无 `code` sitemap 样式；带 `code` 或多语言资源再走资源代理。 |
+| 文件                              | 行段      | 处理方式                                                                              |
+| --------------------------------- | --------- | ------------------------------------------------------------------------------------- |
+| `app/pages/index.vue`             | 源站 1-7  | 保留，作为无 `code` 首页入口；页面内容复用同一套组件。                                |
+| `app/pages/index/page/[id].vue`   | 源站 1-9  | 保留，作为无 `code` 分页入口；页面内容复用同一套组件。                                |
+| `app/pages/index/post/[id].vue`   | 源站 1-9  | 保留，作为无 `code` 文章详情入口；页面内容复用同一套组件。                            |
+| `app/pages/index/post/list*.vue`  | 源站 1-54 | 保留，作为无 `code` 列表入口；页面内容复用同一套组件。                                |
+| `server/routes/ads.txt.js`        | 源站 1-7  | 保留无 `code` 根路径服务。                                                            |
+| `server/routes/api/blog/[...].js` | 源站 1-7  | 保留，继续服务无 `code` 请求和评论、日志、链接、浏览量、点赞等公共行为。              |
+| `server/routes/robots.txt.js`     | 源站 1-7  | 保留根路径 robots；内容要包含无 `code` 和带 `code` 的 sitemap 规则。                  |
+| `server/routes/rss*.js`           | 源站 1-7  | 保留无 `code` RSS；带 `code` RSS 使用 `server/routes/[code]/rss*.js`。                |
+| `server/routes/sitemap.xml.js`    | 源站 1-7  | 保留无 `code` sitemap；带 `code` sitemap 使用 `server/routes/[code]/sitemap.xml.js`。 |
+| `server/routes/sitemap.xsl.js`    | 源站 1-7  | 保留无 `code` sitemap 样式；带 `code` 或多语言资源再走资源代理。                      |
 
 ## 修改文件差异
 
 下面是两边都存在但内容不同的文件。行段格式是“源站行段 / 翻译站行段”。
 
-| 文件 | 差异行段 | 为什么修改 |
-| --- | --- | --- |
-| `.env` | 源站 1 / 翻译站 1-3 | 翻译站曾经增加分站回源 API 和资源域名。合并后不需要 `source-blog` 回源 API，环境变量按第 9 步重新整理。 |
-| `sample.env` | 源站 1 / 翻译站 1-3；源站 7 / 翻译站 9 | 同步环境变量模板和端口。 |
-| `nuxt.config.js` | 源站 1-183 / 翻译站 1-183 多处 | 增加本地环境读取、资源前缀、`public-root`、多语言运行时配置、Nitro publicAssets、icon API。 |
-| `app/api/index.js` | 源站 1-127 / 翻译站 1-75 多处 | 改成合并后双模式：无 `code` 走原请求；带 `code` 且请求可翻译内容时走 `multilingual-blog`；公共行为仍走原请求。 |
-| `app/api/option.js` | 源站 1、9-10、13 / 翻译站 1、9-10、13-17 | 增加多语言 options 接口。 |
-| `app/app.vue` | 源站 13-214 / 翻译站 13-308 多处 | 全局语言、RSS 链接、SEO lang、错误文案、全景提示本地化。 |
-| `app/assets/css/common.css` | 源站 679、1423、1512 / 翻译站 679、1423、1512 | 背景图片改用 `/_multilingual_public`，代码块语言标签样式微调。 |
-| `app/composables/useArticleJsonLd.js` | 源站 8、54、145、163、165 / 翻译站 8、55、146-149、167、169 | JSON-LD 加语言 URL 和本地化标题描述。 |
-| `app/composables/useOptions.js` | 源站 1-12 / 翻译站 1-291 | 无 `code` 读取源站配置；带 `code` 时合并源站配置和多语言配置，并规范资源 URL。 |
-| `app/composables/usePostSeo.js` | 源站 1-16 / 翻译站 1-29 | SEO URL 加语言路径和 canonical 处理。 |
-| `app/error.vue` | 源站 10-35 / 翻译站 10-62 | 错误页按语言显示文案，并识别语言关闭状态。 |
-| `app/layouts/default.vue` | 源站 17-528 / 翻译站 17-587 多处 | 导航、页脚、语言切换、RSS、链接路径全部加语言逻辑。 |
-| `app/pages/404.vue` | 源站 4-11 / 翻译站 4-29 | 404 返回链接改成当前语言路径。 |
-| `server/plugins/routecache.js` | 源站 3-376 / 翻译站 3-487 多处 | 缓存识别语言前缀，缓存前检查该语言是否启用。 |
-| `server/routes/content/[...].js` | 源站 1-6 / 翻译站 1-4 | 改用源站资源代理。 |
-| `server/routes/ucloudImg/[...].js` | 源站 1-6 / 翻译站 1-4 | 改用源站资源代理。 |
-| `server/routes/up_works/[...].js` | 源站 1-6 / 翻译站 1-4 | 改用源站资源代理。 |
-| `server/routes/upload/[...].js` | 源站 1-6 / 翻译站 1-4 | 改用源站资源代理。 |
-| `server/routes/web_demo/[...].js` | 源站 1-6 / 翻译站 1-4 | 改用源站资源代理。 |
-| `public/panorama/index.html` | 源站 1-83 / 翻译站 1-82 | 全景静态页资源路径适配翻译站部署路径。 |
-| `public/panorama/assets/index-DhXh4irt.css` | 文件内容不同，minified 无可读 hunk | 全景构建产物路径差异。迁移时建议重新生成或统一采用一份产物。 |
-| `public/panorama/assets/vr-equirectangular-viewer.esm-ChMBHEeH.js` | 文件内容不同，minified 无可读 hunk | 全景构建产物路径差异。迁移时建议重新生成或统一采用一份产物。 |
+| 文件                                                               | 差异行段                                                    | 为什么修改                                                                                                     |
+| ------------------------------------------------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `.env`                                                             | 源站 1 / 翻译站 1-3                                         | 翻译站曾经增加分站回源 API 和资源域名。合并后不需要 `source-blog` 回源 API，环境变量按第 9 步重新整理。        |
+| `sample.env`                                                       | 源站 1 / 翻译站 1-3；源站 7 / 翻译站 9                      | 同步环境变量模板和端口。                                                                                       |
+| `nuxt.config.js`                                                   | 源站 1-183 / 翻译站 1-183 多处                              | 增加本地环境读取、资源前缀、`public-root`、多语言运行时配置、Nitro publicAssets、icon API。                    |
+| `app/api/index.js`                                                 | 源站 1-127 / 翻译站 1-75 多处                               | 改成合并后双模式：无 `code` 走原请求；带 `code` 且请求可翻译内容时走 `multilingual-blog`；公共行为仍走原请求。 |
+| `app/api/option.js`                                                | 源站 1、9-10、13 / 翻译站 1、9-10、13-17                    | 增加多语言 options 接口。                                                                                      |
+| `app/app.vue`                                                      | 源站 13-214 / 翻译站 13-308 多处                            | 全局语言、RSS 链接、SEO lang、错误文案、全景提示本地化。                                                       |
+| `app/assets/css/common.css`                                        | 源站 679、1423、1512 / 翻译站 679、1423、1512               | 背景图片改用 `/_multilingual_public`，代码块语言标签样式微调。                                                 |
+| `app/composables/useArticleJsonLd.js`                              | 源站 8、54、145、163、165 / 翻译站 8、55、146-149、167、169 | JSON-LD 加语言 URL 和本地化标题描述。                                                                          |
+| `app/composables/useOptions.js`                                    | 源站 1-12 / 翻译站 1-291                                    | 无 `code` 读取源站配置；带 `code` 时合并源站配置和多语言配置，并规范资源 URL。                                 |
+| `app/composables/usePostSeo.js`                                    | 源站 1-16 / 翻译站 1-29                                     | SEO URL 加语言路径和 canonical 处理。                                                                          |
+| `app/error.vue`                                                    | 源站 10-35 / 翻译站 10-62                                   | 错误页按语言显示文案，并识别语言关闭状态。                                                                     |
+| `app/layouts/default.vue`                                          | 源站 17-528 / 翻译站 17-587 多处                            | 导航、页脚、语言切换、RSS、链接路径全部加语言逻辑。                                                            |
+| `app/pages/404.vue`                                                | 源站 4-11 / 翻译站 4-29                                     | 404 返回链接改成当前语言路径。                                                                                 |
+| `server/plugins/routecache.js`                                     | 源站 3-376 / 翻译站 3-487 多处                              | 缓存识别语言前缀，缓存前检查该语言是否启用。                                                                   |
+| `server/routes/content/[...].js`                                   | 源站 1-6 / 翻译站 1-4                                       | 改用源站资源代理。                                                                                             |
+| `server/routes/ucloudImg/[...].js`                                 | 源站 1-6 / 翻译站 1-4                                       | 改用源站资源代理。                                                                                             |
+| `server/routes/up_works/[...].js`                                  | 源站 1-6 / 翻译站 1-4                                       | 改用源站资源代理。                                                                                             |
+| `server/routes/upload/[...].js`                                    | 源站 1-6 / 翻译站 1-4                                       | 改用源站资源代理。                                                                                             |
+| `server/routes/web_demo/[...].js`                                  | 源站 1-6 / 翻译站 1-4                                       | 改用源站资源代理。                                                                                             |
+| `public/panorama/index.html`                                       | 源站 1-83 / 翻译站 1-82                                     | 全景静态页资源路径适配翻译站部署路径。                                                                         |
+| `public/panorama/assets/index-DhXh4irt.css`                        | 文件内容不同，minified 无可读 hunk                          | 全景构建产物路径差异。迁移时建议重新生成或统一采用一份产物。                                                   |
+| `public/panorama/assets/vr-equirectangular-viewer.esm-ChMBHEeH.js` | 文件内容不同，minified 无可读 hunk                          | 全景构建产物路径差异。迁移时建议重新生成或统一采用一份产物。                                                   |
 
 ### 组件修改行段
 
 这些组件大多是同一种原因：硬编码中文改成语言包；`NuxtLink`/`navigateTo`/分享链接加语言参数；数字、时间、评分改成本地化格式；静态资源改到 `/_multilingual_public`。
 
-| 文件 | 差异行段 | 主要原因 |
-| --- | --- | --- |
-| `app/components/ACGNItem.vue` | 源站 11、52、58、67、92、97、103、130 / 翻译站 11、52、59、68、93-97、102-104、110-111、130-131 | 条目链接和文案本地化。 |
-| `app/components/AlbumPhotoSwipe.vue` | 源站 4、27 / 翻译站 4、28 | 图片预览文案本地化。 |
-| `app/components/Archive.vue` | 源站 12、16、21、37 / 翻译站 12-17、21-26、31、37 | 归档链接带语言参数。 |
-| `app/components/Avatar.vue` | 源站 55 / 翻译站 55 | 默认头像路径改为多语言本地资源。 |
-| `app/components/BangumiItem.vue` | 源站 6、20、29、40 / 翻译站 6、20-25、34、40-42 | 番剧条目文案、季度、链接本地化。 |
-| `app/components/BangumiSeasonList.vue` | 源站 16、23 / 翻译站 16、23 | 季度文案本地化。 |
-| `app/components/Banner.vue` | 源站 54、74 / 翻译站 54、75 | Banner 链接路径本地化。 |
-| `app/components/BookItem.vue` | 源站 20-77 多处 / 翻译站 20-77 多处 | 书籍条目文案、评分、链接本地化。 |
-| `app/components/Calendar.vue` | 源站 57-58、199 / 翻译站 57-58、201 | 日历文案本地化。 |
-| `app/components/CommentForm.vue` | 源站 7-460 多处 / 翻译站 7-465 多处 | 评论表单、校验、提示、撤回提示本地化。 |
-| `app/components/CommentLatest.vue` | 源站 20-98 多处 / 翻译站 20-98 多处 | 最新评论链接和时间显示本地化。 |
-| `app/components/CommentRetractBtn.vue` | 源站 9-131 多处 / 翻译站 9-137 多处 | 撤回按钮、弹窗、错误提示本地化。 |
-| `app/components/Emoji.vue` | 源站 8、40、48、55 / 翻译站 8、40、48、56 | 表情选择提示本地化。 |
-| `app/components/Empty.vue` | 源站 7 / 翻译站 7 | 空状态文案本地化。 |
-| `app/components/GameItem.vue` | 源站 20-77 多处 / 翻译站 20-77 多处 | 游戏条目文案、评分、链接本地化。 |
-| `app/components/HtmlContent.vue` | 源站 23、34-35、351-364 / 翻译站 23、34-35、353 | 文章 HTML 内资源和代码块语言标签处理。 |
-| `app/components/MovieItem.vue` | 源站 6、27-28、43 / 翻译站 6、27-28、45-49 | 电影条目文案和评分本地化。 |
-| `app/components/NaviItem.vue` | 源站 46-94 多处 / 翻译站 46-94 多处 | 导航链接改成当前语言路径。 |
-| `app/components/OlMap.vue` | 源站 6-293 多处 / 翻译站 6-293 多处 | 地图文案和 GeoJSON 资源路径本地化。 |
-| `app/components/PageAbout.vue` | 源站 15、36、44-45 / 翻译站 15、36、44-45 | 关于页图片路径和文案本地化。 |
-| `app/components/PageAlmanac.vue` | 源站 3-452 多处 / 翻译站 3-284 多处 | 老黄历大段静态中文迁入语言包。 |
-| `app/components/PageBangumi.vue` | 源站 18-470 多处 / 翻译站 18-483 多处 | 番剧页筛选、标题、季度、SEO 本地化。 |
-| `app/components/PageBookList.vue` | 源站 17-433 多处 / 翻译站 17-443 多处 | 书籍列表筛选、分页、SEO 本地化。 |
-| `app/components/PageEvent.vue` | 源站 57-398 多处 / 翻译站 57-400 多处 | 事件页文案、按钮、SEO 本地化。 |
-| `app/components/PageGameList.vue` | 源站 17-432 多处 / 翻译站 17-444 多处 | 游戏列表筛选、分页、SEO 本地化。 |
-| `app/components/PageLink.vue` | 源站 33、41-42 / 翻译站 33、41-42 | 友链页文案本地化。 |
-| `app/components/PageMovieList.vue` | 源站 17-379 多处 / 翻译站 17-378 多处 | 电影列表筛选、分页、SEO 本地化。 |
-| `app/components/PageOlMap.vue` | 源站 4-262 多处 / 翻译站 4-270 多处 | 地图页标题、提示、SEO 本地化。 |
-| `app/components/PageSeeking.vue` | 源站 3-206 多处 / 翻译站 3-202 多处 | 寻物页静态文案迁入语言包。 |
-| `app/components/PhotoSwipe.vue` | 源站 41-1181 多处 / 翻译站 41-1186 多处 | 图片预览、全景按钮、分享提示本地化。 |
-| `app/components/PlayingGameList.vue` | 源站 20、27 / 翻译站 20、27 | “正在玩”文案本地化。 |
-| `app/components/PostAbout.vue` | 源站 7、19、30-31 / 翻译站 7、19、30-31 | 相关文章链接加语言参数。 |
-| `app/components/PostAboutEvent.vue` | 源站 7、40 / 翻译站 7、40 | 事件关联文案本地化。 |
-| `app/components/PostACG.vue` | 源站 7、50 / 翻译站 7、50 | ACG 区块文案本地化。 |
-| `app/components/PostAllTypeItem.vue` | 源站 31-109 多处 / 翻译站 31-109 多处 | 综合条目链接、类型文案本地化。 |
-| `app/components/PostCommonFooter.vue` | 源站 18、41、47 / 翻译站 18、42、48 | 上下篇链接加语言参数。 |
-| `app/components/PostDetail.vue` | 源站 11-1142 多处 / 翻译站 11-1210 多处 | 详情页链接、目录、评论、点赞、SEO、默认头像本地化。 |
-| `app/components/PostItem.vue` | 源站 29、35 / 翻译站 29、35 | 文章卡片文案本地化。 |
-| `app/components/PostList.vue` | 源站 24-734 多处 / 翻译站 24-797 多处 | 列表链接、分页、筛选、类型、SEO、时间数字本地化。 |
-| `app/components/PostListFilterBtn.vue` | 源站 10-25 / 翻译站 10-25 | 筛选按钮文案本地化。 |
-| `app/components/PostVote.vue` | 源站 7、22 / 翻译站 7、22 | 投票文案本地化。 |
-| `app/components/QRCodeImg.vue` | 源站 5、12、66、82 / 翻译站 5、12、67、83 | 二维码提示本地化。 |
-| `app/components/QRCodePopover.vue` | 源站 17-83 多处 / 翻译站 17-83 多处 | 二维码 URL、复制提示本地化。 |
-| `app/components/RandomTagList.vue` | 源站 17、23、32 / 翻译站 17、23、32 | 标签链接加语言参数。 |
-| `app/components/Rating.vue` | 源站 7-28 / 翻译站 7-28 | 评分等级文案本地化。 |
-| `app/components/ReadingBookList.vue` | 源站 20、27 / 翻译站 20、27 | “正在读”文案本地化。 |
-| `app/components/SharePopover.vue` | 源站 11-253 多处 / 翻译站 11-267 多处 | 分享标题、复制提示、图标资源路径本地化。 |
-| `app/components/Sort.vue` | 源站 13-60 多处 / 翻译站 13-60 多处 | 分类链接加语言参数。 |
-| `app/components/ThemeChanger.vue` | 源站 6-83 多处 / 翻译站 6-83 多处 | 主题切换文案本地化。 |
-| `app/components/TrendPostList.vue` | 源站 38-136 多处 / 翻译站 38-140 多处 | 热门文章链接、数字显示、本地化标题。 |
-| `app/components/TweetAbout.vue` | 源站 7、24、35-36 / 翻译站 7、24、35-36 | 相关动态链接加语言参数。 |
-| `app/components/TweetContent.vue` | 源站 19、29、61、130-131 / 翻译站 19、29、61、130-131 | 标签、地图点链接加语言参数。 |
-| `app/components/TweetContentLite.vue` | 源站 16、23-27、42 / 翻译站 16、23-27、42 | 动态简版文案本地化。 |
-| `app/components/TweetImgList.vue` | 源站 95-325 多处 / 翻译站 95-325 多处 | 图片列表提示本地化。 |
-| `app/components/VoteItem.vue` | 源站 13-224 多处 / 翻译站 13-232 多处 | 投票选项、提示、状态文案本地化。 |
+| 文件                                   | 差异行段                                                                                        | 主要原因                                            |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `app/components/ACGNItem.vue`          | 源站 11、52、58、67、92、97、103、130 / 翻译站 11、52、59、68、93-97、102-104、110-111、130-131 | 条目链接和文案本地化。                              |
+| `app/components/AlbumPhotoSwipe.vue`   | 源站 4、27 / 翻译站 4、28                                                                       | 图片预览文案本地化。                                |
+| `app/components/Archive.vue`           | 源站 12、16、21、37 / 翻译站 12-17、21-26、31、37                                               | 归档链接带语言参数。                                |
+| `app/components/Avatar.vue`            | 源站 55 / 翻译站 55                                                                             | 默认头像路径改为多语言本地资源。                    |
+| `app/components/BangumiItem.vue`       | 源站 6、20、29、40 / 翻译站 6、20-25、34、40-42                                                 | 番剧条目文案、季度、链接本地化。                    |
+| `app/components/BangumiSeasonList.vue` | 源站 16、23 / 翻译站 16、23                                                                     | 季度文案本地化。                                    |
+| `app/components/Banner.vue`            | 源站 54、74 / 翻译站 54、75                                                                     | Banner 链接路径本地化。                             |
+| `app/components/BookItem.vue`          | 源站 20-77 多处 / 翻译站 20-77 多处                                                             | 书籍条目文案、评分、链接本地化。                    |
+| `app/components/Calendar.vue`          | 源站 57-58、199 / 翻译站 57-58、201                                                             | 日历文案本地化。                                    |
+| `app/components/CommentForm.vue`       | 源站 7-460 多处 / 翻译站 7-465 多处                                                             | 评论表单、校验、提示、撤回提示本地化。              |
+| `app/components/CommentLatest.vue`     | 源站 20-98 多处 / 翻译站 20-98 多处                                                             | 最新评论链接和时间显示本地化。                      |
+| `app/components/CommentRetractBtn.vue` | 源站 9-131 多处 / 翻译站 9-137 多处                                                             | 撤回按钮、弹窗、错误提示本地化。                    |
+| `app/components/Emoji.vue`             | 源站 8、40、48、55 / 翻译站 8、40、48、56                                                       | 表情选择提示本地化。                                |
+| `app/components/Empty.vue`             | 源站 7 / 翻译站 7                                                                               | 空状态文案本地化。                                  |
+| `app/components/GameItem.vue`          | 源站 20-77 多处 / 翻译站 20-77 多处                                                             | 游戏条目文案、评分、链接本地化。                    |
+| `app/components/HtmlContent.vue`       | 源站 23、34-35、351-364 / 翻译站 23、34-35、353                                                 | 文章 HTML 内资源和代码块语言标签处理。              |
+| `app/components/MovieItem.vue`         | 源站 6、27-28、43 / 翻译站 6、27-28、45-49                                                      | 电影条目文案和评分本地化。                          |
+| `app/components/NaviItem.vue`          | 源站 46-94 多处 / 翻译站 46-94 多处                                                             | 导航链接改成当前语言路径。                          |
+| `app/components/OlMap.vue`             | 源站 6-293 多处 / 翻译站 6-293 多处                                                             | 地图文案和 GeoJSON 资源路径本地化。                 |
+| `app/components/PageAbout.vue`         | 源站 15、36、44-45 / 翻译站 15、36、44-45                                                       | 关于页图片路径和文案本地化。                        |
+| `app/components/PageAlmanac.vue`       | 源站 3-452 多处 / 翻译站 3-284 多处                                                             | 老黄历大段静态中文迁入语言包。                      |
+| `app/components/PageBangumi.vue`       | 源站 18-470 多处 / 翻译站 18-483 多处                                                           | 番剧页筛选、标题、季度、SEO 本地化。                |
+| `app/components/PageBookList.vue`      | 源站 17-433 多处 / 翻译站 17-443 多处                                                           | 书籍列表筛选、分页、SEO 本地化。                    |
+| `app/components/PageEvent.vue`         | 源站 57-398 多处 / 翻译站 57-400 多处                                                           | 事件页文案、按钮、SEO 本地化。                      |
+| `app/components/PageGameList.vue`      | 源站 17-432 多处 / 翻译站 17-444 多处                                                           | 游戏列表筛选、分页、SEO 本地化。                    |
+| `app/components/PageLink.vue`          | 源站 33、41-42 / 翻译站 33、41-42                                                               | 友链页文案本地化。                                  |
+| `app/components/PageMovieList.vue`     | 源站 17-379 多处 / 翻译站 17-378 多处                                                           | 电影列表筛选、分页、SEO 本地化。                    |
+| `app/components/PageOlMap.vue`         | 源站 4-262 多处 / 翻译站 4-270 多处                                                             | 地图页标题、提示、SEO 本地化。                      |
+| `app/components/PageSeeking.vue`       | 源站 3-206 多处 / 翻译站 3-202 多处                                                             | 寻物页静态文案迁入语言包。                          |
+| `app/components/PhotoSwipe.vue`        | 源站 41-1181 多处 / 翻译站 41-1186 多处                                                         | 图片预览、全景按钮、分享提示本地化。                |
+| `app/components/PlayingGameList.vue`   | 源站 20、27 / 翻译站 20、27                                                                     | “正在玩”文案本地化。                                |
+| `app/components/PostAbout.vue`         | 源站 7、19、30-31 / 翻译站 7、19、30-31                                                         | 相关文章链接加语言参数。                            |
+| `app/components/PostAboutEvent.vue`    | 源站 7、40 / 翻译站 7、40                                                                       | 事件关联文案本地化。                                |
+| `app/components/PostACG.vue`           | 源站 7、50 / 翻译站 7、50                                                                       | ACG 区块文案本地化。                                |
+| `app/components/PostAllTypeItem.vue`   | 源站 31-109 多处 / 翻译站 31-109 多处                                                           | 综合条目链接、类型文案本地化。                      |
+| `app/components/PostCommonFooter.vue`  | 源站 18、41、47 / 翻译站 18、42、48                                                             | 上下篇链接加语言参数。                              |
+| `app/components/PostDetail.vue`        | 源站 11-1142 多处 / 翻译站 11-1210 多处                                                         | 详情页链接、目录、评论、点赞、SEO、默认头像本地化。 |
+| `app/components/PostItem.vue`          | 源站 29、35 / 翻译站 29、35                                                                     | 文章卡片文案本地化。                                |
+| `app/components/PostList.vue`          | 源站 24-734 多处 / 翻译站 24-797 多处                                                           | 列表链接、分页、筛选、类型、SEO、时间数字本地化。   |
+| `app/components/PostListFilterBtn.vue` | 源站 10-25 / 翻译站 10-25                                                                       | 筛选按钮文案本地化。                                |
+| `app/components/PostVote.vue`          | 源站 7、22 / 翻译站 7、22                                                                       | 投票文案本地化。                                    |
+| `app/components/QRCodeImg.vue`         | 源站 5、12、66、82 / 翻译站 5、12、67、83                                                       | 二维码提示本地化。                                  |
+| `app/components/QRCodePopover.vue`     | 源站 17-83 多处 / 翻译站 17-83 多处                                                             | 二维码 URL、复制提示本地化。                        |
+| `app/components/RandomTagList.vue`     | 源站 17、23、32 / 翻译站 17、23、32                                                             | 标签链接加语言参数。                                |
+| `app/components/Rating.vue`            | 源站 7-28 / 翻译站 7-28                                                                         | 评分等级文案本地化。                                |
+| `app/components/ReadingBookList.vue`   | 源站 20、27 / 翻译站 20、27                                                                     | “正在读”文案本地化。                                |
+| `app/components/SharePopover.vue`      | 源站 11-253 多处 / 翻译站 11-267 多处                                                           | 分享标题、复制提示、图标资源路径本地化。            |
+| `app/components/Sort.vue`              | 源站 13-60 多处 / 翻译站 13-60 多处                                                             | 分类链接加语言参数。                                |
+| `app/components/ThemeChanger.vue`      | 源站 6-83 多处 / 翻译站 6-83 多处                                                               | 主题切换文案本地化。                                |
+| `app/components/TrendPostList.vue`     | 源站 38-136 多处 / 翻译站 38-140 多处                                                           | 热门文章链接、数字显示、本地化标题。                |
+| `app/components/TweetAbout.vue`        | 源站 7、24、35-36 / 翻译站 7、24、35-36                                                         | 相关动态链接加语言参数。                            |
+| `app/components/TweetContent.vue`      | 源站 19、29、61、130-131 / 翻译站 19、29、61、130-131                                           | 标签、地图点链接加语言参数。                        |
+| `app/components/TweetContentLite.vue`  | 源站 16、23-27、42 / 翻译站 16、23-27、42                                                       | 动态简版文案本地化。                                |
+| `app/components/TweetImgList.vue`      | 源站 95-325 多处 / 翻译站 95-325 多处                                                           | 图片列表提示本地化。                                |
+| `app/components/VoteItem.vue`          | 源站 13-224 多处 / 翻译站 13-232 多处                                                           | 投票选项、提示、状态文案本地化。                    |
 
 ## 完整 hunk 行段索引
 

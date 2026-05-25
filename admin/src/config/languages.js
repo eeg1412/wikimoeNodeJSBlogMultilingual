@@ -1,7 +1,7 @@
 export const LANGUAGE_CONFIG_LIST = [
   {
     code: 'zh-CN',
-    label: '简体中文',
+    label: '中国大陆简体中文',
     isDefault: true,
     sidebarBuiltinTitles: {
       1: '自定义内容',
@@ -19,7 +19,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-HK',
-    label: '繁体中文（香港）',
+    label: '香港繁體中文',
     sidebarBuiltinTitles: {
       1: '自訂內容',
       3: '最新評論',
@@ -36,7 +36,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-TW',
-    label: '繁体中文（台湾）',
+    label: '臺灣正體中文',
     sidebarBuiltinTitles: {
       1: '自訂內容',
       3: '最新評論',
@@ -53,7 +53,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-SG',
-    label: '简体中文（新加坡）',
+    label: '新加坡简体中文',
     sidebarBuiltinTitles: {
       1: '自定义内容',
       3: '最新评论',
