@@ -92,7 +92,9 @@ function buildSourceSnapshotIdentitySet(sourceSnapshotList) {
       sourceSnapshotIdSet.add(sourceSnapshotId)
     }
 
-    const translationGroupId = getRecordIdText(sourceSnapshot.translationGroupId)
+    const translationGroupId = getRecordIdText(
+      sourceSnapshot.translationGroupId
+    )
     if (translationGroupId) {
       translationGroupIdSet.add(translationGroupId)
     }
@@ -121,11 +123,9 @@ module.exports = async function (req, res) {
   const sourceObjectId = new mongoose.Types.ObjectId(sourceId)
 
   try {
-    const [enabledLanguageCodeSet, sourceArticleRecordList] =
-      await Promise.all([
-        getEnabledLanguageCodeSet(),
-        getSourceArticleRecordList(sourceObjectId)
-      ])
+    const [enabledLanguageCodeSet, sourceArticleRecordList] = await Promise.all(
+      [getEnabledLanguageCodeSet(), getSourceArticleRecordList(sourceObjectId)]
+    )
     const { sourceSnapshotList, translationList } = splitSourceArticleRecords(
       sourceArticleRecordList
     )
@@ -143,11 +143,12 @@ module.exports = async function (req, res) {
     const { sourceSnapshotIdSet, translationGroupIdSet } =
       buildSourceSnapshotIdentitySet(sourceSnapshotList)
     const sourcePublishedLanguageCodeSet = new Set()
+    let sourceLanguageCode = null
     for (const sourceSnapshot of sourceSnapshotList) {
-      const sourceLanguageCode = normalizeLanguageCode(
+      const currentSourceLanguageCode = normalizeLanguageCode(
         sourceSnapshot.sourceLanguageCode
       )
-      if (!sourceLanguageCode) {
+      if (!currentSourceLanguageCode) {
         res.status(400).json({
           errors: [
             {
@@ -158,8 +159,23 @@ module.exports = async function (req, res) {
         return
       }
 
+      if (!sourceLanguageCode) {
+        sourceLanguageCode = currentSourceLanguageCode
+      }
+
+      if (sourceLanguageCode !== currentSourceLanguageCode) {
+        res.status(400).json({
+          errors: [
+            {
+              message: '源文章快照语言不一致'
+            }
+          ]
+        })
+        return
+      }
+
       if (sourceSnapshot.status === 1) {
-        sourcePublishedLanguageCodeSet.add(sourceLanguageCode)
+        sourcePublishedLanguageCodeSet.add(currentSourceLanguageCode)
       }
     }
 
@@ -188,7 +204,10 @@ module.exports = async function (req, res) {
       existenceMap[sourceLanguageCode] = true
     }
 
-    res.send(existenceMap)
+    res.send({
+      sourceLanguageCode,
+      existenceMap
+    })
   } catch (err) {
     res.status(400).json({
       errors: [

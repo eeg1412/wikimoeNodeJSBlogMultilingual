@@ -66,6 +66,19 @@ export default function (api) {
         noLoading
       })
     },
+    getSourceConfig(data = {}, noLoading = false) {
+      return api.get('/source/config/get', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    refreshSourceConfig(data = {}, noLoading = false) {
+      return api.post('/source/config/refresh', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getLanguageSettings(data, noLoading = false) {
       return api.get('/settings/language/list', {
         params: data,

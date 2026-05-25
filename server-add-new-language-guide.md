@@ -129,6 +129,7 @@ Server 只认后端语言。完整新增一种站点语言时，还必须同步�
 - 多语言站点配置：标题、描述、关键词、Logo、Favicon、默认封面。
 - 博客端语言启用状态：新增语言默认启用，可在 Admin 多语言站点配置中关闭。
 - RSS/Sitemap 设置：是否开启、最大数量、是否在页脚显示。
+- RSS 品牌字段 `siteTitle`、`siteDescription`、`siteLogo`、`siteFavicon` 来自当前语言的多语言站点配置；源站运行配置只提供 `siteUrl`、`siteTimeZone`、`sitePageSize` 和相似内容查询参数。
 - 导航：`navis`。
 - Banner：`banners`。
 - 侧边栏：`sidebars`。
@@ -180,7 +181,7 @@ server/validator-tool.js
 - 短 code 或未配置 code 仍返回 `null`。
 - 管理端保存新语言内容时不被后端语言校验拒绝。
 - 新语言站点配置能保存。
-- 新语言 RSS/Sitemap 开启并有有效 `siteUrl` 后能生成对应文件。
+- 新语言 RSS/Sitemap 开启、当前语言已配置 RSS 品牌字段，并且源站配置缓存中有有效 `siteUrl` 后能生成对应文件。
 - 新语言没有内容时不会返回默认语言内容。
 - Admin 关闭某语言的博客端启用状态后，`/api/multilingual-blog` 对应 languageCode 返回 404。
 

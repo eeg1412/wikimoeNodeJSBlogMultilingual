@@ -238,6 +238,18 @@ const multilingualAdminRouteSetting = [
     controller: sourcePostProperNounController.createOrganizeJob
   },
   {
+    path: '/source/config/get',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/config/get')
+  },
+  {
+    path: '/source/config/refresh',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/config/refresh')
+  },
+  {
     path: '/dashboard/summary',
     method: 'get',
     middleware: [checkAuth],

@@ -41,9 +41,7 @@ async function getLanguageSeoSettings(languageCode) {
     languageValues[name] = values[name]
   })
   const languageSitemapSettings = pickLanguageSitemapSettings(values)
-  const siteUrl = normalizeSiteUrl(
-    sourceSettings.siteUrl || languageValues.siteUrl
-  )
+  const siteUrl = normalizeSiteUrl(sourceSettings.siteUrl)
 
   return {
     ...sourceSettings,

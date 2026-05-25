@@ -240,12 +240,7 @@ function getMultilingualModel(collectionName) {
 }
 
 function createApiFieldError(message, field) {
-  return new ApiError(
-    ERROR_CODES.CONTENT_FIELD_INVALID,
-    message,
-    field,
-    400
-  )
+  return new ApiError(ERROR_CODES.CONTENT_FIELD_INVALID, message, field, 400)
 }
 
 function normalizeRequiredSiteUrl(value, message, field) {
@@ -617,7 +612,10 @@ function buildHighlightParts(text, ranges) {
 
 function buildContextPreviewParts(text, highlightStart, highlightEnd) {
   const contextStart = Math.max(0, highlightStart - PREVIEW_CONTEXT_LENGTH)
-  const contextEnd = Math.min(text.length, highlightEnd + PREVIEW_CONTEXT_LENGTH)
+  const contextEnd = Math.min(
+    text.length,
+    highlightEnd + PREVIEW_CONTEXT_LENGTH
+  )
   const snippet = text.slice(contextStart, contextEnd)
   const parts = buildHighlightParts(snippet, [
     {
@@ -641,9 +639,11 @@ function buildContextPreviewParts(text, highlightStart, highlightEnd) {
   }
 
   return {
-    value: parts.map((part) => {
-      return part.text
-    }).join(''),
+    value: parts
+      .map(part => {
+        return part.text
+      })
+      .join(''),
     parts
   }
 }
@@ -714,7 +714,9 @@ function getPlainText(value) {
     return ''
   }
 
-  return String(value).replace(/<[^>]*>/g, '').trim()
+  return String(value)
+    .replace(/<[^>]*>/g, '')
+    .trim()
 }
 
 function getRecordDisplayName(collectionName, record) {
@@ -1212,12 +1214,18 @@ function buildSelectedFieldNextValue(value, entries) {
       match.end > value.length ||
       match.start >= match.end
     ) {
-      throw createApiFieldError('源站链接命中项已变化，请重新预览', 'selectedKeys')
+      throw createApiFieldError(
+        '源站链接命中项已变化，请重新预览',
+        'selectedKeys'
+      )
     }
 
     const currentUrl = value.slice(match.start, match.end)
     if (currentUrl !== match.sourceUrl) {
-      throw createApiFieldError('源站链接命中项已变化，请重新预览', 'selectedKeys')
+      throw createApiFieldError(
+        '源站链接命中项已变化，请重新预览',
+        'selectedKeys'
+      )
     }
 
     nextValue += value.slice(cursor, match.start)
@@ -1360,7 +1368,10 @@ async function applyTranslationPostSourceLinkReplacement(body = {}) {
   for (const key of selectedKeys) {
     const entry = entryMap.get(key)
     if (!entry) {
-      throw createApiFieldError(`源站链接条目不存在或已变化：${key}`, 'selectedKeys')
+      throw createApiFieldError(
+        `源站链接条目不存在或已变化：${key}`,
+        'selectedKeys'
+      )
     }
     addEntryToUpdateMap(updateMap, entry)
   }

@@ -9,6 +9,9 @@ const cacheDataUtils = require('../../../config/cacheData')
 const languageSettingsService = require('../../multilingual-admin/services/languageSettingsService')
 const rssToolUtils = require('../../../utils/rss')
 const sitemapToolUtils = require('../../../utils/sitemap')
+const {
+  refreshSourceSeoSettingsCache
+} = require('../../../utils/sourceSeoSettings')
 
 module.exports = async function (req, res, next) {
   const id = req.body.id
@@ -151,6 +154,7 @@ module.exports = async function (req, res, next) {
               })
             // 重新加载缓存
             // 更新时注意同时更新初始化数据库的地方
+            await refreshSourceSeoSettingsCache()
             await languageSettingsService.refreshLanguageSettingsCache()
             await cacheDataUtils.refreshAllLanguageCache()
             await rssToolUtils.reflushRSS()

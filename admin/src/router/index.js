@@ -41,6 +41,11 @@ const routes = [
           import('../views/index/source/SourcePostProperNounList.vue')
       },
       {
+        path: '/source/config',
+        name: 'SourceConfig',
+        component: () => import('../views/index/source/SourceConfig.vue')
+      },
+      {
         path: '/source/post/snapshot/list',
         name: 'SourcePostSnapshotList',
         component: () =>

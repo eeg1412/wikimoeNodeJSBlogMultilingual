@@ -1,8 +1,4 @@
 const SOURCE_SEO_SETTING_DEFAULTS = {
-  siteTitle: '',
-  siteDescription: '',
-  siteLogo: '',
-  siteFavicon: '',
   siteUrl: '',
   siteTimeZone: '',
   sitePageSize: 10,
@@ -12,6 +8,8 @@ const SOURCE_SEO_SETTING_DEFAULTS = {
 }
 
 const SOURCE_SEO_SETTING_NAMES = Object.keys(SOURCE_SEO_SETTING_DEFAULTS)
+const SOURCE_SEO_SETTINGS_CACHE_KEY = '$sourceSeoSettings'
+let sourceSeoSettingsCacheLoadPromise = null
 
 function getSourceOptionRepository() {
   return global.$mongodDB?.source?.repositories?.options
@@ -26,6 +24,23 @@ function buildDefaultSourceSeoSettings() {
   })
 
   return settings
+}
+
+function cloneSourceSeoSettings(settings) {
+  const clonedSettings = buildDefaultSourceSeoSettings()
+  SOURCE_SEO_SETTING_NAMES.forEach(name => {
+    const value = settings?.[name]
+    if (Array.isArray(value)) {
+      clonedSettings[name] = [...value]
+      return
+    }
+
+    if (typeof value !== 'undefined') {
+      clonedSettings[name] = value
+    }
+  })
+
+  return clonedSettings
 }
 
 function normalizeSiteUrl(siteUrl) {
@@ -71,7 +86,18 @@ function normalizeSourceOptionValue(defaultValue, value) {
   return String(value || '')
 }
 
-async function getSourceSeoSettings() {
+function getSourceSeoSettingsCache() {
+  return global[SOURCE_SEO_SETTINGS_CACHE_KEY] || null
+}
+
+function setSourceSeoSettingsCache(settings) {
+  global[SOURCE_SEO_SETTINGS_CACHE_KEY] = {
+    values: cloneSourceSeoSettings(settings),
+    updatedAt: new Date()
+  }
+}
+
+async function loadSourceSeoSettingsFromDatabase() {
   const settings = buildDefaultSourceSeoSettings()
   const repository = getSourceOptionRepository()
   if (!repository) {
@@ -99,7 +125,48 @@ async function getSourceSeoSettings() {
   return settings
 }
 
+async function refreshSourceSeoSettingsCache() {
+  const settings = await loadSourceSeoSettingsFromDatabase()
+  setSourceSeoSettingsCache(settings)
+  return getSourceSeoSettingsCacheData()
+}
+
+async function ensureSourceSeoSettingsCache() {
+  const cacheData = getSourceSeoSettingsCache()
+  if (cacheData) {
+    return cacheData
+  }
+
+  if (!sourceSeoSettingsCacheLoadPromise) {
+    sourceSeoSettingsCacheLoadPromise = refreshSourceSeoSettingsCache()
+  }
+
+  try {
+    await sourceSeoSettingsCacheLoadPromise
+  } finally {
+    sourceSeoSettingsCacheLoadPromise = null
+  }
+
+  return getSourceSeoSettingsCache()
+}
+
+async function getSourceSeoSettings() {
+  const cacheData = await ensureSourceSeoSettingsCache()
+  return cloneSourceSeoSettings(cacheData?.values)
+}
+
+async function getSourceSeoSettingsCacheData() {
+  const cacheData = await ensureSourceSeoSettingsCache()
+  return {
+    names: SOURCE_SEO_SETTING_NAMES.slice(),
+    values: cloneSourceSeoSettings(cacheData?.values),
+    updatedAt: cacheData?.updatedAt || null
+  }
+}
+
 module.exports = {
   getSourceSeoSettings,
+  getSourceSeoSettingsCacheData,
+  refreshSourceSeoSettingsCache,
   normalizeSiteUrl
 }

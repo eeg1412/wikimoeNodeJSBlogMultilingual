@@ -22,6 +22,16 @@ const LANGUAGE_RSS_SETTING_NAMES = [
   'siteShowRssInFooter'
 ]
 
+const SOURCE_ASSET_PATH_PREFIXES = [
+  '/content/',
+  '/upload/',
+  '/ucloudImg/',
+  '/up_works/',
+  '/web_demo/'
+]
+
+const MULTILINGUAL_ASSET_PATH_PREFIX = '/multilingual-assets/'
+
 function pickLanguageRssSettings(values) {
   const rssSettings = {}
   LANGUAGE_RSS_SETTING_NAMES.forEach(name => {
@@ -42,23 +52,174 @@ async function getLanguageSeoSettings(languageCode) {
     languageValues[name] = values[name]
   })
   const languageRssSettings = pickLanguageRssSettings(values)
-  const siteUrl = normalizeSiteUrl(
-    sourceSettings.siteUrl || languageValues.siteUrl
-  )
+  const siteUrl = normalizeSiteUrl(sourceSettings.siteUrl)
 
   return {
     ...sourceSettings,
     ...languageValues,
     ...languageRssSettings,
     siteUrl,
-    siteTimeZone:
-      languageValues.siteTimeZone || sourceSettings.siteTimeZone || ''
+    sourceSiteUrl: sourceSettings.siteUrl || '',
+    siteTimeZone: sourceSettings.siteTimeZone || ''
   }
 }
 
 function getPostUrl(siteUrl, languageCode, post) {
   const pathType = post.type === 3 ? 'page' : 'post'
   return `${siteUrl}/${languageCode}/${pathType}/${post.alias || post._id}`
+}
+
+function isAbsoluteUrl(value) {
+  return /^(https?:)?\/\//i.test(value)
+}
+
+function buildAbsoluteUrl(baseUrl, value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return ''
+  }
+
+  if (text.startsWith('data:') || text.startsWith('blob:')) {
+    return text
+  }
+
+  if (text.startsWith('//')) {
+    return `https:${text}`
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    return text
+  }
+
+  const normalizedBaseUrl = normalizeSiteUrl(baseUrl)
+  if (!normalizedBaseUrl) {
+    return text
+  }
+
+  const pathText = text.startsWith('/') ? text : `/${text}`
+  return `${normalizedBaseUrl}${pathText}`
+}
+
+function isSourceAssetPath(value) {
+  return SOURCE_ASSET_PATH_PREFIXES.some(prefix => {
+    return value.startsWith(prefix)
+  })
+}
+
+function getAttachmentPath(attachment, fieldNames) {
+  for (const fieldName of fieldNames) {
+    const value = String(attachment?.[fieldName] || '').trim()
+    if (value) {
+      return value
+    }
+  }
+
+  return ''
+}
+
+function getAssetBaseUrl(siteSettings, attachment, assetPath) {
+  const value = String(assetPath || '').trim()
+  if (!value || isAbsoluteUrl(value)) {
+    return ''
+  }
+
+  if (value.startsWith(MULTILINGUAL_ASSET_PATH_PREFIX)) {
+    return siteSettings.siteUrl
+  }
+
+  if (attachment?.mediaMode === 'local') {
+    return siteSettings.siteUrl
+  }
+
+  if (
+    value === attachment?.localFilepath ||
+    value === attachment?.localThumbnailPath
+  ) {
+    return siteSettings.siteUrl
+  }
+
+  if (isSourceAssetPath(value)) {
+    return siteSettings.sourceSiteUrl || siteSettings.siteUrl
+  }
+
+  return siteSettings.sourceSiteUrl || siteSettings.siteUrl
+}
+
+function getMediaUrl(siteSettings, attachment, fieldNames) {
+  const assetPath = getAttachmentPath(attachment, fieldNames)
+  if (!assetPath) {
+    return ''
+  }
+
+  return buildAbsoluteUrl(
+    getAssetBaseUrl(siteSettings, attachment, assetPath),
+    assetPath
+  )
+}
+
+function getContentAssetBaseUrl(siteSettings, assetPath) {
+  const value = String(assetPath || '').trim()
+  if (!value || value.startsWith('#') || isAbsoluteUrl(value)) {
+    return ''
+  }
+
+  if (value.startsWith('data:') || value.startsWith('blob:')) {
+    return ''
+  }
+
+  if (value.startsWith(MULTILINGUAL_ASSET_PATH_PREFIX)) {
+    return siteSettings.siteUrl
+  }
+
+  if (isSourceAssetPath(value)) {
+    return siteSettings.sourceSiteUrl || siteSettings.siteUrl
+  }
+
+  return ''
+}
+
+function appendQuerySuffix(url, suffix) {
+  if (!url || !suffix) {
+    return url
+  }
+
+  const hashIndex = url.indexOf('#')
+  const urlWithoutHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : ''
+  const joiner = urlWithoutHash.includes('?') ? '&' : '?'
+  return `${urlWithoutHash}${joiner}${suffix}${hash}`
+}
+
+function normalizeContentAssetUrls(content, siteSettings) {
+  const html = String(content || '')
+  if (!html) {
+    return html
+  }
+
+  return html.replace(
+    /(\s(?:src|href|poster)\s*=\s*)("([^"]*)"|'([^']*)')/gi,
+    (match, prefix, quotedValue, doubleQuotedValue, singleQuotedValue) => {
+      const rawValue =
+        typeof doubleQuotedValue === 'string'
+          ? doubleQuotedValue
+          : singleQuotedValue
+      const baseUrl = getContentAssetBaseUrl(siteSettings, rawValue)
+      if (!baseUrl) {
+        return match
+      }
+
+      const normalizedValue = buildAbsoluteUrl(
+        baseUrl,
+        rawValue
+      )
+      if (!normalizedValue || normalizedValue === rawValue) {
+        return match
+      }
+
+      const quote = quotedValue.startsWith('"') ? '"' : "'"
+      return `${prefix}${quote}${normalizedValue}${quote}`
+    }
+  )
 }
 
 async function cleanLanguageRss(languageCode) {
@@ -156,8 +317,8 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
       id: siteUrl,
       link: `${siteUrl}/${languageCode}`,
       language: languageCode,
-      image: `${siteUrl}${siteLogo}`,
-      favicon: `${siteUrl}${siteFavicon}`,
+      image: buildAbsoluteUrl(siteUrl, siteLogo),
+      favicon: buildAbsoluteUrl(siteUrl, siteFavicon),
       generator: 'wikimoeBlog',
       feedLinks: {
         rss: feedLinksRss
@@ -168,7 +329,7 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
       const link = getPostUrl(siteUrl, languageCode, item)
       // 注意如果用到作者的话，务必在更改作者的时候更新rss！！！
       let newTitle = title
-      let newContent = content
+      let newContent = normalizeContentAssetUrls(content, siteSettings)
       if (type === 2) {
         if (siteRssTweetTitleType === 2) {
           // 推文标题类型为日期
@@ -197,14 +358,33 @@ exports.updateRSS = async (type, languageCodeInput = DEFAULT_LANGUAGE_CODE) => {
             // 遍历coverImages，以图片形式展示
             const coverImages = item.coverImages || []
             coverImages.forEach(image => {
-              const imageIsVideo = image.mimetype.startsWith('video')
+              const imageIsVideo = String(image.mimetype || '').startsWith(
+                'video'
+              )
               const createdAt = new Date(image.createdAt).getTime()
               if (imageIsVideo) {
-                newContent += `<p><video src="${siteUrl}${image.filepath}" controls="controls" playsinline="true" preload="none" muted="muted" poster="${siteUrl}${image.thumfor}?${createdAt}" loop="loop" style="border-radius: 10px; margin-bottom: 10px; max-width: 100%;"></video></p>`
+                const videoUrl = getMediaUrl(siteSettings, image, [
+                  'localFilepath',
+                  'filepath',
+                  'remoteFilepath'
+                ])
+                const posterUrl = appendQuerySuffix(
+                  getMediaUrl(siteSettings, image, [
+                    'localThumbnailPath',
+                    'thumfor'
+                  ]),
+                  createdAt
+                )
+                newContent += `<p><video src="${videoUrl}" controls="controls" playsinline="true" preload="none" muted="muted" poster="${posterUrl}" loop="loop" style="border-radius: 10px; margin-bottom: 10px; max-width: 100%;"></video></p>`
               } else {
-                newContent += `<p><img src="${siteUrl}${
-                  image.thumfor || image.filepath
-                }" alt="${
+                const imageUrl = getMediaUrl(siteSettings, image, [
+                  'localThumbnailPath',
+                  'thumfor',
+                  'localFilepath',
+                  'filepath',
+                  'remoteFilepath'
+                ])
+                newContent += `<p><img src="${imageUrl}" alt="${
                   image.name
                 }" style="border-radius: 10px; margin-bottom: 10px; max-width: 100%;" /></p>`
               }

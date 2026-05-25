@@ -2,6 +2,9 @@ const cacheDataUtils = require('../config/cacheData')
 const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
 const rssToolUtils = require('../utils/rss')
 const sitemapToolUtils = require('../utils/sitemap')
+const {
+  refreshSourceSeoSettingsCache
+} = require('../utils/sourceSeoSettings')
 const sourceConnectionInfo = require('./sourceConnection')
 const multilingualConnectionInfo = require('./multilingualConnection')
 const registerModels = require('./modelFactory/registerModels')
@@ -67,6 +70,7 @@ async function initializeMultilingualRuntime() {
     await logMongoDBVersion()
     mongodbErrorCount = 0
     // 更新时注意同时更新还原时的缓存
+    await refreshSourceSeoSettingsCache()
     await languageSettingsService.refreshLanguageSettingsCache()
     await cacheDataUtils.refreshAllLanguageCache()
     await rssToolUtils.reflushRSS()

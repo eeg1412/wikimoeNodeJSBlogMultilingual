@@ -140,6 +140,11 @@ const menuGroups = [
         icon: 'fas fa-fw fa-newspaper pr10'
       },
       {
+        name: 'SourceConfig',
+        title: '源站配置管理',
+        icon: 'fas fa-fw fa-sliders-h pr10'
+      },
+      {
         name: 'SourceAuthorRelationList',
         title: '源作者',
         icon: 'fas fa-fw fa-user pr10'

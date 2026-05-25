@@ -24,6 +24,8 @@
 
 - 读取 `languageSettingsService.getLanguageSettings(languageCode)`。
 - 返回当前语言配置值以及已配置的配置项名称。
+- `siteTitle`、`siteDescription`、`siteLogo`、`siteFavicon` 由多语言站点配置维护；源站配置不再作为这些字段的 RSS 输出兜底。
+- `siteUrl`、`siteTimeZone`、`sitePageSize`、相似内容数量与范围仍来自源站运行配置缓存，刷新入口在管理端“源站配置管理”。
 
 ## 成功响应
 
