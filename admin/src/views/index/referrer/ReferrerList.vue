@@ -43,9 +43,6 @@
             >
           </el-form-item>
         </el-form>
-        <div>
-          ※如果有不想统计的来源域名可以在【设置】->【其他设置】->【引用域名白名单】中设置
-        </div>
       </div>
       <div class="fr"></div>
     </div>

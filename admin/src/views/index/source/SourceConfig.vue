@@ -9,7 +9,7 @@
 
     <div class="source-config-toolbar clearfix pb20">
       <div class="fl source-config-summary">
-        <span>缓存刷新时间：</span>
+        <span>运行配置缓存刷新时间：</span>
         <span>{{ updatedAtText }}</span>
       </div>
       <div class="fr">
@@ -79,6 +79,11 @@ const SOURCE_CONFIG_FIELD_MAP = {
   sitePostRandomSimilarShowRange: {
     label: '相似内容显示范围',
     usage: '文章详情在哪些文章类型展示相似内容'
+  },
+  siteReferrerWhiteList: {
+    label: '引用域名白名单',
+    usage:
+      '源站引用过滤白名单；当前多语言后台仅做只读展示，不参与 referrer/list 过滤'
   }
 }
 
@@ -90,7 +95,12 @@ const SOURCE_CONFIG_VALUE_LABEL_MAP = {
   sitePostRandomSimilarShowRange: {
     1: '博文',
     2: '推文'
-  }
+  },
+  siteReferrerWhiteList: {}
+}
+
+const SOURCE_CONFIG_EMPTY_TEXT_MAP = {
+  siteReferrerWhiteList: '未配置'
 }
 
 export default {
@@ -100,7 +110,6 @@ export default {
     RefreshRight
   },
   setup() {
-    const loading = ref(false)
     const refreshing = ref(false)
     const configNames = ref([])
     const configValues = ref({})
@@ -129,15 +138,9 @@ export default {
     }
 
     function getSourceConfig(noLoading = true) {
-      loading.value = true
-      return multilingualApi
-        .getSourceConfig({}, noLoading)
-        .then(response => {
-          applySourceConfigData(response.data.data || {})
-        })
-        .finally(() => {
-          loading.value = false
-        })
+      return multilingualApi.getSourceConfig({}, noLoading).then(response => {
+        applySourceConfigData(response.data.data || {})
+      })
     }
 
     function refreshSourceConfig() {
@@ -163,9 +166,10 @@ export default {
 
     function formatArrayValue(name, value) {
       const labelMap = SOURCE_CONFIG_VALUE_LABEL_MAP[name]
+      const emptyText = SOURCE_CONFIG_EMPTY_TEXT_MAP[name] || '-'
 
       if (!Array.isArray(value) || value.length === 0) {
-        return '-'
+        return emptyText
       }
 
       if (!labelMap) {
@@ -197,7 +201,6 @@ export default {
     })
 
     return {
-      loading,
       refreshing,
       configList,
       updatedAtText,
