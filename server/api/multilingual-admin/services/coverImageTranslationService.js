@@ -287,7 +287,7 @@ function resolveSourceCoverLocalPath(attachment) {
 }
 
 function getSourceAssetDomainConfig() {
-  const rawValue = String(process.env.SOURCE_ASSET_DOMAIN || '').trim()
+  const rawValue = String(process.env.SOURCE_DOMAIN || '').trim()
   if (!rawValue) {
     return {
       enabled: false,
@@ -300,10 +300,10 @@ function getSourceAssetDomainConfig() {
   try {
     parsedUrl = new URL(normalizedValue)
   } catch (error) {
-    throw new Error('SOURCE_ASSET_DOMAIN 配置不合法')
+    throw new Error('SOURCE_DOMAIN 配置不合法')
   }
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    throw new Error('SOURCE_ASSET_DOMAIN 必须是 http 或 https 地址')
+    throw new Error('SOURCE_DOMAIN 必须是 http 或 https 地址')
   }
 
   return {
@@ -619,7 +619,7 @@ async function resolveSourceCover(job, post) {
         ok: false,
         status: 'recognition-failed',
         message:
-          '封面图缺少 filepath 或 thumfor，不能通过 SOURCE_ASSET_DOMAIN 获取源图'
+          '封面图缺少 filepath 或 thumfor，不能通过 SOURCE_DOMAIN 获取源图'
       }
     }
 
@@ -651,7 +651,7 @@ async function resolveSourceCover(job, post) {
         ok: false,
         status: 'recognition-failed',
         message:
-          '封面图无法解析为本地文件，请配置 SOURCE_ASSET_DOMAIN 后通过 HTTP 获取源图'
+          '封面图无法解析为本地文件，请配置 SOURCE_DOMAIN 后通过 HTTP 获取源图'
       }
     }
     try {
@@ -661,7 +661,7 @@ async function resolveSourceCover(job, post) {
         ok: false,
         status: 'recognition-failed',
         message:
-          '封面图本地文件不存在或不可读，请配置 SOURCE_ASSET_DOMAIN 后通过 HTTP 获取源图'
+          '封面图本地文件不存在或不可读，请配置 SOURCE_DOMAIN 后通过 HTTP 获取源图'
       }
     }
 
