@@ -76,16 +76,15 @@
               v-model="contentTab"
               type="border-card"
               class="w_10 post-editor-body"
-              @tab-change="onContentTabChange"
             >
               <el-tab-pane label="富文本" name="richText">
                 <RichEditor4
-                  v-if="postEditorVersion === 4"
+                  v-if="contentTab === 'richText' && postEditorVersion === 4"
                   v-model:content="form.content"
                   :language-code="form.languageCode"
                 />
                 <RichEditor5
-                  v-else
+                  v-else-if="contentTab === 'richText'"
                   v-model:content="form.content"
                   :isPost="true"
                   :language-code="form.languageCode"
@@ -93,7 +92,7 @@
               </el-tab-pane>
               <el-tab-pane label="源代码" name="sourceCode">
                 <el-input
-                  v-model="contentSource"
+                  v-model="form.content"
                   type="textarea"
                   :rows="30"
                   placeholder="请输入源代码"
@@ -1808,7 +1807,6 @@ export default {
     const saving = ref(false)
     const detailData = ref(null)
     const contentTab = ref('richText')
-    const contentSource = ref('')
     const relationRecords = reactive(createRelationRecords())
     const originalEditorVersion = ref(undefined)
     const snapshotRestoreDialogVisible = ref(false)
@@ -2146,10 +2144,6 @@ export default {
     }
 
     function buildTranslationEntries(options = {}) {
-      if (contentTab.value === 'sourceCode') {
-        form.content = contentSource.value
-      }
-
       return buildTranslationExportEntries({
         form,
         relationFields: ALL_RELATION_FIELDS,
@@ -2496,7 +2490,6 @@ export default {
         }
         setRelationRecordList(field.field, post[field.field] || [])
       })
-      contentSource.value = form.content
     }
 
     function getPostDetail() {
@@ -2812,34 +2805,15 @@ export default {
       )
     }
 
-    function onContentTabChange(tabName) {
-      if (tabName === 'sourceCode') {
-        contentSource.value = form.content
-        return
-      }
-      form.content = contentSource.value
-    }
-
-    function syncEditorContentBeforeAiTranslation() {
-      if (contentTab.value === 'sourceCode') {
-        form.content = contentSource.value
-      }
-    }
-
     function openPostAiTranslationDialog() {
-      syncEditorContentBeforeAiTranslation()
       postAiDialogVisible.value = true
     }
 
     function handlePostAiTranslationSaved(nextDetailData) {
       applyPostDetailData(nextDetailData)
-      contentSource.value = form.content
     }
 
     function buildSubmitData(confirmReview) {
-      if (contentTab.value === 'sourceCode') {
-        form.content = contentSource.value
-      }
       return {
         id: form.id,
         languageCode: form.languageCode,
@@ -2934,7 +2908,6 @@ export default {
     function handleSourceLinkRewriteApplied(data) {
       if (data?.detail) {
         applyPostDetailData(data.detail)
-        contentSource.value = form.content
       }
     }
 
@@ -4019,7 +3992,6 @@ export default {
       authorRecord,
       canCreateSkippedTranslation,
       clearAiEntries,
-      contentSource,
       contentTab,
       creatableAiSkippedEntries,
       currentAiCoverImageList,
@@ -4067,7 +4039,6 @@ export default {
       articleMediaReplaceRecord,
       articleMediaReplaceSubmitting,
       articleMediaReplaceVisible,
-      onContentTabChange,
       openArticleMediaReplace,
       openMediaPreview,
       openPostAiTranslationDialog,

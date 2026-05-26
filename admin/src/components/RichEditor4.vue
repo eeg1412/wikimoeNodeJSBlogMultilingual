@@ -83,6 +83,26 @@ export default {
       editor.txt.html(props.content)
     }
 
+    /**
+     * 同步父组件传入的内容到 wangEditor v4 实例。
+     * 源码模式直接修改 form.content 时，v4 编辑器需要显式刷新内部 HTML。
+     */
+    watch(
+      () => props.content,
+      content => {
+        if (!editor) {
+          return
+        }
+
+        const nextContent = content || ''
+        if (editor.txt.html() === nextContent) {
+          return
+        }
+
+        editor.txt.html(nextContent)
+      }
+    )
+
     onMounted(() => {
       initEditor()
     })
