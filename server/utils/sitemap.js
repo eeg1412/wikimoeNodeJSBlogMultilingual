@@ -14,7 +14,7 @@ const {
   normalizeSiteUrl
 } = require('./sourceSeoSettings')
 const sitemapCacheFolder = './seo/sitemap'
-const sitemapXslUrl = '/api/multilingual-asset/sitemap.xsl'
+const sitemapXslUrl = '/sitemap.xsl'
 
 const LANGUAGE_SITEMAP_SETTING_NAMES = [
   'siteEnableSitemap',

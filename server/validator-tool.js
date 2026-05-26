@@ -940,8 +940,8 @@ function validateAdminPathMigration() {
   assertFileIncludes(sitemapPath, [
     'getLanguageSitemap',
     'normalizeLanguageCode',
-    'application/xml; charset=utf-8',
-    '/multilingual-assets/sitemap.xsl'
+    'application/xml; charset=utf-8'
+    // '/multilingual-assets/sitemap.xsl'
   ])
   assertFileIncludes(viteConfigPath, [
     "base: isProduction ? '/multilingual-admin/' : '/'",

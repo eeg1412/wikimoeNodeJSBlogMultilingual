@@ -21,9 +21,7 @@ const {
 global.$mongodDB = $mongodDB
 const translationJobWorker = require('./api/multilingual-admin/services/translationJobWorker')
 translationJobWorker.startTranslationJobWorker()
-const properNounTranslationService = require(
-  './api/multilingual-admin/services/properNounTranslationService'
-)
+const properNounTranslationService = require('./api/multilingual-admin/services/properNounTranslationService')
 properNounTranslationService.scheduleProperNounTermCleanup()
 var history = require('connect-history-api-fallback')
 
@@ -145,9 +143,9 @@ app.get('/:code/sitemap.xml', async function (req, res) {
   sitemapToolUtils.getLanguageSitemap(req, res)
 })
 // sitemap.xsl
-app.use('/multilingual-assets/sitemap.xsl', function (req, res) {
-  res.sendFile(path.join(__dirname, 'seo/sitemap/sitemap.xsl'))
-})
+// app.use('/multilingual-assets/sitemap.xsl', function (req, res) {
+//   res.sendFile(path.join(__dirname, 'seo/sitemap/sitemap.xsl'))
+// })
 // 多语言 server 只处理多语言后台静态资源，源站路径留给源站处理
 app.use((req, res, next) => {
   const firstLevelPath = req.path.split('/')[1]
