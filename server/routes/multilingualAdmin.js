@@ -250,6 +250,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/config/refresh')
   },
   {
+    path: '/source/config/refresh-from-source',
+    method: 'post',
+    middleware: [],
+    controller: require('../api/multilingual-admin/source/config/refreshFromSource')
+  },
+  {
     path: '/dashboard/summary',
     method: 'get',
     middleware: [checkAuth],

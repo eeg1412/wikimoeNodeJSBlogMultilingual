@@ -277,6 +277,11 @@ export default {
       return sourceGroup.value?.sourcePost || null
     })
 
+    /**
+     * 获取当前源文章可创建或查看的目标语言选项。
+     * 源文章自身语言只作为来源信息展示，不作为翻译版本行出现。
+     * @returns {Array<{ label: string, value: string }>} 目标语言选项列表
+     */
     const targetLanguageOptions = computed(() => {
       const sourceLanguageCode = sourcePost.value?.sourceLanguageCode
       return SUPPORTED_LANGUAGE_OPTIONS.filter(item => {

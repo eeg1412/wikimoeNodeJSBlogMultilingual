@@ -16,16 +16,16 @@
 
 ### 参数
 
-| 名称 | 位置 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- | --- |
-| `languageCode` | Query/Body | string | 否 | 语言代码；前端 `multilingualRequest` 会自动补齐，缺省时服务端使用默认语言。 |
+| 名称           | 位置       | 类型   | 必填 | 说明                                                                        |
+| -------------- | ---------- | ------ | ---- | --------------------------------------------------------------------------- |
+| `languageCode` | Query/Body | string | 否   | 语言代码；前端 `multilingualRequest` 会自动补齐，缺省时服务端使用默认语言。 |
 
 ## 行为
 
 - 读取 `languageSettingsService.getLanguageSettings(languageCode)`。
 - 返回当前语言配置值以及已配置的配置项名称。
 - `siteTitle`、`siteDescription`、`siteLogo`、`siteFavicon` 由多语言站点配置维护；源站配置不再作为这些字段的 RSS 输出兜底。
-- `siteUrl`、`siteTimeZone`、`sitePageSize`、相似内容数量与范围仍来自源站运行配置缓存，刷新入口在管理端“源站配置管理”。
+- `siteUrl`、`siteTimeZone`、`sitePageSize`、相似内容数量与范围仍来自源站运行配置缓存；源站相关配置保存后会静默触发刷新，也可以在管理端“源站配置管理”手动刷新。
 
 ## 成功响应
 
