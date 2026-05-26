@@ -277,9 +277,16 @@ export default {
       return sourceGroup.value?.sourcePost || null
     })
 
+    const targetLanguageOptions = computed(() => {
+      const sourceLanguageCode = sourcePost.value?.sourceLanguageCode
+      return SUPPORTED_LANGUAGE_OPTIONS.filter(item => {
+        return item.value !== sourceLanguageCode
+      })
+    })
+
     const translationRows = computed(() => {
       const translations = sourceGroup.value?.translations || {}
-      return SUPPORTED_LANGUAGE_OPTIONS.map(item => {
+      return targetLanguageOptions.value.map(item => {
         return {
           languageCode: item.value,
           translation: translations[item.value]
