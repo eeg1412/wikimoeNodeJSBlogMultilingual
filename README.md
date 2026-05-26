@@ -28,16 +28,16 @@
 
 Docker 部署时，在项目根目录创建 `.env`，变量名保持一致。
 
-| 变量名 | 是否必填 | 例子 | 说明 |
-| --- | --- | --- | --- |
-| `PORT` | 建议填写 | `3016` | 多语言 server 监听端口。 |
-| `DB_HOST` | 必填 | `mongodb://127.0.0.1:27017/blog` | 源站数据库连接串。 |
-| `DB_HOST_MULTILINGUAL` | 必填 | `mongodb://127.0.0.1:27017/blog_multilingual` | 多语言数据库连接串，不能和 `DB_HOST` 指向同一个库。 |
-| `JSON_LIMIT` | 可选 | `50mb` | JSON 请求体大小限制。 |
-| `URLENCODED_LIMIT` | 可选 | `50mb` | 表单请求体大小限制。 |
-| `SOURCE_DOMAIN` | 按需填写 | `https://source.example.com` | 源站域名。做源站认证校验、回调源站接口、回源拉取封面图时会用到。 |
-| `IP2LOCATION_FILE_NAME` | 可选 | `IP2LOCATION-LITE-DB11.BIN` | IP 地址库文件名，文件本体放在 `server/utils/ip2location`。 |
-| `MAX_HISTORYLOGS_SIZE` | 可选 | `1073741824` | 历史日志最大占用，单位字节。 |
+| 变量名                  | 是否必填 | 例子                                          | 说明                                                             |
+| ----------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| `PORT`                  | 建议填写 | `3016`                                        | 多语言 server 监听端口。                                         |
+| `DB_HOST`               | 必填     | `mongodb://127.0.0.1:27017/blog`              | 源站数据库连接串。                                               |
+| `DB_HOST_MULTILINGUAL`  | 必填     | `mongodb://127.0.0.1:27017/blog_multilingual` | 多语言数据库连接串，不能和 `DB_HOST` 指向同一个库。              |
+| `JSON_LIMIT`            | 可选     | `50mb`                                        | JSON 请求体大小限制。                                            |
+| `URLENCODED_LIMIT`      | 可选     | `50mb`                                        | 表单请求体大小限制。                                             |
+| `SOURCE_DOMAIN`         | 按需填写 | `https://source.example.com`                  | 源站域名。做源站认证校验、回调源站接口、回源拉取封面图时会用到。 |
+| `IP2LOCATION_FILE_NAME` | 可选     | `IP2LOCATION-LITE-DB11.BIN`                   | IP 地址库文件名，文件本体放在 `server/utils/ip2location`。       |
+| `MAX_HISTORYLOGS_SIZE`  | 可选     | `1073741824`                                  | 历史日志最大占用，单位字节。                                     |
 
 ## Docker 部署
 
@@ -132,6 +132,13 @@ yarn run start --build
 - 直接启动 server
 
 登录仍然使用源站管理员账号。
+
+## 安全边界
+
+- 运行中的多语言服务会读取源站数据库里的用户、文章和配置，但当前运行时没有向源站数据库写入的 API 路径。
+- `server/mongodb/sourceRepositories/index.js` 只暴露了 `find`、`findOne`、`countDocuments`、`aggregate`、`findCursor` 这几个只读方法。
+- 多语言后台登录校验走的是 `server/api/multilingual-admin/auth/login.js` 和 `server/routes/multilingualAdmin.js`，都是回源站 `users` 集合做只读查询。
+- 旧的源站维护脚本入口已经从 `server/package.json` 移除，`server/tools/mongodb.js` 也改成了直接拒绝连接源站数据库，避免在这个仓库里误操作源站库。
 
 ## Docker 工作流
 
