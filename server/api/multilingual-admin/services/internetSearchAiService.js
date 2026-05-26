@@ -35,6 +35,8 @@ const OPERATION_OFFICIAL_TERM_SEARCH = 'proper-noun.official-translation.search'
 const TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE = 'aiKnowledgeBase'
 const TERM_TRANSLATION_SOURCE_INTERNET_SEARCH = 'internetSearchAi'
 const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
+const OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS = 2
+const OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 1
 
 const officialTermKnowledgeResponseJsonSchema = {
   type: 'object',
@@ -491,14 +493,23 @@ function buildOfficialTermSearchPrompt({
   sourceLanguageCode,
   contextSummary,
   includeTermNoteRevision = true,
-  allowSameSourceTranslationWithNote = false
+  allowSameSourceTranslationWithNote = false,
+  repairAttemptNo = 0
 }) {
   const normalizedContextSummary =
     normalizeOfficialTermContextSummary(contextSummary)
+  const isRepairRequest = Number(repairAttemptNo || 0) > 0
+  let taskName = 'search_official_term_translations'
+  if (isRepairRequest) {
+    taskName = 'repair_missing_official_term_translations'
+  }
   const requestData = {
-    task: 'search_official_term_translations',
+    task: taskName,
     sourceLanguageCode: sourceLanguageCode || '',
     sourceTermRequests: buildTermRequestPromptRows(termRequests)
+  }
+  if (isRepairRequest) {
+    requestData.repairAttemptNo = Number(repairAttemptNo || 0)
   }
   attachTermTranslationQualityPolicy(requestData)
   attachTermNoteInstruction(requestData, termRequests)
@@ -532,6 +543,15 @@ function buildOfficialTermSearchPrompt({
     '优先采用官方网站、发行商、出版社、平台商、百科条目或权威媒体中已存在的正式译名。',
     '必须覆盖每一个输入 sourceText 下列出的每一个目标语言 code。'
   ]
+
+  if (isRepairRequest) {
+    promptLines.push(
+      '这是缺失译名定向补齐请求，不是全量重做。',
+      '上一轮已经通过校验的译名已经被后台保留；本轮只允许处理当前 sourceTermRequests 中列出的缺失 sourceText 和目标语言 code。',
+      '禁止返回 sourceTermRequests 之外的 sourceText；禁止返回未请求的目标语言 code。',
+      '如果上一轮遗漏是因为译名与原名完全一致，本轮必须补齐 translationNotes[languageCode]。'
+    )
+  }
 
   if (allowSameSourceTranslationWithNote === true) {
     promptLines.push(
@@ -847,7 +867,99 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
   }
 }
 
-function normalizeSearchTerms(resultData, termRequests, options = {}) {
+function buildMissingTermParts(missingTermRequests) {
+  const missingParts = []
+  missingTermRequests.forEach(termRequest => {
+    termRequest.targetLanguageCodes.forEach(languageCode => {
+      missingParts.push(`${termRequest.sourceText}/${languageCode}`)
+    })
+  })
+  return missingParts
+}
+
+function shouldTreatSearchTranslationAsMissing({
+  resultTerm,
+  languageCode,
+  allowSameSourceTranslationWithNote
+}) {
+  if (resultTerm?.translations?.[languageCode]) {
+    return false
+  }
+
+  let skippedLanguageCodes = []
+  if (Array.isArray(resultTerm?.skippedSameWithoutNoteLanguageCodes)) {
+    skippedLanguageCodes = resultTerm.skippedSameWithoutNoteLanguageCodes
+  }
+  if (!skippedLanguageCodes.includes(languageCode)) {
+    return true
+  }
+
+  if (allowSameSourceTranslationWithNote === true) {
+    return true
+  }
+  return false
+}
+
+function collectSearchMissingTermRequests(
+  termRequests,
+  resultTermMap,
+  options = {}
+) {
+  const allowSameSourceTranslationWithNote =
+    options.allowSameSourceTranslationWithNote === true
+  const missingTermRequests = []
+  termRequests.forEach(termRequest => {
+    const resultTerm = resultTermMap.get(termRequest.normalizedSourceText)
+    const missingLanguageCodes = []
+    termRequest.targetLanguageCodes.forEach(languageCode => {
+      if (!resultTerm) {
+        missingLanguageCodes.push(languageCode)
+        return
+      }
+      const shouldMissing = shouldTreatSearchTranslationAsMissing({
+        resultTerm,
+        languageCode,
+        allowSameSourceTranslationWithNote
+      })
+      if (shouldMissing) {
+        missingLanguageCodes.push(languageCode)
+      }
+    })
+    if (missingLanguageCodes.length === 0) {
+      return
+    }
+    missingTermRequests.push({
+      sourceText: termRequest.sourceText,
+      sourceLanguageCode: termRequest.sourceLanguageCode || '',
+      termId: termRequest.termId || '',
+      note: resultTerm?.note || termRequest.note || '',
+      targetLanguageCodes: missingLanguageCodes
+    })
+  })
+  return normalizeTermRequestList(missingTermRequests)
+}
+
+function throwMissingSearchTranslationsError(
+  missingParts,
+  operationLabel = 'AI 联网搜索',
+  errorField = 'geminiInternetSearch'
+) {
+  if (!Array.isArray(missingParts) || missingParts.length === 0) {
+    return
+  }
+  throw new ApiError(
+    ERROR_CODES.AI_TRANSLATION_FAILED,
+    `${operationLabel}结果缺少名词译名：${missingParts.join('，')}`,
+    errorField,
+    502
+  )
+}
+
+function normalizeSearchTermsWithMissing(
+  resultData,
+  termRequests,
+  options = {}
+) {
   const operationLabel = options.operationLabel || 'AI 联网搜索'
   const errorField = options.errorField || 'geminiInternetSearch'
   normalizeResultRoot(resultData, operationLabel, errorField)
@@ -940,34 +1052,244 @@ function normalizeSearchTerms(resultData, termRequests, options = {}) {
     })
   })
 
-  const missingParts = []
-  requestedTermMap.forEach((termRequest, normalizedSourceText) => {
-    const resultTerm = resultTermMap.get(normalizedSourceText)
-    if (!resultTerm) {
-      missingParts.push(termRequest.sourceText)
-      return
+  const normalizedTermRequests = Array.from(requestedTermMap.values())
+  const missingTermRequests = collectSearchMissingTermRequests(
+    normalizedTermRequests,
+    resultTermMap,
+    {
+      allowSameSourceTranslationWithNote
     }
-    termRequest.targetLanguageCodes.forEach(languageCode => {
-      if (!resultTerm.translations[languageCode]) {
-        if (
-          resultTerm.skippedSameWithoutNoteLanguageCodes.includes(languageCode)
-        ) {
-          return
-        }
-        missingParts.push(`${termRequest.sourceText}/${languageCode}`)
-      }
+  )
+  const missingParts = buildMissingTermParts(missingTermRequests)
+
+  return {
+    terms: Array.from(resultTermMap.values()),
+    termMap: resultTermMap,
+    missingTermRequests,
+    missingParts
+  }
+}
+
+function normalizeSearchTerms(resultData, termRequests, options = {}) {
+  const operationLabel = options.operationLabel || 'AI 联网搜索'
+  const errorField = options.errorField || 'geminiInternetSearch'
+  const normalizedResult = normalizeSearchTermsWithMissing(
+    resultData,
+    termRequests,
+    options
+  )
+  throwMissingSearchTranslationsError(
+    normalizedResult.missingParts,
+    operationLabel,
+    errorField
+  )
+  return normalizedResult.terms
+}
+
+function cloneSearchResultTerm(term) {
+  const translations = {}
+  if (term?.translations && typeof term.translations === 'object') {
+    Object.keys(term.translations).forEach(languageCode => {
+      translations[languageCode] = term.translations[languageCode]
     })
-  })
-  if (missingParts.length > 0) {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      `${operationLabel}结果缺少名词译名：${missingParts.join('，')}`,
-      errorField,
-      502
-    )
   }
 
-  return Array.from(resultTermMap.values())
+  const translationNotes = {}
+  if (term?.translationNotes && typeof term.translationNotes === 'object') {
+    Object.keys(term.translationNotes).forEach(languageCode => {
+      translationNotes[languageCode] = term.translationNotes[languageCode]
+    })
+  }
+
+  const skippedSameWithoutNoteLanguageCodes = []
+  if (Array.isArray(term?.skippedSameWithoutNoteLanguageCodes)) {
+    term.skippedSameWithoutNoteLanguageCodes.forEach(languageCode => {
+      if (!skippedSameWithoutNoteLanguageCodes.includes(languageCode)) {
+        skippedSameWithoutNoteLanguageCodes.push(languageCode)
+      }
+    })
+  }
+
+  return {
+    ...term,
+    translations,
+    translationNotes,
+    skippedSameWithoutNoteLanguageCodes
+  }
+}
+
+function mergeSearchMetadata(currentMetadata, nextMetadata) {
+  const mergedMetadata = {}
+  if (currentMetadata && typeof currentMetadata === 'object') {
+    Object.assign(mergedMetadata, currentMetadata)
+  }
+
+  if (!nextMetadata || typeof nextMetadata !== 'object') {
+    return mergedMetadata
+  }
+
+  const mergedQueries = []
+  if (Array.isArray(currentMetadata?.webSearchQueries)) {
+    currentMetadata.webSearchQueries.forEach(query => {
+      const text = normalizeString(query, 300)
+      if (text && !mergedQueries.includes(text)) {
+        mergedQueries.push(text)
+      }
+    })
+  }
+  if (Array.isArray(nextMetadata.webSearchQueries)) {
+    nextMetadata.webSearchQueries.forEach(query => {
+      const text = normalizeString(query, 300)
+      if (text && !mergedQueries.includes(text)) {
+        mergedQueries.push(text)
+      }
+    })
+  }
+  if (mergedQueries.length > 0) {
+    mergedMetadata.webSearchQueries = mergedQueries.slice(0, 20)
+  }
+
+  const mergedChunks = []
+  if (Array.isArray(currentMetadata?.groundingChunks)) {
+    currentMetadata.groundingChunks.forEach(chunk => {
+      const uri = normalizeString(chunk?.uri, 600)
+      if (!uri) {
+        return
+      }
+      if (mergedChunks.some(item => item.uri === uri)) {
+        return
+      }
+      mergedChunks.push({
+        title: normalizeString(chunk?.title, 200),
+        uri
+      })
+    })
+  }
+  if (Array.isArray(nextMetadata.groundingChunks)) {
+    nextMetadata.groundingChunks.forEach(chunk => {
+      const uri = normalizeString(chunk?.uri, 600)
+      if (!uri) {
+        return
+      }
+      if (mergedChunks.some(item => item.uri === uri)) {
+        return
+      }
+      mergedChunks.push({
+        title: normalizeString(chunk?.title, 200),
+        uri
+      })
+    })
+  }
+  if (mergedChunks.length > 0) {
+    mergedMetadata.groundingChunks = mergedChunks.slice(0, 20)
+  }
+
+  return mergedMetadata
+}
+
+function mergeSearchTermIntoMap(termMap, term) {
+  const sourceText = properNounTranslationService.normalizeSourceText(
+    term?.sourceText
+  )
+  const normalizedSourceText =
+    properNounTranslationService.buildNormalizedSourceText(sourceText)
+  if (!sourceText || !normalizedSourceText) {
+    return
+  }
+
+  let currentTerm = termMap.get(normalizedSourceText)
+  if (!currentTerm) {
+    termMap.set(normalizedSourceText, cloneSearchResultTerm(term))
+    return
+  }
+
+  Object.keys(term.translations || {}).forEach(languageCode => {
+    currentTerm.translations[languageCode] = term.translations[languageCode]
+  })
+
+  Object.keys(term.translationNotes || {}).forEach(languageCode => {
+    currentTerm.translationNotes[languageCode] =
+      term.translationNotes[languageCode]
+  })
+
+  if (term.shouldUpdateTermNote === true) {
+    currentTerm.note = term.note || currentTerm.note || ''
+    currentTerm.shouldUpdateTermNote = true
+  }
+  if (!currentTerm.note && term.note) {
+    currentTerm.note = term.note
+  }
+
+  currentTerm.searchMetadata = mergeSearchMetadata(
+    currentTerm.searchMetadata,
+    term.searchMetadata
+  )
+
+  if (Array.isArray(term.skippedSameWithoutNoteLanguageCodes)) {
+    term.skippedSameWithoutNoteLanguageCodes.forEach(languageCode => {
+      if (
+        !currentTerm.skippedSameWithoutNoteLanguageCodes.includes(languageCode)
+      ) {
+        currentTerm.skippedSameWithoutNoteLanguageCodes.push(languageCode)
+      }
+    })
+  }
+}
+
+function mergeSearchTermsIntoMap(termMap, terms) {
+  terms.forEach(term => {
+    mergeSearchTermIntoMap(termMap, term)
+  })
+}
+
+function splitTermRequestBatches(termRequests, batchTermCount) {
+  const batches = []
+  const normalizedBatchTermCount = Number(batchTermCount)
+  let size = OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT
+  if (
+    Number.isInteger(normalizedBatchTermCount) &&
+    normalizedBatchTermCount > 0
+  ) {
+    size = normalizedBatchTermCount
+  }
+  for (let index = 0; index < termRequests.length; index += size) {
+    batches.push(termRequests.slice(index, index + size))
+  }
+  return batches
+}
+
+function notifySearchStatus(onStatus, message, payload = {}) {
+  if (typeof onStatus !== 'function') {
+    return
+  }
+  onStatus({
+    message,
+    ...payload
+  })
+}
+
+function buildSearchRawResponse(primaryResult, repairResults) {
+  if (!Array.isArray(repairResults) || repairResults.length === 0) {
+    return primaryResult.rawResponse
+  }
+  return {
+    primary: primaryResult.rawResponse,
+    repairs: repairResults.map(result => {
+      return result.rawResponse
+    })
+  }
+}
+
+function buildSearchResponseSummary(primaryResult, repairResults) {
+  if (!Array.isArray(repairResults) || repairResults.length === 0) {
+    return primaryResult.responseSummary
+  }
+  return {
+    primary: primaryResult.responseSummary,
+    repairs: repairResults.map(result => {
+      return result.responseSummary
+    })
+  }
 }
 
 async function recordUsage(options = {}) {
@@ -1208,6 +1530,124 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   )
 }
 
+async function requestOfficialTermSearchTranslations({
+  settings,
+  termRequests,
+  sourceLanguageCode,
+  contextSummary,
+  requestUrl,
+  cancellation,
+  skipUsageLog,
+  includeTermNoteRevision = true,
+  allowSameSourceTranslationWithNote = false,
+  repairAttemptNo = 0
+}) {
+  const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
+  let operationLabel = 'AI 联网搜索'
+  if (Number(repairAttemptNo || 0) > 0) {
+    operationLabel = 'AI 联网搜索补缺'
+  }
+  const prompt = buildOfficialTermSearchPrompt({
+    settings,
+    termRequests,
+    sourceLanguageCode,
+    contextSummary,
+    includeTermNoteRevision,
+    allowSameSourceTranslationWithNote,
+    repairAttemptNo
+  })
+  const requestBody = buildGeminiSearchRequest(settings, prompt, {
+    includeTermNoteRevision
+  })
+  const requestSummary = summarizeGeminiNativeRequestBody(
+    requestBody,
+    requestUrl
+  )
+
+  try {
+    const response = await sendGeminiNativeGenerateContentRequest(
+      settings,
+      requestBody,
+      requestUrl,
+      { cancellation }
+    )
+    const responseSummary = summarizeGeminiNativeResponse(response)
+    const extractedText = extractTextFromGeminiNativeResponse(response)
+    const resultData = parseSearchResponseText(
+      extractedText?.text || '',
+      operationLabel,
+      'geminiInternetSearch'
+    )
+    const groundingMetadata = summarizeGroundingMetadata(response)
+    const normalizedResult = normalizeSearchTermsWithMissing(
+      resultData,
+      termRequests,
+      {
+        operationLabel,
+        includeTermNoteRevision,
+        allowSameSourceTranslationWithNote
+      }
+    )
+    const terms = normalizedResult.terms.map(term => {
+      return {
+        ...term,
+        searchMetadata: groundingMetadata
+      }
+    })
+    await recordUsage({
+      settings,
+      operation: OPERATION_OFFICIAL_TERM_SEARCH,
+      status: 'success',
+      response,
+      sourceLanguageCode,
+      targetLanguageCodes,
+      termCount: termRequests.length,
+      termRequests,
+      contextSummary,
+      requestSummary,
+      responseSummary,
+      skipUsageLog
+    })
+    return {
+      terms,
+      missingTermRequests: normalizedResult.missingTermRequests,
+      missingParts: normalizedResult.missingParts,
+      rawResponse: response,
+      resultData,
+      groundingMetadata,
+      responseSummary,
+      requestBody,
+      requestSummary,
+      termRequests
+    }
+  } catch (error) {
+    await recordUsage({
+      settings,
+      operation: OPERATION_OFFICIAL_TERM_SEARCH,
+      status: 'error',
+      error,
+      sourceLanguageCode,
+      targetLanguageCodes,
+      termCount: termRequests.length,
+      termRequests,
+      contextSummary,
+      requestSummary,
+      failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
+      failureReason: error?.message || '',
+      skipUsageLog
+    })
+    if (error && error.name === 'ApiError') {
+      throw error
+    }
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      error?.message || 'Gemini 联网搜索请求失败',
+      'geminiInternetSearch',
+      502
+    )
+  }
+}
+
 async function searchOfficialTermTranslationsWithInternet({
   settings,
   termRequests,
@@ -1221,104 +1661,178 @@ async function searchOfficialTermTranslationsWithInternet({
   allowSameSourceTranslationWithNote = false
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
-  const prompt = buildOfficialTermSearchPrompt({
-    settings,
-    termRequests,
-    sourceLanguageCode,
-    contextSummary,
-    includeTermNoteRevision,
-    allowSameSourceTranslationWithNote
-  })
-  const requestBody = buildGeminiSearchRequest(settings, prompt, {
-    includeTermNoteRevision
-  })
-  const requestSummary = summarizeGeminiNativeRequestBody(
-    requestBody,
-    requestUrl
-  )
 
   return await runAiStepWithRetry(
     async () => {
       try {
-        const response = await sendGeminiNativeGenerateContentRequest(
+        const primaryResult = await requestOfficialTermSearchTranslations({
           settings,
-          requestBody,
           requestUrl,
-          { cancellation }
-        )
-        const responseSummary = summarizeGeminiNativeResponse(response)
-        const extractedText = extractTextFromGeminiNativeResponse(response)
-        const resultData = parseSearchResponseText(extractedText?.text || '')
-        const groundingMetadata = summarizeGroundingMetadata(response)
-        const terms = normalizeSearchTerms(resultData, termRequests, {
+          termRequests,
+          sourceLanguageCode,
+          contextSummary,
+          cancellation,
+          skipUsageLog,
           includeTermNoteRevision,
           allowSameSourceTranslationWithNote
-        }).map(term => {
-          return {
-            ...term,
-            searchMetadata: groundingMetadata
+        })
+
+        const aggregateTermMap = new Map()
+        mergeSearchTermsIntoMap(aggregateTermMap, primaryResult.terms)
+
+        let missingTermRequests = collectSearchMissingTermRequests(
+          termRequests,
+          aggregateTermMap,
+          {
+            allowSameSourceTranslationWithNote
+          }
+        )
+
+        const repairResults = []
+        let repairRoundNo = 1
+        while (
+          missingTermRequests.length > 0 &&
+          repairRoundNo <= OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS
+        ) {
+          const missingParts = buildMissingTermParts(missingTermRequests)
+          notifySearchStatus(
+            onStatus,
+            `正在定向补齐 ${missingParts.length} 个缺失名词译名（${repairRoundNo}/${OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS}）`,
+            {
+              missingParts
+            }
+          )
+
+          const repairBatches = splitTermRequestBatches(
+            missingTermRequests,
+            OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT
+          )
+          for (let index = 0; index < repairBatches.length; index += 1) {
+            const repairBatch = repairBatches[index]
+            notifySearchStatus(
+              onStatus,
+              `正在补齐第 ${index + 1}/${repairBatches.length} 批缺失名词译名`,
+              {
+                repairRoundNo,
+                repairBatchIndex: index + 1,
+                repairBatchCount: repairBatches.length,
+                missingParts: buildMissingTermParts(repairBatch)
+              }
+            )
+            const repairResult = await requestOfficialTermSearchTranslations({
+              settings,
+              requestUrl,
+              termRequests: repairBatch,
+              sourceLanguageCode,
+              contextSummary,
+              cancellation,
+              skipUsageLog,
+              includeTermNoteRevision,
+              allowSameSourceTranslationWithNote,
+              repairAttemptNo: repairRoundNo
+            })
+            repairResults.push(repairResult)
+            mergeSearchTermsIntoMap(aggregateTermMap, repairResult.terms)
+          }
+
+          missingTermRequests = collectSearchMissingTermRequests(
+            termRequests,
+            aggregateTermMap,
+            {
+              allowSameSourceTranslationWithNote
+            }
+          )
+
+          if (missingTermRequests.length > 0) {
+            const remainingMissingParts =
+              buildMissingTermParts(missingTermRequests)
+            notifySearchStatus(
+              onStatus,
+              `第 ${repairRoundNo} 轮补齐后仍有 ${remainingMissingParts.length} 个名词译名缺失`,
+              {
+                repairRoundNo,
+                missingParts: remainingMissingParts
+              }
+            )
+          }
+
+          repairRoundNo += 1
+        }
+
+        const finalMissingParts = buildMissingTermParts(missingTermRequests)
+        throwMissingSearchTranslationsError(finalMissingParts)
+
+        const terms = Array.from(aggregateTermMap.values())
+        const rawResponse = buildSearchRawResponse(
+          primaryResult,
+          repairResults
+        )
+        const responseSummary = buildSearchResponseSummary(
+          primaryResult,
+          repairResults
+        )
+        let repairRoundCount = 0
+        if (repairResults.length > 0) {
+          repairRoundCount = repairRoundNo - 1
+        }
+        const aiJsonLog = translationAiJsonLogService.createAiJsonLog({
+          operation: OPERATION_OFFICIAL_TERM_SEARCH,
+          stage: 'ProperNounOfficialTranslationSearch',
+          provider: settings.provider,
+          model: settings.model,
+          requestId: '',
+          sourceLanguageCode,
+          targetLanguageCode: targetLanguageCodes.join(','),
+          meta: {
+            sourceTermCount: termRequests.length,
+            targetLanguageCodes,
+            contextSummaryLength:
+              normalizeOfficialTermContextSummary(contextSummary).length,
+            translatedTermCount: terms.length,
+            primaryMissingPairCount: primaryResult.missingParts.length,
+            repairRequestCount: repairResults.length,
+            repairRoundCount
+          },
+          input: {
+            primary: {
+              requestBody: primaryResult.requestBody,
+              requestSummary: primaryResult.requestSummary
+            },
+            repairs: repairResults.map(result => {
+              return {
+                requestBody: result.requestBody,
+                requestSummary: result.requestSummary
+              }
+            })
+          },
+          json: {
+            primary: {
+              result: primaryResult.resultData,
+              terms: primaryResult.terms,
+              missingTermRequests: primaryResult.missingTermRequests,
+              groundingMetadata: primaryResult.groundingMetadata,
+              responseSummary: primaryResult.responseSummary
+            },
+            repairs: repairResults.map(result => {
+              return {
+                result: result.resultData,
+                terms: result.terms,
+                missingTermRequests: result.missingTermRequests,
+                groundingMetadata: result.groundingMetadata,
+                responseSummary: result.responseSummary
+              }
+            }),
+            terms,
+            responseSummary
           }
         })
-        await recordUsage({
-          settings,
-          operation: OPERATION_OFFICIAL_TERM_SEARCH,
-          status: 'success',
-          response,
-          sourceLanguageCode,
-          targetLanguageCodes,
-          termCount: termRequests.length,
-          termRequests,
-          contextSummary,
-          requestSummary,
-          responseSummary,
-          skipUsageLog
-        })
+
         return {
           terms,
-          rawResponse: response,
-          aiJsonLog: translationAiJsonLogService.createAiJsonLog({
-            operation: OPERATION_OFFICIAL_TERM_SEARCH,
-            stage: 'ProperNounOfficialTranslationSearch',
-            provider: settings.provider,
-            model: settings.model,
-            requestId: '',
-            sourceLanguageCode,
-            targetLanguageCode: targetLanguageCodes.join(','),
-            meta: {
-              sourceTermCount: termRequests.length,
-              targetLanguageCodes,
-              contextSummaryLength:
-                normalizeOfficialTermContextSummary(contextSummary).length,
-              translatedTermCount: terms.length
-            },
-            input: {
-              requestBody,
-              requestSummary
-            },
-            json: {
-              result: resultData,
-              terms,
-              groundingMetadata,
-              responseSummary
-            }
-          })
+          rawResponse,
+          aiJsonLog
         }
       } catch (error) {
-        await recordUsage({
-          settings,
-          operation: OPERATION_OFFICIAL_TERM_SEARCH,
-          status: 'error',
-          error,
-          sourceLanguageCode,
-          targetLanguageCodes,
-          termCount: termRequests.length,
-          termRequests,
-          contextSummary,
-          requestSummary,
-          failureCode: error?.code || ERROR_CODES.AI_TRANSLATION_FAILED,
-          failureReason: error?.message || '',
-          skipUsageLog
-        })
         if (error && error.name === 'ApiError') {
           throw error
         }
