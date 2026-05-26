@@ -1,58 +1,32 @@
 services:
-  blog:
-    container_name: wikimoe-blog-nuxt
-    image: eeg1412/wikimoe-blog-nuxt
-    environment:
-      - TZ=Asia/Shanghai
-      - NUXT_API_DOMAIN=${NUXT_API_DOMAIN}
-      - NUXT_SWR_ENABLED=${NUXT_SWR_ENABLED}
-      - NUXT_SWR_CACHE_MAXAGE=${NUXT_SWR_CACHE_MAXAGE}
-      - NUXT_SWR_CACHE_STALEMAXAGE=${NUXT_SWR_CACHE_STALEMAXAGE}
-      - NUXT_SWR_CACHE_MAX_PAGE=${NUXT_SWR_CACHE_MAX_PAGE}
-      - NUXT_SWR_CACHE_TTL=${NUXT_SWR_CACHE_TTL}
-      - NITRO_PORT=${NITRO_PORT}
-    ports:
-      - '3007:3007'
-    depends_on:
-      - server
-    networks:
-      - wikimoe
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: '378M'
-        reservations:
-          cpus: '0.25'
-          memory: '128M'
   server:
-    container_name: wikimoe-blog-server
-    image: eeg1412/wikimoe-blog-server:latest
+    container_name: wikimoe-multilingual-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: eeg1412/wikimoe-multilingual-server:latest
     environment:
-      - TZ=Asia/Shanghai
-      - PORT=${PORT}
-      - DB_HOST=${DB_HOST}
-      - DB_HOST_MULTILINGUAL=${DB_HOST_MULTILINGUAL}
-      - JSON_LIMIT=${JSON_LIMIT}
-      - URLENCODED_LIMIT=${URLENCODED_LIMIT}
-      - IP2LOCATION_FILE_NAME=${IP2LOCATION_FILE_NAME}
-      - MAX_HISTORYLOGS_SIZE=${MAX_HISTORYLOGS_SIZE}
-      - USER_NAME=${USER_NAME} # option
+      TZ: Asia/Shanghai
+      PORT: ${PORT}
+      DB_HOST: ${DB_HOST}
+      DB_HOST_MULTILINGUAL: ${DB_HOST_MULTILINGUAL}
+      JSON_LIMIT: ${JSON_LIMIT}
+      URLENCODED_LIMIT: ${URLENCODED_LIMIT}
+      SOURCE_DOMAIN: ${SOURCE_DOMAIN}
+      IP2LOCATION_FILE_NAME: ${IP2LOCATION_FILE_NAME}
+      MAX_HISTORYLOGS_SIZE: ${MAX_HISTORYLOGS_SIZE}
     volumes:
-      - ./data/wikimoe-blog-server/log:/app/log
-      - ./data/wikimoe-blog-server/ip2location:/app/utils/ip2location
-      - ./data/wikimoe-blog-server/backups:/app/backups
-      - ./data/wikimoe-blog-server/cache:/app/cache
-      - ./data/wikimoe-blog-server/public:/app/public
-      - ./data/wikimoe-blog-server/ailog:/app/ailog
-      - ./data/wikimoe-blog-server/blog-public:/blog/public
-      - ./data/wikimoe-blog-server/blog-public-root:/blog/public-root
-      - ./data/wikimoe-blog-server/secret:/app/secret
+      - ./data/wikimoe-multilingual-server/log:/app/log
+      - ./data/wikimoe-multilingual-server/ip2location:/app/utils/ip2location
+      - ./data/wikimoe-multilingual-server/backups:/app/backups
+      - ./data/wikimoe-multilingual-server/cache:/app/cache
+      - ./data/wikimoe-multilingual-server/public:/app/public
+      - ./data/wikimoe-multilingual-server/ailog:/app/ailog
+      - ./data/wikimoe-multilingual-server/secret:/app/secret
     ports:
-      - '3006:3006'
+      - '${PORT}:${PORT}'
     depends_on:
-      - mongo
+      - mongodb
     networks:
       - wikimoe
     restart: unless-stopped
@@ -60,16 +34,16 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: '378M'
+          memory: '512M'
         reservations:
           cpus: '0.25'
           memory: '128M'
 
-  mongo:
-    container_name: wikimoe-db
+  mongodb:
+    container_name: wikimoe-multilingual-db
     image: mongo:8.2.3-noble
     volumes:
-      - ./data/db:/data/db
+      - ./data/wikimoe-multilingual-db:/data/db
     networks:
       - wikimoe
     restart: unless-stopped

@@ -1,9 +1,14 @@
 const { execSync } = require('child_process')
+
+function run(command) {
+  execSync(command, {
+    stdio: 'inherit'
+  })
+}
+
 console.log('install and build admin')
-execSync('cd admin && yarn install && yarn build && cd ..', {
-  stdio: 'inherit'
-})
+run('yarn --cwd admin install')
+run('yarn --cwd admin build')
+
 console.log('install server')
-execSync(`cd server && yarn install && cd ..`, { stdio: 'inherit' })
-console.log('install and build blog')
-execSync('cd blog && yarn install && yarn build && cd ..', { stdio: 'inherit' })
+run('yarn --cwd server install')

@@ -25,13 +25,6 @@ try {
     { stdio: 'inherit' }
   )
 
-  // 更新blog版本
-  console.log('更新 blog 版本')
-  execSync(
-    `cd blog && yarn version --new-version ${newVersion} --no-git-tag-version && cd ..`,
-    { stdio: 'inherit' }
-  )
-
   console.log(`所有项目已更新到版本 ${newVersion}`)
 
   // 更新根目录的版本
