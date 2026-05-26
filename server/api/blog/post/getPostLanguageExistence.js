@@ -38,7 +38,7 @@ async function getSourceArticleRecordList(sourceId) {
       ]
     },
     undefined,
-    '_id sourceId sourceLanguageCode languageCode translationGroupId sourceSnapshotId recordKind status'
+    '_id sourceId sourceLanguageCode languageCode translationGroupId sourceSnapshotId recordKind status alias'
   )
 }
 
@@ -59,6 +59,70 @@ function getRecordIdText(value) {
   }
 
   return String(value)
+}
+
+/**
+ * 规范化文章别名；空别名保留为空字符串，让前端继续使用 id 生成 URL。
+ * @param {any} value - 文章别名字段值。
+ * @returns {string} 可直接返回给前端的别名文本。
+ */
+function getAliasText(value) {
+  if (!value) {
+    return ''
+  }
+
+  return String(value).trim()
+}
+
+/**
+ * 构造语言切换需要的公开文章标识。
+ * 源语言使用源站文章 id，译文语言使用译文记录 id，保持与各自 sitemap 一致。
+ * @param {object} record - 多语言文章记录或源文章快照记录。
+ * @param {boolean} shouldUseSourceIdAsId - 是否把源文章 id 作为当前语言公开 id。
+ * @returns {{ id: string, alias: string, sourceId: string }} 语言文章标识信息。
+ */
+function buildLanguagePostInfo(record, shouldUseSourceIdAsId = false) {
+  const sourceId = getRecordIdText(record.sourceId)
+  let id = getRecordIdText(record._id)
+
+  if (shouldUseSourceIdAsId) {
+    id = sourceId
+  }
+
+  return {
+    id,
+    alias: getAliasText(record.alias),
+    sourceId
+  }
+}
+
+/**
+ * 写入已经通过记录关系校验的语言文章信息。
+ * 未开启语言或缺少可路由 id 的记录不会进入可用语言结果。
+ * @param {object} existenceMap - 按语言记录文章是否可访问的布尔表。
+ * @param {object} languagePostMap - 按语言记录文章 alias、id 和 sourceId 的映射。
+ * @param {Set<string>} enabledLanguageCodeSet - 已开启博客语言集合。
+ * @param {string} languageCode - 当前语言码。
+ * @param {{ id: string, alias: string, sourceId: string }} postInfo - 当前语言文章标识信息。
+ * @returns {void}
+ */
+function setLanguagePostInfo(
+  existenceMap,
+  languagePostMap,
+  enabledLanguageCodeSet,
+  languageCode,
+  postInfo
+) {
+  if (!enabledLanguageCodeSet.has(languageCode)) {
+    return
+  }
+
+  if (!postInfo.id || !postInfo.sourceId) {
+    return
+  }
+
+  existenceMap[languageCode] = true
+  languagePostMap[languageCode] = postInfo
 }
 
 function splitSourceArticleRecords(recordList) {
@@ -120,6 +184,8 @@ module.exports = async function (req, res) {
   }
 
   const existenceMap = buildEmptyExistenceMap()
+  // 只记录发布状态、语言开启且具备公开路由标识的语言文章。
+  const languagePostMap = {}
   const sourceObjectId = new mongoose.Types.ObjectId(sourceId)
 
   try {
@@ -142,7 +208,6 @@ module.exports = async function (req, res) {
 
     const { sourceSnapshotIdSet, translationGroupIdSet } =
       buildSourceSnapshotIdentitySet(sourceSnapshotList)
-    const sourcePublishedLanguageCodeSet = new Set()
     let sourceLanguageCode = null
     for (const sourceSnapshot of sourceSnapshotList) {
       const currentSourceLanguageCode = normalizeLanguageCode(
@@ -175,7 +240,14 @@ module.exports = async function (req, res) {
       }
 
       if (sourceSnapshot.status === 1) {
-        sourcePublishedLanguageCodeSet.add(currentSourceLanguageCode)
+        const sourcePostInfo = buildLanguagePostInfo(sourceSnapshot, true)
+        setLanguagePostInfo(
+          existenceMap,
+          languagePostMap,
+          enabledLanguageCodeSet,
+          currentSourceLanguageCode,
+          sourcePostInfo
+        )
       }
     }
 
@@ -195,18 +267,20 @@ module.exports = async function (req, res) {
         continue
       }
 
-      if (enabledLanguageCodeSet.has(languageCode)) {
-        existenceMap[languageCode] = true
-      }
-    }
-
-    for (const sourceLanguageCode of sourcePublishedLanguageCodeSet) {
-      existenceMap[sourceLanguageCode] = true
+      const translationPostInfo = buildLanguagePostInfo(translation)
+      setLanguagePostInfo(
+        existenceMap,
+        languagePostMap,
+        enabledLanguageCodeSet,
+        languageCode,
+        translationPostInfo
+      )
     }
 
     res.send({
       sourceLanguageCode,
-      existenceMap
+      existenceMap,
+      languagePostMap
     })
   } catch (err) {
     res.status(400).json({
