@@ -1,7 +1,7 @@
 export const LANGUAGE_CONFIG_LIST = [
   {
     code: 'zh-CN',
-    label: '中国大陆简体中文',
+    label: '简体中文（中国）',
     isDefault: true,
     sidebarBuiltinTitles: {
       1: '自定义内容',
@@ -19,7 +19,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-SG',
-    label: '新加坡简体中文',
+    label: '简体中文（新加坡）',
     sidebarBuiltinTitles: {
       1: '自定义内容',
       3: '最新评论',
@@ -36,7 +36,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-HK',
-    label: '香港繁體中文',
+    label: '繁體中文（香港特別行政區）',
     sidebarBuiltinTitles: {
       1: '自訂內容',
       3: '最新評論',
@@ -53,7 +53,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'zh-TW',
-    label: '臺灣正體中文',
+    label: '繁體中文（台灣）',
     sidebarBuiltinTitles: {
       1: '自訂內容',
       3: '最新評論',
@@ -71,7 +71,7 @@ export const LANGUAGE_CONFIG_LIST = [
 
   {
     code: 'ja-JP',
-    label: '日本語',
+    label: '日本語 (日本)',
     sidebarBuiltinTitles: {
       1: 'カスタムコンテンツ',
       3: '最新コメント',
@@ -88,7 +88,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'en-US',
-    label: 'English',
+    label: 'English (United States)',
     sidebarBuiltinTitles: {
       1: 'Custom content',
       3: 'Latest comments',
@@ -105,7 +105,7 @@ export const LANGUAGE_CONFIG_LIST = [
   },
   {
     code: 'ko-KR',
-    label: '한국어',
+    label: '한국어(대한민국)',
     sidebarBuiltinTitles: {
       1: '사용자 지정 콘텐츠',
       3: '최신 댓글',
