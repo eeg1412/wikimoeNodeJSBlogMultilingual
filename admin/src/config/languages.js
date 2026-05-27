@@ -18,6 +18,23 @@ export const LANGUAGE_CONFIG_LIST = [
     }
   },
   {
+    code: 'zh-SG',
+    label: '新加坡简体中文',
+    sidebarBuiltinTitles: {
+      1: '自定义内容',
+      3: '最新评论',
+      4: '随机标签',
+      8: '分类',
+      9: '归档',
+      10: '谷歌广告',
+      11: '自定义HTML',
+      12: '热门文章',
+      13: '当季追番',
+      14: '攻略中',
+      15: '阅读中'
+    }
+  },
+  {
     code: 'zh-HK',
     label: '香港繁體中文',
     sidebarBuiltinTitles: {
@@ -51,23 +68,7 @@ export const LANGUAGE_CONFIG_LIST = [
       15: '閱讀中'
     }
   },
-  {
-    code: 'zh-SG',
-    label: '新加坡简体中文',
-    sidebarBuiltinTitles: {
-      1: '自定义内容',
-      3: '最新评论',
-      4: '随机标签',
-      8: '分类',
-      9: '归档',
-      10: '谷歌广告',
-      11: '自定义HTML',
-      12: '热门文章',
-      13: '当季追番',
-      14: '攻略中',
-      15: '阅读中'
-    }
-  },
+
   {
     code: 'ja-JP',
     label: '日本語',
