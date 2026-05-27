@@ -3379,7 +3379,8 @@ async function getOfficialTermGlossaryCacheData({
     input,
     settings,
     handlers,
-    targetLanguageCodes
+    targetLanguageCodes,
+    allowSameSourceTranslationWithNote: true
   })
   return await setOfficialTermGlossaryCache(taskCache, cacheKey, promise)
 }

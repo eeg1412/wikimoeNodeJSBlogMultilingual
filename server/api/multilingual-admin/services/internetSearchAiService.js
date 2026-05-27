@@ -36,7 +36,7 @@ const TERM_TRANSLATION_SOURCE_AI_KNOWLEDGE = 'aiKnowledgeBase'
 const TERM_TRANSLATION_SOURCE_INTERNET_SEARCH = 'internetSearchAi'
 const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS = 2
-const OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 1
+const OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
 
 const officialTermKnowledgeResponseJsonSchema = {
   type: 'object',
@@ -123,6 +123,47 @@ const officialTermSearchTranslationOnlyResponseJsonSchema = {
       }
     }
   }
+}
+
+function requireTranslationNotesInTermSchema(schema) {
+  let requiredFields = schema.properties.terms.items.required
+  if (!requiredFields.includes('translationNotes')) {
+    requiredFields = requiredFields.concat('translationNotes')
+  }
+
+  return {
+    ...schema,
+    properties: {
+      ...schema.properties,
+      terms: {
+        ...schema.properties.terms,
+        items: {
+          ...schema.properties.terms.items,
+          required: requiredFields
+        }
+      }
+    }
+  }
+}
+
+function buildOfficialTermKnowledgeResponseJsonSchema(options = {}) {
+  if (options.allowSameSourceTranslationWithNote !== true) {
+    return officialTermKnowledgeResponseJsonSchema
+  }
+  return requireTranslationNotesInTermSchema(
+    officialTermKnowledgeResponseJsonSchema
+  )
+}
+
+function buildOfficialTermSearchResponseJsonSchema(options = {}) {
+  let responseJsonSchema = officialTermSearchResponseJsonSchema
+  if (options.includeTermNoteRevision === false) {
+    responseJsonSchema = officialTermSearchTranslationOnlyResponseJsonSchema
+  }
+  if (options.allowSameSourceTranslationWithNote !== true) {
+    return responseJsonSchema
+  }
+  return requireTranslationNotesInTermSchema(responseJsonSchema)
 }
 
 function normalizeString(value, maxLength = 600) {
@@ -615,11 +656,11 @@ function buildOfficialTermSearchPrompt({
   return promptLines.join('\n')
 }
 
-function buildGeminiKnowledgeRequest(settings, prompt) {
+function buildGeminiKnowledgeRequest(settings, prompt, options = {}) {
   const generationConfig = applyGeminiThinkingConfig(
     {
       responseMimeType: 'application/json',
-      responseJsonSchema: officialTermKnowledgeResponseJsonSchema
+      responseJsonSchema: buildOfficialTermKnowledgeResponseJsonSchema(options)
     },
     settings
   )
@@ -637,10 +678,7 @@ function buildGeminiKnowledgeRequest(settings, prompt) {
 }
 
 function buildGeminiSearchRequest(settings, prompt, options = {}) {
-  let responseJsonSchema = officialTermSearchResponseJsonSchema
-  if (options.includeTermNoteRevision === false) {
-    responseJsonSchema = officialTermSearchTranslationOnlyResponseJsonSchema
-  }
+  const responseJsonSchema = buildOfficialTermSearchResponseJsonSchema(options)
   const generationConfig = applyGeminiThinkingConfig(
     {
       responseMimeType: 'application/json',
@@ -1384,14 +1422,18 @@ async function resolveOfficialTermTranslationsFromKnowledge({
   let requestBody = null
   let requestSummary = null
   if (settings.provider === 'gemini') {
-    requestBody = buildGeminiKnowledgeRequest(settings, prompt)
+    requestBody = buildGeminiKnowledgeRequest(settings, prompt, {
+      allowSameSourceTranslationWithNote
+    })
     requestSummary = summarizeGeminiNativeRequestBody(requestBody, requestUrl)
   } else {
     const requestConfig = buildJsonRequestBody(
       settings,
       buildKnowledgeMessages(prompt),
       {
-        responseJsonSchema: officialTermKnowledgeResponseJsonSchema
+        responseJsonSchema: buildOfficialTermKnowledgeResponseJsonSchema({
+          allowSameSourceTranslationWithNote
+        })
       }
     )
     requestBody = requestConfig.requestBody
@@ -1557,7 +1599,8 @@ async function requestOfficialTermSearchTranslations({
     repairAttemptNo
   })
   const requestBody = buildGeminiSearchRequest(settings, prompt, {
-    includeTermNoteRevision
+    includeTermNoteRevision,
+    allowSameSourceTranslationWithNote
   })
   const requestSummary = summarizeGeminiNativeRequestBody(
     requestBody,
@@ -1763,10 +1806,7 @@ async function searchOfficialTermTranslationsWithInternet({
         throwMissingSearchTranslationsError(finalMissingParts)
 
         const terms = Array.from(aggregateTermMap.values())
-        const rawResponse = buildSearchRawResponse(
-          primaryResult,
-          repairResults
-        )
+        const rawResponse = buildSearchRawResponse(primaryResult, repairResults)
         const responseSummary = buildSearchResponseSummary(
           primaryResult,
           repairResults
