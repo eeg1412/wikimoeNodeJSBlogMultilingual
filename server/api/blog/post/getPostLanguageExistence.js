@@ -42,6 +42,32 @@ async function getSourceArticleRecordList(sourceId) {
   )
 }
 
+function getSourcePostRepository() {
+  return global.$mongodDB.source.repositories.posts
+}
+
+async function getSourceArticleStatus(sourceId) {
+  const sourceArticle = await getSourcePostRepository().findOne(
+    {
+      _id: sourceId
+    },
+    'status',
+    {
+      lean: true
+    }
+  )
+
+  if (!sourceArticle) {
+    return null
+  }
+
+  if (typeof sourceArticle.status === 'undefined') {
+    return null
+  }
+
+  return sourceArticle.status
+}
+
 async function getEnabledLanguageCodeSet() {
   const enabledLanguageCodes =
     await languageSettingsService.getBlogEnabledLanguageCodes()
@@ -189,9 +215,15 @@ module.exports = async function (req, res) {
   const sourceObjectId = new mongoose.Types.ObjectId(sourceId)
 
   try {
-    const [enabledLanguageCodeSet, sourceArticleRecordList] = await Promise.all(
-      [getEnabledLanguageCodeSet(), getSourceArticleRecordList(sourceObjectId)]
-    )
+    const [
+      enabledLanguageCodeSet,
+      sourceArticleRecordList,
+      sourceLanguageStatus
+    ] = await Promise.all([
+      getEnabledLanguageCodeSet(),
+      getSourceArticleRecordList(sourceObjectId),
+      getSourceArticleStatus(sourceObjectId)
+    ])
     const { sourceSnapshotList, translationList } = splitSourceArticleRecords(
       sourceArticleRecordList
     )
@@ -279,6 +311,7 @@ module.exports = async function (req, res) {
 
     res.send({
       sourceLanguageCode,
+      sourceLanguageStatus,
       existenceMap,
       languagePostMap
     })
