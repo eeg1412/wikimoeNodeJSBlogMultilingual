@@ -1,22 +1,25 @@
-const deepSeekTranslationService = require('./deepSeekTranslationService')
+const textTranslationWorkflowService = require('./textTranslationWorkflowService')
 
 async function translatePostEntries(body = {}) {
-  return deepSeekTranslationService.translatePostEntries(body)
+  return textTranslationWorkflowService.translatePostEntries(body)
 }
 
 async function translatePostEntriesStream(body = {}, handlers = {}) {
-  return deepSeekTranslationService.translatePostEntriesStream(body, handlers)
+  return textTranslationWorkflowService.translatePostEntriesStream(
+    body,
+    handlers
+  )
 }
 
 async function translateContentEntriesStream(body = {}, handlers = {}) {
-  return deepSeekTranslationService.translateContentEntriesStream(
+  return textTranslationWorkflowService.translateContentEntriesStream(
     body,
     handlers
   )
 }
 
 async function organizeProperNounTerms(body = {}, handlers = {}) {
-  return deepSeekTranslationService.organizeProperNounTerms(body, handlers)
+  return textTranslationWorkflowService.organizeProperNounTerms(body, handlers)
 }
 
 module.exports = {

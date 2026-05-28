@@ -1,5 +1,3 @@
-const http = require('http')
-const https = require('https')
 const crypto = require('crypto')
 const mongoose = require('mongoose')
 const {
@@ -17,6 +15,7 @@ const internetSearchAiService = require('./internetSearchAiService')
 const properNounTranslationService = require('./properNounTranslationService')
 const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const translationOfficialTermGlossaryService = require('./translationOfficialTermGlossaryService')
 const translationPromptPolicyService = require('./translationPromptPolicyService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
 const {
@@ -40,6 +39,7 @@ const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
   'richTextDocument'
 ])
 const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
+const AI_TRANSLATION_ERROR_FIELD = 'aiTranslation'
 const MAX_AI_REQUEST_TEXT_LENGTH = 6000
 const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 3000
 const MIN_AI_REQUEST_TEXT_LENGTH = 600
@@ -75,6 +75,22 @@ function getProviderFieldBySettings(settings) {
 
 function getProviderCodeBySettings(settings) {
   return getProviderCode(settings) || 'deepseek'
+}
+
+function getConfiguredModelBySettings(settings = {}) {
+  const model = normalizeString(settings.model).trim()
+  if (model) {
+    return model
+  }
+  return normalizeString(settings.deepSeekModel).trim()
+}
+
+function getResponseModel(responseResult = {}, settings = {}) {
+  const responseModel = normalizeString(responseResult.model).trim()
+  if (responseModel) {
+    return responseModel
+  }
+  return getConfiguredModelBySettings(settings)
 }
 
 function createProviderApiError(settings, message, status = 502, extra = {}) {
@@ -985,27 +1001,30 @@ function splitLongText(text, maxLength) {
 }
 
 function getConfiguredMaxTokens(settings = {}) {
-  const maxTokens = Number(settings.deepSeekMaxTokens || 0)
+  const maxTokens = Number(settings.maxTokens || settings.deepSeekMaxTokens || 0)
   if (Number.isFinite(maxTokens) && maxTokens > 0) {
     return maxTokens
   }
   return 8192
 }
 
-function isDeepSeekThinkingEnabled(settings = {}) {
+function isAiThinkingModeEnabled(settings = {}) {
   return (
     getProviderCodeBySettings(settings) === 'deepseek' &&
-    normalizeString(settings.deepSeekThinkingType).trim() === 'enabled'
+    normalizeString(settings.thinkingType || settings.deepSeekThinkingType)
+      .trim() === 'enabled'
   )
 }
 
-function getDeepSeekThinkingTokenReserve(settings = {}) {
-  if (!isDeepSeekThinkingEnabled(settings)) {
+function getAiThinkingTokenReserve(settings = {}) {
+  if (!isAiThinkingModeEnabled(settings)) {
     return 0
   }
 
   const maxTokens = getConfiguredMaxTokens(settings)
-  const reasoningEffort = normalizeString(settings.deepSeekReasoningEffort)
+  const reasoningEffort = normalizeString(
+    settings.reasoningEffort || settings.deepSeekReasoningEffort
+  )
     .trim()
     .toLowerCase()
 
@@ -1031,7 +1050,7 @@ function getDeepSeekThinkingTokenReserve(settings = {}) {
 function getTranslationChunkTextLimit(settings = {}) {
   const maxTokens = getConfiguredMaxTokens(settings)
   const reservedTokens =
-    AI_RESPONSE_JSON_TOKEN_RESERVE + getDeepSeekThinkingTokenReserve(settings)
+    AI_RESPONSE_JSON_TOKEN_RESERVE + getAiThinkingTokenReserve(settings)
   const usableOutputTokens = Math.max(
     MIN_AI_REQUEST_TEXT_LENGTH,
     maxTokens - reservedTokens
@@ -1458,42 +1477,6 @@ function setOfficialTermGlossaryCache(taskCache, cacheKey, promise) {
   return promise
 }
 
-function buildOfficialTermGlossaryMarkdownMap({
-  extractedTerms,
-  targetLanguageCodes,
-  coverage,
-  includeMissingTerms = false
-}) {
-  const glossaryMarkdownMap = {}
-  let missingTerms = []
-  if (includeMissingTerms === true) {
-    missingTerms = coverage.missingTerms || []
-  }
-  targetLanguageCodes.forEach(languageCode => {
-    const markdown = properNounTranslationService.buildGlossaryMarkdown({
-      sourceTexts: extractedTerms,
-      targetLanguageCodes: [languageCode],
-      translations: coverage.translations,
-      missingTerms
-    })
-    if (markdown) {
-      glossaryMarkdownMap[languageCode] = markdown
-    }
-  })
-  return glossaryMarkdownMap
-}
-
-function getCurrentOfficialTermGlossaryMarkdown({
-  input,
-  glossaryMarkdownMap
-}) {
-  const currentLanguageCode = normalizeLanguageCode(input.targetLanguageCode)
-  if (currentLanguageCode && glossaryMarkdownMap[currentLanguageCode]) {
-    return glossaryMarkdownMap[currentLanguageCode]
-  }
-  return ''
-}
-
 function getEntryTermExtractionLabel(entry, index) {
   const labelList = [
     entry.groupLabel,
@@ -1865,8 +1848,8 @@ function getTermContextSummaryFromExtractionResult(resultData) {
   if (typeof resultData?.contextSummary !== 'string') {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 名词抽取结果缺少 contextSummary 字符串',
-      'deepSeek',
+      'AI 名词抽取结果缺少 contextSummary 字符串',
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -1882,8 +1865,8 @@ function normalizeTermImportance(value, index) {
   ) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.importance 必须是 1-100 的整数`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms.importance 必须是 1-100 的整数`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -1902,8 +1885,8 @@ function normalizeTermSearchKeywordList(item, index) {
   if (!Array.isArray(item.searchKeywords)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 必须是数组`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 必须是数组`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -1925,8 +1908,8 @@ function normalizeTermSearchKeywordList(item, index) {
   if (keywordList.length === 0) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 不能为空`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms.searchKeywords 不能为空`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -1979,8 +1962,8 @@ function normalizeExtractedTermItem(item, index) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms 项必须是对象`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms 项必须是对象`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -1994,8 +1977,8 @@ function normalizeExtractedTermItem(item, index) {
   if (!sourceText || !normalizedSourceText) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.sourceText 不能为空`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms.sourceText 不能为空`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -2006,8 +1989,8 @@ function normalizeExtractedTermItem(item, index) {
   if (!note) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果第 ${index + 1} 个 terms.note 不能为空`,
-      'deepSeek',
+      `AI 名词抽取结果第 ${index + 1} 个 terms.note 不能为空`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -2030,8 +2013,8 @@ function normalizeExtractedTermList(resultData) {
     const fieldNames = Object.keys(resultData || {})
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 名词抽取结果缺少 terms 数组，实际字段：${fieldNames.join('，')}`,
-      'deepSeek',
+      `AI 名词抽取结果缺少 terms 数组，实际字段：${fieldNames.join('，')}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -2121,7 +2104,7 @@ async function recordTermExtractionUsage({
   }
   await aiUsageService.recordAiUsageLog({
     provider: getProviderCodeBySettings(settings),
-    model: responseResult.model || settings.deepSeekModel || settings.model,
+    model: getResponseModel(responseResult, settings),
     operation: 'proper-noun.keyword.extract',
     status,
     requestId: responseResult.requestId || '',
@@ -2213,8 +2196,7 @@ async function extractTermsFromPackage({
           operation: 'proper-noun.keyword.extract',
           stage: 'ProperNounKeywordExtract',
           provider: getProviderCodeBySettings(settings),
-          model:
-            responseResult.model || settings.deepSeekModel || settings.model,
+          model: getResponseModel(responseResult, settings),
           requestId: responseResult.requestId || '',
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
@@ -2246,7 +2228,7 @@ async function extractTermsFromPackage({
       stepLabel: `专有名词抽取第 ${packageIndex}/${packageCount} 包`,
       sourceLanguageCode: input.sourceLanguageCode,
       targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
-      field: 'deepSeek',
+      field: getProviderFieldBySettings(settings),
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
     }
@@ -2694,11 +2676,15 @@ function buildExistingTermFilterMessages({
 }
 
 function getTermFilterMaxTokens(settings) {
-  const configuredMaxTokens = Number(settings.deepSeekMaxTokens || 0)
+  const configuredMaxTokens = Number(
+    settings.maxTokens || settings.deepSeekMaxTokens || 0
+  )
 
-  if (isDeepSeekThinkingEnabled(settings)) {
+  if (isAiThinkingModeEnabled(settings)) {
     let thinkingMaxTokens = MAX_TERM_FILTER_THINKING_TOKENS
-    const reasoningEffort = normalizeString(settings.deepSeekReasoningEffort)
+    const reasoningEffort = normalizeString(
+      settings.reasoningEffort || settings.deepSeekReasoningEffort
+    )
       .trim()
       .toLowerCase()
     if (reasoningEffort === 'max') {
@@ -2795,8 +2781,8 @@ function normalizeMatchedExistingTermLinks({
   if (!Array.isArray(resultData?.matchedTerms)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 专有名词候选消歧结果缺少 matchedTerms 数组',
-      'deepSeek',
+      'AI 专有名词候选消歧结果缺少 matchedTerms 数组',
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -2966,8 +2952,7 @@ async function filterExistingTermCandidatesWithAi({
       if (input.skipUsageLog !== true) {
         await aiUsageService.recordAiUsageLog({
           provider: getProviderCodeBySettings(settings),
-          model:
-            responseResult.model || settings.deepSeekModel || settings.model,
+          model: getResponseModel(responseResult, settings),
           operation: 'proper-noun.existing-term.filter',
           status: usageStatus,
           requestId: responseResult.requestId || '',
@@ -3032,8 +3017,7 @@ async function filterExistingTermCandidatesWithAi({
           operation: 'proper-noun.existing-term.filter',
           stage: 'ProperNounExistingTermFilter',
           provider: getProviderCodeBySettings(settings),
-          model:
-            responseResult.model || settings.deepSeekModel || settings.model,
+          model: getResponseModel(responseResult, settings),
           requestId: responseResult.requestId || '',
           sourceLanguageCode: input.sourceLanguageCode,
           targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
@@ -3062,7 +3046,7 @@ async function filterExistingTermCandidatesWithAi({
       stepLabel: '专有名词候选消歧',
       sourceLanguageCode: input.sourceLanguageCode,
       targetLanguageCode: getTermTargetLanguageCodeLogValue(input),
-      field: 'deepSeek',
+      field: getProviderFieldBySettings(settings),
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
     }
@@ -3341,11 +3325,12 @@ async function resolveOfficialTermGlossaryCacheData({
     missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
   }
 
-  const glossaryMarkdownMap = buildOfficialTermGlossaryMarkdownMap({
-    extractedTerms,
-    targetLanguageCodes,
-    coverage
-  })
+  const glossaryMarkdownMap =
+    translationOfficialTermGlossaryService.buildOfficialTermGlossaryMarkdownMap({
+      extractedTerms,
+      targetLanguageCodes,
+      coverage
+    })
   if (handlers.onStatus) {
     handlers.onStatus({
       message: `已整理 ${keywordArray.length} 个专有名词用于本次翻译`
@@ -3393,102 +3378,25 @@ async function resolveLinkedOfficialTermGlossaryCacheData({
   const sourcePostId = sourcePostProperNounRelationService.getSourcePostIdFromScopeKey(
     getOfficialTermGlossaryScopeKey(input)
   )
-  let linkedGlossaryCoverage = {
-    sourceTextItems: [],
-    candidateTerms: [],
-    translations: [],
-    matchedTermIds: [],
-    matchedTermLinks: [],
-    coverage: {
-      sourceTextItems: [],
-      languageCodes: targetLanguageCodes,
-      translations: [],
-      existingTerms: [],
-      missingTerms: [],
-      candidateTerms: []
-    }
-  }
-
-  if (sourcePostId) {
-    linkedGlossaryCoverage =
-      await sourcePostProperNounRelationService.getSourcePostLinkedTermGlossaryCoverage(
-        {
-          sourcePostId,
-          sourceLanguageCode: input.sourceLanguageCode,
-          targetLanguageCodes
-        }
-      )
-  }
-
-  const extractedTerms = properNounTranslationService.normalizeExtractedTermList(
-    linkedGlossaryCoverage.sourceTextItems
+  const glossaryData =
+    await translationOfficialTermGlossaryService.resolveLinkedOfficialTermGlossaryData(
+      {
+        sourcePostId,
+        sourceLanguageCode: input.sourceLanguageCode,
+        targetLanguageCodes,
+        handlers
+      }
+    )
+  const missingTermRequests = buildMissingTermRequests(
+    glossaryData.coverage.missingTerms
   )
-  const keywordArray = extractedTerms.map(term => term.sourceText)
-  const coverage = linkedGlossaryCoverage.coverage || {
-    translations: [],
-    existingTerms: [],
-    missingTerms: []
-  }
-  const missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
-  const glossaryMarkdownMap = buildOfficialTermGlossaryMarkdownMap({
-    extractedTerms,
-    targetLanguageCodes,
-    coverage,
-    includeMissingTerms: true
-  })
-  if (handlers.onStatus) {
-    if (!sourcePostId) {
-      handlers.onStatus({
-        message: '当前翻译没有源文章名词词库范围，跳过自动整理词库'
-      })
-    } else if (keywordArray.length === 0) {
-      handlers.onStatus({
-        message: '源文章没有已整理的专有名词，跳过自动整理词库'
-      })
-    } else {
-      handlers.onStatus({
-        message: `已复用源文章整理的 ${keywordArray.length} 个专有名词用于本次翻译`
-      })
-    }
-  }
-
   return {
-    aiJsonLogs: [],
-    extractedTerms,
-    keywordArray,
-    matchedTermIds: linkedGlossaryCoverage.matchedTermIds || [],
-    matchedTermLinks: linkedGlossaryCoverage.matchedTermLinks || [],
-    matchedCandidateTerms: linkedGlossaryCoverage.candidateTerms || [],
-    candidateCoverage: {
-      sourceTextItems: extractedTerms,
-      languageCodes: targetLanguageCodes,
-      candidateTerms: linkedGlossaryCoverage.candidateTerms || [],
-      translations: linkedGlossaryCoverage.translations || [],
-      articleLinkedCandidateCount:
-        linkedGlossaryCoverage.candidateTerms.length || 0
-    },
-    coverage,
-    savedTranslations: [],
-    officialTermContextSummary: '',
-    officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
-    officialTermStats: {
-      keywordCount: keywordArray.length,
-      candidateCount: linkedGlossaryCoverage.candidateTerms.length || 0,
-      articleLinkedCandidateCount:
-        linkedGlossaryCoverage.candidateTerms.length || 0,
-      matchedTermCount: linkedGlossaryCoverage.matchedTermIds.length || 0,
-      existingCount: coverage.existingTerms.length || 0,
-      missingCount: coverage.missingTerms.length || 0,
-      missingRequestCount: missingTermRequests.length,
-      aiKnowledgeBaseTermCount: 0,
-      aiKnowledgeBaseTranslationCount: 0,
-      internetSearchTermCount: 0,
-      internetSearchTranslationCount: 0,
-      internetSearchRequestedTermCount: 0,
-      internetSearchTargetLanguageCodes: [],
-      contextSummaryLength: 0,
-      glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
-    }
+    ...glossaryData,
+    officialTermStats:
+      translationOfficialTermGlossaryService.buildLinkedOfficialTermStats(
+        glossaryData,
+        missingTermRequests.length
+      )
   }
 }
 
@@ -3556,10 +3464,13 @@ async function prepareOfficialTermGlossaryForAiInput({
     targetLanguageCodes,
     taskCache
   })
-  const glossaryMarkdown = getCurrentOfficialTermGlossaryMarkdown({
-    input,
-    glossaryMarkdownMap: glossaryData.officialTermGlossaryMarkdownMap
-  })
+  const glossaryMarkdown =
+    translationOfficialTermGlossaryService.getCurrentOfficialTermGlossaryMarkdown(
+      {
+        input,
+        glossaryMarkdownMap: glossaryData.officialTermGlossaryMarkdownMap
+      }
+    )
 
   return {
     ...input,
@@ -3575,7 +3486,7 @@ async function prepareOfficialTermGlossaryForAiInput({
   }
 }
 
-function buildDeepSeekMessages(settings, input) {
+function buildTranslationMessages(settings, input) {
   const systemPromptList = [
     buildSystemPrompt(),
     buildOutputContractPrompt(),
@@ -3616,93 +3527,11 @@ function buildDeepSeekMessages(settings, input) {
 function buildTranslationRequestConfig(settings, input, stream = false) {
   return buildJsonRequestBody(
     settings,
-    buildDeepSeekMessages(settings, input),
+    buildTranslationMessages(settings, input),
     {
       stream
     }
   )
-}
-
-function buildDeepSeekRequestBody(settings, input) {
-  const requestBody = {
-    model: settings.deepSeekModel,
-    messages: buildDeepSeekMessages(settings, input),
-    response_format: { type: 'json_object' },
-    max_tokens: settings.deepSeekMaxTokens,
-    stream: false
-  }
-
-  if (settings.deepSeekThinkingType === 'enabled') {
-    requestBody.thinking = { type: 'enabled' }
-    requestBody.reasoning_effort = settings.deepSeekReasoningEffort
-    return requestBody
-  }
-
-  requestBody.thinking = { type: 'disabled' }
-  requestBody.temperature = settings.deepSeekTemperature
-  return requestBody
-}
-
-function buildDeepSeekStreamRequestBody(settings, input) {
-  const requestBody = buildDeepSeekRequestBody(settings, input)
-  requestBody.stream = true
-  requestBody.stream_options = { include_usage: true }
-  return requestBody
-}
-
-function buildChatCompletionUrl(settings) {
-  const baseUrl = String(settings.deepSeekBaseUrl || '').trim()
-  if (!baseUrl) {
-    throw new ApiError(
-      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      'DeepSeek Base URL 不能为空',
-      'deepSeekBaseUrl',
-      400
-    )
-  }
-
-  try {
-    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
-    if (/\/chat\/completions$/i.test(normalizedBaseUrl)) {
-      throw new ApiError(
-        ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-        'DeepSeek Base URL 只填写到服务地址，不要包含 /chat/completions',
-        'deepSeekBaseUrl',
-        400
-      )
-    }
-
-    const url = new URL(normalizedBaseUrl + '/chat/completions')
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      throw new Error('unsupported protocol')
-    }
-    return url
-  } catch (error) {
-    throw new ApiError(
-      ERROR_CODES.AI_PROVIDER_CONFIG_REQUIRED,
-      'DeepSeek Base URL 格式不正确',
-      'deepSeekBaseUrl',
-      400
-    )
-  }
-}
-
-function buildDeepSeekRequestHeaders(settings, requestText, accept = '') {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(requestText)
-  }
-  if (accept) {
-    headers.Accept = accept
-  }
-
-  if (settings.deepSeekUseCloudflareAiGateway === true) {
-    headers['cf-aig-authorization'] = `Bearer ${settings.deepSeekApiKey}`
-    return headers
-  }
-
-  headers.Authorization = `Bearer ${settings.deepSeekApiKey}`
-  return headers
 }
 
 function createTranslationCancelledError(reason, retryable = true) {
@@ -3728,432 +3557,6 @@ function throwIfCancellationRequested(options = {}) {
     options.cancellation?.reason,
     options.cancellation?.retryable !== false
   )
-}
-
-function bindCancellation(request, options = {}) {
-  const cancellation = options.cancellation
-  if (!cancellation || typeof cancellation.onCancel !== 'function') {
-    return () => {}
-  }
-
-  return cancellation.onCancel(reason => {
-    request.destroy(
-      createTranslationCancelledError(reason, cancellation.retryable !== false)
-    )
-  })
-}
-
-function createDeepSeekResponseInterruptedError(message, error = null) {
-  let detailMessage = message
-  if (error?.message) {
-    detailMessage = `${message}：${error.message}`
-  }
-  return new ApiError(
-    ERROR_CODES.AI_TRANSLATION_FAILED,
-    detailMessage,
-    'deepSeek',
-    502,
-    { retryable: true }
-  )
-}
-
-function requestJson(url, requestBody, settings, options = {}) {
-  throwIfCancellationRequested(options)
-  const requestText = JSON.stringify(requestBody)
-  let client = https
-  if (url.protocol === 'http:') {
-    client = http
-  }
-  const timeout = Number(settings.deepSeekTimeoutSeconds || 120) * 1000
-
-  return new Promise((resolve, reject) => {
-    let unbindCancellation = () => {}
-    const request = client.request(
-      url,
-      {
-        method: 'POST',
-        headers: buildDeepSeekRequestHeaders(settings, requestText),
-        timeout
-      },
-      response => {
-        const chunks = []
-        response.on('data', chunk => {
-          chunks.push(chunk)
-        })
-        response.on('end', () => {
-          unbindCancellation()
-          const responseText = Buffer.concat(chunks).toString('utf8')
-          let responseData = null
-          try {
-            responseData = JSON.parse(responseText)
-          } catch (error) {
-            resolve({
-              statusCode: response.statusCode,
-              data: {
-                rawText: responseText
-              },
-              parseError: true
-            })
-            return
-          }
-
-          resolve({
-            statusCode: response.statusCode,
-            data: responseData
-          })
-        })
-      }
-    )
-
-    unbindCancellation = bindCancellation(request, options)
-    if (isCancellationRequested(options)) {
-      request.destroy(
-        createTranslationCancelledError(
-          options.cancellation?.reason,
-          options.cancellation?.retryable !== false
-        )
-      )
-      return
-    }
-
-    request.on('timeout', () => {
-      request.destroy(
-        new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          'DeepSeek 请求超时',
-          'deepSeek',
-          504
-        )
-      )
-    })
-    request.on('error', error => {
-      unbindCancellation()
-      if (error && error.name === 'ApiError') {
-        reject(error)
-        return
-      }
-      reject(
-        new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          error?.message || 'DeepSeek 请求失败',
-          'deepSeek',
-          502
-        )
-      )
-    })
-    request.write(requestText)
-    request.end()
-  })
-}
-
-function parseSseBlock(block) {
-  const dataLines = block
-    .split(/\r?\n/)
-    .filter(line => line.startsWith('data:'))
-    .map(line => line.slice(5).trimStart())
-  if (dataLines.length === 0) {
-    return null
-  }
-  return dataLines.join('\n')
-}
-
-function findSseBoundary(buffer) {
-  const lfIndex = buffer.indexOf('\n\n')
-  const crlfIndex = buffer.indexOf('\r\n\r\n')
-  if (lfIndex < 0 && crlfIndex < 0) {
-    return { index: -1, length: 0 }
-  }
-  if (lfIndex < 0) {
-    return { index: crlfIndex, length: 4 }
-  }
-  if (crlfIndex < 0) {
-    return { index: lfIndex, length: 2 }
-  }
-  if (lfIndex < crlfIndex) {
-    return { index: lfIndex, length: 2 }
-  }
-  return { index: crlfIndex, length: 4 }
-}
-
-function requestStream(
-  url,
-  requestBody,
-  settings,
-  handlers = {},
-  options = {}
-) {
-  throwIfCancellationRequested(options)
-  const requestText = JSON.stringify(requestBody)
-  let client = https
-  if (url.protocol === 'http:') {
-    client = http
-  }
-  const timeout = Number(settings.deepSeekTimeoutSeconds || 300) * 1000
-
-  return new Promise((resolve, reject) => {
-    let unbindCancellation = () => {}
-    let settled = false
-    function resolveOnce(value) {
-      if (settled) {
-        return
-      }
-      settled = true
-      unbindCancellation()
-      resolve(value)
-    }
-    function rejectOnce(error) {
-      if (settled) {
-        return
-      }
-      settled = true
-      unbindCancellation()
-      reject(error)
-    }
-    const request = client.request(
-      url,
-      {
-        method: 'POST',
-        headers: buildDeepSeekRequestHeaders(
-          settings,
-          requestText,
-          'text/event-stream'
-        ),
-        timeout
-      },
-      response => {
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          collectNonStreamResponse(response, resolveOnce, rejectOnce)
-          return
-        }
-
-        if (handlers.onStatus) {
-          handlers.onStatus({ message: '已连接 AI 服务' })
-        }
-
-        const streamChunks = []
-        let buffer = ''
-        let content = ''
-        let reasoningContent = ''
-        let usage = {}
-        let responseId = ''
-        let responseModel = settings.deepSeekModel
-        let finishReason = ''
-        let responseEnded = false
-        let responseStreamError = null
-
-        function rejectStream(error) {
-          responseStreamError = error
-          rejectOnce(error)
-        }
-
-        function handleDataText(dataText) {
-          if (!dataText || dataText === '[DONE]') {
-            return
-          }
-
-          let chunkData = null
-          try {
-            chunkData = JSON.parse(dataText)
-          } catch (error) {
-            throw new ApiError(
-              ERROR_CODES.AI_TRANSLATION_FAILED,
-              'DeepSeek 流式返回解析失败',
-              'deepSeek',
-              502
-            )
-          }
-
-          streamChunks.push(chunkData)
-          if (chunkData.id && !responseId) {
-            responseId = chunkData.id
-          }
-          if (chunkData.model) {
-            responseModel = chunkData.model
-          }
-          if (chunkData.usage) {
-            usage = chunkData.usage
-          }
-
-          const choice = chunkData.choices?.[0] || {}
-          if (choice.finish_reason) {
-            finishReason = choice.finish_reason
-          }
-          const delta = choice.delta || {}
-          const contentDelta = delta.content || ''
-          const reasoningDelta = delta.reasoning_content || ''
-          if (contentDelta) {
-            content += contentDelta
-          }
-          if (reasoningDelta) {
-            reasoningContent += reasoningDelta
-          }
-          if (handlers.onChunk && (contentDelta || reasoningDelta)) {
-            handlers.onChunk({ contentDelta, reasoningDelta })
-          }
-        }
-
-        function consumeBuffer() {
-          let boundary = findSseBoundary(buffer)
-          while (boundary.index >= 0) {
-            const boundaryIndex = boundary.index
-            const block = buffer.slice(0, boundaryIndex)
-            buffer = buffer.slice(boundaryIndex + boundary.length)
-            const dataText = parseSseBlock(block)
-            handleDataText(dataText)
-            boundary = findSseBoundary(buffer)
-          }
-        }
-
-        response.on('data', chunk => {
-          try {
-            buffer += chunk.toString('utf8')
-            consumeBuffer()
-          } catch (error) {
-            responseStreamError = error
-            request.destroy(error)
-          }
-        })
-        response.on('aborted', () => {
-          rejectStream(
-            createDeepSeekResponseInterruptedError(
-              'DeepSeek 流式连接在完成前被上游中断'
-            )
-          )
-        })
-        response.on('error', error => {
-          rejectStream(
-            createDeepSeekResponseInterruptedError(
-              'DeepSeek 流式连接发生错误',
-              error
-            )
-          )
-        })
-        response.on('close', () => {
-          if (responseEnded) {
-            return
-          }
-          rejectStream(
-            responseStreamError ||
-              createDeepSeekResponseInterruptedError(
-                'DeepSeek 流式连接在完成前关闭'
-              )
-          )
-        })
-        response.on('end', () => {
-          try {
-            responseEnded = true
-            if (buffer.trim()) {
-              const dataText = parseSseBlock(buffer)
-              handleDataText(dataText)
-            }
-            resolveOnce({
-              statusCode: response.statusCode,
-              data: {
-                id: responseId,
-                model: responseModel,
-                object: 'chat.completion.stream',
-                choices: [
-                  {
-                    finish_reason: finishReason || null,
-                    message: {
-                      content,
-                      reasoning_content: reasoningContent
-                    }
-                  }
-                ],
-                usage,
-                streamChunks
-              }
-            })
-          } catch (error) {
-            rejectOnce(error)
-          }
-        })
-      }
-    )
-
-    unbindCancellation = bindCancellation(request, options)
-    if (isCancellationRequested(options)) {
-      request.destroy(
-        createTranslationCancelledError(
-          options.cancellation?.reason,
-          options.cancellation?.retryable !== false
-        )
-      )
-      return
-    }
-
-    request.on('timeout', () => {
-      request.destroy(
-        new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          'DeepSeek 请求超时',
-          'deepSeek',
-          504
-        )
-      )
-    })
-    request.on('error', error => {
-      if (error && error.name === 'ApiError') {
-        rejectOnce(error)
-        return
-      }
-      rejectOnce(
-        new ApiError(
-          ERROR_CODES.AI_TRANSLATION_FAILED,
-          error?.message || 'DeepSeek 请求失败',
-          'deepSeek',
-          502
-        )
-      )
-    })
-    request.write(requestText)
-    request.end()
-  })
-}
-
-function collectNonStreamResponse(response, resolve, reject) {
-  const chunks = []
-  let responseEnded = false
-  response.on('data', chunk => {
-    chunks.push(chunk)
-  })
-  response.on('end', () => {
-    responseEnded = true
-    const responseText = Buffer.concat(chunks).toString('utf8')
-    let responseData = null
-    try {
-      responseData = JSON.parse(responseText)
-    } catch (error) {
-      responseData = { rawText: responseText }
-    }
-    resolve({
-      statusCode: response.statusCode,
-      data: responseData
-    })
-  })
-  response.on('aborted', () => {
-    reject(
-      createDeepSeekResponseInterruptedError(
-        'DeepSeek 错误响应在读取完成前被上游中断'
-      )
-    )
-  })
-  response.on('error', error => {
-    reject(
-      createDeepSeekResponseInterruptedError('DeepSeek 错误响应读取失败', error)
-    )
-  })
-  response.on('close', () => {
-    if (responseEnded) {
-      return
-    }
-    reject(
-      createDeepSeekResponseInterruptedError(
-        'DeepSeek 错误响应在读取完成前关闭'
-      )
-    )
-  })
 }
 
 function getAiResponseContentPreview(content) {
@@ -4288,50 +3691,6 @@ function parseAiContentText(content, settings, finishReason = '') {
   throw createProviderApiError(settings, message, 502, extra)
 }
 
-function getDeepSeekFinishReason(responseData) {
-  return String(responseData?.choices?.[0]?.finish_reason || '').trim()
-}
-
-function parseAiContent(responseData) {
-  const content = responseData?.choices?.[0]?.message?.content
-  if (!content || typeof content !== 'string') {
-    throw new ApiError(
-      ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 没有返回可用内容',
-      'deepSeek',
-      502
-    )
-  }
-
-  const candidateList = buildJsonContentCandidates(content)
-  for (const candidate of candidateList) {
-    try {
-      return JSON.parse(candidate)
-    } catch (error) {
-      continue
-    }
-  }
-
-  const finishReason = getDeepSeekFinishReason(responseData)
-  const preview = getAiResponseContentPreview(content)
-  let message = 'DeepSeek 返回的 JSON 内容解析失败'
-  const extra = { finishReason }
-  if (finishReason === 'length') {
-    message = 'DeepSeek 返回内容被最大输出 Token 截断，JSON 内容解析失败'
-    extra.retryable = false
-  }
-  if (preview) {
-    message = `${message}，内容开头：${preview}`
-  }
-  throw new ApiError(
-    ERROR_CODES.AI_TRANSLATION_FAILED,
-    message,
-    'deepSeek',
-    502,
-    extra
-  )
-}
-
 function buildEntriesFromObjectMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return []
@@ -4354,8 +3713,8 @@ function normalizeResultEntries(resultData) {
   if (!resultData || typeof resultData !== 'object') {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      'DeepSeek 返回的 JSON 根节点必须是对象',
-      'deepSeek',
+      'AI 返回的 JSON 根节点必须是对象',
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -4390,8 +3749,8 @@ function normalizeResultEntries(resultData) {
   const actualKeys = Object.keys(resultData).join(', ')
   throw new ApiError(
     ERROR_CODES.AI_TRANSLATION_FAILED,
-    `DeepSeek 返回 JSON 缺少 entries，实际字段：${actualKeys || '无'}`,
-    'deepSeek',
+    `AI 返回 JSON 缺少 entries，实际字段：${actualKeys || '无'}`,
+    AI_TRANSLATION_ERROR_FIELD,
     502
   )
 }
@@ -4465,16 +3824,16 @@ function normalizeIndexedRichTextSegments(entry, value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 返回的富文本索引结果不合法：${entry.label || entry.id}`,
-      'deepSeek',
+      `AI 返回的富文本索引结果不合法：${entry.label || entry.id}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
   if (value.type !== RICH_TEXT_INDEXED_VALUE_TYPE) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 返回的富文本类型不合法：${entry.label || entry.id}`,
-      'deepSeek',
+      `AI 返回的富文本类型不合法：${entry.label || entry.id}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -4485,8 +3844,8 @@ function normalizeIndexedRichTextSegments(entry, value) {
   if (!Array.isArray(segmentList)) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 返回的富文本 segments 不合法：${entry.label || entry.id}`,
-      'deepSeek',
+      `AI 返回的富文本 segments 不合法：${entry.label || entry.id}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -4664,8 +4023,8 @@ function applyIndexedRichTextTranslation(entry, value) {
     if (!translatedSegmentMap.has(segment.index)) {
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
-        `DeepSeek 返回结果缺少富文本片段：${entry.label || entry.id} / ${segment.index}`,
-        'deepSeek',
+        `AI 返回结果缺少富文本片段：${entry.label || entry.id} / ${segment.index}`,
+        AI_TRANSLATION_ERROR_FIELD,
         502
       )
     }
@@ -4690,7 +4049,7 @@ function applyIndexedRichTextTranslation(entry, value) {
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
         `富文本片段回填失败：${entry.label || entry.id}`,
-        'deepSeek',
+        AI_TRANSLATION_ERROR_FIELD,
         502
       )
     }
@@ -4701,8 +4060,8 @@ function applyIndexedRichTextTranslation(entry, value) {
   } catch (error) {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 返回的富文本结构不合法：${entry.label || entry.id}`,
-      'deepSeek',
+      `AI 返回的富文本结构不合法：${entry.label || entry.id}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -4721,8 +4080,8 @@ function normalizeTranslatedValue(entry, value) {
     } catch (error) {
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
-        `DeepSeek 返回的富文本结构不合法：${entry.label || entry.id}`,
-        'deepSeek',
+        `AI 返回的富文本结构不合法：${entry.label || entry.id}`,
+        AI_TRANSLATION_ERROR_FIELD,
         502
       )
     }
@@ -4732,8 +4091,8 @@ function normalizeTranslatedValue(entry, value) {
   if (typeof value !== 'string') {
     throw new ApiError(
       ERROR_CODES.AI_TRANSLATION_FAILED,
-      `DeepSeek 返回的条目不是字符串：${entry.label || entry.id}`,
-      'deepSeek',
+      `AI 返回的条目不是字符串：${entry.label || entry.id}`,
+      AI_TRANSLATION_ERROR_FIELD,
       502
     )
   }
@@ -4773,8 +4132,8 @@ function buildTranslatedEntries(preparedInput, resultData) {
         .join(', ')
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
-        `DeepSeek 返回结果缺少条目：${entry.label || entry.id}，期望 i=${entry.aiIndex}，实际返回：${actualKeys || '无'}`,
-        'deepSeek',
+        `AI 返回结果缺少条目：${entry.label || entry.id}，期望 i=${entry.aiIndex}，实际返回：${actualKeys || '无'}`,
+        AI_TRANSLATION_ERROR_FIELD,
         502
       )
     }
@@ -4793,7 +4152,7 @@ function buildTranslatedEntries(preparedInput, resultData) {
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
         `AI 跳过内容缺少原因：${entry.label || entry.id}`,
-        'deepSeek',
+        AI_TRANSLATION_ERROR_FIELD,
         502
       )
     }
@@ -5113,7 +4472,7 @@ function buildAiUsageTextDigest(value) {
   return digest
 }
 
-function buildDeepSeekUsageMessageSummary(message) {
+function buildUsageMessageSummary(message) {
   if (!message || typeof message !== 'object' || Array.isArray(message)) {
     return null
   }
@@ -5134,7 +4493,7 @@ function buildDeepSeekUsageMessageSummary(message) {
   return summary
 }
 
-function buildDeepSeekUsageChoiceSummary(choice) {
+function buildUsageChoiceSummary(choice) {
   if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
     return null
   }
@@ -5147,14 +4506,14 @@ function buildDeepSeekUsageChoiceSummary(choice) {
   if (choice.finish_reason) {
     summary.finishReason = String(choice.finish_reason).trim()
   }
-  const messageSummary = buildDeepSeekUsageMessageSummary(choice.message)
+  const messageSummary = buildUsageMessageSummary(choice.message)
   if (messageSummary) {
     summary.message = messageSummary
   }
   return summary
 }
 
-function buildDeepSeekChunkUsageSummary(responseData, chunkIndex) {
+function buildChunkUsageSummary(responseData, chunkIndex) {
   const data = responseData || {}
   const summary = {
     index: chunkIndex,
@@ -5167,7 +4526,7 @@ function buildDeepSeekChunkUsageSummary(responseData, chunkIndex) {
     summary.choiceCount = data.choices.length
     summary.choices = data.choices
       .slice(0, 8)
-      .map(buildDeepSeekUsageChoiceSummary)
+      .map(buildUsageChoiceSummary)
       .filter(Boolean)
   }
   return summary
@@ -5187,7 +4546,7 @@ function buildAggregateUsageResponseData({
     usage: usage || {},
     chunkCount: chunkResponses.length,
     chunks: chunkResponses.map((item, index) => {
-      return buildDeepSeekChunkUsageSummary(item.data, index)
+      return buildChunkUsageSummary(item.data, index)
     })
   }
   if (error) {
@@ -5321,7 +4680,7 @@ async function translatePostEntries(body = {}) {
         operation: 'translation.post',
         stage: 'PostTranslation',
         provider: aiInput.aiProvider,
-        model: responseResult.model || settings.deepSeekModel || settings.model,
+        model: getResponseModel(responseResult, settings),
         requestId: responseResult.requestId || '',
         sourceLanguageCode: input.sourceLanguageCode,
         targetLanguageCode: input.targetLanguageCode,
@@ -5339,7 +4698,7 @@ async function translatePostEntries(body = {}) {
 
   return {
     payload,
-    model: responseResult.model || settings.deepSeekModel || settings.model,
+    model: getResponseModel(responseResult, settings),
     usage: responseResult.usage || null,
     requestId: responseResult.requestId || null,
     aiJsonLogs
@@ -5519,7 +4878,7 @@ async function translateStreamChunkWithRetry({
       stepLabel: `翻译第 ${chunkIndex + 1}/${chunkTotal} 批`,
       sourceLanguageCode: input.sourceLanguageCode,
       targetLanguageCode: input.targetLanguageCode,
-      field: 'deepSeek',
+      field: getProviderFieldBySettings(settings),
       onStatus: handlers?.onStatus,
       cancellation: handlers?.cancellation
     }
@@ -5553,11 +4912,8 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
     aiJsonLogs,
     resultMap,
     combinedUsage: {},
-    responseModel: settings.deepSeekModel,
+    responseModel: getConfiguredModelBySettings(settings),
     responseId: ''
-  }
-  if (settings.model) {
-    state.responseModel = settings.model
   }
 
   if (handlers.onStatus) {

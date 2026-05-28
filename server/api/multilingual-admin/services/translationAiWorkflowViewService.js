@@ -2045,7 +2045,7 @@ function getNormalizedTermSectionConfig(operation) {
     return {
       title: '名词搜索翻译 AI 确认的译名',
       description:
-        '这些译名由 Gemini 模型知识确认，会写入或参与本次翻译的专有名词词库。'
+        '这些译名由 本地知识库 模型知识确认，会写入或参与本次翻译的专有名词词库。'
     }
   }
   return {
@@ -2065,7 +2065,7 @@ function getTermSectionConfig(operation) {
     return {
       title: '名词搜索翻译 AI 联网确认的译名',
       description:
-        '这些译名由 Gemini 联网检索确认，会写入或参与本次翻译的专有名词词库。'
+        '这些译名由 联网检索AI 确认，会写入或参与本次翻译的专有名词词库。'
     }
   }
   return {

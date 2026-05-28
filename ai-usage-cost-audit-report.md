@@ -22,7 +22,7 @@
 
 - [server/api/multilingual-admin/services/textAiProviderRequestService.js](server/api/multilingual-admin/services/textAiProviderRequestService.js)：DeepSeek/Gemini 文本请求统一封装。
 - [server/api/multilingual-admin/services/geminiNativeApiService.js](server/api/multilingual-admin/services/geminiNativeApiService.js)：Gemini 原生 `generateContent` 请求封装。
-- [server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js)：正文翻译、专有名词抽取、候选词消歧。
+- [server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js)：正文翻译、专有名词抽取、候选词消歧。
 - [server/api/multilingual-admin/services/internetSearchAiService.js](server/api/multilingual-admin/services/internetSearchAiService.js)：官方译名知识库整理与 Gemini 联网搜索。
 - [server/api/multilingual-admin/services/coverImageTranslationService.js](server/api/multilingual-admin/services/coverImageTranslationService.js)：封面图识别和生成编排。
 - [server/api/multilingual-admin/services/geminiImageRecognitionService.js](server/api/multilingual-admin/services/geminiImageRecognitionService.js)：Gemini 图像识别。
@@ -43,7 +43,7 @@ admin 前端只调用后端接口，例如 [admin/src/api/module/multilingual.js
 
 ### 专有名词链路
 
-[deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js) 中：
+[textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js) 中：
 
 - `extractTermsFromPackage`：每个 package 一次 AI 请求，并包在 `runAiStepWithRetry` 里。
 - `filterExistingTermCandidatesWithAi`：候选词消歧一次 AI 请求，并包在 `runAiStepWithRetry` 里。
@@ -56,7 +56,7 @@ admin 前端只调用后端接口，例如 [admin/src/api/module/multilingual.js
 
 ### 正文翻译链路
 
-[deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js) 中：
+[textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js) 中：
 
 - 非流式 `translatePreparedEntries`：一次 AI JSON 请求。
 - 流式 `translatePreparedEntriesStream`：先拆 chunk，再每个 chunk 调用 `translateStreamChunkWithRetry`。
@@ -163,9 +163,9 @@ OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
 
 证据：
 
-- 判定函数：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L2492-L2494)
-- 分流函数：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L2496-L2535)
-- AI 消歧请求：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L2912-L3034)
+- 判定函数：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L2492-L2494)
+- 分流函数：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L2496-L2535)
+- AI 消歧请求：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L2912-L3034)
 
 当前 `splitExistingTermCandidatesForFilter` 看起来支持自动匹配，但 `shouldFilterExistingTermWithAi` 的实现是：只要候选数组非空就返回 true。结果是：只要有候选词，就进入 AI 消歧；`autoMatchedTermLinks` 对非空候选基本不会生效。
 
@@ -181,10 +181,10 @@ OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
 
 证据：
 
-- package 构建：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L1597-L1658)
-- 每包 AI 调用：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L2121-L2205)
-- 顺序循环：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L2235-L2292)
-- 当前文本切片常量：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L55-L58)
+- package 构建：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L1597-L1658)
+- 每包 AI 调用：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L2121-L2205)
+- 顺序循环：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L2235-L2292)
+- 当前文本切片常量：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L55-L58)
 
 当前逻辑会把标题、摘要、关联内容作为 overview package，把正文按 `MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH = 8000` 切成 articleContent package。每个 package 一次 AI 名词抽取，并携带 previousContextSummary。
 
@@ -205,9 +205,9 @@ OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
 
 证据：
 
-- 常量：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L43-L55)
-- chunk limit 计算：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L961-L1029)
-- chunk 翻译循环：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L5380-L5455)
+- 常量：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L43-L55)
+- chunk limit 计算：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L961-L1029)
+- chunk 翻译循环：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L5380-L5455)
 
 `getTranslationChunkTextLimit` 会参考 `deepSeekMaxTokens`、JSON 输出预留、DeepSeek Thinking 预留，最后再被 `MAX_AI_REQUEST_TEXT_LENGTH = 6000` 截断。
 
@@ -219,9 +219,9 @@ OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
 
 证据：
 
-- Thinking 预留：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L976-L1002)
-- chunk 文本上限：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L1005-L1019)
-- 富文本上下文：[server/api/multilingual-admin/services/deepSeekTranslationService.js](server/api/multilingual-admin/services/deepSeekTranslationService.js#L1035-L1061)
+- Thinking 预留：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L976-L1002)
+- chunk 文本上限：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L1005-L1019)
+- 富文本上下文：[server/api/multilingual-admin/services/textTranslationWorkflowService.js](server/api/multilingual-admin/services/textTranslationWorkflowService.js#L1035-L1061)
 
 DeepSeek Thinking 开启后会预留 35% token，`reasoningEffort=max` 预留 50%。这会降低单个 chunk 可承载的正文长度，间接增加 chunk 数。
 
