@@ -169,7 +169,15 @@ function getSourcePostDisplayTitle(post) {
 
 function shouldSearchOfficialTermTranslations(job) {
   const options = job?.request?.options || {}
+  if (options.autoOrganizeOfficialTermGlossary === false) {
+    return false
+  }
   return options.searchOfficialTermTranslations === true
+}
+
+function shouldAutoOrganizeOfficialTermGlossary(job) {
+  const options = job?.request?.options || {}
+  return options.autoOrganizeOfficialTermGlossary !== false
 }
 
 function shouldAllowAiKeepOriginalJudgement(job) {
@@ -594,6 +602,8 @@ async function executePostAiTranslation(job, context) {
         cacheKey: getJobId(job),
         cacheScopeKey: 'post',
         prompt: getPrompt(job),
+        autoOrganizeOfficialTermGlossary:
+          shouldAutoOrganizeOfficialTermGlossary(job),
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),
         entries
@@ -1145,6 +1155,8 @@ async function translateSourcePostForLanguage({
         cacheKey: getSharedTranslationCacheKey(job),
         cacheScopeKey: `sourcePostImport:${languageCode}`,
         prompt: getPrompt(job),
+        autoOrganizeOfficialTermGlossary:
+          shouldAutoOrganizeOfficialTermGlossary(job),
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),
         officialTermGlossaryTaskCache,

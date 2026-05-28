@@ -2045,6 +2045,41 @@ function getGlossarySourceLanguageText(sourceTextItem, translation) {
   return `${getLanguageText(sourceLanguageCode)}（${sourceLanguageCode}）`
 }
 
+function appendMissingGlossaryTranslations(translationMap, missingTerms = []) {
+  if (!Array.isArray(missingTerms)) {
+    return
+  }
+  missingTerms.forEach(missingTerm => {
+    const normalizedSourceText =
+      missingTerm?.normalizedSourceText ||
+      buildNormalizedSourceText(missingTerm?.sourceText || '')
+    if (!normalizedSourceText || !Array.isArray(missingTerm?.languageCodes)) {
+      return
+    }
+    missingTerm.languageCodes.forEach(languageCode => {
+      const normalizedLanguageCode = normalizeLanguageCode(languageCode)
+      if (!normalizedLanguageCode) {
+        return
+      }
+      const key = buildTranslationKey(
+        normalizedSourceText,
+        normalizedLanguageCode
+      )
+      if (translationMap.has(key)) {
+        return
+      }
+      translationMap.set(key, {
+        normalizedSourceText,
+        sourceText: missingTerm.sourceText || '',
+        sourceLanguageCode: missingTerm.sourceLanguageCode || '',
+        languageCode: normalizedLanguageCode,
+        translatedText: '未收录',
+        glossaryNote: missingTerm.glossaryNote || missingTerm.note || ''
+      })
+    })
+  })
+}
+
 function pushSingleLanguageGlossaryRow({
   lines,
   sourceTextItem,
@@ -2206,7 +2241,8 @@ function hasGlossaryTranslationRows(
 function buildGlossaryMarkdown({
   sourceTexts = [],
   targetLanguageCodes = [],
-  translations = []
+  translations = [],
+  missingTerms = []
 } = {}) {
   const sourceTextItems = normalizeExtractedTermList(sourceTexts)
   const languageCodes = normalizeLanguageCodeList(targetLanguageCodes)
@@ -2229,6 +2265,7 @@ function buildGlossaryMarkdown({
       translation
     )
   })
+  appendMissingGlossaryTranslations(translationMap, missingTerms)
   const includeSourceLanguageColumn = shouldIncludeGlossarySourceLanguageColumn(
     sourceTextItems,
     languageCodes,

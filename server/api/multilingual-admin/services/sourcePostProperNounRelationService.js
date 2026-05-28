@@ -996,6 +996,115 @@ async function getArticleLinkedCandidateTerms({
   }
 }
 
+function buildEmptyLinkedTermGlossaryCoverage(languageCodes = []) {
+  return {
+    sourceTextItems: [],
+    candidateTerms: [],
+    translations: [],
+    matchedTermIds: [],
+    matchedTermLinks: [],
+    coverage: {
+      sourceTextItems: [],
+      languageCodes,
+      translations: [],
+      existingTerms: [],
+      missingTerms: [],
+      candidateTerms: []
+    }
+  }
+}
+
+async function getSourcePostLinkedTermGlossaryCoverage({
+  sourcePostId,
+  sourceLanguageCode = '',
+  targetLanguageCodes = []
+} = {}) {
+  if (!mongoose.Types.ObjectId.isValid(sourcePostId)) {
+    return buildEmptyLinkedTermGlossaryCoverage()
+  }
+
+  const languageCodes = normalizeTargetLanguageCodes(targetLanguageCodes)
+  if (languageCodes.length === 0) {
+    return buildEmptyLinkedTermGlossaryCoverage(languageCodes)
+  }
+
+  const sourceId = new mongoose.Types.ObjectId(sourcePostId)
+  const normalizedSourceLanguageCode = normalizeOptionalLanguageCode(
+    sourceLanguageCode,
+    'sourceLanguageCode'
+  )
+  const RelationModel = getRelationModel()
+  const TermModel = getTermModel()
+  const TranslationModel = getTranslationModel()
+  const relations = await RelationModel.find(
+    buildRelationMatch({
+      sourceId,
+      sourceLanguageCode: normalizedSourceLanguageCode
+    })
+  )
+    .sort({ updatedAt: -1, _id: -1 })
+    .lean()
+  const termIdList = getUniqueTermIdList(
+    relations.map(relation => relation.termId)
+  )
+  if (termIdList.length === 0) {
+    return buildEmptyLinkedTermGlossaryCoverage(languageCodes)
+  }
+
+  const termList = await TermModel.find({
+    _id: { $in: termIdList },
+    enabled: true
+  }).lean()
+  const termMap = new Map()
+  termList.forEach(term => {
+    termMap.set(String(term._id), term)
+  })
+  const orderedTermList = termIdList
+    .map(termId => termMap.get(String(termId)))
+    .filter(Boolean)
+  if (orderedTermList.length === 0) {
+    return buildEmptyLinkedTermGlossaryCoverage(languageCodes)
+  }
+
+  const translationList = await TranslationModel.find({
+    termId: { $in: orderedTermList.map(term => term._id) },
+    languageCode: { $in: languageCodes },
+    enabled: true
+  }).lean()
+  const candidateTerms = orderedTermList.map(term => {
+    return {
+      ...term,
+      articleLinked: true
+    }
+  })
+  const sourceTextItems = orderedTermList.map(term => {
+    return {
+      sourceText: term.sourceText,
+      sourceLanguageCode:
+        term.sourceLanguageCode || normalizedSourceLanguageCode,
+      note: term.note || ''
+    }
+  })
+  const matchedTermIds = orderedTermList.map(term => String(term._id))
+  const coverage =
+    await properNounTranslationService.compareMatchedTermTranslationCoverage({
+      terms: sourceTextItems,
+      targetLanguageCodes: languageCodes,
+      candidateTerms,
+      translations: translationList,
+      matchedTermIds
+    })
+
+  return {
+    sourceTextItems: coverage.sourceTextItems,
+    candidateTerms,
+    translations: translationList,
+    matchedTermIds,
+    matchedTermLinks: [],
+    coverage
+  }
+}
+
 async function mergeArticleLinkedCandidateCoverage({
   scopeKey = '',
   sourceLanguageCode = '',
@@ -1039,6 +1148,7 @@ module.exports = {
   deleteRelationsByTermIds,
   getRelationCountMapBySourceIds,
   getSourcePostIdFromScopeKey,
+  getSourcePostLinkedTermGlossaryCoverage,
   getSourcePostSummary,
   getSourcePostTermList,
   getSourcePostTermsForInternetSearch,

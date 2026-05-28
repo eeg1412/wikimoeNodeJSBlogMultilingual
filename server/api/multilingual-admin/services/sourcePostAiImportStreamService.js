@@ -121,6 +121,17 @@ function normalizeEntriesForAiKeepOriginalJudgement(
   })
 }
 
+function shouldAutoOrganizeOfficialTermGlossary(body = {}) {
+  return body.autoOrganizeOfficialTermGlossary !== false
+}
+
+function shouldSearchOfficialTermTranslations(body = {}) {
+  if (!shouldAutoOrganizeOfficialTermGlossary(body)) {
+    return false
+  }
+  return body.searchOfficialTermTranslations === true
+}
+
 function parseInput(body = {}) {
   const sourceId = String(body.sourceId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(sourceId)) {
@@ -188,8 +199,9 @@ function parseInput(body = {}) {
     translateCoverImage,
     allowEmptyEntries,
     skipUsageLog: body.skipUsageLog === true,
-    searchOfficialTermTranslations:
-      body.searchOfficialTermTranslations === true,
+    autoOrganizeOfficialTermGlossary:
+      shouldAutoOrganizeOfficialTermGlossary(body),
+    searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(body),
     allowAiKeepOriginalJudgement
   }
 }
@@ -218,6 +230,8 @@ async function translateSourcePostAiImportEntriesStream(
         targetLanguageCodes: input.targetLanguageCodes,
         prompt: input.prompt,
         skipUsageLog: input.skipUsageLog,
+        autoOrganizeOfficialTermGlossary:
+          input.autoOrganizeOfficialTermGlossary,
         searchOfficialTermTranslations: input.searchOfficialTermTranslations,
         entries: input.entries
       },

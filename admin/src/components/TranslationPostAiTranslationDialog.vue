@@ -320,16 +320,19 @@
           </div>
 
           <el-form class="ai-translation-prompt-form" label-width="110px">
-            <el-form-item label="名词检索">
-              <el-switch
-                v-model="aiSearchOfficialTermTranslations"
-                :disabled="isOfficialTermSearchDisabled"
-                active-text="联网检索官方译名"
-              />
-              <AiFeatureUnavailableTip
-                :message="officialTermSearchUnavailableReason"
-              />
-            </el-form-item>
+            <OfficialTermGlossaryOptions
+              v-model:auto-organize="aiAutoOrganizeOfficialTermGlossary"
+              v-model:search-official-term-translations="
+                aiSearchOfficialTermTranslations
+              "
+              :disabled="isAiBusy"
+              :search-default-loading="officialTermSearchDefaultLoading"
+              :search-unavailable-reason="officialTermSearchUnavailableReason"
+              :source-proper-noun-term-count="sourceProperNounTermCount"
+              :source-proper-noun-term-count-loading="
+                sourceProperNounTermCountLoading
+              "
+            />
             <el-form-item label="此次提示词">
               <el-input
                 v-model="aiPrompt"
@@ -613,6 +616,7 @@ import { Document, VideoPlay } from '@element-plus/icons-vue'
 import store from '@/store'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
@@ -880,6 +884,7 @@ export default {
   components: {
     AiFeatureUnavailableTip,
     Document,
+    OfficialTermGlossaryOptions,
     TranslationEntryMeta,
     TranslationEntrySelectableGroups,
     VideoPlay
@@ -909,9 +914,12 @@ export default {
     const aiBaseMode = ref('source')
     const aiSourceLanguageCode = ref('')
     const aiTranslateCoverImage = ref(false)
+    const aiAutoOrganizeOfficialTermGlossary = ref(true)
     const aiSearchOfficialTermTranslations = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
+    const sourceProperNounTermCount = ref(0)
+    const sourceProperNounTermCountLoading = ref(false)
     const aiImportPreview = ref(null)
     const sourceReferenceEntries = ref([])
     const sourceReferencePost = ref(null)
@@ -924,6 +932,7 @@ export default {
     const creatingAllSkippedTranslations = ref(false)
     let aiEntryLoadRequestId = 0
     let officialTermSearchDefaultRequestId = 0
+    let sourceProperNounTermCountRequestId = 0
 
     const visible = computed({
       get() {
@@ -1017,21 +1026,19 @@ export default {
     const officialTermSearchUnavailableReason = computed(() => {
       return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
     })
-    const isOfficialTermSearchDisabled = computed(() => {
-      if (isAiBusy.value) {
-        return true
-      }
-      if (officialTermSearchDefaultLoading.value) {
-        return true
-      }
-      return Boolean(officialTermSearchUnavailableReason.value)
-    })
 
     function shouldSearchOfficialTermTranslations() {
+      if (!shouldAutoOrganizeOfficialTermGlossary()) {
+        return false
+      }
       if (officialTermSearchUnavailableReason.value) {
         return false
       }
       return aiSearchOfficialTermTranslations.value === true
+    }
+
+    function shouldAutoOrganizeOfficialTermGlossary() {
+      return aiAutoOrganizeOfficialTermGlossary.value === true
     }
 
     function shouldTranslateAiCoverImage() {
@@ -1054,6 +1061,10 @@ export default {
     }
 
     function enforceOfficialTermSearchAvailability() {
+      if (!shouldAutoOrganizeOfficialTermGlossary()) {
+        aiSearchOfficialTermTranslations.value = false
+        return
+      }
       if (!officialTermSearchUnavailableReason.value) {
         return
       }
@@ -1462,10 +1473,14 @@ export default {
       aiBaseMode.value = 'source'
       aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
       aiTranslateCoverImage.value = false
+      aiAutoOrganizeOfficialTermGlossary.value = true
       aiSearchOfficialTermTranslations.value = false
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
+      sourceProperNounTermCount.value = 0
+      sourceProperNounTermCountLoading.value = false
+      sourceProperNounTermCountRequestId += 1
       aiImportPreview.value = null
       sourceReferenceEntries.value = []
       sourceReferencePost.value = null
@@ -1489,9 +1504,16 @@ export default {
           return
         }
         aiSettingsAvailability.value = availability
-        aiSearchOfficialTermTranslations.value =
-          availability.internetSearchEnabled === true
+        if (
+          availability.internetSearchEnabled === true &&
+          shouldAutoOrganizeOfficialTermGlossary()
+        ) {
+          aiSearchOfficialTermTranslations.value = true
+        } else {
+          aiSearchOfficialTermTranslations.value = false
+        }
         enforceAiCoverImageTranslationAvailability()
+        enforceOfficialTermSearchAvailability()
       } catch (error) {
         if (requestId === officialTermSearchDefaultRequestId) {
           aiSettingsAvailability.value =
@@ -1505,6 +1527,76 @@ export default {
       } finally {
         if (requestId === officialTermSearchDefaultRequestId) {
           officialTermSearchDefaultLoading.value = false
+        }
+      }
+    }
+
+    function normalizeSourceProperNounTermCount(value) {
+      const count = Number(value || 0)
+      if (!Number.isFinite(count) || count < 0) {
+        return 0
+      }
+      return Math.floor(count)
+    }
+
+    function applyAutoOrganizeOfficialTermGlossaryDefault() {
+      if (sourceProperNounTermCount.value > 0) {
+        aiAutoOrganizeOfficialTermGlossary.value = false
+      } else {
+        aiAutoOrganizeOfficialTermGlossary.value = true
+      }
+      enforceOfficialTermSearchAvailability()
+    }
+
+    async function refreshSourceProperNounTermCount(options = {}) {
+      const requestId = sourceProperNounTermCountRequestId + 1
+      sourceProperNounTermCountRequestId = requestId
+      sourceProperNounTermCountLoading.value = true
+      const sourceId = String(form.sourceId || '').trim()
+      const sourceLanguageCode = String(
+        aiSourceLanguageCode.value || form.sourceLanguageCode || ''
+      ).trim()
+
+      try {
+        if (!sourceId || !sourceLanguageCode) {
+          sourceProperNounTermCount.value = 0
+          if (options.applyDefault === true) {
+            applyAutoOrganizeOfficialTermGlossaryDefault()
+          }
+          return
+        }
+
+        const response = await multilingualApi.getSourcePostProperNounTermList(
+          {
+            sourceId,
+            sourceLanguageCode,
+            page: 1,
+            limit: 1
+          },
+          true
+        )
+        if (requestId !== sourceProperNounTermCountRequestId) {
+          return
+        }
+        const responseData = response.data?.data || {}
+        sourceProperNounTermCount.value = normalizeSourceProperNounTermCount(
+          responseData.relationCount
+        )
+        if (options.applyDefault === true) {
+          applyAutoOrganizeOfficialTermGlossaryDefault()
+        }
+      } catch (error) {
+        if (requestId === sourceProperNounTermCountRequestId) {
+          sourceProperNounTermCount.value = 0
+          aiAutoOrganizeOfficialTermGlossary.value = true
+          enforceOfficialTermSearchAvailability()
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === sourceProperNounTermCountRequestId) {
+          sourceProperNounTermCountLoading.value = false
         }
       }
     }
@@ -1678,6 +1770,7 @@ export default {
 
     function handleAiSourceLanguageChange() {
       resetAiTranslationPreview()
+      refreshSourceProperNounTermCount({ applyDefault: true })
     }
 
     function selectAllAiEntries() {
@@ -1942,6 +2035,10 @@ export default {
         ElMessage.warning('请选择源语言')
         return
       }
+      if (sourceProperNounTermCountLoading.value) {
+        ElMessage.warning('正在检查源文章名词词库，请稍候')
+        return
+      }
 
       const selectedIdSet = new Set(selectedAiEntryIds.value)
       const selectedEntries = aiEntryList.value.filter(entry => {
@@ -1971,6 +2068,8 @@ export default {
               prompt: aiPrompt.value,
               entries: selectedEntries,
               translateCoverImage: shouldTranslateAiCoverImage(),
+              autoOrganizeOfficialTermGlossary:
+                shouldAutoOrganizeOfficialTermGlossary(),
               searchOfficialTermTranslations:
                 shouldSearchOfficialTermTranslations()
             })
@@ -2012,6 +2111,10 @@ export default {
         ElMessage.warning('当前文章缺少源文章身份，无法创建后台任务')
         return
       }
+      if (sourceProperNounTermCountLoading.value) {
+        ElMessage.warning('正在检查源文章名词词库，请稍候')
+        return
+      }
 
       const selectedIdSet = new Set(selectedAiEntryIds.value)
       const selectedEntries = aiEntryList.value.filter(entry => {
@@ -2038,6 +2141,8 @@ export default {
             baseMode: aiBaseMode.value,
             options: {
               translateCoverImage: shouldTranslateAiCoverImage(),
+              autoOrganizeOfficialTermGlossary:
+                shouldAutoOrganizeOfficialTermGlossary(),
               searchOfficialTermTranslations:
                 shouldSearchOfficialTermTranslations()
             },
@@ -2249,6 +2354,7 @@ export default {
       }
 
       applyOfficialTermSearchDefault()
+      refreshSourceProperNounTermCount({ applyDefault: true })
       refreshAiTranslationCandidates().then(() => {
         if (
           aiEntryList.value.length === 0 &&
@@ -2289,10 +2395,15 @@ export default {
       enforceOfficialTermSearchAvailability()
     })
 
+    watch(aiAutoOrganizeOfficialTermGlossary, () => {
+      enforceOfficialTermSearchAvailability()
+    })
+
     return {
       Document,
       VideoPlay,
       aiApplying,
+      aiAutoOrganizeOfficialTermGlossary,
       aiBaseMode,
       aiEntryGroups,
       aiEntryList,
@@ -2336,7 +2447,6 @@ export default {
       handleAiSourceLanguageChange,
       isAiCoverImageTranslationDisabled,
       isAiBusy,
-      isOfficialTermSearchDisabled,
       isImageAttachment,
       isSkippedTranslationCreating,
       isVideoAttachment,
@@ -2349,6 +2459,8 @@ export default {
       selectAllAiEntries,
       selectedAiEntryIds,
       sourceAiCoverImageList,
+      sourceProperNounTermCount,
+      sourceProperNounTermCountLoading,
       showAiCoverImageTranslationOption,
       stopAiTranslation,
       visible

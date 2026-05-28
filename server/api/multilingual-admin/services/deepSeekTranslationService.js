@@ -294,6 +294,17 @@ function validateInputEntry(entry, index) {
   }
 }
 
+function shouldAutoOrganizeOfficialTermGlossaryFromBody(body = {}) {
+  return body.autoOrganizeOfficialTermGlossary !== false
+}
+
+function shouldSearchOfficialTermTranslationsFromBody(body = {}) {
+  if (!shouldAutoOrganizeOfficialTermGlossaryFromBody(body)) {
+    return false
+  }
+  return body.searchOfficialTermTranslations === true
+}
+
 function parseInput(body = {}) {
   const postId = String(body.postId || '').trim()
   if (!mongoose.Types.ObjectId.isValid(postId)) {
@@ -362,7 +373,10 @@ function parseInput(body = {}) {
     officialTermGlossaryTaskCache: normalizeOfficialTermGlossaryTaskCache(
       body.officialTermGlossaryTaskCache
     ),
-    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
+    autoOrganizeOfficialTermGlossary:
+      shouldAutoOrganizeOfficialTermGlossaryFromBody(body),
+    searchOfficialTermTranslations:
+      shouldSearchOfficialTermTranslationsFromBody(body)
   }
 }
 
@@ -418,7 +432,10 @@ function parseGenericInput(body = {}) {
       body.officialTermGlossaryTaskCache
     ),
     skipUsageLog: body.skipUsageLog === true,
-    searchOfficialTermTranslations: body.searchOfficialTermTranslations === true
+    autoOrganizeOfficialTermGlossary:
+      shouldAutoOrganizeOfficialTermGlossaryFromBody(body),
+    searchOfficialTermTranslations:
+      shouldSearchOfficialTermTranslationsFromBody(body)
   }
 }
 
@@ -691,15 +708,24 @@ function buildOfficialTermGlossaryPrompt(input) {
   const contextSummary = normalizeTermContextSummary(
     input.officialTermContextSummary
   )
-  const promptLines = [
-    '以下名词数据库由本次选中的翻译内容抽取，并与站点专有名词翻译集合合并整理。',
+  const promptLines = []
+  if (input.autoOrganizeOfficialTermGlossary === false) {
+    promptLines.push(
+      '以下名词数据库来自源文章已整理并关联的专有名词词库。'
+    )
+  } else {
+    promptLines.push(
+      '以下名词数据库由本次选中的翻译内容抽取，并与站点专有名词翻译集合合并整理。'
+    )
+  }
+  promptLines.push(
     '这份名词数据库只包含当前目标语言，不包含其他语言的译名。',
     '翻译正文、标题、摘要、关联内容和递归关联文章时，必须优先使用表格中的译名。',
     '同一个原文名词在同一次请求的所有条目、富文本片段和关联字段中必须保持同一译法。',
     '如果表格包含“译名备注”，它说明对应译名的选择原因；当译名与原文完全一致时，译名备注表示该同名译名已经过专门整理确认，不要误判为缺失译名，也不要自行改成直译、音译、意译或本地化写法。',
     '译名为“未收录”的名词表示本次没有可验证译名；不得把它当成已确认的官方译名、权威译名或稳定通用译名处理。',
     '处理“未收录”名词时，必须保留原文表面形式；禁止凭空直译、音译、意译、本地化、改写或声称官方用法。'
-  ]
+  )
   if (input.searchOfficialTermTranslations === true) {
     promptLines.push(
       '本次已开启官方译名搜索；如果表格仍显示“未收录”，说明数据库和联网流程没有取得可验证译名，不能再用模型记忆补造译名。'
@@ -1402,6 +1428,8 @@ function buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes) {
     scopeKey: getOfficialTermGlossaryScopeKey(input),
     sourceLanguageCode: input.sourceLanguageCode || '',
     targetLanguageCodes: targetLanguageCodes.slice().sort(),
+    autoOrganizeOfficialTermGlossary:
+      input.autoOrganizeOfficialTermGlossary !== false,
     searchOfficialTermTranslations:
       input.searchOfficialTermTranslations === true,
     packages
@@ -1433,15 +1461,20 @@ function setOfficialTermGlossaryCache(taskCache, cacheKey, promise) {
 function buildOfficialTermGlossaryMarkdownMap({
   extractedTerms,
   targetLanguageCodes,
-  coverage
+  coverage,
+  includeMissingTerms = false
 }) {
   const glossaryMarkdownMap = {}
+  let missingTerms = []
+  if (includeMissingTerms === true) {
+    missingTerms = coverage.missingTerms || []
+  }
   targetLanguageCodes.forEach(languageCode => {
     const markdown = properNounTranslationService.buildGlossaryMarkdown({
       sourceTexts: extractedTerms,
       targetLanguageCodes: [languageCode],
       translations: coverage.translations,
-      missingTerms: coverage.missingTerms
+      missingTerms
     })
     if (markdown) {
       glossaryMarkdownMap[languageCode] = markdown
@@ -3352,14 +3385,119 @@ async function resolveOfficialTermGlossaryCacheData({
   }
 }
 
+async function resolveLinkedOfficialTermGlossaryCacheData({
+  input,
+  handlers,
+  targetLanguageCodes
+}) {
+  const sourcePostId = sourcePostProperNounRelationService.getSourcePostIdFromScopeKey(
+    getOfficialTermGlossaryScopeKey(input)
+  )
+  let linkedGlossaryCoverage = {
+    sourceTextItems: [],
+    candidateTerms: [],
+    translations: [],
+    matchedTermIds: [],
+    matchedTermLinks: [],
+    coverage: {
+      sourceTextItems: [],
+      languageCodes: targetLanguageCodes,
+      translations: [],
+      existingTerms: [],
+      missingTerms: [],
+      candidateTerms: []
+    }
+  }
+
+  if (sourcePostId) {
+    linkedGlossaryCoverage =
+      await sourcePostProperNounRelationService.getSourcePostLinkedTermGlossaryCoverage(
+        {
+          sourcePostId,
+          sourceLanguageCode: input.sourceLanguageCode,
+          targetLanguageCodes
+        }
+      )
+  }
+
+  const extractedTerms = properNounTranslationService.normalizeExtractedTermList(
+    linkedGlossaryCoverage.sourceTextItems
+  )
+  const keywordArray = extractedTerms.map(term => term.sourceText)
+  const coverage = linkedGlossaryCoverage.coverage || {
+    translations: [],
+    existingTerms: [],
+    missingTerms: []
+  }
+  const missingTermRequests = buildMissingTermRequests(coverage.missingTerms)
+  const glossaryMarkdownMap = buildOfficialTermGlossaryMarkdownMap({
+    extractedTerms,
+    targetLanguageCodes,
+    coverage,
+    includeMissingTerms: true
+  })
+  if (handlers.onStatus) {
+    if (!sourcePostId) {
+      handlers.onStatus({
+        message: '当前翻译没有源文章名词词库范围，跳过自动整理词库'
+      })
+    } else if (keywordArray.length === 0) {
+      handlers.onStatus({
+        message: '源文章没有已整理的专有名词，跳过自动整理词库'
+      })
+    } else {
+      handlers.onStatus({
+        message: `已复用源文章整理的 ${keywordArray.length} 个专有名词用于本次翻译`
+      })
+    }
+  }
+
+  return {
+    aiJsonLogs: [],
+    extractedTerms,
+    keywordArray,
+    matchedTermIds: linkedGlossaryCoverage.matchedTermIds || [],
+    matchedTermLinks: linkedGlossaryCoverage.matchedTermLinks || [],
+    matchedCandidateTerms: linkedGlossaryCoverage.candidateTerms || [],
+    candidateCoverage: {
+      sourceTextItems: extractedTerms,
+      languageCodes: targetLanguageCodes,
+      candidateTerms: linkedGlossaryCoverage.candidateTerms || [],
+      translations: linkedGlossaryCoverage.translations || [],
+      articleLinkedCandidateCount:
+        linkedGlossaryCoverage.candidateTerms.length || 0
+    },
+    coverage,
+    savedTranslations: [],
+    officialTermContextSummary: '',
+    officialTermGlossaryMarkdownMap: glossaryMarkdownMap,
+    officialTermStats: {
+      keywordCount: keywordArray.length,
+      candidateCount: linkedGlossaryCoverage.candidateTerms.length || 0,
+      articleLinkedCandidateCount:
+        linkedGlossaryCoverage.candidateTerms.length || 0,
+      matchedTermCount: linkedGlossaryCoverage.matchedTermIds.length || 0,
+      existingCount: coverage.existingTerms.length || 0,
+      missingCount: coverage.missingTerms.length || 0,
+      missingRequestCount: missingTermRequests.length,
+      aiKnowledgeBaseTermCount: 0,
+      aiKnowledgeBaseTranslationCount: 0,
+      internetSearchTermCount: 0,
+      internetSearchTranslationCount: 0,
+      internetSearchRequestedTermCount: 0,
+      internetSearchTargetLanguageCodes: [],
+      contextSummaryLength: 0,
+      glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
+    }
+  }
+}
+
 async function getOfficialTermGlossaryCacheData({
   input,
   handlers,
   targetLanguageCodes,
   taskCache
 }) {
-  const settings =
-    await aiSettingsService.getProperNounPreprocessRuntimeSettings()
   const cacheKey = buildOfficialTermGlossaryCacheKey(input, targetLanguageCodes)
   const cachedPromise = getOfficialTermGlossaryCache(taskCache, cacheKey)
   if (cachedPromise) {
@@ -3375,13 +3513,24 @@ async function getOfficialTermGlossaryCacheData({
     }
   }
 
-  const promise = resolveOfficialTermGlossaryCacheData({
-    input,
-    settings,
-    handlers,
-    targetLanguageCodes,
-    allowSameSourceTranslationWithNote: true
-  })
+  let promise = null
+  if (input.autoOrganizeOfficialTermGlossary === false) {
+    promise = resolveLinkedOfficialTermGlossaryCacheData({
+      input,
+      handlers,
+      targetLanguageCodes
+    })
+  } else {
+    const settings =
+      await aiSettingsService.getProperNounPreprocessRuntimeSettings()
+    promise = resolveOfficialTermGlossaryCacheData({
+      input,
+      settings,
+      handlers,
+      targetLanguageCodes,
+      allowSameSourceTranslationWithNote: true
+    })
+  }
   return await setOfficialTermGlossaryCache(taskCache, cacheKey, promise)
 }
 

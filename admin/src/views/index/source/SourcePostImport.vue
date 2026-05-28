@@ -378,16 +378,21 @@
                 placeholder="可补充本次翻译的语气、专有名词、保留词或风格要求"
               />
             </el-form-item>
-            <el-form-item label="名词检索">
-              <el-switch
-                v-model="aiForm.searchOfficialTermTranslations"
-                :disabled="isOfficialTermSearchDisabled"
-                active-text="联网检索官方译名"
-              />
-              <AiFeatureUnavailableTip
-                :message="officialTermSearchUnavailableReason"
-              />
-            </el-form-item>
+            <OfficialTermGlossaryOptions
+              v-model:auto-organize="
+                aiForm.autoOrganizeOfficialTermGlossary
+              "
+              v-model:search-official-term-translations="
+                aiForm.searchOfficialTermTranslations
+              "
+              :disabled="isAiImportBusy"
+              :search-default-loading="officialTermSearchDefaultLoading"
+              :search-unavailable-reason="officialTermSearchUnavailableReason"
+              :source-proper-noun-term-count="sourceProperNounTermCount"
+              :source-proper-noun-term-count-loading="
+                sourceProperNounTermCountLoading
+              "
+            />
             <el-form-item label="AI判译">
               <el-switch
                 v-model="aiForm.allowAiKeepOriginalJudgement"
@@ -1098,6 +1103,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
@@ -1167,6 +1173,7 @@ const AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS = [
 export default {
   components: {
     AiFeatureUnavailableTip,
+    OfficialTermGlossaryOptions,
     PostRelationSummary,
     SourcePostTermOrganizeDialog,
     TranslationEntrySelectableGroups,
@@ -1203,8 +1210,11 @@ export default {
     const aiStreamContentRef = ref(null)
     const officialTermSearchDefaultLoading = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
+    const sourceProperNounTermCount = ref(0)
+    const sourceProperNounTermCountLoading = ref(false)
     const rowActionLoadingMap = reactive({})
     let officialTermSearchDefaultRequestId = 0
+    let sourceProperNounTermCountRequestId = 0
     const languageForm = reactive({
       sourceLanguageCode: 'zh-CN'
     })
@@ -1213,6 +1223,7 @@ export default {
       targetLanguageCodes: [],
       prompt: '',
       coverImageTranslationMode: AI_COVER_IMAGE_TRANSLATION_MODE_NEVER,
+      autoOrganizeOfficialTermGlossary: true,
       searchOfficialTermTranslations: false,
       allowAiKeepOriginalJudgement: false,
       syncRelatedPosts: true
@@ -1439,12 +1450,16 @@ export default {
       aiStreamContent.value = ''
       aiForm.prompt = ''
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
+      aiForm.autoOrganizeOfficialTermGlossary = true
       aiForm.searchOfficialTermTranslations = false
       aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
+      sourceProperNounTermCount.value = 0
+      sourceProperNounTermCountLoading.value = false
+      sourceProperNounTermCountRequestId += 1
     }
 
     const applyOfficialTermSearchDefault = async () => {
@@ -1460,9 +1475,16 @@ export default {
           return
         }
         aiSettingsAvailability.value = availability
-        aiForm.searchOfficialTermTranslations =
-          availability.internetSearchEnabled === true
+        if (
+          availability.internetSearchEnabled === true &&
+          shouldAutoOrganizeOfficialTermGlossary()
+        ) {
+          aiForm.searchOfficialTermTranslations = true
+        } else {
+          aiForm.searchOfficialTermTranslations = false
+        }
         enforceAiCoverImageTranslationAvailability()
+        enforceOfficialTermSearchAvailability()
       } catch (error) {
         if (requestId === officialTermSearchDefaultRequestId) {
           aiSettingsAvailability.value =
@@ -1476,6 +1498,82 @@ export default {
       } finally {
         if (requestId === officialTermSearchDefaultRequestId) {
           officialTermSearchDefaultLoading.value = false
+        }
+      }
+    }
+
+    const normalizeSourceProperNounTermCount = value => {
+      const count = Number(value || 0)
+      if (!Number.isFinite(count) || count < 0) {
+        return 0
+      }
+      return Math.floor(count)
+    }
+
+    const getAiSourcePostId = () => {
+      const row = aiRow.value
+      if (!row) {
+        return ''
+      }
+      return String(row.sourceId || row._id || '').trim()
+    }
+
+    const applyAutoOrganizeOfficialTermGlossaryDefault = () => {
+      if (sourceProperNounTermCount.value > 0) {
+        aiForm.autoOrganizeOfficialTermGlossary = false
+      } else {
+        aiForm.autoOrganizeOfficialTermGlossary = true
+      }
+      enforceOfficialTermSearchAvailability()
+    }
+
+    const refreshSourceProperNounTermCount = async (options = {}) => {
+      const requestId = sourceProperNounTermCountRequestId + 1
+      sourceProperNounTermCountRequestId = requestId
+      sourceProperNounTermCountLoading.value = true
+      const sourceId = getAiSourcePostId()
+      const sourceLanguageCode = String(aiForm.sourceLanguageCode || '').trim()
+
+      try {
+        if (!sourceId || !sourceLanguageCode) {
+          sourceProperNounTermCount.value = 0
+          if (options.applyDefault === true) {
+            applyAutoOrganizeOfficialTermGlossaryDefault()
+          }
+          return
+        }
+
+        const response = await multilingualApi.getSourcePostProperNounTermList(
+          {
+            sourceId,
+            sourceLanguageCode,
+            page: 1,
+            limit: 1
+          },
+          true
+        )
+        if (requestId !== sourceProperNounTermCountRequestId) {
+          return
+        }
+        const responseData = response.data?.data || {}
+        sourceProperNounTermCount.value = normalizeSourceProperNounTermCount(
+          responseData.relationCount
+        )
+        if (options.applyDefault === true) {
+          applyAutoOrganizeOfficialTermGlossaryDefault()
+        }
+      } catch (error) {
+        if (requestId === sourceProperNounTermCountRequestId) {
+          sourceProperNounTermCount.value = 0
+          aiForm.autoOrganizeOfficialTermGlossary = true
+          enforceOfficialTermSearchAvailability()
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === sourceProperNounTermCountRequestId) {
+          sourceProperNounTermCountLoading.value = false
         }
       }
     }
@@ -1505,6 +1603,7 @@ export default {
       aiSettingsAvailability.value = createAiSettingsAvailability()
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
+      refreshSourceProperNounTermCount({ applyDefault: true })
     }
 
     const openOrganizeDialog = row => {
@@ -1521,6 +1620,7 @@ export default {
           aiForm.sourceLanguageCode
         )
       }
+      refreshSourceProperNounTermCount({ applyDefault: true })
     }
 
     const getAiActionKey = row => {
@@ -1958,16 +2058,6 @@ export default {
       return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
     })
 
-    const isOfficialTermSearchDisabled = computed(() => {
-      if (isAiImportBusy.value) {
-        return true
-      }
-      if (officialTermSearchDefaultLoading.value) {
-        return true
-      }
-      return Boolean(officialTermSearchUnavailableReason.value)
-    })
-
     const showAiCoverImageTranslationOption = computed(() => {
       if (!aiRow.value) {
         return false
@@ -2006,11 +2096,29 @@ export default {
       aiForm.coverImageTranslationMode = AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
     }
 
-    const shouldSearchOfficialTermTranslations = () => {
+    function shouldAutoOrganizeOfficialTermGlossary() {
+      return aiForm.autoOrganizeOfficialTermGlossary === true
+    }
+
+    function shouldSearchOfficialTermTranslations() {
+      if (!shouldAutoOrganizeOfficialTermGlossary()) {
+        return false
+      }
       if (officialTermSearchUnavailableReason.value) {
         return false
       }
       return aiForm.searchOfficialTermTranslations === true
+    }
+
+    function enforceOfficialTermSearchAvailability() {
+      if (!shouldAutoOrganizeOfficialTermGlossary()) {
+        aiForm.searchOfficialTermTranslations = false
+        return
+      }
+      if (!officialTermSearchUnavailableReason.value) {
+        return
+      }
+      aiForm.searchOfficialTermTranslations = false
     }
 
     const isAiCoverImageModeDisabled = mode => {
@@ -2707,6 +2815,8 @@ export default {
             targetLanguageCodes: aiForm.targetLanguageCodes,
             prompt: aiForm.prompt,
             skipUsageLog: true,
+            autoOrganizeOfficialTermGlossary:
+              shouldAutoOrganizeOfficialTermGlossary(),
             searchOfficialTermTranslations:
               shouldSearchOfficialTermTranslations(),
             allowAiKeepOriginalJudgement:
@@ -3032,6 +3142,10 @@ export default {
         ElMessage.warning('请至少选择一个目标语言')
         return
       }
+      if (sourceProperNounTermCountLoading.value) {
+        ElMessage.warning('正在检查源文章名词词库，请稍候')
+        return
+      }
 
       rememberAiImportOptions()
       aiRunning.value = true
@@ -3114,6 +3228,10 @@ export default {
         ElMessage.warning('请至少选择一个目标语言')
         return
       }
+      if (sourceProperNounTermCountLoading.value) {
+        ElMessage.warning('正在检查源文章名词词库，请稍候')
+        return
+      }
 
       rememberAiImportOptions()
       try {
@@ -3133,6 +3251,8 @@ export default {
             options: {
               coverImageTranslationMode: getAiCoverImageTranslationMode(),
               translateCoverImage: shouldTranslateAiCoverImage(),
+              autoOrganizeOfficialTermGlossary:
+                shouldAutoOrganizeOfficialTermGlossary(),
               searchOfficialTermTranslations:
                 shouldSearchOfficialTermTranslations(),
               allowAiKeepOriginalJudgement:
@@ -3390,11 +3510,12 @@ export default {
       }
     )
 
-    watch(officialTermSearchUnavailableReason, reason => {
-      if (!reason) {
-        return
-      }
-      aiForm.searchOfficialTermTranslations = false
+    watch(officialTermSearchUnavailableReason, () => {
+      enforceOfficialTermSearchAvailability()
+    })
+
+    watch(() => aiForm.autoOrganizeOfficialTermGlossary, () => {
+      enforceOfficialTermSearchAvailability()
     })
 
     watch(
@@ -3451,6 +3572,8 @@ export default {
       activeAiPreviewLanguageCode,
       aiCoverImageAutoModeUnavailableReason,
       aiCoverImageTranslationUnavailableReason,
+      sourceProperNounTermCount,
+      sourceProperNounTermCountLoading,
       selectedAiResultLanguageCodes,
       selectedAiResultEntryIdsMap,
       selectedAiRelatedEntryIdsMap,
@@ -3461,7 +3584,6 @@ export default {
       isAiCoverImageModeDisabled,
       isAiCoverImageTranslationDisabled,
       isAiImportBusy,
-      isOfficialTermSearchDisabled,
       officialTermSearchDefaultLoading,
       officialTermSearchUnavailableReason,
       rowActionLoadingMap,
