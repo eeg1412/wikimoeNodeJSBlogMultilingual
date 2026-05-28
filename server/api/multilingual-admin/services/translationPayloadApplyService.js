@@ -755,6 +755,31 @@ function buildEntryMap(entries = []) {
   return map
 }
 
+function isSelectablePreviewEntry(entry) {
+  if (!entry || !entry.entryKey || entry.aiSkipReason) {
+    return false
+  }
+
+  if (entry.entryType !== 'coverImageTranslation') {
+    return true
+  }
+
+  if (entry.status !== 'generated') {
+    return false
+  }
+
+  return Boolean(entry.artifactId && entry.generatedCoverUrl)
+}
+
+function getSelectableEntryKeys(job) {
+  const entries = Array.isArray(job.result?.previewEntries)
+    ? job.result.previewEntries
+    : []
+  return new Set(
+    entries.filter(isSelectablePreviewEntry).map(entry => entry.entryKey)
+  )
+}
+
 function buildSourcePostApplyPayload(job, selectedEntries) {
   const selectedEntryMap = new Map()
   selectedEntries.forEach(entry => {
@@ -856,10 +881,7 @@ async function updateSourcePostJobAdoption({
       buildSourcePostAdoptionEntry(entry, adminSnapshot, applyBatchId)
     )
   })
-  const selectableEntries = (job.result?.previewEntries || []).filter(entry => {
-    return entry && entry.entryKey && !entry.aiSkipReason
-  })
-  const totalEntryKeys = new Set(selectableEntries.map(entry => entry.entryKey))
+  const totalEntryKeys = getSelectableEntryKeys(job)
   const appliedEntryKeys = new Set(
     Array.from(existingEntryMap.values())
       .filter(
@@ -1311,12 +1333,7 @@ async function updateJobStatusAfterApply(jobId) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
-  const entries = Array.isArray(job.result?.previewEntries)
-    ? job.result.previewEntries.filter(
-        entry => entry && entry.entryKey && !entry.aiSkipReason
-      )
-    : []
-  const totalEntryKeys = new Set(entries.map(entry => entry.entryKey))
+  const totalEntryKeys = getSelectableEntryKeys(job)
   const appliedEntryKeys = new Set(
     (job.adoption?.entries || [])
       .filter(

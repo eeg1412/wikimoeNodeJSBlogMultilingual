@@ -4400,7 +4400,7 @@ function collectAiImportRelationSyncFields(entries = []) {
       return
     }
     const relationField = getAiImportEntryRelationField(entry)
-    if (!relationField || relationField === 'coverImages') {
+    if (!relationField) {
       return
     }
     if (!POST_RELATION_FIELDS.includes(relationField)) {
