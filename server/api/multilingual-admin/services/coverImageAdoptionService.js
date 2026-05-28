@@ -500,13 +500,26 @@ function buildArtifactAdoptedRecords({
   return filteredRecords
 }
 
+function isSelectablePreviewEntry(entry) {
+  if (!entry?.entryKey || entry.aiSkipReason) {
+    return false
+  }
+  if (entry.entryType !== COVER_IMAGE_ENTRY_TYPE) {
+    return true
+  }
+  if (entry.status !== 'generated') {
+    return false
+  }
+  return Boolean(entry.artifactId && entry.generatedCoverUrl)
+}
+
 function resolveNextJobStatus(job, adoptionEntries) {
   const previewEntries = Array.isArray(job?.result?.previewEntries)
     ? job.result.previewEntries
     : []
   const selectableEntryKeySet = new Set(
     previewEntries
-      .filter(entry => entry?.entryKey && !entry.aiSkipReason)
+      .filter(isSelectablePreviewEntry)
       .map(entry => String(entry.entryKey))
   )
   const appliedEntryCount = adoptionEntries.filter(entry => {
