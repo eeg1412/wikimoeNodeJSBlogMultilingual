@@ -4003,6 +4003,28 @@ function collectRelationSourceIdentityCandidates(entry = {}) {
   return candidateList
 }
 
+function buildMissingRelationRecordErrorMessage(entry = {}, languageCode) {
+  const collectionName = normalizeAiEntryIdentityValue(entry.collectionName)
+  const fieldName = normalizeAiEntryIdentityValue(entry.fieldName)
+  const relationField = normalizeAiEntryIdentityValue(entry.relationField)
+  const label = normalizeAiEntryIdentityValue(entry.label || entry.recordLabel)
+  const sourceIdentityCandidates =
+    collectRelationSourceIdentityCandidates(entry).join(', ') || '无'
+  const detailList = [
+    `目标语言：${languageCode}`,
+    `集合：${collectionName || '未知'}`,
+    `字段：${fieldName || '未知'}`,
+    `源内容身份：${sourceIdentityCandidates}`
+  ]
+  if (relationField) {
+    detailList.push(`关联字段：${relationField}`)
+  }
+  if (label) {
+    detailList.push(`条目：${label}`)
+  }
+  return `目标语言关联内容不存在，无法采纳该翻译条目。${detailList.join('；')}。通常是目标语言版本缺少从源快照复制出的关联记录，或任务结果里的关联身份已过期；请先同步/创建该关联内容后再采纳。`
+}
+
 function buildIdentityQueryCandidates(identityValues) {
   const candidates = []
   identityValues.forEach(value => {
@@ -4076,9 +4098,18 @@ async function findTranslationRecordBySourceEntry(entry, languageCode) {
   if (!record) {
     throw new ApiError(
       ERROR_CODES.CONTENT_NOT_FOUND,
-      '目标语言关联内容不存在',
+      buildMissingRelationRecordErrorMessage(entry, languageCode),
       'sourceId',
-      404
+      404,
+      {
+        languageCode,
+        collectionName: entry.collectionName || '',
+        relationField: entry.relationField || '',
+        fieldName: entry.fieldName || '',
+        sourceIdentityCandidates: sourceIdentityCandidates.map(item =>
+          String(item)
+        )
+      }
     )
   }
   return record
@@ -4368,7 +4399,7 @@ function collectAiImportRelationSyncFields(entries = []) {
     if (!entry || entry.scope !== 'relation') {
       return
     }
-    const relationField = String(entry.relationField || '').trim()
+    const relationField = getAiImportEntryRelationField(entry)
     if (!relationField || relationField === 'coverImages') {
       return
     }
@@ -4378,6 +4409,44 @@ function collectAiImportRelationSyncFields(entries = []) {
     fieldSet.add(relationField)
   })
   return Array.from(fieldSet)
+}
+
+function getAiImportEntryRelationField(entry = {}) {
+  const directField = String(entry.relationField || '').trim()
+  if (POST_RELATION_FIELDS.includes(directField)) {
+    return directField
+  }
+
+  const identityValues = [entry.id, entry.originalEntryKey, entry.entryKey]
+  for (const value of identityValues) {
+    const field = extractRelationFieldFromAiImportEntryIdentity(value)
+    if (field) {
+      return field
+    }
+  }
+
+  return ''
+}
+
+function extractRelationFieldFromAiImportEntryIdentity(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return ''
+  }
+
+  const relationMatch = text.match(/(?:^|:)relation\.([^.:\[]+)/)
+  if (relationMatch && POST_RELATION_FIELDS.includes(relationMatch[1])) {
+    return relationMatch[1]
+  }
+
+  const parts = text.split(':')
+  for (const part of parts) {
+    if (POST_RELATION_FIELDS.includes(part)) {
+      return part
+    }
+  }
+
+  return ''
 }
 
 async function syncTranslationPostRelationsForAiImport(

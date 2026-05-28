@@ -269,6 +269,28 @@ function collectRelationSourceIdentityCandidates(entry = {}) {
   return candidateList
 }
 
+function buildMissingRelationRecordErrorMessage(entry = {}, languageCode) {
+  const collectionName = normalizeIdentityValue(entry.collectionName)
+  const fieldName = normalizeIdentityValue(entry.fieldName)
+  const relationField = normalizeIdentityValue(entry.relationField)
+  const label = normalizeIdentityValue(entry.label || entry.recordLabel)
+  const sourceIdentityCandidates =
+    collectRelationSourceIdentityCandidates(entry).join(', ') || '无'
+  const detailList = [
+    `目标语言：${languageCode}`,
+    `集合：${collectionName || '未知'}`,
+    `字段：${fieldName || '未知'}`,
+    `源内容身份：${sourceIdentityCandidates}`
+  ]
+  if (relationField) {
+    detailList.push(`关联字段：${relationField}`)
+  }
+  if (label) {
+    detailList.push(`条目：${label}`)
+  }
+  return `目标语言关联内容不存在，无法采纳该翻译条目。${detailList.join('；')}。通常是目标语言版本缺少从源快照复制出的关联记录，或任务结果里的关联身份已过期；请先同步/创建该关联内容后再采纳。`
+}
+
 function buildIdentityQueryCandidates(identityValues) {
   const candidates = []
   identityValues.forEach(value => {
@@ -512,9 +534,18 @@ async function findTranslationRelationRecord(entry, languageCode) {
   if (!record) {
     throw new ApiError(
       ERROR_CODES.CONTENT_NOT_FOUND,
-      '目标语言关联内容不存在',
+      buildMissingRelationRecordErrorMessage(entry, languageCode),
       'sourceId',
-      404
+      404,
+      {
+        languageCode,
+        collectionName: entry.collectionName || '',
+        relationField: entry.relationField || '',
+        fieldName: entry.fieldName || '',
+        sourceIdentityCandidates: sourceIdentityCandidates.map(item =>
+          String(item)
+        )
+      }
     )
   }
 
