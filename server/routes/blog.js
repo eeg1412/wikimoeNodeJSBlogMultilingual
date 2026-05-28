@@ -113,6 +113,13 @@ const blogRouteSetting = [
     middleware: [],
     controller: require('../api/blog/post/getPostLanguageExistence')
   },
+  // getLanguageEnabledMap
+  {
+    path: '/language/enabled-map',
+    method: 'get',
+    middleware: [],
+    controller: require('../api/blog/language/getLanguageEnabledMap')
+  },
   // getBangumiList
   {
     path: '/bangumi/list',
