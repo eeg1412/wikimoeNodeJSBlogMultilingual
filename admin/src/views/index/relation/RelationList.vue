@@ -123,33 +123,74 @@
             />
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="300" fixed="right">
+        <ResponsiveTableColumn label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openDetail(row)">详情</el-button>
-            <el-button
-              v-if="!isSourceScope"
-              type="primary"
-              size="small"
-              @click="openEdit(row)"
+            <div
+              v-if="canUseAuthorActionGroup(row)"
+              class="relation-row-actions"
             >
-              编辑
-            </el-button>
-            <el-button
-              v-if="!isSourceScope"
-              type="success"
-              size="small"
-              @click="openTranslationDialog(row)"
-            >
-              AI 翻译
-            </el-button>
-            <el-button
-              v-if="!isSourceScope"
-              type="warning"
-              size="small"
-              @click="restoreSnapshot(row)"
-            >
-              同步快照
-            </el-button>
+              <el-button size="small" @click="openDetail(row)">
+                详情
+              </el-button>
+              <el-dropdown
+                trigger="click"
+                @command="command => handleAuthorAction(row, command)"
+              >
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="isAuthorActionLoading(row)"
+                >
+                  作者操作
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                    <el-dropdown-item command="translate">
+                      AI 翻译
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="syncPhoto"
+                      divided
+                      :disabled="isAuthorPhotoSyncing(row)"
+                    >
+                      同步头像
+                    </el-dropdown-item>
+                    <el-dropdown-item command="restoreSnapshot">
+                      同步快照
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+            <template v-else>
+              <el-button size="small" @click="openDetail(row)">详情</el-button>
+              <el-button
+                v-if="!isSourceScope"
+                type="primary"
+                size="small"
+                @click="openEdit(row)"
+              >
+                编辑
+              </el-button>
+              <el-button
+                v-if="!isSourceScope"
+                type="success"
+                size="small"
+                @click="openTranslationDialog(row)"
+              >
+                AI 翻译
+              </el-button>
+              <el-button
+                v-if="!isSourceScope"
+                type="warning"
+                size="small"
+                @click="restoreSnapshot(row)"
+              >
+                同步快照
+              </el-button>
+            </template>
           </template>
         </ResponsiveTableColumn>
       </ResponsiveTable>
@@ -368,6 +409,7 @@ export default {
     const submitting = ref(false)
     const aiSkipLoadingMap = reactive({})
     const editForm = reactive({})
+    const authorPhotoSyncLoadingMap = reactive({})
 
     const getDefaultParams = () => {
       const defaultParams = {
@@ -583,6 +625,33 @@ export default {
       return params.collectionName
     }
 
+    const canSyncAuthorPhoto = row => {
+      if (isSourceScope.value) {
+        return false
+      }
+      return getRowCollectionName(row) === 'users'
+    }
+
+    const canUseAuthorActionGroup = row => {
+      return canSyncAuthorPhoto(row)
+    }
+
+    const getAuthorPhotoSyncActionKey = row => {
+      if (!row || !row._id) {
+        return ''
+      }
+      return `authorPhoto:${row._id}`
+    }
+
+    const isAuthorPhotoSyncing = row => {
+      const actionKey = getAuthorPhotoSyncActionKey(row)
+      return Boolean(actionKey && authorPhotoSyncLoadingMap[actionKey])
+    }
+
+    const isAuthorActionLoading = row => {
+      return isAuthorPhotoSyncing(row)
+    }
+
     const getAiSkipActionKey = row => {
       if (!row || !row._id) {
         return ''
@@ -657,6 +726,68 @@ export default {
           ...record,
           collectionName: getRowCollectionName(currentRow.value)
         }
+      }
+    }
+
+    const syncAuthorPhoto = row => {
+      if (!row || !canSyncAuthorPhoto(row) || isAuthorPhotoSyncing(row)) {
+        return
+      }
+
+      const actionKey = getAuthorPhotoSyncActionKey(row)
+      if (!actionKey) {
+        return
+      }
+
+      ElMessageBox.confirm(
+        '确认从源作者快照同步头像？该操作只会更新 photo 字段。',
+        '同步头像',
+        {
+          type: 'warning',
+          confirmButtonText: '同步头像',
+          cancelButtonText: '取消'
+        }
+      )
+        .then(() => {
+          authorPhotoSyncLoadingMap[actionKey] = true
+          return multilingualApi.syncTranslationAuthorPhoto(
+            {
+              id: row._id,
+              languageCode: row.languageCode
+            },
+            true
+          )
+        })
+        .then(response => {
+          updateRelationListRow(response.data.data)
+          getRelationList(false)
+          ElMessage.success('作者头像已同步')
+        })
+        .catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+        .finally(() => {
+          authorPhotoSyncLoadingMap[actionKey] = false
+        })
+    }
+
+    const handleAuthorAction = (row, command) => {
+      if (command === 'edit') {
+        openEdit(row)
+        return
+      }
+      if (command === 'translate') {
+        openTranslationDialog(row)
+        return
+      }
+      if (command === 'syncPhoto') {
+        syncAuthorPhoto(row)
+        return
+      }
+      if (command === 'restoreSnapshot') {
+        restoreSnapshot(row)
       }
     }
 
@@ -903,8 +1034,13 @@ export default {
       getLanguageText,
       getRelationDisplayName,
       isAiSkipUpdating,
+      canSyncAuthorPhoto,
+      canUseAuthorActionGroup,
+      isAuthorActionLoading,
+      isAuthorPhotoSyncing,
       getRelationList,
       handlePageChange,
+      handleAuthorAction,
       handleParentRelationUpdated,
       toggleAiSkip,
       confirmAiTranslation,
@@ -913,6 +1049,7 @@ export default {
       openTranslationDialog,
       openDetail,
       openEdit,
+      syncAuthorPhoto,
       restoreSnapshot,
       submitUpdate
     }
@@ -934,6 +1071,17 @@ export default {
 .relation-title {
   font-weight: 600;
   word-break: break-word;
+}
+
+.relation-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.relation-row-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .relation-subtitle {

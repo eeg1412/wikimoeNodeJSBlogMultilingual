@@ -399,6 +399,12 @@ export default function (api) {
         noLoading
       })
     },
+    syncTranslationAuthorPhoto(data, noLoading = false) {
+      return api.post('/translation/relation/sync-author-photo', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     restoreTranslationRelationSnapshot(data) {
       return api.post('/translation/relation/restore-snapshot', data, {
         shouldAdminJWT: true
