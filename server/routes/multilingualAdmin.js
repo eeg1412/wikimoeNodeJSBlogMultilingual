@@ -520,6 +520,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/relation/getList')
   },
   {
+    path: '/source/relation/sync-author-media',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/relation/syncAuthorMedia')
+  },
+  {
     path: '/translation/post/create',
     method: 'post',
     middleware: [checkAuth],
@@ -692,12 +698,6 @@ const multilingualAdminRouteSetting = [
     method: 'put',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/relation/update')
-  },
-  {
-    path: '/translation/relation/sync-author-photo',
-    method: 'post',
-    middleware: [checkAuth],
-    controller: require('../api/multilingual-admin/translation/relation/syncAuthorPhoto')
   },
   {
     path: '/translation/relation/restore-snapshot',

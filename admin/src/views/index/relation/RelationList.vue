@@ -81,6 +81,48 @@
             </div>
           </template>
         </ResponsiveTableColumn>
+        <ResponsiveTableColumn
+          v-if="showAuthorMediaColumn"
+          label="头像"
+          width="82"
+        >
+          <template #default="{ row }">
+            <div class="relation-media-cell">
+              <el-image
+                v-if="getAuthorPhotoUrl(row)"
+                :src="getAuthorPhotoUrl(row)"
+                :preview-src-list="[getAuthorPhotoUrl(row)]"
+                preview-teleported
+                fit="cover"
+                class="relation-media-avatar"
+              />
+              <div v-else class="relation-media-empty relation-media-avatar">
+                -
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn
+          v-if="showAuthorMediaColumn"
+          label="封面"
+          width="126"
+        >
+          <template #default="{ row }">
+            <div class="relation-media-cell">
+              <el-image
+                v-if="getAuthorCoverUrl(row)"
+                :src="getAuthorCoverUrl(row)"
+                :preview-src-list="[getAuthorCoverUrl(row)]"
+                preview-teleported
+                fit="cover"
+                class="relation-media-cover"
+              />
+              <div v-else class="relation-media-empty relation-media-cover">
+                -
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
         <ResponsiveTableColumn label="语言" width="150">
           <template #default="{ row }">
             {{ getLanguageText(row.languageCode) }}
@@ -136,11 +178,7 @@
                 trigger="click"
                 @command="command => handleAuthorAction(row, command)"
               >
-                <el-button
-                  type="primary"
-                  size="small"
-                  :loading="isAuthorActionLoading(row)"
-                >
+                <el-button type="primary" size="small">
                   作者操作
                   <el-icon class="el-icon--right"><ArrowDown /></el-icon>
                 </el-button>
@@ -149,13 +187,6 @@
                     <el-dropdown-item command="edit">编辑</el-dropdown-item>
                     <el-dropdown-item command="translate">
                       AI 翻译
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      command="syncPhoto"
-                      divided
-                      :disabled="isAuthorPhotoSyncing(row)"
-                    >
-                      同步头像
                     </el-dropdown-item>
                     <el-dropdown-item command="restoreSnapshot">
                       同步快照
@@ -189,6 +220,15 @@
                 @click="restoreSnapshot(row)"
               >
                 同步快照
+              </el-button>
+              <el-button
+                v-if="canSyncSourceAuthorMedia(row)"
+                type="warning"
+                size="small"
+                :loading="isSourceAuthorMediaSyncing(row)"
+                @click="syncSourceAuthorMedia(row)"
+              >
+                同步头像封面
               </el-button>
             </template>
           </template>
@@ -409,7 +449,7 @@ export default {
     const submitting = ref(false)
     const aiSkipLoadingMap = reactive({})
     const editForm = reactive({})
-    const authorPhotoSyncLoadingMap = reactive({})
+    const sourceAuthorMediaSyncLoadingMap = reactive({})
 
     const getDefaultParams = () => {
       const defaultParams = {
@@ -456,6 +496,12 @@ export default {
       })
     })
 
+    const showAuthorMediaColumn = computed(() => {
+      const collectionName =
+        currentCollectionName.value || params.collectionName
+      return collectionName === 'users'
+    })
+
     const breadcrumbGroup = computed(() => {
       if (isSourceScope.value) {
         return '源数据管理'
@@ -479,6 +525,69 @@ export default {
         return item.label
       }
       return collectionName || '-'
+    }
+
+    const isAbsoluteMediaUrl = value => {
+      if (!value) {
+        return false
+      }
+
+      return /^(https?:)?\/\//.test(value) || value.startsWith('/')
+    }
+
+    const normalizeMediaUrl = value => {
+      if (!value) {
+        return ''
+      }
+
+      if (isAbsoluteMediaUrl(value)) {
+        return value
+      }
+
+      return value
+    }
+
+    const appendMediaTimestamp = (url, record) => {
+      if (!url) {
+        return ''
+      }
+
+      const stampSource = record?.updatedAt || record?.sourceUpdatedAt
+      if (!stampSource) {
+        return url
+      }
+
+      const stamp = new Date(stampSource).getTime()
+      if (!stamp) {
+        return url
+      }
+
+      const separator = url.includes('?') ? '&' : '?'
+      return `${url}${separator}s=${stamp}`
+    }
+
+    const getAuthorPhotoUrl = row => {
+      return appendMediaTimestamp(normalizeMediaUrl(row?.photo), row)
+    }
+
+    const getAuthorCoverUrl = row => {
+      const cover = row?.cover
+      const previewCandidateList = [
+        cover?.localThumbnailPath,
+        cover?.localFilepath,
+        cover?.thumfor,
+        cover?.filepath,
+        cover?.remoteFilepath
+      ]
+
+      for (const item of previewCandidateList) {
+        const previewUrl = normalizeMediaUrl(item)
+        if (previewUrl) {
+          return appendMediaTimestamp(previewUrl, cover)
+        }
+      }
+
+      return ''
     }
 
     const currentEditFields = computed(() => {
@@ -625,31 +734,30 @@ export default {
       return params.collectionName
     }
 
-    const canSyncAuthorPhoto = row => {
-      if (isSourceScope.value) {
+    const canSyncSourceAuthorMedia = row => {
+      if (!isSourceScope.value) {
         return false
       }
       return getRowCollectionName(row) === 'users'
     }
 
     const canUseAuthorActionGroup = row => {
-      return canSyncAuthorPhoto(row)
+      if (isSourceScope.value) {
+        return false
+      }
+      return getRowCollectionName(row) === 'users'
     }
 
-    const getAuthorPhotoSyncActionKey = row => {
+    const getSourceAuthorMediaSyncActionKey = row => {
       if (!row || !row._id) {
         return ''
       }
-      return `authorPhoto:${row._id}`
+      return `sourceAuthorMedia:${row._id}`
     }
 
-    const isAuthorPhotoSyncing = row => {
-      const actionKey = getAuthorPhotoSyncActionKey(row)
-      return Boolean(actionKey && authorPhotoSyncLoadingMap[actionKey])
-    }
-
-    const isAuthorActionLoading = row => {
-      return isAuthorPhotoSyncing(row)
+    const isSourceAuthorMediaSyncing = row => {
+      const actionKey = getSourceAuthorMediaSyncActionKey(row)
+      return Boolean(actionKey && sourceAuthorMediaSyncLoadingMap[actionKey])
     }
 
     const getAiSkipActionKey = row => {
@@ -729,39 +837,47 @@ export default {
       }
     }
 
-    const syncAuthorPhoto = row => {
-      if (!row || !canSyncAuthorPhoto(row) || isAuthorPhotoSyncing(row)) {
+    const syncSourceAuthorMedia = row => {
+      if (
+        !row ||
+        !canSyncSourceAuthorMedia(row) ||
+        isSourceAuthorMediaSyncing(row)
+      ) {
         return
       }
 
-      const actionKey = getAuthorPhotoSyncActionKey(row)
+      const actionKey = getSourceAuthorMediaSyncActionKey(row)
       if (!actionKey) {
         return
       }
 
       ElMessageBox.confirm(
-        '确认从源作者快照同步头像？该操作只会更新 photo 字段。',
-        '同步头像',
+        '确认使用当前源作者快照，同步全部多语言作者的 photo 和 cover？该操作只会覆盖头像和封面，不会改动昵称、邮箱与说明。',
+        '同步多语言作者头像封面',
         {
           type: 'warning',
-          confirmButtonText: '同步头像',
+          confirmButtonText: '同步头像封面',
           cancelButtonText: '取消'
         }
       )
         .then(() => {
-          authorPhotoSyncLoadingMap[actionKey] = true
-          return multilingualApi.syncTranslationAuthorPhoto(
+          sourceAuthorMediaSyncLoadingMap[actionKey] = true
+          return multilingualApi.syncSourceAuthorMedia(
             {
-              id: row._id,
-              languageCode: row.languageCode
+              id: row._id
             },
             true
           )
         })
         .then(response => {
-          updateRelationListRow(response.data.data)
+          const result = response.data.data || {}
+          const updatedCount = Number(result.updatedCount || 0)
           getRelationList(false)
-          ElMessage.success('作者头像已同步')
+          if (updatedCount > 0) {
+            ElMessage.success(`已同步 ${updatedCount} 个多语言作者的头像和封面`)
+            return
+          }
+          ElMessage.warning('当前源作者还没有可同步的多语言作者')
         })
         .catch(error => {
           if (error !== 'cancel' && error !== 'close') {
@@ -769,7 +885,7 @@ export default {
           }
         })
         .finally(() => {
-          authorPhotoSyncLoadingMap[actionKey] = false
+          sourceAuthorMediaSyncLoadingMap[actionKey] = false
         })
     }
 
@@ -780,10 +896,6 @@ export default {
       }
       if (command === 'translate') {
         openTranslationDialog(row)
-        return
-      }
-      if (command === 'syncPhoto') {
-        syncAuthorPhoto(row)
         return
       }
       if (command === 'restoreSnapshot') {
@@ -1030,14 +1142,16 @@ export default {
       breadcrumbGroup,
       pageTitle,
       getCollectionText,
+      showAuthorMediaColumn,
+      getAuthorPhotoUrl,
+      getAuthorCoverUrl,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       getLanguageText,
       getRelationDisplayName,
       isAiSkipUpdating,
-      canSyncAuthorPhoto,
+      canSyncSourceAuthorMedia,
       canUseAuthorActionGroup,
-      isAuthorActionLoading,
-      isAuthorPhotoSyncing,
+      isSourceAuthorMediaSyncing,
       getRelationList,
       handlePageChange,
       handleAuthorAction,
@@ -1049,7 +1163,7 @@ export default {
       openTranslationDialog,
       openDetail,
       openEdit,
-      syncAuthorPhoto,
+      syncSourceAuthorMedia,
       restoreSnapshot,
       submitUpdate
     }
@@ -1071,6 +1185,36 @@ export default {
 .relation-title {
   font-weight: 600;
   word-break: break-word;
+}
+
+.relation-media-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.relation-media-avatar,
+.relation-media-cover,
+.relation-media-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+}
+
+.relation-media-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+}
+
+.relation-media-cover {
+  width: 88px;
+  height: 44px;
+  border-radius: 8px;
 }
 
 .relation-row-actions {
@@ -1105,6 +1249,16 @@ export default {
   .relation-actions {
     float: none;
     margin-top: 10px;
+  }
+
+  .relation-media-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .relation-media-cover {
+    width: 72px;
+    height: 40px;
   }
 }
 </style>

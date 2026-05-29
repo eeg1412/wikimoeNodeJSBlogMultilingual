@@ -382,6 +382,14 @@ function getRelationListPopulate(collectionName) {
     }
   }
 
+  if (collectionName === 'users') {
+    return {
+      path: 'cover',
+      select:
+        '_id filepath thumfor localFilepath localThumbnailPath remoteFilepath width height mimetype updatedAt'
+    }
+  }
+
   return undefined
 }
 
@@ -500,37 +508,6 @@ function parseRelationInput(body = {}) {
     languageCode,
     payload
   }
-}
-
-function parseAuthorPhotoSyncInput(body = {}) {
-  const id = String(body.id || '').trim()
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    throw new ApiError(ERROR_CODES.CONTENT_ID_INVALID, undefined, 'id', 400)
-  }
-
-  const languageCode = normalizeLanguageCode(body.languageCode)
-  if (!languageCode) {
-    throw new ApiError(
-      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
-      undefined,
-      'languageCode',
-      400
-    )
-  }
-
-  return {
-    id,
-    languageCode
-  }
-}
-
-function getRecordSourceObjectId(record) {
-  const sourceId = record?.sourceId
-  if (!sourceId || !mongoose.Types.ObjectId.isValid(sourceId)) {
-    return null
-  }
-
-  return new mongoose.Types.ObjectId(String(sourceId))
 }
 
 function isSafePayloadField(field) {
@@ -713,92 +690,15 @@ async function updateRelation(body = {}, options = {}) {
   if (input.collectionName === 'sorts') {
     cacheDataUtils.invalidateSortListCache(record.languageCode)
   }
-  if (
-    input.collectionName === 'posts' &&
-    options.skipContentRefresh !== true
-  ) {
+  if (input.collectionName === 'posts' && options.skipContentRefresh !== true) {
     await contentRefreshUtils.refreshArticlePublishing(record.languageCode)
   }
 
   return await Model.findOne({ _id: record._id }).lean()
 }
-
-async function syncAuthorPhoto(body = {}) {
-  const input = parseAuthorPhotoSyncInput(body)
-  const Model = getMultilingualModel('users')
-  const record = await Model.findOne({
-    _id: new mongoose.Types.ObjectId(input.id),
-    recordKind: TRANSLATION_RECORD_KIND
-  })
-
-  if (!record) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_NOT_FOUND,
-      'translation author not found',
-      'id',
-      404
-    )
-  }
-
-  if (record.languageCode !== input.languageCode) {
-    throw new ApiError(
-      ERROR_CODES.RELATION_LANGUAGE_MISMATCH,
-      undefined,
-      'languageCode',
-      409
-    )
-  }
-
-  const sourceId = getRecordSourceObjectId(record)
-  if (!sourceId) {
-    throw new ApiError(
-      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
-      'source author identity not found',
-      'sourceId',
-      404
-    )
-  }
-
-  const sourceRecord = await Model.findOne({
-    sourceCollection: 'users',
-    sourceId,
-    sourceLanguageCode: record.sourceLanguageCode,
-    recordKind: SOURCE_RECORD_KIND
-  })
-    .select('photo')
-    .lean()
-
-  if (!sourceRecord) {
-    throw new ApiError(
-      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
-      'source author snapshot not found',
-      'sourceId',
-      404
-    )
-  }
-
-  const updatedRecord = await Model.findOneAndUpdate(
-    { _id: record._id, recordKind: TRANSLATION_RECORD_KIND },
-    { $set: { photo: sourceRecord.photo || '' } },
-    { new: true }
-  ).lean()
-
-  if (!updatedRecord) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_NOT_FOUND,
-      'translation author not found',
-      'id',
-      404
-    )
-  }
-
-  return updatedRecord
-}
-
 module.exports = {
   ALLOWED_COLLECTION_NAMES,
   SYSTEM_FIELDS,
   listRelations,
-  syncAuthorPhoto,
   updateRelation
 }

@@ -59,6 +59,12 @@ export default function (api) {
         noLoading
       })
     },
+    syncSourceAuthorMedia(data, noLoading = false) {
+      return api.post('/source/relation/sync-author-media', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getSourcePostDetail(data, noLoading = false) {
       return api.get('/source/post/detail', {
         params: data,
@@ -395,12 +401,6 @@ export default function (api) {
     },
     updateTranslationRelation(data, noLoading = false) {
       return api.put('/translation/relation/update', data, {
-        shouldAdminJWT: true,
-        noLoading
-      })
-    },
-    syncTranslationAuthorPhoto(data, noLoading = false) {
-      return api.post('/translation/relation/sync-author-photo', data, {
         shouldAdminJWT: true,
         noLoading
       })

@@ -2959,6 +2959,17 @@ function parseRestoreRecordInput(body = {}) {
   }
 }
 
+function parseSourceAuthorMediaSyncInput(body = {}) {
+  const id = String(body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(ERROR_CODES.CONTENT_ID_INVALID, undefined, 'id', 400)
+  }
+
+  return {
+    id
+  }
+}
+
 async function findTranslationRecord(collectionName, id) {
   const Model = getMultilingualModel(collectionName)
   return await Model.findOne({
@@ -3398,6 +3409,126 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
   }
 
   return await Model.findOne({ _id: record._id }).lean()
+}
+
+async function syncSourceAuthorMediaToTranslations(body = {}) {
+  const input = parseSourceAuthorMediaSyncInput(body)
+  const UserModel = getMultilingualModel('users')
+  const sourceRecord = await UserModel.findOne({
+    _id: new mongoose.Types.ObjectId(input.id),
+    sourceCollection: 'users',
+    recordKind: SOURCE_RECORD_KIND
+  })
+    .select(
+      '_id sourceId sourceLanguageCode photo cover snapshotVersion sourceSnapshotAt sourceUpdatedAt updatedAt sourceHash'
+    )
+    .lean()
+
+  if (!sourceRecord) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source author snapshot not found',
+      'id',
+      404
+    )
+  }
+
+  const sourceId = getSourceIdentityId(sourceRecord)
+  if (!sourceId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source author identity not found',
+      'sourceId',
+      404
+    )
+  }
+
+  const translationList = await UserModel.find({
+    sourceCollection: 'users',
+    sourceId,
+    recordKind: TRANSLATION_RECORD_KIND
+  })
+    .select('_id languageCode sourceLanguageCode translationGroupId')
+    .lean()
+
+  if (translationList.length === 0) {
+    return {
+      sourceAuthorId: String(sourceRecord._id),
+      sourceId: String(sourceId),
+      updatedCount: 0,
+      languageCodes: []
+    }
+  }
+
+  const now = new Date()
+  const sharedCopyCache = new Map()
+  const sharedSourceRecordCache = new Map()
+  const sharedCopyPromiseCache = new Map()
+
+  const updatedTranslations = await mapWithConcurrency(
+    translationList,
+    RELATION_COPY_CONCURRENCY,
+    async translationRecord => {
+      const context = {
+        languageCode: translationRecord.languageCode,
+        sourceLanguageCode:
+          translationRecord.sourceLanguageCode ||
+          sourceRecord.sourceLanguageCode,
+        translationGroupId: translationRecord.translationGroupId || null,
+        sourceSnapshotId: sourceRecord._id,
+        snapshotVersion: sourceRecord.snapshotVersion || 1,
+        sourceSnapshotAt: sourceRecord.sourceSnapshotAt || now,
+        now,
+        copiedCounts: {},
+        copyCache: sharedCopyCache,
+        sourceRecordCache: sharedSourceRecordCache,
+        copyPromiseCache: sharedCopyPromiseCache
+      }
+
+      const translationData = await buildTranslationRecordData(
+        'users',
+        sourceRecord,
+        context,
+        {
+          recordId: translationRecord._id
+        }
+      )
+
+      const updateData = {
+        photo: translationData.photo || '',
+        cover: translationData.cover || null
+      }
+
+      const updatedRecord = await UserModel.findOneAndUpdate(
+        {
+          _id: translationRecord._id,
+          recordKind: TRANSLATION_RECORD_KIND
+        },
+        { $set: updateData },
+        { new: true }
+      )
+        .select('_id languageCode')
+        .lean()
+
+      if (!updatedRecord) {
+        throw new ApiError(
+          ERROR_CODES.CONTENT_NOT_FOUND,
+          'translation author not found during media sync',
+          'id',
+          404
+        )
+      }
+
+      return updatedRecord
+    }
+  )
+
+  return {
+    sourceAuthorId: String(sourceRecord._id),
+    sourceId: String(sourceId),
+    updatedCount: updatedTranslations.length,
+    languageCodes: updatedTranslations.map(record => record.languageCode)
+  }
 }
 
 async function getTranslationPostSnapshotRestorePreview(body = {}) {
@@ -4708,6 +4839,7 @@ module.exports = {
   getTranslationPostDetail,
   getTranslationPostSnapshotRestorePreview,
   restoreTranslationRecordFromSnapshot,
+  syncSourceAuthorMediaToTranslations,
   updateTranslationPostAiSkip,
   updateTranslationPostStatus,
   updateTranslationPost
