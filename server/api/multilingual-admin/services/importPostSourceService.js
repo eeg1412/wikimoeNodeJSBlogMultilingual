@@ -18,6 +18,7 @@ const SOURCE_POST_COLLECTION = 'posts'
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
 const RELATION_COPY_CONCURRENCY = 4
+const REFRESHABLE_SOURCE_RELATION_COLLECTIONS = new Set(['users'])
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -608,7 +609,12 @@ function applyCollectionDefaults(collectionName, data, sourceObject, context) {
   }
 }
 
-async function copyRelatedRecord(collectionName, sourceValue, context) {
+async function copyRelatedRecord(
+  collectionName,
+  sourceValue,
+  context,
+  options = {}
+) {
   const sourceRecord = await resolveSourceRecord(
     collectionName,
     sourceValue,
@@ -618,13 +624,22 @@ async function copyRelatedRecord(collectionName, sourceValue, context) {
     return null
   }
 
-  const options = {}
+  const recordOptions = {}
   if (collectionName === 'posts') {
-    options.copyPostRelations = false
-    options.useSelfTranslationGroup = true
+    recordOptions.copyPostRelations = false
+    recordOptions.useSelfTranslationGroup = true
   }
 
-  return await copySourceRecord(collectionName, sourceRecord, context, options)
+  if (options.updateExisting === true) {
+    recordOptions.updateExisting = true
+  }
+
+  return await copySourceRecord(
+    collectionName,
+    sourceRecord,
+    context,
+    recordOptions
+  )
 }
 
 async function copyRelatedRecordList(collectionName, sourceList, context) {
@@ -646,7 +661,8 @@ async function applyDependencyFields(
   collectionName,
   data,
   sourceObject,
-  context
+  context,
+  options = {}
 ) {
   const dependencies = COLLECTION_DEPENDENCY_FIELDS[collectionName] || []
   const dependencyEntries = await mapWithConcurrency(
@@ -661,10 +677,16 @@ async function applyDependencyFields(
         }
       }
 
+      const copyOptions = {}
+      if (options.updateDependencyRecords === true) {
+        copyOptions.updateExisting = true
+      }
+
       const copiedRecord = await copyRelatedRecord(
         dependency.collectionName,
         sourceValue,
-        context
+        context,
+        copyOptions
       )
 
       return {
@@ -780,7 +802,13 @@ async function buildSourceRecordData(
   if (collectionName === 'posts') {
     await applyPostRelationFields(data, sourceObject, context, options)
   } else {
-    await applyDependencyFields(collectionName, data, sourceObject, context)
+    await applyDependencyFields(
+      collectionName,
+      data,
+      sourceObject,
+      context,
+      options
+    )
   }
 
   return data
@@ -1115,6 +1143,120 @@ async function importOrOverwriteSourcePost(body, forceOverwrite, options = {}) {
     copiedCounts: context.copiedCounts,
     sourceHash,
     sourceChangedTranslations
+  }
+}
+
+function parseSourceRelationSnapshotRefreshInput(body = {}) {
+  const collectionName = String(body.collectionName || '').trim()
+  if (!REFRESHABLE_SOURCE_RELATION_COLLECTIONS.has(collectionName)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'collectionName is not supported',
+      'collectionName',
+      400
+    )
+  }
+
+  const sourceSnapshotId = String(body.sourceSnapshotId || body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_ID_INVALID,
+      undefined,
+      'sourceSnapshotId',
+      400
+    )
+  }
+
+  return {
+    collectionName,
+    sourceSnapshotId
+  }
+}
+
+async function findExistingSourceRelationSnapshot(
+  collectionName,
+  sourceSnapshotId
+) {
+  const Model = getMultilingualModel(collectionName)
+  return await Model.findOne({
+    _id: new mongoose.Types.ObjectId(sourceSnapshotId),
+    sourceCollection: collectionName,
+    recordKind: SOURCE_RECORD_KIND
+  })
+    .select(
+      '_id sourceId sourceLanguageCode translationGroupId snapshotVersion sourceHash'
+    )
+    .lean()
+}
+
+async function refreshSourceRelationSnapshot(body = {}) {
+  const input = parseSourceRelationSnapshotRefreshInput(body)
+  const existingSnapshot = await findExistingSourceRelationSnapshot(
+    input.collectionName,
+    input.sourceSnapshotId
+  )
+
+  if (!existingSnapshot) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source relation snapshot not found',
+      'sourceSnapshotId',
+      404
+    )
+  }
+
+  const sourceId = toObjectId(existingSnapshot.sourceId)
+  if (!sourceId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source relation identity not found',
+      'sourceId',
+      404
+    )
+  }
+
+  const sourceRecord = await loadSourceRecord(input.collectionName, sourceId)
+  if (!sourceRecord) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source relation record not found',
+      'sourceId',
+      404
+    )
+  }
+
+  const sourceHash = createSourceHash(sourceRecord)
+  const now = new Date()
+  let snapshotVersion = existingSnapshot.snapshotVersion || 1
+  let sourceHashChanged = false
+  if (existingSnapshot.sourceHash !== sourceHash) {
+    sourceHashChanged = true
+    snapshotVersion++
+  }
+
+  const context = buildImportContext(
+    existingSnapshot.sourceLanguageCode,
+    snapshotVersion,
+    now,
+    existingSnapshot._id,
+    existingSnapshot.translationGroupId
+  )
+
+  await copySourceRecord(input.collectionName, sourceRecord, context, {
+    updateExisting: true,
+    updateDependencyRecords: true,
+    recordId: existingSnapshot._id
+  })
+
+  return {
+    sourceSnapshotId: existingSnapshot._id,
+    sourceId,
+    sourceLanguageCode: existingSnapshot.sourceLanguageCode,
+    translationGroupId: existingSnapshot.translationGroupId,
+    snapshotVersion,
+    sourceHash,
+    sourceHashChanged,
+    copiedCounts: context.copiedCounts
   }
 }
 
@@ -1679,6 +1821,7 @@ async function getSourcePostDetail(id) {
 module.exports = {
   createSourceHash,
   copySourceRecord,
+  refreshSourceRelationSnapshot,
   repairSourcePostSnapshotRelations,
   importOrOverwriteSourcePost,
   getSourceDatabasePostList,

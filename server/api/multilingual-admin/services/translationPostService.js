@@ -877,7 +877,8 @@ function increaseCopiedCount(context, collectionName, action) {
   if (!context.copiedCounts[collectionName]) {
     context.copiedCounts[collectionName] = {
       created: 0,
-      reused: 0
+      reused: 0,
+      updated: 0
     }
   }
 
@@ -1413,7 +1414,8 @@ async function applyDependencyFields(
   collectionName,
   data,
   sourceObject,
-  context
+  context,
+  options = {}
 ) {
   const dependencies = COLLECTION_DEPENDENCY_FIELDS[collectionName] || []
   const dependencyEntries = await mapWithConcurrency(
@@ -1428,12 +1430,18 @@ async function applyDependencyFields(
         }
       }
 
+      const copyOptions = {}
+      if (options.updateDependencyRecords === true) {
+        copyOptions.updateExisting = true
+      }
+
       const copiedRecord = await copyRelationToLanguage(
         dependency.collectionName,
         sourceValue,
         context.languageCode,
         context.sourceSnapshotId,
-        context
+        context,
+        copyOptions
       )
 
       return {
@@ -1611,7 +1619,13 @@ async function buildTranslationRecordData(
     await applyPostRelationFields(data, sourceObject, context, options)
   } else {
     data.translationGroupId = context.translationGroupId
-    await applyDependencyFields(collectionName, data, sourceObject, context)
+    await applyDependencyFields(
+      collectionName,
+      data,
+      sourceObject,
+      context,
+      options
+    )
   }
 
   return data
@@ -1666,7 +1680,7 @@ async function copySourceSnapshotRecord(
       context,
       recordOptions
     )
-    if (existingRecord) {
+    if (existingRecord && recordOptions.updateExisting !== true) {
       increaseCopiedCount(context, collectionName, 'reused')
       context.copyCache.set(cacheKey, existingRecord)
       return existingRecord
@@ -1692,6 +1706,28 @@ async function copySourceSnapshotRecord(
       )
     }
 
+    if (existingRecord) {
+      let existingAttachmentRecord = null
+      if (collectionName === 'attachments' && data.mediaMode === 'remote') {
+        existingAttachmentRecord = await model
+          .findOne({ _id: existingRecord._id })
+          .lean()
+      }
+
+      await model.updateOne({ _id: existingRecord._id }, { $set: data })
+      if (existingAttachmentRecord) {
+        await mediaService.deleteAttachmentLocalFiles(existingAttachmentRecord)
+      }
+
+      const updatedRecord = { _id: existingRecord._id }
+      if (collectionName === 'sorts') {
+        cacheDataUtils.invalidateSortListCache(context.languageCode)
+      }
+      increaseCopiedCount(context, collectionName, 'updated')
+      context.copyCache.set(cacheKey, updatedRecord)
+      return updatedRecord
+    }
+
     data._id = recordId
     let saveResult = null
     if (collectionName === SOURCE_POST_COLLECTION) {
@@ -1713,7 +1749,8 @@ async function copyRelationToLanguage(
   sourceRecordId,
   languageCode,
   sourceSnapshotId,
-  context
+  context,
+  options = {}
 ) {
   const sourceRecord = await resolveSourceSnapshotRecord(
     collectionName,
@@ -1730,17 +1767,21 @@ async function copyRelationToLanguage(
     sourceSnapshotId:
       toObjectId(sourceRecord) || sourceSnapshotId || context.sourceSnapshotId
   }
-  const options = {}
+  const recordOptions = {}
   if (collectionName === 'posts') {
-    options.copyPostRelations = false
-    options.useSelfTranslationGroup = true
+    recordOptions.copyPostRelations = false
+    recordOptions.useSelfTranslationGroup = true
+  }
+
+  if (options.updateExisting === true) {
+    recordOptions.updateExisting = true
   }
 
   return await copySourceSnapshotRecord(
     collectionName,
     sourceRecord,
     relationContext,
-    options
+    recordOptions
   )
 }
 
@@ -2970,6 +3011,68 @@ function parseSourceAuthorMediaSyncInput(body = {}) {
   }
 }
 
+async function loadSourceAuthorSnapshotForMediaSync(id) {
+  const sourceRecord = await loadSourceSnapshotRecord(
+    'users',
+    new mongoose.Types.ObjectId(id)
+  )
+  if (!sourceRecord) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source author snapshot not found',
+      'id',
+      404
+    )
+  }
+
+  const sourceId = getSourceIdentityId(sourceRecord)
+  if (!sourceId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source author identity not found',
+      'sourceId',
+      404
+    )
+  }
+
+  return sourceRecord
+}
+
+function getAuthorCoverSyncIdentity(record) {
+  if (!record || !record.cover) {
+    return {
+      sourceId: '',
+      sourceHash: ''
+    }
+  }
+
+  const sourceId = getSourceIdentityId(record.cover)
+  let sourceIdText = ''
+  if (sourceId) {
+    sourceIdText = String(sourceId)
+  }
+
+  return {
+    sourceId: sourceIdText,
+    sourceHash: String(record.cover.sourceHash || '')
+  }
+}
+
+function hasAuthorCoverMediaChanged(previousRecord, currentRecord) {
+  const previousIdentity = getAuthorCoverSyncIdentity(previousRecord)
+  const currentIdentity = getAuthorCoverSyncIdentity(currentRecord)
+
+  if (previousIdentity.sourceId !== currentIdentity.sourceId) {
+    return true
+  }
+
+  if (previousIdentity.sourceHash !== currentIdentity.sourceHash) {
+    return true
+  }
+
+  return false
+}
+
 async function findTranslationRecord(collectionName, id) {
   const Model = getMultilingualModel(collectionName)
   return await Model.findOne({
@@ -3414,34 +3517,20 @@ async function restoreTranslationRecordFromSnapshot(body = {}) {
 async function syncSourceAuthorMediaToTranslations(body = {}) {
   const input = parseSourceAuthorMediaSyncInput(body)
   const UserModel = getMultilingualModel('users')
-  const sourceRecord = await UserModel.findOne({
-    _id: new mongoose.Types.ObjectId(input.id),
-    sourceCollection: 'users',
-    recordKind: SOURCE_RECORD_KIND
-  })
-    .select(
-      '_id sourceId sourceLanguageCode photo cover snapshotVersion sourceSnapshotAt sourceUpdatedAt updatedAt sourceHash'
-    )
-    .lean()
-
-  if (!sourceRecord) {
-    throw new ApiError(
-      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
-      'source author snapshot not found',
-      'id',
-      404
-    )
-  }
-
+  const previousSourceRecord = await loadSourceAuthorSnapshotForMediaSync(
+    input.id
+  )
+  const refreshResult =
+    await importPostSourceService.refreshSourceRelationSnapshot({
+      collectionName: 'users',
+      sourceSnapshotId: previousSourceRecord._id
+    })
+  const sourceRecord = await loadSourceAuthorSnapshotForMediaSync(input.id)
   const sourceId = getSourceIdentityId(sourceRecord)
-  if (!sourceId) {
-    throw new ApiError(
-      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
-      'source author identity not found',
-      'sourceId',
-      404
-    )
-  }
+  const shouldUpdateCoverMedia = hasAuthorCoverMediaChanged(
+    previousSourceRecord,
+    sourceRecord
+  )
 
   const translationList = await UserModel.find({
     sourceCollection: 'users',
@@ -3455,6 +3544,8 @@ async function syncSourceAuthorMediaToTranslations(body = {}) {
     return {
       sourceAuthorId: String(sourceRecord._id),
       sourceId: String(sourceId),
+      sourceSnapshotVersion: refreshResult.snapshotVersion,
+      coverMediaUpdated: shouldUpdateCoverMedia,
       updatedCount: 0,
       languageCodes: []
     }
@@ -3490,7 +3581,8 @@ async function syncSourceAuthorMediaToTranslations(body = {}) {
         sourceRecord,
         context,
         {
-          recordId: translationRecord._id
+          recordId: translationRecord._id,
+          updateDependencyRecords: shouldUpdateCoverMedia
         }
       )
 
@@ -3526,6 +3618,8 @@ async function syncSourceAuthorMediaToTranslations(body = {}) {
   return {
     sourceAuthorId: String(sourceRecord._id),
     sourceId: String(sourceId),
+    sourceSnapshotVersion: refreshResult.snapshotVersion,
+    coverMediaUpdated: shouldUpdateCoverMedia,
     updatedCount: updatedTranslations.length,
     languageCodes: updatedTranslations.map(record => record.languageCode)
   }

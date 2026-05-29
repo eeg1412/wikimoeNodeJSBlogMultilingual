@@ -165,7 +165,7 @@
             />
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="180" fixed="right">
+        <ResponsiveTableColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <div
               v-if="canUseAuthorActionGroup(row)"
@@ -1190,7 +1190,6 @@ export default {
 .relation-media-cell {
   display: flex;
   align-items: center;
-  justify-content: center;
 }
 
 .relation-media-avatar,
