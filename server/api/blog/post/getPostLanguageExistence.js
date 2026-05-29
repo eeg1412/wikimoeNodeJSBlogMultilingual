@@ -297,13 +297,20 @@ module.exports = async function (req, res) {
 
     // 连源快照都不存在时，说明这篇文章没有可校验的多语言主体数据。
     if (sourceSnapshotList.length === 0) {
-      res.status(404).json({
-        errors: [
-          {
-            message: '源文章快照不存在'
-          }
-        ]
+      // res.status(404).json({
+      //   errors: [
+      //     {
+      //       message: '源文章快照不存在'
+      //     }
+      //   ]
+      // })
+      res.send({
+        sourceLanguageCode: null,
+        sourceLanguageData: null,
+        existenceMap: {},
+        languagePostMap: {}
       })
+
       return
     }
 
