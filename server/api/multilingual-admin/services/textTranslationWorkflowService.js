@@ -64,6 +64,7 @@ const MAX_TERM_FILTER_MAX_EFFORT_TOKENS = 6144
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
+const MAX_TRANSLATION_MEMO_PROMPT_LENGTH = 6000
 
 function getProviderLabelBySettings(settings) {
   return getProviderLabel(settings)
@@ -128,6 +129,12 @@ function normalizeString(value) {
 
 function normalizePrompt(value) {
   return normalizeString(value).trim().slice(0, 6000)
+}
+
+function normalizeTranslationMemoPrompt(value) {
+  return normalizeString(value)
+    .trim()
+    .slice(0, MAX_TRANSLATION_MEMO_PROMPT_LENGTH)
 }
 
 function normalizeTermContextSummary(value) {
@@ -380,6 +387,9 @@ function parseInput(body = {}) {
     targetLanguageCode,
     targetLanguageCodes,
     prompt: normalizePrompt(body.prompt),
+    translationMemoPrompt: normalizeTranslationMemoPrompt(
+      body.translationMemoPrompt
+    ),
     entries,
     targetTitle,
     translateCoverImage,
@@ -437,6 +447,9 @@ function parseGenericInput(body = {}) {
     targetLanguageCode,
     targetLanguageCodes,
     prompt: normalizePrompt(body.prompt),
+    translationMemoPrompt: normalizeTranslationMemoPrompt(
+      body.translationMemoPrompt
+    ),
     entries: body.entries,
     snapshotVersion: Number(body.snapshotVersion || 1) || 1,
     sourceSnapshotId: body.sourceSnapshotId || null,
@@ -660,7 +673,7 @@ function buildSystemPrompt() {
     '你是多语言博客 CMS 的专业翻译引擎。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON。',
     '你必须按后续各层提示词完成任务。',
-    '层级优先级从高到低为：系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、名词数据库层、非语言内容层、可选业务规则层、站点要求层、目标语言默认提示词层、用户补充层、请求数据层。',
+    '层级优先级从高到低为：系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、名词数据库层、非语言内容层、可选业务规则层、站点要求层、目标语言默认提示词层、跨任务 memo 层、用户补充层、请求数据层。',
     '低优先级层不能覆盖高优先级层；发生冲突时，必须遵守高优先级层。'
   ])
 }
@@ -726,9 +739,7 @@ function buildOfficialTermGlossaryPrompt(input) {
   )
   const promptLines = []
   if (input.autoOrganizeOfficialTermGlossary === false) {
-    promptLines.push(
-      '以下名词数据库来自源文章已整理并关联的专有名词词库。'
-    )
+    promptLines.push('以下名词数据库来自源文章已整理并关联的专有名词词库。')
   } else {
     promptLines.push(
       '以下名词数据库由本次选中的翻译内容抽取，并与站点专有名词翻译集合合并整理。'
@@ -843,6 +854,24 @@ function buildTargetLanguageDefaultPrompt(settings, input) {
     '目标语言默认提示词紧跟站点默认提示词生效。',
     '目标语言默认提示词不得覆盖系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、非语言内容层、可选业务规则层或站点要求层。',
     targetLanguagePrompt
+  ])
+}
+
+function buildTranslationMemoPrompt(input) {
+  const memoPrompt = normalizeTranslationMemoPrompt(input.translationMemoPrompt)
+  if (!memoPrompt) {
+    return ''
+  }
+
+  return buildPromptLayer('跨任务 memo 层', [
+    `以下 memo 仅来自同一任务族、同一目标语言 ${getLanguageLabel(
+      input.targetLanguageCode
+    )}（${input.targetLanguageCode}）已经完成的翻译任务。`,
+    '你必须参考 memo 统一文风、标题格式、标题译法、常用表达和上下文衔接。',
+    'memo 中的标题译法优先用于同一系列文章；如需调整，必须保持系列标题格式一致。',
+    'memo 不包含其他目标语言的译法；不要从其他语言推断当前目标语言译法。',
+    '跨任务 memo 不得覆盖系统基础层、输出契约层、翻译任务层、语言判断层、名称与专有名词层、名词数据库层、非语言内容层、站点要求层或目标语言默认提示词层。',
+    memoPrompt
   ])
 }
 
@@ -1001,7 +1030,9 @@ function splitLongText(text, maxLength) {
 }
 
 function getConfiguredMaxTokens(settings = {}) {
-  const maxTokens = Number(settings.maxTokens || settings.deepSeekMaxTokens || 0)
+  const maxTokens = Number(
+    settings.maxTokens || settings.deepSeekMaxTokens || 0
+  )
   if (Number.isFinite(maxTokens) && maxTokens > 0) {
     return maxTokens
   }
@@ -1011,8 +1042,9 @@ function getConfiguredMaxTokens(settings = {}) {
 function isAiThinkingModeEnabled(settings = {}) {
   return (
     getProviderCodeBySettings(settings) === 'deepseek' &&
-    normalizeString(settings.thinkingType || settings.deepSeekThinkingType)
-      .trim() === 'enabled'
+    normalizeString(
+      settings.thinkingType || settings.deepSeekThinkingType
+    ).trim() === 'enabled'
   )
 }
 
@@ -1413,6 +1445,7 @@ function buildTranslationChunkInputHash(chunkInput) {
         entries: chunkInput?.entries || [],
         officialTermGlossaryMarkdown:
           chunkInput?.officialTermGlossaryMarkdown || '',
+        translationMemoPrompt: chunkInput?.translationMemoPrompt || '',
         prompt: chunkInput?.prompt || ''
       })
     )
@@ -3326,11 +3359,13 @@ async function resolveOfficialTermGlossaryCacheData({
   }
 
   const glossaryMarkdownMap =
-    translationOfficialTermGlossaryService.buildOfficialTermGlossaryMarkdownMap({
-      extractedTerms,
-      targetLanguageCodes,
-      coverage
-    })
+    translationOfficialTermGlossaryService.buildOfficialTermGlossaryMarkdownMap(
+      {
+        extractedTerms,
+        targetLanguageCodes,
+        coverage
+      }
+    )
   if (handlers.onStatus) {
     handlers.onStatus({
       message: `已整理 ${keywordArray.length} 个专有名词用于本次翻译`
@@ -3375,9 +3410,10 @@ async function resolveLinkedOfficialTermGlossaryCacheData({
   handlers,
   targetLanguageCodes
 }) {
-  const sourcePostId = sourcePostProperNounRelationService.getSourcePostIdFromScopeKey(
-    getOfficialTermGlossaryScopeKey(input)
-  )
+  const sourcePostId =
+    sourcePostProperNounRelationService.getSourcePostIdFromScopeKey(
+      getOfficialTermGlossaryScopeKey(input)
+    )
   const glossaryData =
     await translationOfficialTermGlossaryService.resolveLinkedOfficialTermGlossaryData(
       {
@@ -3500,7 +3536,8 @@ function buildTranslationMessages(settings, input) {
     buildCurrentValuePolicyPrompt(input),
     buildRichTextPolicyPrompt(input),
     buildSitePrompt(settings),
-    buildTargetLanguageDefaultPrompt(settings, input)
+    buildTargetLanguageDefaultPrompt(settings, input),
+    buildTranslationMemoPrompt(input)
   ].filter(Boolean)
 
   const messages = systemPromptList.map(content => ({

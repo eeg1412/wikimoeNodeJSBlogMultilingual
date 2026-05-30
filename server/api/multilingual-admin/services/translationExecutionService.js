@@ -27,6 +27,13 @@ const POST_RELATED_POST_FIELDS = [
   'contentTweetList'
 ]
 const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
+const TRANSLATION_MEMO_SCHEMA = 'wikimoe.ai.translation.task-family.memo'
+const TRANSLATION_MEMO_VERSION = 1
+const MAX_TRANSLATION_MEMO_ENTRIES_PER_LANGUAGE = 30
+const MAX_TRANSLATION_MEMO_TEXT_LENGTH = 6000
+const MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH = 180
+const MAX_TRANSLATION_MEMO_SUMMARY_LENGTH = 160
+const MAX_TRANSLATION_MEMO_SAMPLE_COUNT = 4
 
 function getJobId(job) {
   return String(job && job._id ? job._id : '')
@@ -139,6 +146,508 @@ function getSharedTranslationCacheKey(job) {
     return String(relation.parentId)
   }
   return getJobId(job)
+}
+
+function getTranslationMemoRootId(job) {
+  const relation = getJobTaskRelation(job)
+  if (relation.rootId) {
+    return String(relation.rootId)
+  }
+  if (relation.parentId) {
+    return String(relation.parentId)
+  }
+  return getJobId(job)
+}
+
+function getTranslationMemoRootObjectId(job) {
+  const rootId = getTranslationMemoRootId(job)
+  const rootObjectId = toObjectId(rootId)
+  if (!rootObjectId) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '跨任务翻译 memo 缺少有效根任务 ID',
+      'taskRelation.rootId',
+      400,
+      { retryable: false }
+    )
+  }
+  return rootObjectId
+}
+
+async function loadTranslationMemoRootJob(job) {
+  const JobModel = getTranslationJobModel()
+  const rootJob = await JobModel.findOne(
+    { _id: getTranslationMemoRootObjectId(job) },
+    { _id: 1, taskRelation: 1 }
+  ).lean()
+  if (!rootJob) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_NOT_FOUND,
+      '跨任务翻译 memo 根任务不存在',
+      'taskRelation.rootId',
+      404,
+      { retryable: false }
+    )
+  }
+  return rootJob
+}
+
+function normalizeMemoText(
+  value,
+  maxLength = MAX_TRANSLATION_MEMO_TEXT_LENGTH
+) {
+  if (value === null || typeof value === 'undefined') {
+    return ''
+  }
+  let text = ''
+  if (typeof value === 'string') {
+    text = value
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    text = String(value)
+  } else {
+    return ''
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function getTranslationMemoLanguageState(rootJob, languageCode) {
+  const plan = rootJob?.taskRelation?.plan
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    return null
+  }
+  const memoByLanguage = plan.translationMemoByLanguage
+  if (
+    !memoByLanguage ||
+    typeof memoByLanguage !== 'object' ||
+    Array.isArray(memoByLanguage)
+  ) {
+    return null
+  }
+  const memoState = memoByLanguage[languageCode]
+  if (!memoState || typeof memoState !== 'object' || Array.isArray(memoState)) {
+    return null
+  }
+  return memoState
+}
+
+function formatTranslationMemoSample(sample) {
+  const sourceText = normalizeMemoText(
+    sample?.sourceText,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  const translatedText = normalizeMemoText(
+    sample?.translatedText,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  if (!sourceText || !translatedText) {
+    return ''
+  }
+  const label = normalizeMemoText(sample?.label, 40)
+  if (label) {
+    return `${label}: 「${sourceText}」=>「${translatedText}」`
+  }
+  return `「${sourceText}」=>「${translatedText}」`
+}
+
+function isSameMemoTranslationPair(sample, sourceText, translatedText) {
+  const sampleSourceText = normalizeMemoText(
+    sample?.sourceText,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  const sampleTranslatedText = normalizeMemoText(
+    sample?.translatedText,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  if (!sampleSourceText || !sampleTranslatedText) {
+    return false
+  }
+  return (
+    sampleSourceText === sourceText && sampleTranslatedText === translatedText
+  )
+}
+
+function getCompactTranslationMemoSummary(entry, sourceTitle, translatedTitle) {
+  const summary = normalizeMemoText(
+    entry?.summary,
+    MAX_TRANSLATION_MEMO_SUMMARY_LENGTH
+  )
+  if (!summary) {
+    return ''
+  }
+  if (sourceTitle && summary.includes(sourceTitle)) {
+    return ''
+  }
+  if (translatedTitle && summary.includes(translatedTitle)) {
+    return ''
+  }
+  return summary
+}
+
+function formatTranslationMemoPromptEntry(entry, index) {
+  const parts = []
+  const sourceTitle = normalizeMemoText(
+    entry?.sourceTitle,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  const translatedTitle = normalizeMemoText(
+    entry?.translatedTitle,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  if (sourceTitle && translatedTitle) {
+    parts.push(`标题译法：${sourceTitle} => ${translatedTitle}`)
+  } else if (sourceTitle) {
+    parts.push(`源标题：${sourceTitle}`)
+  }
+
+  const summary = getCompactTranslationMemoSummary(
+    entry,
+    sourceTitle,
+    translatedTitle
+  )
+  if (summary) {
+    parts.push(`重点：${summary}`)
+  }
+
+  const samples = []
+  if (Array.isArray(entry?.samples)) {
+    entry.samples.forEach(sample => {
+      if (isSameMemoTranslationPair(sample, sourceTitle, translatedTitle)) {
+        return
+      }
+      const sampleText = formatTranslationMemoSample(sample)
+      if (sampleText) {
+        samples.push(sampleText)
+      }
+    })
+  }
+  if (samples.length > 0) {
+    parts.push(`关键表达：${samples.slice(0, 2).join('；')}`)
+  }
+
+  const line = parts.join(' ').trim()
+  if (!line) {
+    return ''
+  }
+  return `${index + 1}. ${line}`.slice(0, 520)
+}
+
+function buildTranslationMemoPromptFromState(memoState) {
+  if (!memoState || !Array.isArray(memoState.entries)) {
+    return ''
+  }
+  const entries = memoState.entries.slice(
+    -MAX_TRANSLATION_MEMO_ENTRIES_PER_LANGUAGE
+  )
+  const lines = []
+  entries.forEach((entry, index) => {
+    const line = formatTranslationMemoPromptEntry(entry, index)
+    if (line) {
+      lines.push(line)
+    }
+  })
+  return lines.join('\n').slice(0, MAX_TRANSLATION_MEMO_TEXT_LENGTH)
+}
+
+async function getTranslationMemoPromptForLanguage(job, languageCode) {
+  const normalizedLanguageCode = normalizeString(languageCode)
+  if (!normalizedLanguageCode) {
+    return ''
+  }
+  const rootJob = await loadTranslationMemoRootJob(job)
+  const memoState = getTranslationMemoLanguageState(
+    rootJob,
+    normalizedLanguageCode
+  )
+  return buildTranslationMemoPromptFromState(memoState)
+}
+
+function getMemoPreviewText(entry, fieldNames) {
+  for (const fieldName of fieldNames) {
+    const text = normalizeMemoText(
+      entry?.[fieldName],
+      MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+    )
+    if (text) {
+      return text
+    }
+  }
+  return ''
+}
+
+function getMemoPreviewSourceText(entry) {
+  return getMemoPreviewText(entry, [
+    'sourcePreviewText',
+    'sourcePreviewRawValue'
+  ])
+}
+
+function getMemoPreviewTargetText(entry) {
+  return getMemoPreviewText(entry, [
+    'nextPreviewText',
+    'previewText',
+    'nextPreviewRawValue',
+    'value'
+  ])
+}
+
+function getMemoPreviewEntryKey(entry, index) {
+  const key = normalizeString(entry?.entryKey || entry?.originalEntryKey)
+  if (key) {
+    return key
+  }
+  const id = normalizeString(entry?.id)
+  if (id) {
+    return id
+  }
+  return `index:${index}`
+}
+
+function getMemoEntryLabel(entry) {
+  const label = normalizeMemoText(entry?.label || entry?.recordLabel, 40)
+  if (label) {
+    return label
+  }
+  return normalizeMemoText(entry?.fieldName || entry?.id, 40)
+}
+
+function isTitleMemoPreviewEntry(entry) {
+  const fieldName = normalizeString(entry?.fieldName).toLowerCase()
+  const id = normalizeString(entry?.id).toLowerCase()
+  const label = normalizeString(entry?.label || entry?.recordLabel)
+  if (fieldName === 'title' || fieldName.endsWith('.title')) {
+    return true
+  }
+  if (id === 'title' || id.endsWith('.title') || id.endsWith(':title')) {
+    return true
+  }
+  return label.includes('标题')
+}
+
+function isImportantMemoPreviewEntry(entry) {
+  const fieldName = normalizeString(entry?.fieldName).toLowerCase()
+  const label = normalizeString(entry?.label || entry?.recordLabel)
+  const importantFieldNames = new Set([
+    'title',
+    'excerpt',
+    'summary',
+    'description',
+    'seotitle',
+    'seodescription'
+  ])
+  if (importantFieldNames.has(fieldName)) {
+    return true
+  }
+  return /标题|摘要|简介|描述|seo|分类|标签/i.test(label)
+}
+
+function findTranslationMemoTitleEntry(previewEntries) {
+  for (const entry of previewEntries) {
+    if (!isTitleMemoPreviewEntry(entry)) {
+      continue
+    }
+    const sourceText = getMemoPreviewSourceText(entry)
+    const targetText = getMemoPreviewTargetText(entry)
+    if (sourceText && targetText) {
+      return entry
+    }
+  }
+  return null
+}
+
+function findTranslationMemoEntryBySourceText(previewEntries, sourceText) {
+  const normalizedSourceText = normalizeMemoText(
+    sourceText,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  if (!normalizedSourceText) {
+    return null
+  }
+  for (const entry of previewEntries) {
+    const entrySourceText = getMemoPreviewSourceText(entry)
+    const entryTargetText = getMemoPreviewTargetText(entry)
+    if (entrySourceText === normalizedSourceText && entryTargetText) {
+      return entry
+    }
+  }
+  return null
+}
+
+function collectTranslationMemoSamples(previewEntries, titleEntry) {
+  const samples = []
+  const usedKeys = new Set()
+
+  function appendSample(entry, index) {
+    if (samples.length >= MAX_TRANSLATION_MEMO_SAMPLE_COUNT) {
+      return
+    }
+    const key = getMemoPreviewEntryKey(entry, index)
+    if (usedKeys.has(key)) {
+      return
+    }
+    if (titleEntry && key === getMemoPreviewEntryKey(titleEntry, -1)) {
+      return
+    }
+    const sourceText = getMemoPreviewSourceText(entry)
+    const translatedText = getMemoPreviewTargetText(entry)
+    if (!sourceText || !translatedText) {
+      return
+    }
+    usedKeys.add(key)
+    samples.push({
+      label: getMemoEntryLabel(entry),
+      sourceText,
+      translatedText
+    })
+  }
+
+  previewEntries.forEach((entry, index) => {
+    if (isImportantMemoPreviewEntry(entry)) {
+      appendSample(entry, index)
+    }
+  })
+  previewEntries.forEach((entry, index) => {
+    appendSample(entry, index)
+  })
+
+  return samples
+}
+
+function buildTranslationMemoSummary({
+  sourceTitle,
+  translatedTitle,
+  samples
+}) {
+  const parts = []
+  if (sourceTitle && translatedTitle) {
+    parts.push('标题格式、语气和标点按本次译法延续。')
+  } else if (sourceTitle) {
+    parts.push('本次仅记录源标题，后续优先补齐标题译法。')
+  }
+  if (samples.length > 0) {
+    const labels = []
+    samples.forEach(sample => {
+      const label = normalizeMemoText(sample?.label, 40)
+      if (label && !labels.includes(label)) {
+        labels.push(label)
+      }
+    })
+    if (labels.length > 0) {
+      parts.push(`重点参考 ${labels.slice(0, 3).join('、')} 的表达风格。`)
+    }
+  }
+  return normalizeMemoText(parts.join(' '), MAX_TRANSLATION_MEMO_SUMMARY_LENGTH)
+}
+
+function buildTranslationMemoEntry({
+  job,
+  languageCode,
+  sourceId,
+  sourceTitle,
+  result
+}) {
+  let previewEntries = []
+  if (Array.isArray(result?.previewEntries)) {
+    previewEntries = result.previewEntries
+  }
+  const titleEntry = findTranslationMemoTitleEntry(previewEntries)
+  let titlePairEntry = titleEntry
+  let memoSourceTitle = normalizeMemoText(
+    sourceTitle,
+    MAX_TRANSLATION_MEMO_FIELD_TEXT_LENGTH
+  )
+  if (!memoSourceTitle && titleEntry) {
+    memoSourceTitle = getMemoPreviewSourceText(titleEntry)
+  }
+  let translatedTitle = ''
+  if (titleEntry) {
+    translatedTitle = getMemoPreviewTargetText(titleEntry)
+  }
+  if (!translatedTitle && memoSourceTitle) {
+    titlePairEntry = findTranslationMemoEntryBySourceText(
+      previewEntries,
+      memoSourceTitle
+    )
+    if (titlePairEntry) {
+      translatedTitle = getMemoPreviewTargetText(titlePairEntry)
+    }
+  }
+  const samples = collectTranslationMemoSamples(previewEntries, titlePairEntry)
+  if (!memoSourceTitle && !translatedTitle && samples.length === 0) {
+    return null
+  }
+
+  return {
+    jobId: getJobId(job),
+    sourceId: normalizeString(sourceId),
+    languageCode: normalizeString(languageCode),
+    sourceTitle: memoSourceTitle,
+    translatedTitle,
+    summary: buildTranslationMemoSummary({
+      sourceTitle: memoSourceTitle,
+      translatedTitle,
+      samples
+    }),
+    samples,
+    entryCount: previewEntries.length,
+    requestId: normalizeString(result?.requestId),
+    model: normalizeString(result?.model),
+    createdAt: new Date()
+  }
+}
+
+async function appendTranslationMemoForLanguage({
+  job,
+  languageCode,
+  sourceId,
+  sourceTitle,
+  result
+}) {
+  const normalizedLanguageCode = normalizeString(languageCode)
+  if (!normalizedLanguageCode) {
+    return null
+  }
+  const memoEntry = buildTranslationMemoEntry({
+    job,
+    languageCode: normalizedLanguageCode,
+    sourceId,
+    sourceTitle,
+    result
+  })
+  if (!memoEntry) {
+    return null
+  }
+
+  const JobModel = getTranslationJobModel()
+  const now = new Date()
+  const rootObjectId = getTranslationMemoRootObjectId(job)
+  const memoPath = `taskRelation.plan.translationMemoByLanguage.${normalizedLanguageCode}`
+  const updateResult = await JobModel.updateOne(
+    { _id: rootObjectId },
+    {
+      $set: {
+        [`${memoPath}.schema`]: TRANSLATION_MEMO_SCHEMA,
+        [`${memoPath}.version`]: TRANSLATION_MEMO_VERSION,
+        [`${memoPath}.languageCode`]: normalizedLanguageCode,
+        [`${memoPath}.updatedAt`]: now
+      },
+      $push: {
+        [`${memoPath}.entries`]: {
+          $each: [memoEntry],
+          $slice: -MAX_TRANSLATION_MEMO_ENTRIES_PER_LANGUAGE
+        }
+      }
+    }
+  )
+  if (updateResult.matchedCount !== 1) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_NOT_FOUND,
+      '跨任务翻译 memo 根任务不存在，无法写入摘要',
+      'taskRelation.rootId',
+      404,
+      { retryable: false }
+    )
+  }
+  return memoEntry
 }
 
 function getPlannedRelatedSourceIds(job, languageCode) {
@@ -602,6 +1111,10 @@ async function executePostAiTranslation(job, context) {
         cacheKey: getJobId(job),
         cacheScopeKey: 'post',
         prompt: getPrompt(job),
+        translationMemoPrompt: await getTranslationMemoPromptForLanguage(
+          job,
+          job.target.languageCode
+        ),
         autoOrganizeOfficialTermGlossary:
           shouldAutoOrganizeOfficialTermGlossary(job),
         searchOfficialTermTranslations:
@@ -628,8 +1141,19 @@ async function executePostAiTranslation(job, context) {
     data = createEmptyPostTranslationData()
   }
 
-  const result = await buildResult(job, data)
-  return await appendPostTranslationCoverImageResult(job, result, context)
+  const result = await appendPostTranslationCoverImageResult(
+    job,
+    await buildResult(job, data),
+    context
+  )
+  await appendTranslationMemoForLanguage({
+    job,
+    languageCode: job.target.languageCode,
+    sourceId: job.source.postId || job.target.postId,
+    sourceTitle: job.source.title || job.target.title,
+    result
+  })
+  return result
 }
 
 async function executeContentAiTranslation(job, context) {
@@ -656,6 +1180,10 @@ async function executeContentAiTranslation(job, context) {
       cacheKey: getJobId(job),
       cacheScopeKey: `content:${contentType}`,
       prompt: getPrompt(job),
+      translationMemoPrompt: await getTranslationMemoPromptForLanguage(
+        job,
+        job.target.languageCode
+      ),
       searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
       entries,
       snapshotVersion: job.source.snapshotVersion || 1,
@@ -664,7 +1192,15 @@ async function executeContentAiTranslation(job, context) {
     createHandlers(context, 'TranslateContent', { start: 20, end: 85 })
   )
 
-  return await buildResult(job, data)
+  const result = await buildResult(job, data)
+  await appendTranslationMemoForLanguage({
+    job,
+    languageCode: job.target.languageCode,
+    sourceId: job.source.contentId || job.source.postId || contentId,
+    sourceTitle: job.source.title || job.target.title,
+    result
+  })
+  return result
 }
 
 function getRecordSourceId(record) {
@@ -1155,6 +1691,10 @@ async function translateSourcePostForLanguage({
         cacheKey: getSharedTranslationCacheKey(job),
         cacheScopeKey: `sourcePostImport:${languageCode}`,
         prompt: getPrompt(job),
+        translationMemoPrompt: await getTranslationMemoPromptForLanguage(
+          job,
+          languageCode
+        ),
         autoOrganizeOfficialTermGlossary:
           shouldAutoOrganizeOfficialTermGlossary(job),
         searchOfficialTermTranslations:
@@ -1210,6 +1750,13 @@ async function translateSourcePostForLanguage({
       result
     })
   }
+  const translationMemoEntry = await appendTranslationMemoForLanguage({
+    job,
+    languageCode,
+    sourceId: sourcePostId,
+    sourceTitle: getSourcePostDisplayTitle(previewContext.sourcePost),
+    result
+  })
   await context.saveCheckpoint({
     stage: `TranslatePost:${languageCode}`,
     stateSummary: {
@@ -1219,6 +1766,7 @@ async function translateSourcePostForLanguage({
       coverImageEntryCount: result.previewEntries.filter(entry => {
         return entry && entry.entryType === 'coverImageTranslation'
       }).length,
+      translationMemoUpdated: Boolean(translationMemoEntry),
       requestId: result.requestId || '',
       model: result.model || ''
     }
