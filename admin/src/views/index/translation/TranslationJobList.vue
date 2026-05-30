@@ -798,6 +798,7 @@ const progressStageTextMap = {
   OrganizeProperNouns: '整理文章名词',
   BindProperNouns: '关联文章名词',
   ImportSourceSnapshot: '导入源快照',
+  OverwriteSourceSnapshot: '覆盖源快照',
   PrepareTargetPost: '准备目标文章',
   ValidateJob: '校验任务',
   FinalizeProperNounOrganize: '完成名词整理',

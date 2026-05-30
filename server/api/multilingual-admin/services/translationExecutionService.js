@@ -13,6 +13,7 @@ const translationPayloadApplyService = require('./translationPayloadApplyService
 const translationEntryBuildService = require('./translationEntryBuildService')
 const translationPostService = require('./translationPostService')
 const coverImageTranslationService = require('./coverImageTranslationService')
+const importPostSourceService = require('./importPostSourceService')
 const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
 const {
@@ -1609,7 +1610,8 @@ async function translateSourcePostForLanguage({
     await translationPostService.getSourcePostAiImportPreviewContext({
       sourceId,
       sourceLanguageCode: job.source.languageCode,
-      targetLanguageCode: languageCode
+      targetLanguageCode: languageCode,
+      sourceSnapshotId: getJobSourceSnapshotIdForSource(job, sourceId)
     })
   const sourcePostId =
     getSourcePostId(previewContext.sourcePost) || String(sourceId)
@@ -1916,6 +1918,14 @@ function setPlanNodeRelatedSourceIds({ node, languageCode, relatedSourceIds }) {
   node.plannedRelatedSourceIdsByLanguage[languageCode] = list
 }
 
+function getJobSourceSnapshotIdForSource(job, sourceId) {
+  const jobSourceId = normalizeString(job.source?.postId)
+  if (!jobSourceId || normalizeString(sourceId) !== jobSourceId) {
+    return ''
+  }
+  return normalizeString(job.source?.snapshotId)
+}
+
 async function loadSourcePostImportPreviewContextForPlan({
   job,
   sourceId,
@@ -1924,7 +1934,8 @@ async function loadSourcePostImportPreviewContextForPlan({
   return await translationPostService.getSourcePostAiImportPreviewContext({
     sourceId,
     sourceLanguageCode: job.source.languageCode,
-    targetLanguageCode: languageCode
+    targetLanguageCode: languageCode,
+    sourceSnapshotId: getJobSourceSnapshotIdForSource(job, sourceId)
   })
 }
 
@@ -2149,6 +2160,7 @@ async function createSourcePostImportChildJobs({
       source: {
         postId: sourcePostId,
         languageCode: job.source.languageCode,
+        overwriteSnapshot: job.source?.overwriteSnapshot === true,
         title,
         meta: {
           parentJobId: getJobId(job),
@@ -2232,6 +2244,57 @@ async function createSourcePostImportChildJobs({
   return childTaskResults
 }
 
+async function overwriteSourceSnapshotForAiImportJob(job, context) {
+  if (job.source?.overwriteSnapshot !== true) {
+    return
+  }
+  await context.updateProgress({
+    currentStage: 'OverwriteSourceSnapshot',
+    currentStep: '正在覆盖源文章快照',
+    percent: 1
+  })
+  const importResult =
+    await importPostSourceService.importOrOverwriteSourcePost(
+      {
+        sourceId: String(job.source.postId),
+        sourceLanguageCode: job.source.languageCode,
+        overwrite: true
+      },
+      false
+    )
+  const snapshotId = toObjectId(importResult.sourceSnapshotId)
+  if (!snapshotId) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '覆盖源快照后缺少 sourceSnapshotId',
+      'source.snapshotId',
+      500,
+      { retryable: false }
+    )
+  }
+  const snapshotVersion = Number(importResult.snapshotVersion || 1)
+  job.source.snapshotId = snapshotId
+  job.source.snapshotVersion = snapshotVersion
+
+  const JobModel = getTranslationJobModel()
+  await JobModel.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        'source.snapshotId': snapshotId,
+        'source.snapshotVersion': snapshotVersion
+      }
+    }
+  )
+  await context.saveCheckpoint({
+    stage: 'OverwriteSourceSnapshot',
+    stateSummary: {
+      sourceSnapshotId: String(snapshotId),
+      snapshotVersion
+    }
+  })
+}
+
 async function executeSourcePostAiImport(job, context) {
   const languageCodes = Array.isArray(job.target.languageCodes)
     ? job.target.languageCodes
@@ -2245,6 +2308,8 @@ async function executeSourcePostAiImport(job, context) {
       { retryable: false }
     )
   }
+
+  await overwriteSourceSnapshotForAiImportJob(job, context)
 
   const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
   let childTaskResults = []
@@ -2380,7 +2445,7 @@ async function executeSourcePostAiImport(job, context) {
     coverImageArtifacts: coverImageSnapshot.coverImageArtifacts,
     coverImageGenerationMap: coverImageSnapshot.coverImageGenerationMap,
     coverImageRecognitionMap: coverImageSnapshot.coverImageRecognitionMap,
-    sourceSnapshotId: null,
+    sourceSnapshotId: normalizeString(job.source?.snapshotId) || null,
     aiUsage: {
       languageResults: languageResults.map(item => ({
         languageCode: item.languageCode,

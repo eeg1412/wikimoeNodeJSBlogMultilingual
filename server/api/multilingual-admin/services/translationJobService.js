@@ -431,6 +431,7 @@ function normalizeSource(sourceInput, jobType) {
       source.snapshotVersion,
       'source.snapshotVersion'
     ),
+    overwriteSnapshot: source.overwriteSnapshot === true,
     sourceUpdatedAt: source.sourceUpdatedAt || source.updatedAt || null,
     title: toTrimmedString(source.title),
     meta: normalizeObject(source.meta, 'source.meta')

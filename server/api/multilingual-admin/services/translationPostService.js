@@ -3828,10 +3828,54 @@ function normalizeAiBatchInput(body = {}) {
     )
   }
 
+  const sourceSnapshotId = String(body.sourceSnapshotId || '').trim()
+  if (sourceSnapshotId && !mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_ID_INVALID,
+      undefined,
+      'sourceSnapshotId',
+      400
+    )
+  }
+  const overwriteSourceSnapshot = body.overwriteSourceSnapshot === true
+  if (sourceSnapshotId && overwriteSourceSnapshot) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '不能同时指定 sourceSnapshotId 和 overwriteSourceSnapshot',
+      'sourceSnapshotId',
+      400
+    )
+  }
+
   return {
     sourceId,
     sourceLanguageCode,
+    sourceSnapshotId,
+    overwriteSourceSnapshot,
     results: normalizeAiImportResultList(body)
+  }
+}
+
+function assertAiImportSourceSnapshotMatchesInput(
+  sourceSnapshotSummary,
+  input
+) {
+  const snapshotSourceId = String(sourceSnapshotSummary?.sourceId || '').trim()
+  if (snapshotSourceId !== input.sourceId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      '源快照不属于当前源文章，不能采纳 AI 翻译结果',
+      'sourceSnapshotId',
+      404
+    )
+  }
+  if (sourceSnapshotSummary.sourceLanguageCode !== input.sourceLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      '源快照语言与 AI 翻译源语言不一致',
+      'sourceSnapshotId',
+      400
+    )
   }
 }
 
@@ -3866,10 +3910,21 @@ function parseSourcePostAiImportPreviewInput(query = {}) {
     )
   }
 
+  const sourceSnapshotId = String(query.sourceSnapshotId || '').trim()
+  if (sourceSnapshotId && !mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_ID_INVALID,
+      undefined,
+      'sourceSnapshotId',
+      400
+    )
+  }
+
   return {
     sourceId,
     sourceLanguageCode,
-    targetLanguageCode
+    targetLanguageCode,
+    sourceSnapshotId
   }
 }
 
@@ -4064,11 +4119,17 @@ function buildAiImportPreviewTargetPost(sourcePost, context) {
 
 async function getSourcePostAiImportPreviewContext(query = {}) {
   const input = parseSourcePostAiImportPreviewInput(query)
-  const sourceDetail =
-    await importPostSourceService.getSourceDatabasePostDetail({
+  let sourceDetail = null
+  if (input.sourceSnapshotId) {
+    sourceDetail = await importPostSourceService.getSourcePostDetail(
+      input.sourceSnapshotId
+    )
+  } else {
+    sourceDetail = await importPostSourceService.getSourceDatabasePostDetail({
       id: input.sourceId,
       sourceLanguageCode: input.sourceLanguageCode
     })
+  }
   const sourcePost = sourceDetail.post
   if (!sourcePost) {
     throw new ApiError(
@@ -4077,6 +4138,25 @@ async function getSourcePostAiImportPreviewContext(query = {}) {
       'sourceId',
       404
     )
+  }
+  if (input.sourceSnapshotId) {
+    const snapshotSourceId = String(sourcePost.sourceId || '').trim()
+    if (snapshotSourceId !== input.sourceId) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        '源快照不属于当前源文章',
+        'sourceSnapshotId',
+        400
+      )
+    }
+    if (sourcePost.sourceLanguageCode !== input.sourceLanguageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        '源快照语言与源语言不匹配',
+        'sourceLanguageCode',
+        400
+      )
+    }
   }
 
   const sourceIdMap = collectPostPreviewRelationSources(sourcePost)
@@ -4584,7 +4664,8 @@ async function createOrGetTranslationPostForAiImport(
 async function ensureSourceSnapshotForAiImport(
   sourceId,
   sourceLanguageCode,
-  sourceSnapshotIdCache
+  sourceSnapshotIdCache,
+  options = {}
 ) {
   const cacheKey = String(sourceId)
   if (sourceSnapshotIdCache.has(cacheKey)) {
@@ -4597,7 +4678,7 @@ async function ensureSourceSnapshotForAiImport(
         {
           sourceId: cacheKey,
           sourceLanguageCode,
-          overwrite: false
+          overwrite: options.overwrite === true
         },
         false,
         { skipContentRefresh: true }
@@ -4777,13 +4858,26 @@ async function applySourcePostAiImport(body = {}, options = {}) {
   const input = normalizeAiBatchInput(body)
   const refreshLanguageSet = new Set([input.sourceLanguageCode])
   const sourceSnapshotIdCache = new Map()
-  const sourceSnapshotId = await ensureSourceSnapshotForAiImport(
-    input.sourceId,
-    input.sourceLanguageCode,
-    sourceSnapshotIdCache
-  )
-  const sourceSnapshotSummary =
-    await findSourcePostSnapshotSummary(sourceSnapshotId)
+  let sourceSnapshotId = input.sourceSnapshotId
+  let sourceSnapshotSummary = null
+  if (sourceSnapshotId) {
+    sourceSnapshotSummary =
+      await findSourcePostSnapshotSummary(sourceSnapshotId)
+    assertAiImportSourceSnapshotMatchesInput(sourceSnapshotSummary, input)
+    sourceSnapshotId = sourceSnapshotSummary._id
+    sourceSnapshotIdCache.set(input.sourceId, sourceSnapshotId)
+  } else {
+    sourceSnapshotId = await ensureSourceSnapshotForAiImport(
+      input.sourceId,
+      input.sourceLanguageCode,
+      sourceSnapshotIdCache,
+      {
+        overwrite: input.overwriteSourceSnapshot
+      }
+    )
+    sourceSnapshotSummary =
+      await findSourcePostSnapshotSummary(sourceSnapshotId)
+  }
 
   const results = []
   for (const item of input.results) {
@@ -4851,7 +4945,10 @@ async function applySourcePostAiImport(body = {}, options = {}) {
       const relatedSourceSnapshotId = await ensureSourceSnapshotForAiImport(
         relatedSourceId,
         input.sourceLanguageCode,
-        sourceSnapshotIdCache
+        sourceSnapshotIdCache,
+        {
+          overwrite: input.overwriteSourceSnapshot
+        }
       )
       const relatedCreateResult = await createOrGetTranslationPostForAiImport(
         relatedSourceSnapshotId,

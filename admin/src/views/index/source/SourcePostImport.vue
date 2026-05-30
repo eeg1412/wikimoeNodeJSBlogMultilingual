@@ -183,7 +183,7 @@
             {{ $formatDate(row.updatedAt || row.date || row.createdAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="280" fixed="right">
+        <ResponsiveTableColumn label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <div class="source-post-row-actions">
               <el-button
@@ -195,15 +195,34 @@
               >
                 生成快照
               </el-button>
-              <el-button
+              <el-dropdown
                 v-if="row.hasSnapshot"
-                type="warning"
-                size="small"
-                :loading="rowActionLoadingMap[row.sourceId]"
-                @click="openLanguageDialog(row, 'overwrite')"
+                trigger="click"
+                @command="
+                  command => handleOverwriteSnapshotCommand(row, command)
+                "
               >
-                覆盖快照
-              </el-button>
+                <el-button
+                  type="warning"
+                  size="small"
+                  :loading="rowActionLoadingMap[row.sourceId]"
+                >
+                  快照操作
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="overwrite">
+                      <el-icon><Refresh /></el-icon>
+                      <span>覆盖快照</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="overwriteAiImport">
+                      <el-icon><Promotion /></el-icon>
+                      <span>覆盖快照并AI翻译</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-dropdown
                 trigger="click"
                 @command="command => handleSourcePostAction(row, command)"
@@ -315,7 +334,7 @@
 
     <el-dialog
       v-model="aiDialogVisible"
-      title="生成并AI翻译"
+      :title="aiDialogTitle"
       width="min(1120px, 96vw)"
       align-center
       destroy-on-close
@@ -379,9 +398,7 @@
               />
             </el-form-item>
             <OfficialTermGlossaryOptions
-              v-model:auto-organize="
-                aiForm.autoOrganizeOfficialTermGlossary
-              "
+              v-model:auto-organize="aiForm.autoOrganizeOfficialTermGlossary"
               v-model:search-official-term-translations="
                 aiForm.searchOfficialTermTranslations
               "
@@ -1043,7 +1060,7 @@
           :disabled="isAiImportBusy"
           @click="createSourcePostAiImportJob"
         >
-          创建后台任务
+          {{ aiJobButtonText }}
         </el-button>
         <el-button
           v-if="aiStep !== 'preview'"
@@ -1052,7 +1069,7 @@
           :disabled="isAiImportBusy"
           @click="startAiImportTranslation"
         >
-          开始
+          即时翻译
         </el-button>
         <el-button
           v-else
@@ -1063,7 +1080,7 @@
           "
           @click="confirmAiImportApply"
         >
-          保存所选结果
+          {{ aiApplyButtonText }}
         </el-button>
       </template>
     </el-dialog>
@@ -1165,6 +1182,8 @@ const AI_COVER_IMAGE_ENTRY_TYPE = 'coverImageTranslation'
 const AI_COVER_IMAGE_TRANSLATION_MODE_AUTO = 'auto'
 const AI_COVER_IMAGE_TRANSLATION_MODE_ALWAYS = 'always'
 const AI_COVER_IMAGE_TRANSLATION_MODE_NEVER = 'never'
+const AI_IMPORT_MODE_IMPORT = 'import'
+const AI_IMPORT_MODE_OVERWRITE = 'overwrite'
 const AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS = [
   { label: '自动判断', value: AI_COVER_IMAGE_TRANSLATION_MODE_AUTO },
   { label: '是', value: AI_COVER_IMAGE_TRANSLATION_MODE_ALWAYS },
@@ -1193,6 +1212,7 @@ export default {
     const languageAction = ref('import')
     const languageRow = ref(null)
     const aiRow = ref(null)
+    const aiImportMode = ref(AI_IMPORT_MODE_IMPORT)
     const organizeRow = ref(null)
     const aiStep = ref('setup')
     const aiRunning = ref(false)
@@ -1241,11 +1261,35 @@ export default {
       if (languageAction.value === 'overwrite') {
         return '选择要覆盖的快照语言'
       }
+      if (languageAction.value === 'overwriteAiImport') {
+        return '选择覆盖并AI翻译的快照语言'
+      }
       return '选择源文章快照语言'
+    })
+
+    const aiDialogTitle = computed(() => {
+      if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+        return '覆盖快照并AI翻译'
+      }
+      return '生成并AI翻译'
     })
 
     const isAiImportBusy = computed(() => {
       return aiRunning.value || aiApplying.value
+    })
+
+    const aiJobButtonText = computed(() => {
+      if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+        return '覆盖并创建后台任务'
+      }
+      return '创建后台任务'
+    })
+
+    const aiApplyButtonText = computed(() => {
+      if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+        return '覆盖并保存结果'
+      }
+      return '保存所选结果'
     })
 
     const isAiAbortError = error => {
@@ -1437,6 +1481,7 @@ export default {
         aiAbortController.value = null
       }
       aiRow.value = null
+      aiImportMode.value = AI_IMPORT_MODE_IMPORT
       aiStep.value = 'setup'
       aiRunning.value = false
       aiApplying.value = false
@@ -1518,6 +1563,42 @@ export default {
       return String(row.sourceId || row._id || '').trim()
     }
 
+    const getAiSourceSnapshot = () => {
+      const row = aiRow.value
+      if (!row) {
+        return null
+      }
+      if (Array.isArray(row.snapshotSummary)) {
+        const matchedSnapshot = row.snapshotSummary.find(snapshot => {
+          return snapshot.sourceLanguageCode === aiForm.sourceLanguageCode
+        })
+        if (matchedSnapshot) {
+          return matchedSnapshot
+        }
+      }
+      if (
+        row.snapshot &&
+        row.snapshot.sourceLanguageCode === aiForm.sourceLanguageCode
+      ) {
+        return row.snapshot
+      }
+      return row.snapshot || null
+    }
+
+    const getAiSourceSnapshotId = () => {
+      const snapshot = getAiSourceSnapshot()
+      return String(snapshot?._id || snapshot?.sourceSnapshotId || '').trim()
+    }
+
+    const getAiSourceSnapshotVersion = () => {
+      const snapshot = getAiSourceSnapshot()
+      const version = Number(snapshot?.snapshotVersion || 0)
+      if (!Number.isFinite(version) || version < 1) {
+        return null
+      }
+      return Math.floor(version)
+    }
+
     const applyAutoOrganizeOfficialTermGlossaryDefault = () => {
       if (sourceProperNounTermCount.value > 0) {
         aiForm.autoOrganizeOfficialTermGlossary = false
@@ -1578,8 +1659,13 @@ export default {
       }
     }
 
-    const openAiImportDialog = row => {
+    const openAiImportDialog = (row, options = {}) => {
       aiRow.value = row
+      if (options.mode === AI_IMPORT_MODE_OVERWRITE) {
+        aiImportMode.value = AI_IMPORT_MODE_OVERWRITE
+      } else {
+        aiImportMode.value = AI_IMPORT_MODE_IMPORT
+      }
       aiStep.value = 'setup'
       aiRunning.value = false
       aiApplying.value = false
@@ -1591,7 +1677,11 @@ export default {
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
       aiStreamContent.value = ''
-      aiForm.sourceLanguageCode = getStoredAiSourceLanguageCode()
+      if (options.sourceLanguageCode) {
+        aiForm.sourceLanguageCode = options.sourceLanguageCode
+      } else {
+        aiForm.sourceLanguageCode = getStoredAiSourceLanguageCode()
+      }
       aiForm.targetLanguageCodes = getStoredAiTargetLanguageCodes(
         aiForm.sourceLanguageCode
       )
@@ -2145,7 +2235,8 @@ export default {
       }
       if (
         aiCoverImageAutoModeUnavailableReason.value &&
-        aiForm.coverImageTranslationMode === AI_COVER_IMAGE_TRANSLATION_MODE_AUTO
+        aiForm.coverImageTranslationMode ===
+          AI_COVER_IMAGE_TRANSLATION_MODE_AUTO
       ) {
         forceDisableAiCoverImageTranslation()
       }
@@ -2160,7 +2251,8 @@ export default {
       }
       if (
         aiCoverImageAutoModeUnavailableReason.value &&
-        aiForm.coverImageTranslationMode === AI_COVER_IMAGE_TRANSLATION_MODE_AUTO
+        aiForm.coverImageTranslationMode ===
+          AI_COVER_IMAGE_TRANSLATION_MODE_AUTO
       ) {
         return AI_COVER_IMAGE_TRANSLATION_MODE_NEVER
       }
@@ -2176,6 +2268,13 @@ export default {
       languageDialogVisible.value = false
       if (languageAction.value === 'overwrite') {
         overwriteRow(row, languageForm.sourceLanguageCode)
+        return
+      }
+      if (languageAction.value === 'overwriteAiImport') {
+        openAiImportDialog(row, {
+          mode: AI_IMPORT_MODE_OVERWRITE,
+          sourceLanguageCode: languageForm.sourceLanguageCode
+        })
         return
       }
       importRow(row, languageForm.sourceLanguageCode)
@@ -2235,7 +2334,7 @@ export default {
     const loadSourceDatabasePost = async row => {
       return await loadSourceDatabasePostById({
         sourceId: row.sourceId,
-        ensureNoSnapshot: true
+        ensureNoSnapshot: aiImportMode.value !== AI_IMPORT_MODE_OVERWRITE
       })
     }
 
@@ -3161,7 +3260,9 @@ export default {
       setAiRowLoading(true)
       aiAbortController.value = new AbortController()
       try {
-        assertAiRowCanPreview(row)
+        if (aiImportMode.value !== AI_IMPORT_MODE_OVERWRITE) {
+          assertAiRowCanPreview(row)
+        }
         const sourcePost = await loadSourceDatabasePost(row)
         const resultList = []
         for (const languageCode of aiForm.targetLanguageCodes) {
@@ -3233,15 +3334,44 @@ export default {
         return
       }
 
+      if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+        try {
+          await ElMessageBox.confirm(
+            '确认覆盖源快照并创建后台 AI 翻译任务？',
+            '确认覆盖并创建任务',
+            {
+              type: 'warning',
+              confirmButtonText: '覆盖并创建任务',
+              cancelButtonText: '取消'
+            }
+          )
+        } catch (error) {
+          return
+        }
+      }
+
       rememberAiImportOptions()
       try {
+        const source = {
+          postId: row.sourceId,
+          languageCode: aiForm.sourceLanguageCode,
+          title: getPostDisplayTitle(row)
+        }
+        if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+          source.overwriteSnapshot = true
+        } else {
+          const sourceSnapshotId = getAiSourceSnapshotId()
+          if (sourceSnapshotId) {
+            source.snapshotId = sourceSnapshotId
+          }
+          const sourceSnapshotVersion = getAiSourceSnapshotVersion()
+          if (sourceSnapshotVersion) {
+            source.snapshotVersion = sourceSnapshotVersion
+          }
+        }
         await multilingualApi.createTranslationJob({
           jobType: 'source-post-ai-import',
-          source: {
-            postId: row.sourceId,
-            languageCode: aiForm.sourceLanguageCode,
-            title: getPostDisplayTitle(row)
-          },
+          source,
           target: {
             languageCodes: aiForm.targetLanguageCodes,
             title: getPostDisplayTitle(row)
@@ -3280,16 +3410,21 @@ export default {
         return
       }
 
+      let confirmMessage = '确认保存所选 AI 翻译结果？'
+      let confirmTitle = '保存翻译结果'
+      let confirmButtonText = '保存'
+      if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+        confirmMessage = '确认覆盖源快照并保存所选 AI 翻译结果？'
+        confirmTitle = '确认覆盖并保存'
+        confirmButtonText = '覆盖并保存'
+      }
+
       try {
-        await ElMessageBox.confirm(
-          '确认保存所选 AI 翻译结果？',
-          '保存翻译结果',
-          {
-            type: 'warning',
-            confirmButtonText: '保存',
-            cancelButtonText: '取消'
-          }
-        )
+        await ElMessageBox.confirm(confirmMessage, confirmTitle, {
+          type: 'warning',
+          confirmButtonText,
+          cancelButtonText: '取消'
+        })
       } catch (error) {
         return
       }
@@ -3316,58 +3451,64 @@ export default {
       }
       aiApplying.value = true
       try {
-        const response = await multilingualApi.applySourcePostAiImport(
-          {
-            sourceId: String(aiRow.value.sourceId),
-            sourceLanguageCode: aiForm.sourceLanguageCode,
-            results: selectedResults.map(resultItem => {
-              const shouldPublish = publishLanguageSet.has(
-                resultItem.languageCode
-              )
-              const selectedEntryIds = getSelectedAiResultEntryIds(
-                resultItem.languageCode
-              )
-              return {
-                languageCode: resultItem.languageCode,
-                payload: buildSelectedAiImportPayload(resultItem),
-                publish: shouldPublish,
-                coverImagePreviewEntries: buildSelectedCoverImagePreviewEntries(
-                  resultItem.preview,
-                  selectedEntryIds
-                ),
-                coverImageArtifacts: buildSelectedCoverImageArtifacts(
-                  resultItem.preview,
-                  selectedEntryIds
-                ),
-                relatedPostResults: (resultItem.relatedResults || []).map(
-                  relatedItem => {
-                    const selectedRelatedEntryIds =
-                      getSelectedAiRelatedEntryIds(
-                        resultItem.languageCode,
-                        relatedItem.sourceId
-                      )
-                    return {
-                      sourceId: relatedItem.sourceId,
-                      payload: buildSelectedAiRelatedImportPayload(
-                        resultItem,
-                        relatedItem
-                      ),
-                      publish: shouldPublish,
-                      coverImagePreviewEntries:
-                        buildSelectedCoverImagePreviewEntries(
-                          relatedItem.preview,
-                          selectedRelatedEntryIds
-                        ),
-                      coverImageArtifacts: buildSelectedCoverImageArtifacts(
+        const requestBody = {
+          sourceId: String(aiRow.value.sourceId),
+          sourceLanguageCode: aiForm.sourceLanguageCode,
+          results: selectedResults.map(resultItem => {
+            const shouldPublish = publishLanguageSet.has(
+              resultItem.languageCode
+            )
+            const selectedEntryIds = getSelectedAiResultEntryIds(
+              resultItem.languageCode
+            )
+            return {
+              languageCode: resultItem.languageCode,
+              payload: buildSelectedAiImportPayload(resultItem),
+              publish: shouldPublish,
+              coverImagePreviewEntries: buildSelectedCoverImagePreviewEntries(
+                resultItem.preview,
+                selectedEntryIds
+              ),
+              coverImageArtifacts: buildSelectedCoverImageArtifacts(
+                resultItem.preview,
+                selectedEntryIds
+              ),
+              relatedPostResults: (resultItem.relatedResults || []).map(
+                relatedItem => {
+                  const selectedRelatedEntryIds = getSelectedAiRelatedEntryIds(
+                    resultItem.languageCode,
+                    relatedItem.sourceId
+                  )
+                  return {
+                    sourceId: relatedItem.sourceId,
+                    payload: buildSelectedAiRelatedImportPayload(
+                      resultItem,
+                      relatedItem
+                    ),
+                    publish: shouldPublish,
+                    coverImagePreviewEntries:
+                      buildSelectedCoverImagePreviewEntries(
                         relatedItem.preview,
                         selectedRelatedEntryIds
-                      )
-                    }
+                      ),
+                    coverImageArtifacts: buildSelectedCoverImageArtifacts(
+                      relatedItem.preview,
+                      selectedRelatedEntryIds
+                    )
                   }
-                )
-              }
-            })
-          },
+                }
+              )
+            }
+          })
+        }
+        const sourceSnapshotId = getAiSourceSnapshotId()
+        if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
+          requestBody.overwriteSourceSnapshot = true
+        } else if (sourceSnapshotId) {
+          requestBody.sourceSnapshotId = sourceSnapshotId
+        }
+        const response = await multilingualApi.applySourcePostAiImport(
+          requestBody,
           true
         )
         const snapshot = response.data.data?.snapshot
@@ -3415,6 +3556,7 @@ export default {
         resultDialogVisible.value = true
         ElMessage.success('源文章快照覆盖成功')
         getSourceDatabasePostList(false)
+        return result.value
       } finally {
         setRowLoading(row, false)
       }
@@ -3503,6 +3645,19 @@ export default {
       }
     }
 
+    const handleOverwriteSnapshotCommand = (row, command) => {
+      if (command === 'overwrite') {
+        openLanguageDialog(row, 'overwrite')
+        return
+      }
+      if (command === 'overwriteAiImport') {
+        openAiImportDialog(row, {
+          mode: AI_IMPORT_MODE_OVERWRITE,
+          sourceLanguageCode: getStoredSourceLanguageCode()
+        })
+      }
+    }
+
     watch(
       () => params.page,
       () => {
@@ -3514,9 +3669,12 @@ export default {
       enforceOfficialTermSearchAvailability()
     })
 
-    watch(() => aiForm.autoOrganizeOfficialTermGlossary, () => {
-      enforceOfficialTermSearchAvailability()
-    })
+    watch(
+      () => aiForm.autoOrganizeOfficialTermGlossary,
+      () => {
+        enforceOfficialTermSearchAvailability()
+      }
+    )
 
     watch(
       [
@@ -3579,11 +3737,14 @@ export default {
       selectedAiRelatedEntryIdsMap,
       languageDialogVisible,
       languageDialogTitle,
+      aiDialogTitle,
       languageForm,
       copiedCountRows,
       isAiCoverImageModeDisabled,
       isAiCoverImageTranslationDisabled,
       isAiImportBusy,
+      aiJobButtonText,
+      aiApplyButtonText,
       officialTermSearchDefaultLoading,
       officialTermSearchUnavailableReason,
       rowActionLoadingMap,
@@ -3598,6 +3759,7 @@ export default {
       getPostDisplayTitle,
       getProperNounTermCount,
       handleSourcePostAction,
+      handleOverwriteSnapshotCommand,
       getAiRelatedCoverImageEntries,
       getAiResultCoverImageEntries,
       getAiRelatedSelectableEntryIds,

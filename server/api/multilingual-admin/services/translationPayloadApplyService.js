@@ -946,10 +946,15 @@ async function applySourcePostTranslationJob({
     )
   }
 
+  const sourceSnapshotId =
+    job.source?.snapshotId || job.result?.sourceSnapshotId
   const applyResult = await translationPostService.applySourcePostAiImport(
     {
       sourceId: job.source?.postId,
       sourceLanguageCode: job.source?.languageCode,
+      sourceSnapshotId,
+      overwriteSourceSnapshot:
+        !sourceSnapshotId && job.source?.overwriteSnapshot === true,
       results
     },
     {

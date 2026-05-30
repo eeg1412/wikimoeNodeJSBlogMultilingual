@@ -267,6 +267,10 @@ const translationJobs = new Schema(
         type: Number,
         default: null
       },
+      overwriteSnapshot: {
+        type: Boolean,
+        default: false
+      },
       sourceUpdatedAt: {
         type: Date,
         default: null
