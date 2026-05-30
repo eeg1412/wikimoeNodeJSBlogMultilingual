@@ -426,7 +426,8 @@ export default {
         .getTranslationPostListBySource({
           sourceSnapshotId: route.params.sourceSnapshotId,
           page: 1,
-          limit: 1
+          limit: 1,
+          includeTranslationDetails: true
         })
         .then(response => {
           const responseData = response.data.data || {}

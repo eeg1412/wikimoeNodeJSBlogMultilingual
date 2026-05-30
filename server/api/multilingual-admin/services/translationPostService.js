@@ -339,6 +339,17 @@ const SOURCE_POST_LIST_SELECT_FIELDS = [
 
 const TRANSLATION_POST_LIST_SELECT_FIELDS = [
   '_id',
+  'aiTranslationSkip',
+  'languageCode',
+  'translationGroupId',
+  'status',
+  'pendingReview',
+  'sourceId',
+  'sourceSnapshotId'
+].join(' ')
+
+const TRANSLATION_POST_LANGUAGE_LIST_SELECT_FIELDS = [
+  '_id',
   'title',
   'excerpt',
   'alias',
@@ -378,6 +389,35 @@ const TRANSLATION_POST_LIST_SELECT_FIELDS = [
   'contentVoteList',
   'seriesSortList',
   'contentSeriesSortList'
+].join(' ')
+
+const POST_LIST_RELATION_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'excerpt',
+  'type',
+  'status',
+  'date',
+  'year',
+  'season',
+  'month',
+  'day',
+  'startTime',
+  'booktype',
+  'gamePlatform'
+].join(' ')
+
+const POST_LIST_SIMPLE_RELATION_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'status',
+  'year',
+  'season',
+  'month',
+  'day',
+  'startTime',
+  'booktype',
+  'gamePlatform'
 ].join(' ')
 
 const POST_DETAIL_ATTACHMENT_SELECT_FIELDS = [
@@ -550,6 +590,64 @@ function buildMultilingualPostPopulate() {
       path: 'contentVoteList',
       match: { status: matchStatus }
     }
+  ]
+}
+
+function buildTranslationPostListSourcePopulate() {
+  const matchStatus = { $in: [0, 1] }
+  const simpleRelationPopulate = path => ({
+    path,
+    match: { status: matchStatus },
+    select: POST_LIST_SIMPLE_RELATION_SELECT_FIELDS
+  })
+  const bookRelationPopulate = path => ({
+    path,
+    match: { status: matchStatus },
+    select: POST_LIST_SIMPLE_RELATION_SELECT_FIELDS,
+    populate: { path: 'booktype', select: '_id name' }
+  })
+  const gameRelationPopulate = path => ({
+    path,
+    match: { status: matchStatus },
+    select: POST_LIST_SIMPLE_RELATION_SELECT_FIELDS,
+    populate: { path: 'gamePlatform', select: '_id name' }
+  })
+  const postRelationPopulate = (path, type) => {
+    const match = { status: matchStatus }
+    if (type) {
+      match.type = type
+    }
+    return {
+      path,
+      match,
+      select: POST_LIST_RELATION_SELECT_FIELDS
+    }
+  }
+
+  return [
+    { path: 'sort', select: '_id sortname' },
+    { path: 'tags', select: '_id tagname' },
+    {
+      path: 'mappointList',
+      match: { status: matchStatus },
+      select: '_id title status'
+    },
+    simpleRelationPopulate('bangumiList'),
+    simpleRelationPopulate('movieList'),
+    gameRelationPopulate('gameList'),
+    bookRelationPopulate('bookList'),
+    postRelationPopulate('postList', 1),
+    postRelationPopulate('tweetList', 2),
+    simpleRelationPopulate('eventList'),
+    simpleRelationPopulate('voteList'),
+    simpleRelationPopulate('contentBangumiList'),
+    simpleRelationPopulate('contentMovieList'),
+    gameRelationPopulate('contentGameList'),
+    bookRelationPopulate('contentBookList'),
+    postRelationPopulate('contentPostList', 1),
+    postRelationPopulate('contentTweetList', 2),
+    simpleRelationPopulate('contentEventList'),
+    simpleRelationPopulate('contentVoteList')
   ]
 }
 
@@ -2423,7 +2521,7 @@ async function repairTranslationPostIdentityForSource(record, sourcePost) {
   return record
 }
 
-async function buildTranslationMatrixMap(sourcePosts) {
+async function buildTranslationMatrixMap(sourcePosts, options = {}) {
   const matrixMap = {}
   const sourcePostMap = new Map()
   for (const sourcePost of sourcePosts) {
@@ -2440,13 +2538,18 @@ async function buildTranslationMatrixMap(sourcePosts) {
   }
 
   const PostModel = getPostModel()
-  const translations = await PostModel.find({
+  const translationQuery = PostModel.find({
     translationGroupId: { $in: translationGroupIds },
     recordKind: TRANSLATION_RECORD_KIND
   })
-    .select(TRANSLATION_POST_LIST_SELECT_FIELDS)
-    .populate(buildMultilingualPostPopulate())
-    .lean()
+  if (options.includeTranslationDetails === true) {
+    translationQuery
+      .select(TRANSLATION_POST_LANGUAGE_LIST_SELECT_FIELDS)
+      .populate(buildTranslationPostListSourcePopulate())
+  } else {
+    translationQuery.select(TRANSLATION_POST_LIST_SELECT_FIELDS)
+  }
+  const translations = await translationQuery.lean()
 
   for (const translation of translations) {
     const groupKey = String(translation.translationGroupId)
@@ -2463,6 +2566,9 @@ async function buildTranslationMatrixMap(sourcePosts) {
 async function getTranslationPostListBySource(query = {}) {
   const page = parsePositiveInteger(query.page, 1)
   const limit = parsePositiveInteger(query.limit, 20, 100)
+  const includeTranslationDetails =
+    query.includeTranslationDetails === true ||
+    query.includeTranslationDetails === 'true'
   const sourceParams = {
     sourceCollection: SOURCE_POST_COLLECTION,
     recordKind: SOURCE_RECORD_KIND
@@ -2547,7 +2653,7 @@ async function getTranslationPostListBySource(query = {}) {
   const total = await PostModel.countDocuments(sourceParams)
   const sourcePosts = await PostModel.find(sourceParams)
     .select(SOURCE_POST_LIST_SELECT_FIELDS)
-    .populate(buildMultilingualPostPopulate())
+    .populate(buildTranslationPostListSourcePopulate())
     .sort({ sourceSnapshotAt: -1, updatedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
@@ -2555,7 +2661,9 @@ async function getTranslationPostListBySource(query = {}) {
 
   const normalizedSourcePosts =
     await normalizeSourcePostSnapshotIdentityList(sourcePosts)
-  const matrixMap = await buildTranslationMatrixMap(normalizedSourcePosts)
+  const matrixMap = await buildTranslationMatrixMap(normalizedSourcePosts, {
+    includeTranslationDetails
+  })
   const list = normalizedSourcePosts.map(sourcePost => {
     const groupKey = getSourcePostGroupKey(sourcePost)
     return {
