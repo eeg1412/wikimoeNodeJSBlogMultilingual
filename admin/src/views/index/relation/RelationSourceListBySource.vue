@@ -214,7 +214,12 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <el-button v-else type="primary" size="small" @click="goLanguageList(row)">
+            <el-button
+              v-else
+              type="primary"
+              size="small"
+              @click="goLanguageList(row)"
+            >
               语言版本
             </el-button>
           </template>

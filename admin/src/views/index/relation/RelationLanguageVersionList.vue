@@ -86,7 +86,9 @@
               <el-dropdown
                 v-if="row.record"
                 trigger="click"
-                @command="command => handleRelationActionCommand(row.record, command)"
+                @command="
+                  command => handleRelationActionCommand(row.record, command)
+                "
               >
                 <el-button type="primary" size="small">
                   版本操作
