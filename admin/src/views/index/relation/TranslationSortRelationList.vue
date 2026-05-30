@@ -1,14 +1,18 @@
 <template>
-  <RelationList scope="translation" title="分类" collection-name="sorts" />
+  <RelationSourceListBySource
+    title="分类"
+    collection-name="sorts"
+    language-route-name="TranslationSortRelationLanguageList"
+  />
 </template>
 
 <script>
-import RelationList from './RelationList.vue'
+import RelationSourceListBySource from './RelationSourceListBySource.vue'
 
 export default {
   name: 'TranslationSortRelationList',
   components: {
-    RelationList
+    RelationSourceListBySource
   }
 }
 </script>

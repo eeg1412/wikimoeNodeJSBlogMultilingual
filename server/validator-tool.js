@@ -1046,8 +1046,32 @@ function validateMultilingualAdminConsoleSlice() {
       'src',
       'views',
       'index',
+      'relation',
+      'RelationSourceListBySource.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
+      'relation',
+      'RelationLanguageVersionList.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
       'media',
       'MultilingualMediaList.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
+      'media',
+      'MultilingualMediaSourceList.vue'
     ),
     path.join(
       adminDir,
@@ -1074,6 +1098,30 @@ function validateMultilingualAdminConsoleSlice() {
       'index',
       'translation',
       'TranslationPostList.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
+      'relation',
+      'RelationSourceListBySource.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
+      'relation',
+      'RelationLanguageVersionList.vue'
+    ),
+    path.join(
+      adminDir,
+      'src',
+      'views',
+      'index',
+      'media',
+      'MultilingualMediaSourceList.vue'
     )
   ]
 
@@ -1125,7 +1173,13 @@ function validateMultilingualAdminConsoleSlice() {
     'SourceMediaSnapshotList',
     'TranslationPostList',
     'RelationList',
+    'TranslationAuthorRelationLanguageList',
+    'TranslationSortRelationLanguageList',
+    'TranslationTagRelationLanguageList',
+    'TranslationMappointRelationLanguageList',
+    'TranslationRelationContentLanguageList',
     'MultilingualMediaList',
+    'MultilingualMediaLanguageList',
     'MultilingualConfig'
   ])
   assertFileIncludes(apiIndexPath, [
@@ -1142,6 +1196,8 @@ function validateMultilingualAdminConsoleSlice() {
     '/translation/post/create',
     '/translation/post/list-by-source',
     '/translation/relation/update',
+    '/translation/relation/list-by-source',
+    '/media/list-by-source',
     '/media/replace-local',
     '/media/convert-remote'
   ])
@@ -1491,7 +1547,9 @@ function validateMultilingualAdminApi() {
     '/translation/post/update',
     '/translation/relation/update',
     '/translation/relation/list',
+    '/translation/relation/list-by-source',
     '/media/list',
+    '/media/list-by-source',
     '/media/replace-local',
     '/media/convert-remote'
   ])
@@ -1707,6 +1765,8 @@ function validateTranslationPostApi() {
     '/translation/post/detail',
     '/translation/post/update',
     '/translation/relation/update',
+    '/translation/relation/list-by-source',
+    '/media/list-by-source',
     '/media/replace-local',
     '/media/convert-remote',
     'multer.memoryStorage()',

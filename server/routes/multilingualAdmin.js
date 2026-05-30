@@ -712,10 +712,22 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/relation/getList')
   },
   {
+    path: '/translation/relation/list-by-source',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/relation/getListBySource')
+  },
+  {
     path: '/media/list',
     method: 'get',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/media/getList')
+  },
+  {
+    path: '/media/list-by-source',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/media/getListBySource')
   },
   {
     path: '/media/create-local',

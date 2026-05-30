@@ -1,23 +1,27 @@
 <template>
-  <RelationList
-    scope="translation"
+  <RelationSourceListBySource
     title="关联内容"
-    :exclude-collection-names="basicRelationCollectionNames"
+    :exclude-collection-names="relationContentExcludeCollectionNames"
+    language-route-name="TranslationRelationContentLanguageList"
   />
 </template>
 
 <script>
-import RelationList from './RelationList.vue'
+import RelationSourceListBySource from './RelationSourceListBySource.vue'
 import { BASIC_RELATION_COLLECTION_NAMES } from './relationCollection'
 
 export default {
   name: 'TranslationRelationList',
   components: {
-    RelationList
+    RelationSourceListBySource
   },
   setup() {
     return {
-      basicRelationCollectionNames: BASIC_RELATION_COLLECTION_NAMES
+      relationContentExcludeCollectionNames: [
+        ...BASIC_RELATION_COLLECTION_NAMES,
+        'posts',
+        'attachments'
+      ]
     }
   }
 }

@@ -429,6 +429,10 @@ export default {
       type: String,
       default: ''
     },
+    sourceId: {
+      type: String,
+      default: ''
+    },
     excludeCollectionNames: {
       type: Array,
       default() {
@@ -664,6 +668,10 @@ export default {
 
       if (params.keyword) {
         requestParams.keyword = params.keyword
+      }
+
+      if (props.sourceId) {
+        requestParams.sourceId = props.sourceId
       }
 
       return requestParams

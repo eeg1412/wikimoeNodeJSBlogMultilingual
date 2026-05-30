@@ -2,7 +2,13 @@
   <div class="common-right-panel-form multilingual-media-page">
     <div class="pb20">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item>{{ breadcrumbGroup }}</el-breadcrumb-item>
+        <el-breadcrumb-item
+          v-if="fixedSourceId"
+          :to="{ name: 'MultilingualMediaList' }"
+        >
+          媒体库
+        </el-breadcrumb-item>
+        <el-breadcrumb-item v-else>{{ breadcrumbGroup }}</el-breadcrumb-item>
         <el-breadcrumb-item>{{ pageTitle }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
@@ -72,7 +78,12 @@
       </div>
     </div>
 
-    <div class="mb20 list-table-body">
+    <el-skeleton
+      v-if="loading && fixedSourceId && mediaList.length === 0"
+      :rows="8"
+      animated
+    />
+    <div v-else class="mb20 list-table-body" v-loading="loading">
       <ResponsiveTable
         ref="tableRef"
         :data="mediaList"
@@ -195,60 +206,70 @@
             />
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="400" fixed="right">
+        <ResponsiveTableColumn
+          label="操作"
+          :width="isSourceScope ? 90 : 140"
+          fixed="right"
+        >
           <template #default="{ row }">
-            <el-button size="small" @click="openDetail(row)">详情</el-button>
             <el-button
-              v-if="!isSourceScope"
+              v-if="isSourceScope"
               size="small"
-              @click="openEdit(row)"
+              @click="openDetail(row)"
             >
-              编辑
+              详情
             </el-button>
-            <el-button
-              v-if="!isSourceScope"
-              type="success"
-              size="small"
-              @click="openTranslationDialog(row)"
+            <el-dropdown
+              v-else
+              trigger="click"
+              @command="command => handleMediaActionCommand(row, command)"
             >
-              AI 翻译
-            </el-button>
-            <el-button
-              v-if="!isSourceScope && !isPureLocalMedia(row)"
-              type="warning"
-              size="small"
-              @click="restoreSnapshot(row)"
-            >
-              同步快照
-            </el-button>
-            <el-button
-              v-if="!isSourceScope"
-              type="primary"
-              size="small"
-              @click="openReplace(row)"
-            >
-              替换
-            </el-button>
-            <el-button
-              v-if="
-                !isSourceScope &&
-                row.mediaMode === 'local' &&
-                !isPureLocalMedia(row)
-              "
-              type="warning"
-              size="small"
-              @click="openConvert(row)"
-            >
-              转远程
-            </el-button>
-            <el-button
-              v-if="!isSourceScope && isPureLocalMedia(row)"
-              type="danger"
-              size="small"
-              @click="deleteLocalMedia(row)"
-            >
-              删除
-            </el-button>
+              <el-button type="primary" size="small">
+                媒体操作
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="detail">
+                    <el-icon><View /></el-icon>
+                    <span>详情</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="edit">
+                    <el-icon><EditPen /></el-icon>
+                    <span>编辑</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="aiTranslate">
+                    <el-icon><MagicStick /></el-icon>
+                    <span>AI 翻译</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="!isPureLocalMedia(row)"
+                    command="restoreSnapshot"
+                  >
+                    <el-icon><Refresh /></el-icon>
+                    <span>同步快照</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="replace">
+                    <el-icon><Upload /></el-icon>
+                    <span>替换</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="row.mediaMode === 'local' && !isPureLocalMedia(row)"
+                    command="convertRemote"
+                  >
+                    <el-icon><Refresh /></el-icon>
+                    <span>转远程</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="isPureLocalMedia(row)"
+                    command="deleteLocal"
+                  >
+                    <el-icon><Delete /></el-icon>
+                    <span>删除</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </ResponsiveTableColumn>
       </ResponsiveTable>
@@ -505,6 +526,18 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  ArrowDown,
+  Delete,
+  EditPen,
+  MagicStick,
+  Picture,
+  Refresh,
+  Setting,
+  Upload,
+  VideoPlay,
+  View
+} from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import CheckDialogService from '@/services/CheckDialogService'
 import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.vue'
@@ -526,14 +559,25 @@ import {
 
 export default {
   components: {
+    ArrowDown,
     ContentAiTranslationDialog,
-    VideoUploader
+    Delete,
+    EditPen,
+    MagicStick,
+    Picture,
+    Refresh,
+    Setting,
+    Upload,
+    VideoPlay,
+    VideoUploader,
+    View
   },
   setup() {
     const route = useRoute()
     const tableRef = ref(null)
     const mediaList = ref([])
     const total = ref(0)
+    const loading = ref(false)
     const currentRow = ref(null)
     const detailDialogVisible = ref(false)
     const editDialogVisible = ref(false)
@@ -596,6 +640,10 @@ export default {
       return route.meta.scope === 'source'
     })
 
+    const fixedSourceId = computed(() => {
+      return String(route.params.sourceId || '')
+    })
+
     const breadcrumbGroup = computed(() => {
       if (isSourceScope.value) {
         return '源数据管理'
@@ -606,6 +654,9 @@ export default {
     const pageTitle = computed(() => {
       if (isSourceScope.value) {
         return '源媒体快照'
+      }
+      if (fixedSourceId.value) {
+        return '媒体语言版本'
       }
       return '媒体库'
     })
@@ -819,6 +870,36 @@ export default {
       loadAndOpenImg(0, [previewItem])
     }
 
+    const handleMediaActionCommand = (row, command) => {
+      if (command === 'detail') {
+        openDetail(row)
+        return
+      }
+      if (command === 'edit') {
+        openEdit(row)
+        return
+      }
+      if (command === 'aiTranslate') {
+        openTranslationDialog(row)
+        return
+      }
+      if (command === 'restoreSnapshot') {
+        restoreSnapshot(row)
+        return
+      }
+      if (command === 'replace') {
+        openReplace(row)
+        return
+      }
+      if (command === 'convertRemote') {
+        openConvert(row)
+        return
+      }
+      if (command === 'deleteLocal') {
+        deleteLocalMedia(row)
+      }
+    }
+
     const getRequestParams = () => {
       const requestParams = {
         page: params.page,
@@ -837,6 +918,9 @@ export default {
       if (params.mediaMode) {
         requestParams.mediaMode = params.mediaMode
       }
+      if (fixedSourceId.value) {
+        requestParams.sourceId = fixedSourceId.value
+      }
       return requestParams
     }
 
@@ -846,6 +930,7 @@ export default {
         return
       }
 
+      loading.value = true
       multilingualApi
         .getMediaList(getRequestParams())
         .then(response => {
@@ -857,6 +942,9 @@ export default {
         })
         .catch(error => {
           console.log(error)
+        })
+        .finally(() => {
+          loading.value = false
         })
     }
 
@@ -1328,6 +1416,14 @@ export default {
       }
     )
 
+    watch(
+      () => route.params.sourceId,
+      () => {
+        params.page = 1
+        getMediaList(false)
+      }
+    )
+
     onMounted(() => {
       getMediaList(false)
     })
@@ -1337,6 +1433,8 @@ export default {
       params,
       mediaList,
       total,
+      loading,
+      fixedSourceId,
       currentRow,
       aiDialogVisible,
       detailDialogVisible,
@@ -1369,6 +1467,7 @@ export default {
       getVideoPreviewUrl,
       getVideoCoverUrl,
       openMediaPreview,
+      handleMediaActionCommand,
       getMediaList,
       openDetail,
       toggleAiSkip,

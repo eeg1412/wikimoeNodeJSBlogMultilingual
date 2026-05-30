@@ -1,8 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import {
+  BASIC_RELATION_COLLECTION_NAMES,
   SOURCE_RELATION_ROUTE_NAME_MAP,
   TRANSLATION_RELATION_ROUTE_NAME_MAP
 } from '../views/index/relation/relationCollection'
+
+const RELATION_CONTENT_EXCLUDE_COLLECTION_NAMES = new Set([
+  ...BASIC_RELATION_COLLECTION_NAMES,
+  'posts',
+  'attachments'
+])
 
 const getRelationRedirectQuery = query => {
   const redirectQuery = {}
@@ -149,10 +156,22 @@ const routes = [
           import('../views/index/relation/TranslationAuthorRelationList.vue')
       },
       {
+        path: '/translation/author/language-list/:sourceId',
+        name: 'TranslationAuthorRelationLanguageList',
+        component: () =>
+          import('../views/index/relation/TranslationAuthorRelationLanguageList.vue')
+      },
+      {
         path: '/translation/sort/list',
         name: 'TranslationSortRelationList',
         component: () =>
           import('../views/index/relation/TranslationSortRelationList.vue')
+      },
+      {
+        path: '/translation/sort/language-list/:sourceId',
+        name: 'TranslationSortRelationLanguageList',
+        component: () =>
+          import('../views/index/relation/TranslationSortRelationLanguageList.vue')
       },
       {
         path: '/translation/tag/list',
@@ -161,14 +180,49 @@ const routes = [
           import('../views/index/relation/TranslationTagRelationList.vue')
       },
       {
+        path: '/translation/tag/language-list/:sourceId',
+        name: 'TranslationTagRelationLanguageList',
+        component: () =>
+          import('../views/index/relation/TranslationTagRelationLanguageList.vue')
+      },
+      {
         path: '/translation/mappoint/list',
         name: 'TranslationMappointRelationList',
         component: () =>
           import('../views/index/relation/TranslationMappointRelationList.vue')
       },
       {
+        path: '/translation/mappoint/language-list/:sourceId',
+        name: 'TranslationMappointRelationLanguageList',
+        component: () =>
+          import('../views/index/relation/TranslationMappointRelationLanguageList.vue')
+      },
+      {
+        path: '/translation/relation/language-list/:collectionName/:sourceId',
+        name: 'TranslationRelationContentLanguageList',
+        component: () =>
+          import('../views/index/relation/TranslationRelationContentLanguageList.vue'),
+        beforeEnter: to => {
+          if (
+            RELATION_CONTENT_EXCLUDE_COLLECTION_NAMES.has(
+              to.params.collectionName
+            )
+          ) {
+            return { name: 'RelationList' }
+          }
+          return true
+        }
+      },
+      {
         path: '/translation/media/list',
         name: 'MultilingualMediaList',
+        component: () =>
+          import('../views/index/media/MultilingualMediaSourceList.vue'),
+        meta: { scope: 'translation' }
+      },
+      {
+        path: '/translation/media/language-list/:sourceId',
+        name: 'MultilingualMediaLanguageList',
         component: () =>
           import('../views/index/media/MultilingualMediaList.vue'),
         meta: { scope: 'translation' }

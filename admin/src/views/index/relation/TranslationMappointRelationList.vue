@@ -1,14 +1,18 @@
 <template>
-  <RelationList scope="translation" title="地点" collection-name="mappoints" />
+  <RelationSourceListBySource
+    title="地点"
+    collection-name="mappoints"
+    language-route-name="TranslationMappointRelationLanguageList"
+  />
 </template>
 
 <script>
-import RelationList from './RelationList.vue'
+import RelationSourceListBySource from './RelationSourceListBySource.vue'
 
 export default {
   name: 'TranslationMappointRelationList',
   components: {
-    RelationList
+    RelationSourceListBySource
   }
 }
 </script>

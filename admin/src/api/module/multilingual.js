@@ -417,8 +417,22 @@ export default function (api) {
         noLoading
       })
     },
+    getTranslationRelationListBySource(data, noLoading = false) {
+      return api.get('/translation/relation/list-by-source', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getMediaList(data, noLoading = false) {
       return api.get('/media/list', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    getMediaListBySource(data, noLoading = false) {
+      return api.get('/media/list-by-source', {
         params: data,
         shouldAdminJWT: true,
         noLoading

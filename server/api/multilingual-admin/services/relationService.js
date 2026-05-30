@@ -2,7 +2,10 @@ const mongoose = require('mongoose')
 const cacheDataUtils = require('../../../config/cacheData')
 const contentRefreshUtils = require('../../../utils/contentRefresh')
 const { normalizeTagName } = require('../../../utils/tagName')
-const { normalizeLanguageCode } = require('../../../utils/language')
+const {
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('../../../utils/language')
 const {
   ApiError,
   ERROR_CODES
@@ -367,6 +370,37 @@ function buildRelationListParams(input) {
   return params
 }
 
+function buildEmptyRelationTranslationMatrix() {
+  return SUPPORTED_LANGUAGE_CODES.reduce((matrix, languageCode) => {
+    matrix[languageCode] = null
+    return matrix
+  }, {})
+}
+
+function parseRelationListBySourceQuery(query = {}) {
+  const input = parseRelationListQuery({
+    ...query,
+    languageCode: query.sourceLanguageCode || '',
+    recordKind: SOURCE_RECORD_KIND
+  })
+  const rawTargetLanguageCode = String(query.languageCode || '').trim()
+  const targetLanguageCode = rawTargetLanguageCode
+    ? normalizeLanguageCode(rawTargetLanguageCode)
+    : ''
+  if (rawTargetLanguageCode && !targetLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'languageCode',
+      400
+    )
+  }
+  return {
+    ...input,
+    targetLanguageCode
+  }
+}
+
 function toRelationListItem(item, collectionName) {
   return {
     ...item,
@@ -465,6 +499,220 @@ async function listRelations(queryParams = {}) {
     list: list.map(item => {
       return toRelationListItem(item, input.collectionName)
     }),
+    total,
+    page: input.page,
+    limit: input.limit
+  }
+}
+
+async function buildRelationSourceGroupItems(collectionName, sourceRecords) {
+  const sourceIdList = sourceRecords
+    .map(item => item.sourceId)
+    .filter(sourceId => Boolean(sourceId))
+  const translationMap = new Map()
+
+  sourceRecords.forEach(sourceRecord => {
+    translationMap.set(
+      String(sourceRecord.sourceId),
+      buildEmptyRelationTranslationMatrix()
+    )
+  })
+
+  if (sourceIdList.length > 0) {
+    const Model = getMultilingualModel(collectionName)
+    const translations = await Model.find({
+      recordKind: TRANSLATION_RECORD_KIND,
+      sourceId: { $in: sourceIdList }
+    })
+      .select(
+        '_id languageCode sourceId translationGroupId snapshotVersion aiTranslationSkip pendingReview updatedAt'
+      )
+      .lean()
+    translations.forEach(translation => {
+      const sourceKey = String(translation.sourceId)
+      const matrix = translationMap.get(sourceKey)
+      if (!matrix) {
+        return
+      }
+      matrix[translation.languageCode] = translation
+    })
+  }
+
+  return sourceRecords.map(sourceRecord => {
+    const sourceKey = String(sourceRecord.sourceId)
+    return {
+      sourceRecord: toRelationListItem(sourceRecord, collectionName),
+      translations:
+        translationMap.get(sourceKey) || buildEmptyRelationTranslationMatrix()
+    }
+  })
+}
+
+async function applyRelationTargetLanguageFilter(
+  Model,
+  params,
+  targetLanguageCode
+) {
+  if (!targetLanguageCode) {
+    return true
+  }
+
+  const translationGroupList = await Model.find({
+    recordKind: TRANSLATION_RECORD_KIND,
+    languageCode: targetLanguageCode
+  })
+    .select('translationGroupId')
+    .lean()
+  const translationGroupIdList = translationGroupList
+    .map(item => item.translationGroupId)
+    .filter(translationGroupId => Boolean(translationGroupId))
+  if (translationGroupIdList.length === 0) {
+    return false
+  }
+
+  params.translationGroupId = { $in: translationGroupIdList }
+  return true
+}
+
+async function listRelationsBySourceAcrossCollections(input) {
+  const collectionNameList = DEFAULT_LIST_COLLECTION_NAMES.filter(
+    collectionName => {
+      return !input.excludeCollectionNames.includes(collectionName)
+    }
+  )
+  const sourceParams = buildRelationListParams(input)
+  const sourceRecordList = []
+
+  await Promise.all(
+    collectionNameList.map(async collectionName => {
+      const Model = getMultilingualModel(collectionName)
+      const collectionSourceParams = { ...sourceParams }
+      const shouldQuery = await applyRelationTargetLanguageFilter(
+        Model,
+        collectionSourceParams,
+        input.targetLanguageCode
+      )
+      if (!shouldQuery) {
+        return
+      }
+      let query = Model.find(collectionSourceParams).sort({
+        updatedAt: -1,
+        _id: -1
+      })
+      const populate = getRelationListPopulate(collectionName)
+      if (populate) {
+        query = query.populate(populate)
+      }
+      const list = await query.lean()
+      list.forEach(item => {
+        sourceRecordList.push({
+          collectionName,
+          item
+        })
+      })
+    })
+  )
+
+  sourceRecordList.sort((left, right) => {
+    const leftTime = new Date(
+      left.item.updatedAt || left.item.createdAt || 0
+    ).getTime()
+    const rightTime = new Date(
+      right.item.updatedAt || right.item.createdAt || 0
+    ).getTime()
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+    return String(right.item._id).localeCompare(String(left.item._id))
+  })
+
+  const startIndex = (input.page - 1) * input.limit
+  const pageSourceRecords = sourceRecordList.slice(
+    startIndex,
+    startIndex + input.limit
+  )
+  const sourceRecordsByCollection = new Map()
+  pageSourceRecords.forEach(entry => {
+    if (!sourceRecordsByCollection.has(entry.collectionName)) {
+      sourceRecordsByCollection.set(entry.collectionName, [])
+    }
+    sourceRecordsByCollection.get(entry.collectionName).push(entry.item)
+  })
+
+  const groupItemList = []
+  await Promise.all(
+    Array.from(sourceRecordsByCollection.entries()).map(
+      async ([collectionName, sourceRecords]) => {
+        const items = await buildRelationSourceGroupItems(
+          collectionName,
+          sourceRecords
+        )
+        items.forEach(item => {
+          groupItemList.push(item)
+        })
+      }
+    )
+  )
+
+  const groupItemMap = new Map()
+  groupItemList.forEach(item => {
+    groupItemMap.set(
+      `${item.sourceRecord.collectionName}:${item.sourceRecord.sourceId}`,
+      item
+    )
+  })
+
+  return {
+    list: pageSourceRecords
+      .map(entry => {
+        return groupItemMap.get(
+          `${entry.collectionName}:${entry.item.sourceId}`
+        )
+      })
+      .filter(item => Boolean(item)),
+    total: sourceRecordList.length,
+    page: input.page,
+    limit: input.limit
+  }
+}
+
+async function listRelationsBySource(queryParams = {}) {
+  const input = parseRelationListBySourceQuery(queryParams)
+  if (!input.collectionName) {
+    return listRelationsBySourceAcrossCollections(input)
+  }
+
+  const Model = getMultilingualModel(input.collectionName)
+  const sourceParams = buildRelationListParams(input)
+  const shouldQuery = await applyRelationTargetLanguageFilter(
+    Model,
+    sourceParams,
+    input.targetLanguageCode
+  )
+  if (!shouldQuery) {
+    return {
+      list: [],
+      total: 0,
+      page: input.page,
+      limit: input.limit
+    }
+  }
+
+  const total = await Model.countDocuments(sourceParams)
+  let sourceQuery = Model.find(sourceParams)
+    .sort({ updatedAt: -1, _id: -1 })
+    .skip((input.page - 1) * input.limit)
+    .limit(input.limit)
+  const populate = getRelationListPopulate(input.collectionName)
+  if (populate) {
+    sourceQuery = sourceQuery.populate(populate)
+  }
+  const sourceRecords = await sourceQuery.lean()
+  return {
+    list: await buildRelationSourceGroupItems(
+      input.collectionName,
+      sourceRecords
+    ),
     total,
     page: input.page,
     limit: input.limit
@@ -700,5 +948,6 @@ module.exports = {
   ALLOWED_COLLECTION_NAMES,
   SYSTEM_FIELDS,
   listRelations,
+  listRelationsBySource,
   updateRelation
 }

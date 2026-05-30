@@ -1,14 +1,18 @@
 <template>
-  <RelationList scope="translation" title="作者" collection-name="users" />
+  <RelationSourceListBySource
+    title="作者"
+    collection-name="users"
+    language-route-name="TranslationAuthorRelationLanguageList"
+  />
 </template>
 
 <script>
-import RelationList from './RelationList.vue'
+import RelationSourceListBySource from './RelationSourceListBySource.vue'
 
 export default {
   name: 'TranslationAuthorRelationList',
   components: {
-    RelationList
+    RelationSourceListBySource
   }
 }
 </script>

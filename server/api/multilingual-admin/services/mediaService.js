@@ -3,7 +3,10 @@ const fs = require('fs')
 const path = require('path')
 const mongoose = require('mongoose')
 const utils = require('../../../utils/utils')
-const { normalizeLanguageCode } = require('../../../utils/language')
+const {
+  SUPPORTED_LANGUAGE_CODES,
+  normalizeLanguageCode
+} = require('../../../utils/language')
 const { getSourceSeoSettings } = require('../../../utils/sourceSeoSettings')
 const mediaSettingsService = require('./mediaSettingsService')
 const {
@@ -170,9 +173,7 @@ function buildAttachmentTypeParams(typeList) {
   }
 }
 
-async function listAttachments(query = {}) {
-  const input = parseAttachmentListQuery(query)
-  const AttachmentModel = getAttachmentModel()
+function buildAttachmentListParams(input) {
   const params = {
     recordKind: input.recordKind
   }
@@ -201,6 +202,71 @@ async function listAttachments(query = {}) {
     Object.assign(params, typeParams)
   }
 
+  return params
+}
+
+function buildEmptyAttachmentTranslationMatrix() {
+  return SUPPORTED_LANGUAGE_CODES.reduce((matrix, languageCode) => {
+    matrix[languageCode] = null
+    return matrix
+  }, {})
+}
+
+function parseAttachmentListBySourceQuery(query = {}) {
+  const input = parseAttachmentListQuery({
+    ...query,
+    languageCode: query.sourceLanguageCode || '',
+    recordKind: SOURCE_RECORD_KIND
+  })
+  const rawTargetLanguageCode = String(query.languageCode || '').trim()
+  const targetLanguageCode = rawTargetLanguageCode
+    ? normalizeLanguageCode(rawTargetLanguageCode)
+    : ''
+  if (rawTargetLanguageCode && !targetLanguageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      undefined,
+      'languageCode',
+      400
+    )
+  }
+  return {
+    ...input,
+    targetLanguageCode
+  }
+}
+
+async function applyAttachmentTargetLanguageFilter(
+  AttachmentModel,
+  params,
+  targetLanguageCode
+) {
+  if (!targetLanguageCode) {
+    return true
+  }
+
+  const translationGroupList = await AttachmentModel.find({
+    recordKind: TRANSLATION_RECORD_KIND,
+    languageCode: targetLanguageCode
+  })
+    .select('translationGroupId')
+    .lean()
+  const translationGroupIdList = translationGroupList
+    .map(item => item.translationGroupId)
+    .filter(translationGroupId => Boolean(translationGroupId))
+  if (translationGroupIdList.length === 0) {
+    return false
+  }
+
+  params.translationGroupId = { $in: translationGroupIdList }
+  return true
+}
+
+async function listAttachments(query = {}) {
+  const input = parseAttachmentListQuery(query)
+  const AttachmentModel = getAttachmentModel()
+  const params = buildAttachmentListParams(input)
+
   const total = await AttachmentModel.countDocuments(params)
   const list = await AttachmentModel.find(params)
     .sort({ updatedAt: -1, _id: -1 })
@@ -211,6 +277,82 @@ async function listAttachments(query = {}) {
 
   return {
     list,
+    total,
+    page: input.page,
+    limit: input.limit,
+    sourceSiteUrl: sourceSettings.siteUrl || ''
+  }
+}
+
+async function listAttachmentsBySource(query = {}) {
+  const input = parseAttachmentListBySourceQuery(query)
+  const AttachmentModel = getAttachmentModel()
+  const sourceParams = buildAttachmentListParams(input)
+  const shouldQuery = await applyAttachmentTargetLanguageFilter(
+    AttachmentModel,
+    sourceParams,
+    input.targetLanguageCode
+  )
+  if (!shouldQuery) {
+    const sourceSettings = await getSourceSeoSettings()
+    return {
+      list: [],
+      total: 0,
+      page: input.page,
+      limit: input.limit,
+      sourceSiteUrl: sourceSettings.siteUrl || ''
+    }
+  }
+
+  const total = await AttachmentModel.countDocuments(sourceParams)
+  const sourceRecords = await AttachmentModel.find(sourceParams)
+    .sort({ updatedAt: -1, _id: -1 })
+    .skip((input.page - 1) * input.limit)
+    .limit(input.limit)
+    .lean()
+  const sourceIdList = sourceRecords
+    .map(item => item.sourceId)
+    .filter(sourceId => Boolean(sourceId))
+  const translationMap = new Map()
+
+  sourceRecords.forEach(sourceRecord => {
+    translationMap.set(
+      String(sourceRecord.sourceId),
+      buildEmptyAttachmentTranslationMatrix()
+    )
+  })
+
+  if (sourceIdList.length > 0) {
+    const translations = await AttachmentModel.find({
+      recordKind: TRANSLATION_RECORD_KIND,
+      sourceId: { $in: sourceIdList }
+    })
+      .select(
+        '_id languageCode sourceId translationGroupId snapshotVersion aiTranslationSkip pendingReview updatedAt'
+      )
+      .lean()
+    translations.forEach(translation => {
+      const sourceKey = String(translation.sourceId)
+      const matrix = translationMap.get(sourceKey)
+      if (!matrix) {
+        return
+      }
+      matrix[translation.languageCode] = translation
+    })
+  }
+
+  const sourceSettings = await getSourceSeoSettings()
+
+  return {
+    list: sourceRecords.map(sourceRecord => {
+      const sourceKey = String(sourceRecord.sourceId)
+      return {
+        sourceRecord,
+        translations:
+          translationMap.get(sourceKey) ||
+          buildEmptyAttachmentTranslationMatrix()
+      }
+    }),
     total,
     page: input.page,
     limit: input.limit,
@@ -1140,6 +1282,7 @@ async function convertLocalAttachmentToRemote(body = {}) {
 module.exports = {
   DELETE_LOCAL_FILE_CONFIRM_TEXT,
   listAttachments,
+  listAttachmentsBySource,
   createLocalAttachment,
   deletePureLocalAttachment,
   replaceLocalAttachment,
