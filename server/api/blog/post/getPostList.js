@@ -467,6 +467,7 @@ module.exports = async function (req, res, next) {
     '-voteList -content -bangumiList -movieList -bookList -eventList -gameList -postList -tweetList -seriesSortList -code -editorVersion'
 
   const findOptions = {
+    authorFilter: 'nickname _id photo description cover',
     voteFliter:
       '_id endTime maxSelect showResultAfter title options.title options._id'
   }
