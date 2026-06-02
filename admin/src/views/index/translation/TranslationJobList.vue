@@ -3124,6 +3124,11 @@ html.dark .translation-job-storage-panel {
   border-color: var(--el-color-primary-light-5);
 }
 
+.job-workflow-step.is-pending {
+  background: var(--el-fill-color-lighter);
+  border-color: var(--el-border-color-lighter);
+}
+
 .job-workflow-step-index {
   align-items: center;
   border: 1px solid var(--el-border-color);
@@ -3153,6 +3158,12 @@ html.dark .translation-job-storage-panel {
 .job-workflow-step.is-failed .job-workflow-step-index {
   border-color: var(--el-color-danger-light-5);
   color: var(--el-color-danger);
+}
+
+.job-workflow-step.is-pending .job-workflow-step-index {
+  background: var(--el-fill-color-light);
+  border-color: var(--el-border-color-lighter);
+  color: var(--el-text-color-placeholder);
 }
 
 .job-workflow-step.is-current .job-workflow-step-index {
@@ -3191,6 +3202,11 @@ html.dark .translation-job-storage-panel {
   word-break: break-word;
 }
 
+.job-workflow-step.is-pending .job-workflow-step-title,
+.job-workflow-step.is-pending .job-workflow-step-subtitle {
+  color: var(--el-text-color-placeholder);
+}
+
 .job-workflow-log-list {
   border-top: 1px solid var(--el-border-color-lighter);
   margin-top: 12px;
@@ -3221,6 +3237,10 @@ html.dark .translation-job-storage-panel {
 
 html.dark .job-workflow-panel {
   background: var(--el-fill-color-blank);
+}
+
+html.dark .job-workflow-step.is-pending {
+  background: var(--el-fill-color-extra-light);
 }
 
 .apply-toolbar {

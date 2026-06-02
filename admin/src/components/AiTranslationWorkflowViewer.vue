@@ -780,9 +780,19 @@ export default {
   color: var(--el-color-info);
 }
 
+.ai-workflow-step-button.is-pending {
+  background: var(--el-fill-color-lighter);
+  color: var(--el-text-color-placeholder);
+}
+
 .ai-workflow-step-button:hover,
 .ai-workflow-step-button.is-active {
   background: var(--el-fill-color-light);
+}
+
+.ai-workflow-step-button.is-pending:hover,
+.ai-workflow-step-button.is-pending.is-active {
+  background: var(--el-fill-color-lighter);
 }
 
 .ai-workflow-step-button.is-active .ai-workflow-step-index {
@@ -862,6 +872,10 @@ export default {
   color: var(--el-text-color-secondary);
 }
 
+.ai-workflow-step-status.is-pending {
+  color: var(--el-text-color-placeholder);
+}
+
 .ai-workflow-step-subtitle {
   color: var(--el-text-color-secondary);
   display: block;
@@ -889,10 +903,27 @@ export default {
   color: var(--el-color-danger);
 }
 
+.ai-workflow-step-button.is-pending .ai-workflow-step-index {
+  background: var(--el-fill-color-light);
+  border-color: var(--el-border-color-lighter);
+  color: var(--el-text-color-placeholder);
+}
+
+.ai-workflow-step-button.is-pending .ai-workflow-step-title,
+.ai-workflow-step-button.is-pending .ai-workflow-step-subtitle {
+  color: var(--el-text-color-placeholder);
+}
+
 .ai-workflow-step-button.is-active .ai-workflow-step-index {
   background: var(--el-color-primary);
   border-color: var(--el-color-primary);
   color: #fff;
+}
+
+.ai-workflow-step-button.is-pending.is-active .ai-workflow-step-index {
+  background: var(--el-fill-color-light);
+  border-color: var(--el-border-color-lighter);
+  color: var(--el-text-color-placeholder);
 }
 
 .ai-workflow-detail {

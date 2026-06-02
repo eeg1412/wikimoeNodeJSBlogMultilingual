@@ -1,4 +1,8 @@
 const { getLanguageText } = require('../../../utils/language')
+const {
+  TRANSLATION_JOB_STATUS,
+  TRANSLATION_JOB_TYPES
+} = require('../../../utils/translationJobConstants')
 
 const WORKFLOW_SCHEMA = 'wikimoe.ai.translation.workflow'
 const WORKFLOW_VERSION = 1
@@ -6,6 +10,7 @@ const MAX_TEXT_LENGTH = 8000
 const MAX_SECTION_ITEMS = 80
 const MAX_META_ITEMS = 8
 const MAX_RECURSIVE_DEPTH = 6
+const COVER_IMAGE_TRANSLATION_MODES = ['auto', 'always', 'never']
 
 const WORKFLOW_STEP_STATUS_TEXT_MAP = {
   pending: '待执行',
@@ -417,6 +422,485 @@ function shouldBuildRuntimeWorkflowSteps(job) {
     return true
   }
   return false
+}
+
+function getWorkflowRequestOptions(job) {
+  if (!job || !job.request || !isPlainObject(job.request.options)) {
+    return {}
+  }
+  return job.request.options
+}
+
+function getWorkflowTaskRelation(job) {
+  if (!job || !isPlainObject(job.taskRelation)) {
+    return {}
+  }
+  return job.taskRelation
+}
+
+function isSourcePostImportChildWorkflowJob(job) {
+  return getWorkflowTaskRelation(job).role === 'child'
+}
+
+function shouldSyncRelatedPostsForWorkflow(job) {
+  const options = getWorkflowRequestOptions(job)
+  if (options.syncRelatedPosts === false) {
+    return false
+  }
+  if (options.translateRelatedPosts === false) {
+    return false
+  }
+  return true
+}
+
+function shouldCreateRelatedChildJobsForWorkflow(job) {
+  if (!shouldSyncRelatedPostsForWorkflow(job)) {
+    return false
+  }
+  return !isSourcePostImportChildWorkflowJob(job)
+}
+
+function shouldOrganizeRelatedPostsForWorkflow(job) {
+  const options = getWorkflowRequestOptions(job)
+  if (options.syncRelatedPosts === true) {
+    return true
+  }
+  return options.organizeRelatedPosts === true
+}
+
+function shouldAutoOrganizeOfficialTermGlossaryForWorkflow(job) {
+  const options = getWorkflowRequestOptions(job)
+  return options.autoOrganizeOfficialTermGlossary !== false
+}
+
+function shouldSearchOfficialTermTranslationsForWorkflow(job) {
+  const options = getWorkflowRequestOptions(job)
+  if (options.autoOrganizeOfficialTermGlossary === false) {
+    return false
+  }
+  return options.searchOfficialTermTranslations === true
+}
+
+function normalizeCoverImageTranslationModeForWorkflow(value, defaultMode) {
+  const mode = normalizeText(value)
+  if (COVER_IMAGE_TRANSLATION_MODES.includes(mode)) {
+    return mode
+  }
+  if (COVER_IMAGE_TRANSLATION_MODES.includes(defaultMode)) {
+    return defaultMode
+  }
+  return 'auto'
+}
+
+function getCoverImageTranslationModeForWorkflow(job, defaultMode = 'never') {
+  const options = getWorkflowRequestOptions(job)
+  if (typeof options.coverImageTranslationMode === 'string') {
+    return normalizeCoverImageTranslationModeForWorkflow(
+      options.coverImageTranslationMode,
+      defaultMode
+    )
+  }
+  if (typeof options.translateCoverImage === 'boolean') {
+    if (options.translateCoverImage) {
+      return 'auto'
+    }
+    return 'never'
+  }
+  return normalizeCoverImageTranslationModeForWorkflow(
+    defaultMode,
+    'never'
+  )
+}
+
+function shouldTranslateCoverImageForWorkflow(job, defaultValue) {
+  let defaultMode = 'never'
+  if (defaultValue === true) {
+    defaultMode = 'auto'
+  }
+  const mode = getCoverImageTranslationModeForWorkflow(job, defaultMode)
+  return normalizeCoverImageTranslationModeForWorkflow(mode) !== 'never'
+}
+
+function getWorkflowTargetLanguageCodes(job) {
+  const languageCodes = []
+  const targetLanguageCode = normalizeText(job?.target?.languageCode)
+  if (targetLanguageCode) {
+    languageCodes.push(targetLanguageCode)
+  }
+  if (Array.isArray(job?.target?.languageCodes)) {
+    job.target.languageCodes.forEach(languageCodeValue => {
+      const languageCode = normalizeText(languageCodeValue)
+      if (!languageCode || languageCodes.includes(languageCode)) {
+        return
+      }
+      languageCodes.push(languageCode)
+    })
+  }
+  return languageCodes
+}
+
+function hasWorkflowRequestEntryArray(job) {
+  return Array.isArray(job?.request?.entries)
+}
+
+function hasWorkflowRequestEntries(job) {
+  if (!Array.isArray(job?.request?.entries)) {
+    return false
+  }
+  return job.request.entries.length > 0
+}
+
+function buildPlannedWorkflowStepInputSections(options = {}) {
+  const items = []
+  if (options.stage) {
+    pushItem(items, createItem('阶段', options.stage))
+  }
+  if (
+    Array.isArray(options.targetLanguageCodes) &&
+    options.targetLanguageCodes.length > 0
+  ) {
+    pushItem(
+      items,
+      createItem('目标语言', formatLanguageList(options.targetLanguageCodes))
+    )
+  }
+  if (options.conditionText) {
+    pushItem(items, createItem('执行条件', options.conditionText))
+  }
+  if (options.dynamicDetailText) {
+    pushItem(items, createItem('动态细节', options.dynamicDetailText))
+  }
+  const section = createSection({
+    title: '计划信息',
+    description: '基于任务类型和执行选项生成的主工作流步骤。',
+    kind: 'metric',
+    tone: 'input',
+    items
+  })
+  if (!section) {
+    return []
+  }
+  return [section]
+}
+
+function buildPlannedWorkflowStep(order, options = {}) {
+  const key = normalizeText(options.key) || `planned-${order}`
+  const status = 'pending'
+  const targetLanguageCodes = parseLanguageCodeList(options.targetLanguageCodes)
+  const sourceLanguageCodes = parseLanguageCodeList(options.sourceLanguageCodes)
+  const stepKeys = parseLanguageCodeList(options.stepKeys)
+  const stageKeys = parseLanguageCodeList(options.stageKeys)
+  const badges = []
+  if (targetLanguageCodes.length > 0) {
+    badges.push({
+      label: '目标语言',
+      value: formatLanguageList(targetLanguageCodes)
+    })
+  }
+  if (options.badgeLabel && options.badgeValue) {
+    badges.push({
+      label: normalizeText(options.badgeLabel),
+      value: normalizeText(options.badgeValue)
+    })
+  }
+  return {
+    id: `planned-workflow-step-${key}`,
+    order,
+    displayOrder: String(order),
+    title: normalizeText(options.title),
+    description: normalizeText(options.description),
+    status,
+    statusText: getWorkflowStepStatusText(status),
+    kind: 'planned',
+    majorKey: normalizeText(options.majorKey),
+    plannedStepKey: key,
+    plannedOrder: order,
+    isPlanned: true,
+    stepKeys,
+    stageKeys,
+    sourceLanguageCodes,
+    targetLanguageCodes,
+    displayLevel: 0,
+    operation: normalizeText(options.majorKey),
+    stage: normalizeText(options.stage),
+    provider: '',
+    model: '',
+    requestId: '',
+    createdAt: null,
+    currentStep: '',
+    badges,
+    integrityWarnings: [],
+    children: [],
+    childCount: 0,
+    aiCallCount: 0,
+    serviceStepCount: 0,
+    inputSections: buildPlannedWorkflowStepInputSections({
+      ...options,
+      targetLanguageCodes
+    }),
+    outputSections: []
+  }
+}
+
+function appendPlannedWorkflowStep(steps, options) {
+  steps.push(buildPlannedWorkflowStep(steps.length + 1, options))
+}
+
+function buildPostAiTranslationPlannedSteps(job) {
+  const steps = []
+  const targetLanguageCodes = getWorkflowTargetLanguageCodes(job)
+  if (!hasWorkflowRequestEntryArray(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'post.build-entries',
+      majorKey: 'translation.build-entries',
+      title: '构建翻译条目',
+      description: '从源快照和目标内容整理需要提交给 AI 的文章翻译条目。',
+      stage: 'BuildEntries',
+      stageKeys: ['BuildEntries'],
+      targetLanguageCodes
+    })
+  }
+  if (!hasWorkflowRequestEntryArray(job) || hasWorkflowRequestEntries(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'post.translate',
+      majorKey: 'translation.chunk',
+      title: '翻译文章内容',
+      description: 'AI 按批次处理文章正文和已选择的可翻译字段。',
+      stage: 'TranslatePost',
+      stageKeys: ['TranslatePost', 'TranslationChunk'],
+      stepKeys: ['translation.chunk', 'translation.post'],
+      targetLanguageCodes,
+      dynamicDetailText: '批次数量需要等条目构建和分块完成后才能确定。'
+    })
+  }
+  if (shouldTranslateCoverImageForWorkflow(job, false)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'post.cover-image',
+      majorKey: 'cover-image.generation',
+      title: '处理封面图翻译',
+      description: '根据封面图模式识别或生成目标语言封面图。',
+      stage: 'TranslateCoverImage',
+      stageKeys: ['TranslateCoverImage'],
+      stepKeys: ['cover-image.recognition', 'cover-image.generation'],
+      targetLanguageCodes
+    })
+  }
+  appendPlannedWorkflowStep(steps, {
+    key: 'post.review-preview',
+    majorKey: 'translation.review-preview',
+    title: '生成审核预览',
+    description: '服务端把 AI 输出整理成人工可以对比和采纳的审核结果。',
+    stage: 'FinalizeReview',
+    stageKeys: ['FinalizeReview'],
+    targetLanguageCodes
+  })
+  return steps
+}
+
+function buildContentAiTranslationPlannedSteps(job) {
+  const steps = []
+  const targetLanguageCodes = getWorkflowTargetLanguageCodes(job)
+  if (!hasWorkflowRequestEntryArray(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'content.build-entries',
+      majorKey: 'translation.build-entries',
+      title: '构建翻译条目',
+      description: '从内容快照整理需要提交给 AI 的通用内容翻译条目。',
+      stage: 'BuildEntries',
+      stageKeys: ['BuildEntries'],
+      targetLanguageCodes
+    })
+  }
+  appendPlannedWorkflowStep(steps, {
+    key: 'content.translate',
+    majorKey: 'translation.chunk',
+    title: '翻译通用内容',
+    description: 'AI 按批次处理通用内容翻译条目。',
+    stage: 'TranslateContent',
+    stageKeys: ['TranslateContent', 'TranslationChunk'],
+    stepKeys: ['translation.chunk', 'translation.content'],
+    targetLanguageCodes,
+    dynamicDetailText: '批次数量需要等条目分块完成后才能确定。'
+  })
+  appendPlannedWorkflowStep(steps, {
+    key: 'content.review-preview',
+    majorKey: 'translation.review-preview',
+    title: '生成审核预览',
+    description: '服务端把 AI 输出整理成人工可以对比和采纳的审核结果。',
+    stage: 'FinalizeReview',
+    stageKeys: ['FinalizeReview'],
+    targetLanguageCodes
+  })
+  return steps
+}
+
+function buildSourcePostAiImportPlannedSteps(job) {
+  const steps = []
+  const targetLanguageCodes = getWorkflowTargetLanguageCodes(job)
+  if (job?.source?.overwriteSnapshot === true) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'source-import.overwrite-snapshot',
+      majorKey: 'source-post.overwrite-snapshot',
+      title: '覆盖源文章快照',
+      description: '在执行 AI 翻译前重新导入并覆盖源文章快照。',
+      stage: 'OverwriteSourceSnapshot',
+      stageKeys: ['OverwriteSourceSnapshot'],
+      targetLanguageCodes
+    })
+  }
+  if (shouldCreateRelatedChildJobsForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'source-import.analyze-related-posts',
+      majorKey: 'source-post.analyze-related-posts',
+      title: '拆解相关文章子任务',
+      description: '分析相关文章关系，并为需要独立处理的源文章创建子任务。',
+      stage: 'AnalyzeRelatedPosts',
+      stageKeys: ['AnalyzeRelatedPosts'],
+      targetLanguageCodes,
+      dynamicDetailText: '子任务数量需要读取源文章关联关系后才能确定。'
+    })
+  }
+  appendPlannedWorkflowStep(steps, {
+    key: 'source-import.build-entries',
+    majorKey: 'translation.build-entries',
+    title: '准备源文导入条目',
+    description: '读取源文章和目标文章上下文，整理需要翻译或跳过的条目。',
+    stage: 'BuildEntries',
+    stageKeys: ['BuildEntries'],
+    targetLanguageCodes
+  })
+  targetLanguageCodes.forEach(languageCode => {
+    appendPlannedWorkflowStep(steps, {
+      key: `source-import.translate.${languageCode}`,
+      majorKey: 'translation.chunk',
+      title: `翻译${formatLanguage(languageCode)}内容`,
+      description: 'AI 按批次处理当前目标语言的源文导入条目。',
+      stage: `TranslatePost:${languageCode}`,
+      stageKeys: [`TranslatePost:${languageCode}`],
+      stepKeys: ['translation.chunk', 'translation.post'],
+      targetLanguageCodes: [languageCode],
+      dynamicDetailText: '批次数量和跳过条目需要等当前语言条目准备完成后才能确定。'
+    })
+  })
+  if (shouldTranslateCoverImageForWorkflow(job, true)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'source-import.cover-image',
+      majorKey: 'cover-image.generation',
+      title: '处理封面图翻译',
+      description: '按标题去重后识别或生成各目标语言封面图。',
+      stage: 'TranslateCoverImage',
+      stageKeys: ['TranslateCoverImage'],
+      stepKeys: ['cover-image.recognition', 'cover-image.generation'],
+      targetLanguageCodes,
+      dynamicDetailText: '封面图任务数量需要等各语言预览上下文准备完成后才能确定。'
+    })
+  }
+  appendPlannedWorkflowStep(steps, {
+    key: 'source-import.review-preview',
+    majorKey: 'translation.review-preview',
+    title: '汇总导入审核结果',
+    description: '汇总各目标语言的翻译、跳过内容、关联结果和封面图结果。',
+    stage: 'FinalizeReview',
+    stageKeys: ['FinalizeReview'],
+    targetLanguageCodes
+  })
+  return steps
+}
+
+function buildSourcePostProperNounOrganizePlannedSteps(job) {
+  const steps = []
+  const targetLanguageCodes = getWorkflowTargetLanguageCodes(job)
+  appendPlannedWorkflowStep(steps, {
+    key: 'proper-noun.build-entries',
+    majorKey: 'translation.build-entries',
+    title: '准备名词整理内容',
+    description: '读取源文章内容并整理可用于专有名词抽取的文本条目。',
+    stage: 'BuildEntries',
+    stageKeys: ['BuildEntries'],
+    targetLanguageCodes
+  })
+  appendPlannedWorkflowStep(steps, {
+    key: 'proper-noun.keyword-extract',
+    majorKey: 'proper-noun.keyword.extract',
+    title: '抽取专有名词候选',
+    description: 'AI 阅读文章内容并抽取需要确认的专有名词候选。',
+    stage: 'OrganizeProperNouns',
+    stageKeys: ['OrganizeProperNouns'],
+    stepKeys: ['proper-noun.keyword.extract'],
+    targetLanguageCodes
+  })
+  appendPlannedWorkflowStep(steps, {
+    key: 'proper-noun.existing-term-filter',
+    majorKey: 'proper-noun.existing-term.filter',
+    title: '匹配已有名词库',
+    description: 'AI 和服务端根据已有名词库筛选可复用的专有名词。',
+    stage: 'OrganizeProperNouns',
+    stageKeys: ['OrganizeProperNouns'],
+    stepKeys: ['proper-noun.existing-term.filter'],
+    targetLanguageCodes
+  })
+  if (shouldAutoOrganizeOfficialTermGlossaryForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'proper-noun.official-knowledge',
+      majorKey: 'proper-noun.official-translation.knowledge',
+      title: '整理官方译名知识',
+      description: 'AI 根据上下文和知识库确认专有名词的目标语言译名。',
+      stage: 'OrganizeProperNouns',
+      stageKeys: ['OrganizeProperNouns'],
+      stepKeys: ['proper-noun.official-translation.knowledge'],
+      targetLanguageCodes
+    })
+  }
+  if (shouldSearchOfficialTermTranslationsForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'proper-noun.official-search',
+      majorKey: 'proper-noun.official-translation.search',
+      title: '联网检索官方译名',
+      description: 'AI 使用联网检索确认需要外部资料支撑的专有名词译名。',
+      stage: 'OrganizeProperNouns',
+      stageKeys: ['OrganizeProperNouns'],
+      stepKeys: ['proper-noun.official-translation.search'],
+      targetLanguageCodes
+    })
+  }
+  appendPlannedWorkflowStep(steps, {
+    key: 'proper-noun.bind',
+    majorKey: 'proper-noun.bind',
+    title: '关联文章专有名词',
+    description: '服务端把整理后的专有名词关联到源文章。',
+    stage: 'BindProperNouns',
+    stageKeys: ['BindProperNouns'],
+    targetLanguageCodes
+  })
+  if (shouldOrganizeRelatedPostsForWorkflow(job)) {
+    steps.forEach(step => {
+      if (!Array.isArray(step.badges)) {
+        step.badges = []
+      }
+      step.badges.push({
+        label: '范围',
+        value: '包含相关文章'
+      })
+    })
+  }
+  return steps
+}
+
+function buildPlannedWorkflowSteps(job) {
+  const jobType = normalizeText(job?.jobType)
+  if (jobType === TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION) {
+    return buildPostAiTranslationPlannedSteps(job)
+  }
+  if (jobType === TRANSLATION_JOB_TYPES.CONTENT_AI_TRANSLATION) {
+    return buildContentAiTranslationPlannedSteps(job)
+  }
+  if (jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT) {
+    return buildSourcePostAiImportPlannedSteps(job)
+  }
+  if (jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE) {
+    return buildSourcePostProperNounOrganizePlannedSteps(job)
+  }
+  return []
 }
 
 function normalizeWorkflowMajorKey(value) {
@@ -3083,6 +3567,235 @@ function getWorkflowAiJsonLogs(aiJsonLogs) {
   return logs
 }
 
+function doWorkflowStagesMatch(step, plannedStep) {
+  const stepStage = normalizeText(step?.stage).toLowerCase()
+  if (!stepStage) {
+    return false
+  }
+  const stageKeys = parseLanguageCodeList(
+    plannedStep?.stageKeys || plannedStep?.stage
+  ).map(stageKey => stageKey.toLowerCase())
+  return stageKeys.some(stageKey => {
+    if (!stageKey) {
+      return false
+    }
+    if (stepStage === stageKey) {
+      return true
+    }
+    if (stepStage.startsWith(`${stageKey}:`)) {
+      return true
+    }
+    return stageKey.startsWith(`${stepStage}:`)
+  })
+}
+
+function doesWorkflowStepMatchPlannedStep(step, plannedStep) {
+  const plannedStepKey = normalizeText(plannedStep?.plannedStepKey)
+  if (plannedStepKey && normalizeText(step?.plannedStepKey) === plannedStepKey) {
+    return true
+  }
+  const plannedMajorKey = normalizeText(plannedStep?.majorKey)
+  const stepMajorKey = normalizeText(step?.majorKey)
+  if (!plannedMajorKey || stepMajorKey !== plannedMajorKey) {
+    return false
+  }
+  if (doWorkflowStagesMatch(step, plannedStep)) {
+    return true
+  }
+  const targetLanguageCodes = parseLanguageCodeList(
+    plannedStep?.targetLanguageCodes
+  )
+  if (targetLanguageCodes.length > 0) {
+    return doesStepMatchLanguage(step, targetLanguageCodes)
+  }
+  return true
+}
+
+function getExistingWorkflowStepsForPlan(steps, plannedStep) {
+  if (!Array.isArray(steps)) {
+    return []
+  }
+  return steps.filter(step => {
+    return doesWorkflowStepMatchPlannedStep(step, plannedStep)
+  })
+}
+
+function attachPlannedWorkflowStepMetadata(step, plannedStep) {
+  step.plannedOrder = plannedStep.plannedOrder
+  step.plannedStepKey = plannedStep.plannedStepKey
+  if (!Array.isArray(step.stageKeys) || step.stageKeys.length === 0) {
+    step.stageKeys = plannedStep.stageKeys || []
+  }
+  if (
+    (!Array.isArray(step.targetLanguageCodes) ||
+      step.targetLanguageCodes.length === 0) &&
+    Array.isArray(plannedStep.targetLanguageCodes)
+  ) {
+    step.targetLanguageCodes = plannedStep.targetLanguageCodes
+  }
+  if (
+    (!Array.isArray(step.stepKeys) || step.stepKeys.length === 0) &&
+    Array.isArray(plannedStep.stepKeys)
+  ) {
+    step.stepKeys = plannedStep.stepKeys
+  }
+}
+
+function findActiveWorkflowStep(steps) {
+  if (!Array.isArray(steps)) {
+    return null
+  }
+  const activeStatuses = ['stopping', 'running', 'retrying', 'failed']
+  for (const status of activeStatuses) {
+    const step = steps.find(item => item.status === status)
+    if (step) {
+      return step
+    }
+  }
+  return null
+}
+
+function doesPlannedStepMatchProgressStage(plannedStep, currentStage) {
+  const stage = normalizeText(currentStage).toLowerCase()
+  if (!stage) {
+    return false
+  }
+  const stageKeys = parseLanguageCodeList(
+    plannedStep?.stageKeys || plannedStep?.stage
+  ).map(stageKey => stageKey.toLowerCase())
+  return stageKeys.some(stageKey => {
+    if (!stageKey) {
+      return false
+    }
+    if (stage === stageKey) {
+      return true
+    }
+    if (stage.startsWith(`${stageKey}:`)) {
+      return true
+    }
+    return stageKey.startsWith(`${stage}:`)
+  })
+}
+
+function getCurrentPlannedWorkflowOrder(job, steps, plannedSteps) {
+  const activeStep = findActiveWorkflowStep(steps)
+  const activePlannedOrder = Number(activeStep?.plannedOrder || 0)
+  if (Number.isFinite(activePlannedOrder) && activePlannedOrder > 0) {
+    return activePlannedOrder
+  }
+  const currentStage = normalizeText(job?.progress?.currentStage)
+  if (!currentStage) {
+    return 0
+  }
+  const stageMatchedStep = plannedSteps.find(plannedStep => {
+    return doesPlannedStepMatchProgressStage(plannedStep, currentStage)
+  })
+  const plannedOrder = Number(stageMatchedStep?.plannedOrder || 0)
+  if (Number.isFinite(plannedOrder) && plannedOrder > 0) {
+    return plannedOrder
+  }
+  return 0
+}
+
+function markPlannedWorkflowStepStatus(step, status, currentStep = '') {
+  step.status = status
+  step.statusText = getWorkflowStepStatusText(status)
+  const normalizedCurrentStep = normalizeText(currentStep)
+  if (normalizedCurrentStep) {
+    step.currentStep = normalizedCurrentStep
+  }
+}
+
+function isWorkflowRunningJob(job) {
+  return normalizeText(job?.status) === TRANSLATION_JOB_STATUS.RUNNING
+}
+
+function isWorkflowFailedJob(job) {
+  return normalizeText(job?.status) === TRANSLATION_JOB_STATUS.FAILED
+}
+
+function isWorkflowPendingJob(job) {
+  return normalizeText(job?.status) === TRANSLATION_JOB_STATUS.PENDING
+}
+
+function isWorkflowFinishedJob(job) {
+  const status = normalizeText(job?.status)
+  if (!status) {
+    return false
+  }
+  if (isWorkflowPendingJob(job)) {
+    return false
+  }
+  if (isWorkflowRunningJob(job)) {
+    return false
+  }
+  if (isWorkflowFailedJob(job)) {
+    return false
+  }
+  return true
+}
+
+function applyInferredPlannedWorkflowStatus(job, plannedStep, currentOrder) {
+  const plannedOrder = Number(plannedStep?.plannedOrder || 0)
+  const progressText = normalizeText(job?.progress?.currentStep)
+  if (!Number.isFinite(plannedOrder) || plannedOrder <= 0) {
+    return
+  }
+  if (isWorkflowFinishedJob(job)) {
+    markPlannedWorkflowStepStatus(plannedStep, 'completed')
+    return
+  }
+  if (currentOrder <= 0) {
+    return
+  }
+  if (isWorkflowRunningJob(job)) {
+    if (plannedOrder < currentOrder) {
+      markPlannedWorkflowStepStatus(plannedStep, 'completed')
+      return
+    }
+    if (plannedOrder === currentOrder) {
+      markPlannedWorkflowStepStatus(plannedStep, 'running', progressText)
+    }
+    return
+  }
+  if (isWorkflowFailedJob(job)) {
+    if (plannedOrder < currentOrder) {
+      markPlannedWorkflowStepStatus(plannedStep, 'completed')
+      return
+    }
+    if (plannedOrder === currentOrder) {
+      markPlannedWorkflowStepStatus(plannedStep, 'failed', progressText)
+    }
+  }
+}
+
+function mergePlannedWorkflowSteps(job, steps) {
+  const plannedSteps = buildPlannedWorkflowSteps(job)
+  if (!Array.isArray(plannedSteps) || plannedSteps.length === 0) {
+    return steps
+  }
+  const matchedPlannedStepKeys = new Set()
+  plannedSteps.forEach(plannedStep => {
+    const matchedSteps = getExistingWorkflowStepsForPlan(steps, plannedStep)
+    if (matchedSteps.length === 0) {
+      return
+    }
+    matchedPlannedStepKeys.add(plannedStep.plannedStepKey)
+    matchedSteps.forEach(step => {
+      attachPlannedWorkflowStepMetadata(step, plannedStep)
+    })
+  })
+  const currentOrder = getCurrentPlannedWorkflowOrder(job, steps, plannedSteps)
+  plannedSteps.forEach(plannedStep => {
+    if (matchedPlannedStepKeys.has(plannedStep.plannedStepKey)) {
+      return
+    }
+    applyInferredPlannedWorkflowStatus(job, plannedStep, currentOrder)
+    steps.push(plannedStep)
+  })
+  return steps
+}
+
 function collectWorkflowIntegrityWarnings(steps) {
   const warnings = []
   if (!Array.isArray(steps)) {
@@ -3248,7 +3961,6 @@ function buildTranslationJobWorkflow(job) {
   steps.forEach(step => {
     finalizeWorkflowParentStep(step)
   })
-  sortWorkflowStepsByTime(steps)
   const reviewStep = buildReviewStep(job, steps.length + 1, aiCallCount)
   if (reviewStep) {
     reviewStep.majorKey = 'translation.review-preview'
@@ -3259,6 +3971,8 @@ function buildTranslationJobWorkflow(job) {
     reviewStep.serviceStepCount = 0
     steps.push(reviewStep)
   }
+  mergePlannedWorkflowSteps(job, steps)
+  sortWorkflowStepsByTime(steps)
   steps.forEach((step, index) => {
     step.order = index + 1
     step.displayOrder = String(index + 1)
@@ -3300,8 +4014,21 @@ function getWorkflowStepSortTime(step) {
   return Math.min(...times)
 }
 
+function getWorkflowStepSortPlanOrder(step) {
+  const plannedOrder = Number(step?.plannedOrder || 0)
+  if (Number.isFinite(plannedOrder) && plannedOrder > 0) {
+    return plannedOrder
+  }
+  return Number.MAX_SAFE_INTEGER
+}
+
 function sortWorkflowStepsByTime(steps) {
   steps.sort((left, right) => {
+    const leftPlanOrder = getWorkflowStepSortPlanOrder(left)
+    const rightPlanOrder = getWorkflowStepSortPlanOrder(right)
+    if (leftPlanOrder !== rightPlanOrder) {
+      return leftPlanOrder - rightPlanOrder
+    }
     const leftTime = getWorkflowStepSortTime(left)
     const rightTime = getWorkflowStepSortTime(right)
     if (leftTime !== rightTime) {
