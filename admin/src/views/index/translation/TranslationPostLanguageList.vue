@@ -27,7 +27,12 @@
       </el-descriptions>
 
       <div class="mb20 list-table-body">
-        <ResponsiveTable :data="translationRows" row-key="languageCode" border>
+        <ResponsiveTable
+          ref="tableRef"
+          :data="translationRows"
+          row-key="languageCode"
+          border
+        >
           <ResponsiveTableColumn label="语言" width="150">
             <template #default="{ row }">
               {{ getLanguageText(row.languageCode) }}
@@ -263,6 +268,7 @@ export default {
   setup() {
     const route = useRoute()
     const router = useRouter()
+    const tableRef = ref(null)
     const loading = ref(false)
     const sourceGroup = ref(null)
     const aiTranslationDialogVisible = ref(false)
@@ -438,6 +444,10 @@ export default {
         })
     }
 
+    function preserveTableScrollForNextRefresh() {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
+    }
+
     function createTranslation(languageCode) {
       if (!sourcePost.value) {
         return
@@ -519,14 +529,17 @@ export default {
     }
 
     function handleAiTranslationSaved() {
+      preserveTableScrollForNextRefresh()
       getLanguageList()
     }
 
     function handleSnapshotRestored() {
+      preserveTableScrollForNextRefresh()
       getLanguageList()
     }
 
     function handleSourceLinkRewriteApplied() {
+      preserveTableScrollForNextRefresh()
       getLanguageList()
     }
 
@@ -544,6 +557,7 @@ export default {
       sourceLinkRewritePost,
       rowActionLoadingMap,
       route,
+      tableRef,
       getCreateActionKey,
       sourcePost,
       translationRows,

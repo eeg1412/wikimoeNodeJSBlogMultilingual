@@ -120,7 +120,6 @@ export default {
         .then(res => {
           referrerList.value = res.data.list
           total.value = res.data.total
-          tableRef.value.scrollTo({ top: 0 })
           setSessionParams(route.name, params)
         })
         .catch(err => {

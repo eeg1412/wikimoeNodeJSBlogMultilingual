@@ -73,7 +73,13 @@
     </div>
 
     <div class="mb20 list-table-body" v-loading="loading">
-      <ResponsiveTable :data="relationList" row-key="_id" height="100%" border>
+      <ResponsiveTable
+        ref="tableRef"
+        :data="relationList"
+        row-key="_id"
+        height="100%"
+        border
+      >
         <ResponsiveTableColumn label="名称" min-width="260">
           <template #default="{ row }">
             <div class="relation-title">
@@ -442,6 +448,7 @@ export default {
   },
   setup(props) {
     const route = useRoute()
+    const tableRef = ref(null)
     const relationList = ref([])
     const total = ref(0)
     const loading = ref(false)
@@ -710,6 +717,10 @@ export default {
         })
     }
 
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
+    }
+
     const handlePageChange = page => {
       params.page = page
       getRelationList(false)
@@ -880,6 +891,7 @@ export default {
         .then(response => {
           const result = response.data.data || {}
           const updatedCount = Number(result.updatedCount || 0)
+          preserveTableScrollForNextRefresh()
           getRelationList(false)
           if (updatedCount > 0) {
             ElMessage.success(`已同步 ${updatedCount} 个多语言作者的头像和封面`)
@@ -1009,6 +1021,7 @@ export default {
             editForm[key] = payload[key]
           })
         }
+        preserveTableScrollForNextRefresh()
         getRelationList(false)
         aiDialogVisible.value = false
         ElMessage.success('AI 翻译已写入')
@@ -1037,6 +1050,7 @@ export default {
         })
         .then(response => {
           updateRelationListRow(response.data.data)
+          preserveTableScrollForNextRefresh()
           getRelationList(false)
           ElMessage.success('已同步为最新快照')
         })
@@ -1103,6 +1117,7 @@ export default {
         .then(() => {
           ElMessage.success('保存成功')
           editDialogVisible.value = false
+          preserveTableScrollForNextRefresh()
           getRelationList(false)
         })
         .catch(error => {
@@ -1126,6 +1141,7 @@ export default {
     })
 
     return {
+      tableRef,
       params,
       relationList,
       total,

@@ -212,7 +212,7 @@
     <BackupEditor
       ref="BackupEditorRef"
       :id="editId"
-      @update="getBackupList(true)"
+      @update="handleEditorUpdate"
     />
     <el-dialog
       title="注意"
@@ -314,6 +314,9 @@ export default {
     })
     const total = ref(0)
     const tableRef = ref(null)
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
+    }
     const getBackupList = resetPage => {
       if (resetPage === true && params.page !== 1) {
         params.page = 1
@@ -324,14 +327,14 @@ export default {
         .then(res => {
           backupList.value = res.data.list
           total.value = res.data.total
-          tableRef.value.scrollTo({ top: 0 })
           setSessionParams(route.name, params)
         })
         .catch(err => {
           console.log(err)
-        })
+      })
     }
     const BackupEditorRef = ref(null)
+    const editId = ref(null)
     const handleAdd = () => {
       editId.value = null
       nextTick(() => {
@@ -346,12 +349,19 @@ export default {
       }
     )
 
-    const editId = ref(null)
     const goEdit = id => {
       editId.value = id
       nextTick(() => {
         BackupEditorRef.value.open()
       })
+    }
+    const handleEditorUpdate = () => {
+      if (editId.value) {
+        preserveTableScrollForNextRefresh()
+        getBackupList(false)
+        return
+      }
+      getBackupList(true)
     }
     const deleteCommand = (id, command) => {
       switch (command) {
@@ -503,6 +513,7 @@ export default {
         .restoreBackup({ id: restoreId.value })
         .then(() => {
           ElMessage.success('开始还原，请稍后查看状态')
+          preserveTableScrollForNextRefresh()
           getBackupList()
         })
         .catch(() => {})
@@ -666,6 +677,7 @@ export default {
             .markBackupFileDelete({ id, __v })
             .then(() => {
               ElMessage.success('标记成功')
+              preserveTableScrollForNextRefresh()
               getBackupList()
             })
             .catch(err => {
@@ -691,6 +703,7 @@ export default {
       getBackupList,
       BackupEditorRef,
       handleAdd,
+      handleEditorUpdate,
       editId,
       goEdit,
       deleteCommand,

@@ -265,6 +265,7 @@ import {
   restoreListSessionParams,
   saveListSessionParams
 } from '@/composables/useListSessionParams'
+import { useResponsiveTableScrollSession } from '@/composables/useResponsiveTableScrollSession'
 import {
   SUPPORTED_LANGUAGE_OPTIONS,
   getLanguageText,
@@ -279,6 +280,8 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
+    const { restoreTableScrollOnNextDataRefresh } =
+      useResponsiveTableScrollSession(route, tableRef)
     const sourcePostList = ref([])
     const total = ref(0)
     const detailDialogVisible = ref(false)
@@ -334,12 +337,15 @@ export default {
           const responseData = response.data.data || {}
           sourcePostList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const getSummaryLanguageList = summary => {
@@ -371,6 +377,7 @@ export default {
         })
         .then(() => {
           ElMessage.success('覆盖成功')
+          preserveTableScrollForNextRefresh()
           getSourcePostList(false)
         })
         .catch(error => {
@@ -419,6 +426,7 @@ export default {
     )
 
     onMounted(() => {
+      restoreTableScrollOnNextDataRefresh()
       getSourcePostList(false)
     })
 

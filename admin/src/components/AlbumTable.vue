@@ -128,19 +128,22 @@ export default {
     })
     const total = ref(0)
     const tableRef = ref(null)
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
+    }
     const getAlbumList = (resetPage, top = true) => {
       if (resetPage === true && params.page !== 1) {
         params.page = 1
         return
+      }
+      if (top === false) {
+        preserveTableScrollForNextRefresh()
       }
       authApi
         .getAlbumList(params)
         .then(res => {
           albumList.value = res.data.list
           total.value = res.data.total
-          if (top) {
-            tableRef.value.scrollTo({ top: 0 })
-          }
           emit('paramsChange', params)
         })
         .catch(err => {
@@ -193,6 +196,9 @@ export default {
     }
 
     const onEditorSuccess = () => {
+      if (id.value) {
+        preserveTableScrollForNextRefresh()
+      }
       getAlbumList()
     }
 

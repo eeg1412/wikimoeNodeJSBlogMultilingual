@@ -937,7 +937,6 @@ export default {
           const responseData = response.data.data || {}
           mediaList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
@@ -946,6 +945,10 @@ export default {
         .finally(() => {
           loading.value = false
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const openDetail = row => {
@@ -1056,6 +1059,7 @@ export default {
           updateMediaListRow(response.data.data)
           ElMessage.success('保存成功')
           editDialogVisible.value = false
+          preserveTableScrollForNextRefresh()
           getMediaList(false)
         })
         .catch(error => {
@@ -1159,6 +1163,7 @@ export default {
           updateMediaListRow(response.data.data)
           Object.assign(editForm, payload)
         }
+        preserveTableScrollForNextRefresh()
         getMediaList(false)
         aiDialogVisible.value = false
         ElMessage.success('AI 翻译已写入')
@@ -1190,6 +1195,7 @@ export default {
         })
         .then(response => {
           updateMediaListRow(response.data.data)
+          preserveTableScrollForNextRefresh()
           getMediaList(false)
           ElMessage.success('已同步为最新快照')
         })
@@ -1287,6 +1293,7 @@ export default {
     const handleReplaceSuccess = () => {
       replaceDialogVisible.value = false
       resetReplaceForm()
+      preserveTableScrollForNextRefresh()
       getMediaList(false)
     }
 
@@ -1370,6 +1377,7 @@ export default {
         })
         .then(() => {
           ElMessage.success('已转回远程快照')
+          preserveTableScrollForNextRefresh()
           getMediaList(false)
         })
         .catch(error => {

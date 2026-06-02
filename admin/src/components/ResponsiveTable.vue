@@ -9,6 +9,8 @@
 
     额外 props:
       - mobileBreakpoint: number (默认 768) 移动端断点
+      - dataRefreshScrollBehavior: 'reset' | 'preserve'
+        数据刷新后的滚动策略，默认 reset
   -->
 
   <!-- 桌面端：标准 el-table -->
@@ -187,6 +189,11 @@ import {
 } from 'vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 
+const DATA_REFRESH_SCROLL_BEHAVIOR = Object.freeze({
+  RESET: 'reset',
+  PRESERVE: 'preserve'
+})
+
 /**
  * 辅助组件：渲染卡片中每个单元格的内容
  * 调用已注册列的 renderFn（即 el-table-column 的 #default slot）
@@ -252,6 +259,14 @@ export default {
     mobileBreakpoint: {
       type: Number,
       default: 768
+    },
+    /** 数据刷新后的滚动策略：reset 重置，preserve 保持 */
+    dataRefreshScrollBehavior: {
+      type: String,
+      default: DATA_REFRESH_SCROLL_BEHAVIOR.RESET,
+      validator(value) {
+        return Object.values(DATA_REFRESH_SCROLL_BEHAVIOR).includes(value)
+      }
     }
   },
   emits: [
@@ -278,6 +293,137 @@ export default {
     // ========== el-table ref 及方法代理 ==========
     const elTableRef = ref(null)
     const mobileContainerRef = ref(null)
+    const nextDataRefreshScrollBehavior = ref('')
+    const preservedScrollPosition = ref(null)
+
+    const getDesktopScrollElement = () => {
+      const tableElement = elTableRef.value?.$el
+      if (!tableElement) {
+        return null
+      }
+      return tableElement.querySelector('.el-scrollbar__wrap')
+    }
+
+    const getMobileScrollElement = () => {
+      const appElement = document.querySelector('.el-main')
+      if (appElement) {
+        return appElement
+      }
+      return mobileContainerRef.value
+    }
+
+    const getCurrentScrollElement = () => {
+      if (isMobile.value) {
+        return getMobileScrollElement()
+      }
+      return getDesktopScrollElement()
+    }
+
+    const getCurrentScrollPosition = () => {
+      const scrollElement = getCurrentScrollElement()
+      if (!scrollElement) {
+        return null
+      }
+      return {
+        top: scrollElement.scrollTop,
+        left: scrollElement.scrollLeft
+      }
+    }
+
+    const normalizeScrollPosition = position => {
+      const normalized = {
+        top: 0,
+        left: 0
+      }
+      if (!position || typeof position !== 'object') {
+        return normalized
+      }
+      if (Number.isFinite(Number(position.top))) {
+        normalized.top = Number(position.top)
+      }
+      if (Number.isFinite(Number(position.left))) {
+        normalized.left = Number(position.left)
+      }
+      return normalized
+    }
+
+    const scrollMobileElementTo = position => {
+      const scrollElement = getMobileScrollElement()
+      if (!scrollElement) {
+        return
+      }
+      const normalizedPosition = normalizeScrollPosition(position)
+      scrollElement.scrollTo({
+        top: normalizedPosition.top,
+        left: normalizedPosition.left
+      })
+    }
+
+    const scrollDesktopElementTo = position => {
+      const normalizedPosition = normalizeScrollPosition(position)
+      if (elTableRef.value) {
+        elTableRef.value.scrollTo({
+          top: normalizedPosition.top,
+          left: normalizedPosition.left
+        })
+      }
+    }
+
+    const scrollTableToPosition = position => {
+      if (isMobile.value) {
+        scrollMobileElementTo(position)
+        return
+      }
+      scrollDesktopElementTo(position)
+    }
+
+    const resetScrollPosition = () => {
+      scrollTableToPosition({
+        top: 0,
+        left: 0
+      })
+    }
+
+    const getDataRefreshScrollBehavior = () => {
+      if (nextDataRefreshScrollBehavior.value) {
+        return nextDataRefreshScrollBehavior.value
+      }
+      return props.dataRefreshScrollBehavior
+    }
+
+    const preserveScrollOnNextDataRefresh = position => {
+      nextDataRefreshScrollBehavior.value =
+        DATA_REFRESH_SCROLL_BEHAVIOR.PRESERVE
+      if (position) {
+        preservedScrollPosition.value = normalizeScrollPosition(position)
+        return
+      }
+      preservedScrollPosition.value = getCurrentScrollPosition()
+    }
+
+    const resetScrollOnNextDataRefresh = () => {
+      nextDataRefreshScrollBehavior.value = DATA_REFRESH_SCROLL_BEHAVIOR.RESET
+      preservedScrollPosition.value = null
+    }
+
+    const resolveScrollToPosition = args => {
+      const firstArg = args[0]
+      if (firstArg && typeof firstArg === 'object') {
+        return normalizeScrollPosition(firstArg)
+      }
+
+      const position = {
+        top: 0,
+        left: 0
+      }
+      if (Number.isFinite(Number(firstArg))) {
+        position.left = Number(firstArg)
+      }
+      if (Number.isFinite(Number(args[1]))) {
+        position.top = Number(args[1])
+      }
+      return position
+    }
 
     // ========== 事件名到监听器属性名的映射 ==========
     const eventToListenerMap = new Map()
@@ -416,20 +562,28 @@ export default {
       return result
     })
 
-    // ========== 自动滚动到顶部（移动端） ==========
+    // ========== 数据刷新滚动策略 ==========
     watch(
       () => props.data,
       () => {
-        if (isMobile.value) {
-          // 延迟执行，确保DOM已更新
-          nextTick(() => {
-            // 滚动 .el-main 元素到顶部
-            const appElement = document.querySelector('.el-main')
-            if (appElement) {
-              appElement.scrollTo({ top: 0 })
-            }
-          })
+        const scrollBehavior = getDataRefreshScrollBehavior()
+        let scrollPosition = null
+        if (scrollBehavior === DATA_REFRESH_SCROLL_BEHAVIOR.PRESERVE) {
+          scrollPosition = preservedScrollPosition.value
+          if (!scrollPosition) {
+            scrollPosition = getCurrentScrollPosition()
+          }
         }
+
+        nextTick(() => {
+          if (scrollBehavior === DATA_REFRESH_SCROLL_BEHAVIOR.PRESERVE) {
+            scrollTableToPosition(scrollPosition)
+          } else {
+            resetScrollPosition()
+          }
+          nextDataRefreshScrollBehavior.value = ''
+          preservedScrollPosition.value = null
+        })
       },
       { deep: false }
     )
@@ -642,8 +796,7 @@ export default {
 
     // 过滤掉自定义 props 和事件监听器，其余传递给 el-table
     const tableAttrs = computed(() => {
-      console.log('attrs', attrs)
-      const { mobileBreakpoint, ...rest } = attrs
+      const rest = { ...attrs }
       // 过滤掉已声明的事件监听器，事件由 tableListeners 统一处理
       const filtered = {}
       Object.keys(rest).forEach(key => {
@@ -672,10 +825,18 @@ export default {
       scrollTo: (...args) => {
         if (elTableRef.value) {
           elTableRef.value.scrollTo(...args)
-        } else if (mobileContainerRef.value) {
-          mobileContainerRef.value.scrollTo(...args)
+        } else if (isMobile.value) {
+          scrollMobileElementTo(resolveScrollToPosition(args))
         }
       },
+      /** 下一次数据刷新后保持当前滚动位置 */
+      preserveScrollOnNextDataRefresh,
+      /** 下一次数据刷新后重置滚动位置 */
+      resetScrollOnNextDataRefresh,
+      /** 获取当前滚动位置 */
+      getScrollPosition: getCurrentScrollPosition,
+      /** 立即恢复到指定滚动位置 */
+      restoreScrollPosition: scrollTableToPosition,
       /** 清空选择 */
       clearSelection: () => {
         if (elTableRef.value) {

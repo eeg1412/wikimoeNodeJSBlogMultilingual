@@ -361,6 +361,7 @@ import {
   restoreListSessionParams,
   saveListSessionParams
 } from '@/composables/useListSessionParams'
+import { useResponsiveTableScrollSession } from '@/composables/useResponsiveTableScrollSession'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -381,6 +382,8 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
+    const { restoreTableScrollOnNextDataRefresh } =
+      useResponsiveTableScrollSession(route, tableRef)
     const sourceGroupList = ref([])
     const total = ref(0)
     const detailDialogVisible = ref(false)
@@ -443,12 +446,15 @@ export default {
           const responseData = response.data.data || {}
           sourceGroupList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const getTranslationRows = row => {
@@ -628,6 +634,7 @@ export default {
           detailData.value = response.data.data
           syncEditForm(detailData.value?.post)
           ElMessage.success('保存成功')
+          preserveTableScrollForNextRefresh()
           getTranslationPostList(false)
         })
         .catch(error => {
@@ -655,6 +662,7 @@ export default {
           detailData.value = response.data.data
           syncEditForm(detailData.value?.post)
           ElMessage.success('复核状态已更新')
+          preserveTableScrollForNextRefresh()
           getTranslationPostList(false)
         })
         .catch(error => {
@@ -673,6 +681,7 @@ export default {
     )
 
     onMounted(() => {
+      restoreTableScrollOnNextDataRefresh()
       getTranslationPostList(false)
     })
 

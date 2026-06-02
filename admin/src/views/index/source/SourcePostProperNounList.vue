@@ -637,12 +637,15 @@ export default {
           termList.value = data.list || []
           total.value = data.total || 0
           relationCount.value = data.relationCount || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params, listSessionKey.value)
         })
         .finally(() => {
           loading.value = false
         })
+    }
+
+    function preserveTableScrollForNextRefresh() {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     function resetTermForm() {
@@ -682,6 +685,9 @@ export default {
         .then(() => {
           ElMessage.success('名词已保存')
           termDialogVisible.value = false
+          if (termMode.value === 'edit') {
+            preserveTableScrollForNextRefresh()
+          }
           getTermList(false)
         })
         .finally(() => {
@@ -849,6 +855,9 @@ export default {
           ElMessage.success('译名已保存')
           translationEditDialogVisible.value = false
           getTranslationList()
+          if (translationMode.value === 'edit') {
+            preserveTableScrollForNextRefresh()
+          }
           getTermList(false)
         })
         .finally(() => {
@@ -884,6 +893,7 @@ export default {
     }
 
     function handleInternetSearchApplied() {
+      preserveTableScrollForNextRefresh()
       getTermList(false)
       if (translationDialogVisible.value && activeTerm.value) {
         getTranslationList()

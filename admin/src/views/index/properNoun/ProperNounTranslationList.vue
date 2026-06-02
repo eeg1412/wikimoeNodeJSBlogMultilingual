@@ -651,12 +651,15 @@ export default {
           termSummary.maxCount = data.maxTermCount || 0
           termSummary.starredCount = data.starredTermCount || 0
           termSummary.maxStarredCount = data.maxStarredTermCount || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .finally(() => {
           loading.value = false
         })
+    }
+
+    function preserveTableScrollForNextRefresh() {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     function resetTermForm() {
@@ -695,6 +698,9 @@ export default {
         .then(() => {
           ElMessage.success('名词已保存')
           termDialogVisible.value = false
+          if (termMode.value === 'edit') {
+            preserveTableScrollForNextRefresh()
+          }
           getTermList()
         })
         .finally(() => {
@@ -813,6 +819,7 @@ export default {
     }
 
     function handleInternetSearchApplied() {
+      preserveTableScrollForNextRefresh()
       getTermList()
       if (translationDialogVisible.value && activeTerm.value) {
         getTranslationList()
@@ -889,6 +896,9 @@ export default {
           ElMessage.success('译名已保存')
           translationEditDialogVisible.value = false
           getTranslationList()
+          if (translationMode.value === 'edit') {
+            preserveTableScrollForNextRefresh()
+          }
           getTermList()
         })
         .finally(() => {

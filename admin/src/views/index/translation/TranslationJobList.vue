@@ -2113,7 +2113,6 @@ export default {
           const responseData = response.data.data || {}
           jobList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
@@ -2139,6 +2138,10 @@ export default {
     const refreshJobPage = resetPage => {
       getJobList(resetPage)
       getJobStorageSummary()
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const loadTranslationJobDetail = (id, options = {}) => {
@@ -2191,6 +2194,9 @@ export default {
       action({ id: row._id })
         .then(() => {
           ElMessage.success(successText)
+          if (options.preserveScroll !== false) {
+            preserveTableScrollForNextRefresh()
+          }
           getJobList(false)
           getJobStorageSummary()
           const isCurrentDetailJob = currentJob.value?._id === row._id
@@ -2249,6 +2255,7 @@ export default {
         type: 'warning'
       }).then(() => {
         runJobAction(row, multilingualApi.deleteTranslationJob, '已删除', {
+          preserveScroll: false,
           closeCurrentDetail: true
         })
       })
@@ -2335,6 +2342,7 @@ export default {
           ElMessage.success('已采纳')
           selectedEntryKeys.value = []
           refreshDetail()
+          preserveTableScrollForNextRefresh()
           getJobList(false)
         })
         .catch(error => {

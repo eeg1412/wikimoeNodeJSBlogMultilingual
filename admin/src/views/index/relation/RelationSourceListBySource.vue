@@ -253,6 +253,7 @@ import {
   restoreListSessionParams,
   saveListSessionParams
 } from '@/composables/useListSessionParams'
+import { useResponsiveTableScrollSession } from '@/composables/useResponsiveTableScrollSession'
 import {
   RELATION_COLLECTION_OPTIONS,
   SUPPORTED_LANGUAGE_OPTIONS,
@@ -291,6 +292,8 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
+    const { restoreTableScrollOnNextDataRefresh } =
+      useResponsiveTableScrollSession(route, tableRef)
     const sourceGroupList = ref([])
     const total = ref(0)
     const loading = ref(false)
@@ -384,7 +387,6 @@ export default {
           const responseData = response.data.data || {}
           sourceGroupList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
@@ -393,6 +395,10 @@ export default {
         .finally(() => {
           loading.value = false
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const getSourceGroupRowKey = row => {
@@ -550,6 +556,7 @@ export default {
         .then(response => {
           const result = response.data.data || {}
           const updatedCount = Number(result.updatedCount || 0)
+          preserveTableScrollForNextRefresh()
           getSourceList(false)
           if (updatedCount > 0) {
             ElMessage.success(`已同步 ${updatedCount} 个多语言作者的头像和封面`)
@@ -578,6 +585,7 @@ export default {
     }
 
     onMounted(() => {
+      restoreTableScrollOnNextDataRefresh()
       getSourceList(false)
     })
 

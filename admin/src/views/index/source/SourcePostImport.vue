@@ -329,7 +329,7 @@
     <SourcePostTermOrganizeDialog
       v-model="organizeDialogVisible"
       :source-post="organizeRow"
-      @created="getSourceDatabasePostList(false)"
+      @created="handleOrganizeCreated"
     />
 
     <el-dialog
@@ -1135,6 +1135,7 @@ import {
   restoreListSessionParams,
   saveListSessionParams
 } from '@/composables/useListSessionParams'
+import { useResponsiveTableScrollSession } from '@/composables/useResponsiveTableScrollSession'
 import {
   POST_STATUS_OPTIONS,
   POST_TYPE_OPTIONS,
@@ -1202,6 +1203,8 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
+    const { restoreTableScrollOnNextDataRefresh } =
+      useResponsiveTableScrollSession(route, tableRef)
     const sourcePostList = ref([])
     const total = ref(0)
     const result = ref(null)
@@ -1367,12 +1370,20 @@ export default {
           const responseData = response.data.data || {}
           sourcePostList.value = responseData.list || []
           total.value = responseData.total || 0
-          tableRef.value?.scrollTo({ top: 0 })
           saveListSessionParams(route, params)
         })
         .catch(error => {
           console.log(error)
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
+    }
+
+    const handleOrganizeCreated = () => {
+      preserveTableScrollForNextRefresh()
+      getSourceDatabasePostList(false)
     }
 
     const setRowLoading = (row, value) => {
@@ -2293,6 +2304,7 @@ export default {
         syncRowSnapshot(row, result.value)
         resultDialogVisible.value = true
         ElMessage.success('源文章快照生成成功')
+        preserveTableScrollForNextRefresh()
         getSourceDatabasePostList(false)
       } catch (error) {
         await handleImportError(row, error, sourceLanguageCode)
@@ -3518,6 +3530,7 @@ export default {
         syncRowSnapshot(aiRow.value, snapshot)
         aiDialogVisible.value = false
         ElMessage.success('AI 翻译已保存')
+        preserveTableScrollForNextRefresh()
         getSourceDatabasePostList(false)
       } finally {
         aiApplying.value = false
@@ -3555,6 +3568,7 @@ export default {
         syncRowSnapshot(row, result.value)
         resultDialogVisible.value = true
         ElMessage.success('源文章快照覆盖成功')
+        preserveTableScrollForNextRefresh()
         getSourceDatabasePostList(false)
         return result.value
       } finally {
@@ -3699,6 +3713,7 @@ export default {
     })
 
     onMounted(() => {
+      restoreTableScrollOnNextDataRefresh()
       getSourceDatabasePostList(false)
     })
 
@@ -3787,6 +3802,7 @@ export default {
       setAllAiRelatedEntriesSelected,
       getSourceDatabasePostList,
       confirmLanguageAction,
+      handleOrganizeCreated,
       backToAiSetup,
       confirmAiImportApply,
       createSourcePostAiImportJob,

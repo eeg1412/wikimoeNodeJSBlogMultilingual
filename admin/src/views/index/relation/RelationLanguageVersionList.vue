@@ -28,6 +28,7 @@
 
       <div class="mb20 list-table-body" v-loading="loading">
         <ResponsiveTable
+          ref="tableRef"
           :data="languageRows"
           row-key="languageCode"
           height="100%"
@@ -317,6 +318,7 @@ export default {
   },
   setup(props) {
     const route = useRoute()
+    const tableRef = ref(null)
     const sourceId = computed(() => {
       return String(route.params.sourceId || '')
     })
@@ -435,6 +437,10 @@ export default {
         .finally(() => {
           loading.value = false
         })
+    }
+
+    const preserveTableScrollForNextRefresh = () => {
+      tableRef.value?.preserveScrollOnNextDataRefresh()
     }
 
     const getAiSkipActionKey = row => {
@@ -653,6 +659,7 @@ export default {
             editForm[key] = payload[key]
           })
         }
+        preserveTableScrollForNextRefresh()
         loadTranslationList()
         aiDialogVisible.value = false
         ElMessage.success('AI 翻译已写入')
@@ -729,6 +736,7 @@ export default {
             ...data
           })
           editDialogVisible.value = false
+          preserveTableScrollForNextRefresh()
           loadPageData()
           ElMessage.success(`${props.title}语言版本已保存`)
         })
@@ -756,6 +764,7 @@ export default {
     })
 
     return {
+      tableRef,
       sourceId,
       sourceRecord,
       languageRows,
