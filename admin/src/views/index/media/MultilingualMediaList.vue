@@ -1056,6 +1056,7 @@ export default {
           updateMediaListRow(response.data.data)
           ElMessage.success('保存成功')
           editDialogVisible.value = false
+          getMediaList(false)
         })
         .catch(error => {
           console.log(error)

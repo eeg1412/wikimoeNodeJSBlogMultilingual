@@ -729,6 +729,7 @@ export default {
             ...data
           })
           editDialogVisible.value = false
+          loadPageData()
           ElMessage.success(`${props.title}语言版本已保存`)
         })
         .catch(error => {
