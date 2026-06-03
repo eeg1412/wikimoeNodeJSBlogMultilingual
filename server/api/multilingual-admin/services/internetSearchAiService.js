@@ -1921,6 +1921,8 @@ async function searchOfficialTermTranslations(options = {}) {
   const includeTermNoteRevision = options.includeTermNoteRevision !== false
   const allowSameSourceTranslationWithNote =
     options.allowSameSourceTranslationWithNote === true
+  const skipKnowledgeBase = options.skipKnowledgeBase === true
+  const skipInternetSearch = options.skipInternetSearch === true
 
   const knowledgeSettings =
     await aiSettingsService.getProperNounKnowledgeRuntimeSettings()
@@ -1934,7 +1936,7 @@ async function searchOfficialTermTranslations(options = {}) {
     rawResponse: null,
     aiJsonLog: null
   }
-  if (options.skipKnowledgeBase !== true) {
+  if (!skipKnowledgeBase) {
     knowledgeResult = await resolveOfficialTermTranslationsFromKnowledge({
       settings: knowledgeSettings,
       termRequests,
@@ -1957,7 +1959,17 @@ async function searchOfficialTermTranslations(options = {}) {
     aiJsonLog: null
   }
   let searchSettings = null
-  if (knowledgeResult.missingTermRequests.length > 0) {
+  let internetSearchRequestedTermCount = 0
+  let internetSearchTargetLanguageCodes = []
+  if (
+    !skipInternetSearch &&
+    knowledgeResult.missingTermRequests.length > 0
+  ) {
+    internetSearchRequestedTermCount =
+      knowledgeResult.missingTermRequests.length
+    internetSearchTargetLanguageCodes = getTermRequestTargetLanguageCodes(
+      knowledgeResult.missingTermRequests
+    )
     searchSettings = await aiSettingsService.getInternetSearchRuntimeSettings()
     if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
       searchSettings.timeoutSeconds = timeoutSeconds
@@ -1984,18 +1996,25 @@ async function searchOfficialTermTranslations(options = {}) {
     })
   }
 
+  let provider = knowledgeSettings.provider
+  let model = knowledgeSettings.model || knowledgeSettings.deepSeekModel || ''
+  if (searchResult.terms.length > 0) {
+    provider = 'gemini'
+    model = ''
+    if (searchSettings && searchSettings.model) {
+      model = searchSettings.model
+    }
+  }
+
   return {
-    provider:
-      searchResult.terms.length > 0 ? 'gemini' : knowledgeSettings.provider,
-    model:
-      searchResult.terms.length > 0
-        ? searchSettings?.model || ''
-        : knowledgeSettings.model || knowledgeSettings.deepSeekModel || '',
+    provider,
+    model,
     terms: knowledgeResult.terms.concat(searchResult.terms),
     stats: {
       sourceTermCount: sourceTerms.length,
       targetLanguageCodes: requestTargetLanguageCodes,
-      skipKnowledgeBase: options.skipKnowledgeBase === true,
+      skipKnowledgeBase,
+      skipInternetSearch,
       includeTermNoteRevision,
       allowSameSourceTranslationWithNote,
       aiKnowledgeBaseTermCount: knowledgeResult.terms.length,
@@ -2006,11 +2025,8 @@ async function searchOfficialTermTranslations(options = {}) {
       internetSearchTranslationCount: countTermTranslationLanguagePairs(
         searchResult.terms
       ),
-      internetSearchRequestedTermCount:
-        knowledgeResult.missingTermRequests.length,
-      internetSearchTargetLanguageCodes: getTermRequestTargetLanguageCodes(
-        knowledgeResult.missingTermRequests
-      )
+      internetSearchRequestedTermCount,
+      internetSearchTargetLanguageCodes
     },
     rawResponse: {
       knowledge: knowledgeResult.rawResponse,

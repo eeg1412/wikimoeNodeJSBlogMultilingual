@@ -1130,6 +1130,10 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
     '联网检索目标语言',
     '实际提交给联网检索的目标语言列表。'
   ],
+  skipInternetSearch: [
+    '跳过联网检索',
+    '关闭联网检索时，只跳过联网搜索 AI，仍会先使用模型知识确认缺失名词译名。'
+  ],
   skippedByNoTranslationCount: [
     '无译名跳过数',
     '因为没有可用译名而未写入术语库的名词数量。'

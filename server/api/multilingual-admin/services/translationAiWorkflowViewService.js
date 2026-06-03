@@ -1940,7 +1940,8 @@ function getMetaLabel(key) {
     internetSearchTranslationCount: '联网检索译名数',
     internetSearchRequestedTermCount: '联网检索请求名词数',
     internetSearchTargetLanguageCodes: '联网检索目标语言',
-    skipKnowledgeBase: '跳过模型知识确认'
+    skipKnowledgeBase: '跳过模型知识确认',
+    skipInternetSearch: '跳过联网检索'
   }
   return labelMap[key] || key
 }

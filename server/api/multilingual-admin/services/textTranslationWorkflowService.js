@@ -2439,6 +2439,7 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
   model,
   matchedTermIds,
   matchedTermLinks,
+  currentMatchedCandidateTerms,
   extractedTerms,
   targetLanguageCodes,
   properNounScopeKey = '',
@@ -2450,7 +2451,7 @@ async function saveResolvedTermTranslationsAndRefreshCoverage({
     return {
       matchedTermIds,
       matchedTermLinks,
-      matchedCandidateTerms: [],
+      matchedCandidateTerms: currentMatchedCandidateTerms,
       candidateCoverage: null,
       coverage: null,
       savedTranslations: []
@@ -3203,6 +3204,7 @@ async function resolveOfficialTermGlossaryCacheData({
         internetSearchTranslationCount: 0,
         internetSearchRequestedTermCount: 0,
         internetSearchTargetLanguageCodes: [],
+        skipInternetSearch: input.searchOfficialTermTranslations !== true,
         contextSummaryLength: officialTermContextSummary.length,
         glossaryLanguageCodes: []
       }
@@ -3257,14 +3259,17 @@ async function resolveOfficialTermGlossaryCacheData({
   let internetSearchTranslationCount = 0
   let internetSearchRequestedTermCount = 0
   let internetSearchTargetLanguageCodes = []
+  const allowInternetSearch = input.searchOfficialTermTranslations === true
+  const skipInternetSearch = !allowInternetSearch
   let savedTranslations = []
-  if (
-    input.searchOfficialTermTranslations === true &&
-    missingTermRequests.length > 0
-  ) {
+  if (missingTermRequests.length > 0) {
     if (handlers.onStatus) {
+      let statusMessage = `正在交给名词知识库翻译 AI 处理 ${missingTermRequests.length} 个缺失专有名词`
+      if (allowInternetSearch) {
+        statusMessage = `正在交给名词搜索翻译 AI 处理 ${missingTermRequests.length} 个缺失专有名词`
+      }
       handlers.onStatus({
-        message: `正在交给名词搜索翻译 AI 处理 ${missingTermRequests.length} 个缺失专有名词`
+        message: statusMessage
       })
     }
     const searchRequestedTermRequests = missingTermRequests
@@ -3276,6 +3281,7 @@ async function resolveOfficialTermGlossaryCacheData({
         skipUsageLog: input.skipUsageLog,
         onStatus: handlers.onStatus,
         cancellation: handlers.cancellation,
+        skipInternetSearch,
         allowSameSourceTranslationWithNote
       })
     aiKnowledgeBaseTermCount = searchResult.stats?.aiKnowledgeBaseTermCount || 0
@@ -3311,6 +3317,7 @@ async function resolveOfficialTermGlossaryCacheData({
           internetSearchTranslationCount,
           internetSearchRequestedTermCount,
           internetSearchTargetLanguageCodes,
+          skipInternetSearch,
           contextSummaryLength: officialTermContextSummary.length
         },
         input: {
@@ -3332,6 +3339,7 @@ async function resolveOfficialTermGlossaryCacheData({
         model: searchResult.model,
         matchedTermIds,
         matchedTermLinks,
+        currentMatchedCandidateTerms: matchedCandidateTerms,
         extractedTerms,
         targetLanguageCodes,
         properNounScopeKey: getOfficialTermGlossaryScopeKey(input),
@@ -3395,6 +3403,7 @@ async function resolveOfficialTermGlossaryCacheData({
       internetSearchTranslationCount,
       internetSearchRequestedTermCount,
       internetSearchTargetLanguageCodes,
+      skipInternetSearch,
       contextSummaryLength: officialTermContextSummary.length,
       glossaryLanguageCodes: Object.keys(glossaryMarkdownMap)
     }
