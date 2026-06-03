@@ -1740,7 +1740,7 @@ async function searchOfficialTermTranslationsWithInternet({
           const missingParts = buildMissingTermParts(missingTermRequests)
           notifySearchStatus(
             onStatus,
-            `正在定向补齐 ${missingParts.length} 个缺失名词译名（${repairRoundNo}/${OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS}）`,
+            `正在定向补齐 ${missingParts.length} 个缺失名词译名，第 ${repairRoundNo} 轮补齐，最多 ${OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS} 轮`,
             {
               missingParts
             }

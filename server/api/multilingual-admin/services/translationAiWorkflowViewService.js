@@ -3,6 +3,11 @@ const {
   TRANSLATION_JOB_STATUS,
   TRANSLATION_JOB_TYPES
 } = require('../../../utils/translationJobConstants')
+const {
+  formatAiAttemptNoValue,
+  formatAiAttemptText,
+  formatAiMaxAttemptsValue
+} = require('../utils/aiAttemptText')
 
 const WORKFLOW_SCHEMA = 'wikimoe.ai.translation.workflow'
 const WORKFLOW_VERSION = 1
@@ -1134,8 +1139,17 @@ function buildAiWorkflowEventStatusSection(stepEntry) {
     items,
     createItem('目标语言', formatLanguageList(stepEntry.targetLanguageCodes))
   )
-  pushItem(items, createItem('尝试次数', latestEvent.attemptNo))
-  pushItem(items, createItem('最大尝试次数', latestEvent.maxAttempts))
+  pushItem(
+    items,
+    createItem('尝试次数', formatAiAttemptNoValue(latestEvent.attemptNo))
+  )
+  pushItem(
+    items,
+    createItem(
+      '最大尝试次数',
+      formatAiMaxAttemptsValue(latestEvent.maxAttempts)
+    )
+  )
   pushItem(items, createItem('更新时间', latestEvent.createdAt))
   return createSection({
     title: 'AI 工作流状态',
@@ -1173,8 +1187,9 @@ function buildAiWorkflowEventLogSection(stepEntry) {
     if (event.status) {
       meta.push(`状态：${getWorkflowStepStatusText(event.status)}`)
     }
-    if (event.attemptNo) {
-      meta.push(`尝试：${event.attemptNo}/${event.maxAttempts || '-'}`)
+    const attemptText = formatAiAttemptText(event.attemptNo, event.maxAttempts)
+    if (attemptText) {
+      meta.push(`尝试次数：${attemptText}`)
     }
     if (event.targetLanguageCode) {
       meta.push(`目标语言：${formatLanguage(event.targetLanguageCode)}`)

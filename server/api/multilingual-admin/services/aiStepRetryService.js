@@ -2,6 +2,7 @@ const {
   ApiError,
   ERROR_CODES
 } = require('../../../utils/multilingualAdminResponse')
+const { formatAiAttemptText } = require('../utils/aiAttemptText')
 
 const DEFAULT_AI_STEP_MAX_ATTEMPTS = 3
 const DEFAULT_AI_STEP_RETRY_DELAY_MS = 800
@@ -188,9 +189,10 @@ async function runAiStepWithRetry(operation, options = {}) {
 
   while (attemptNo <= maxAttempts) {
     throwIfCancellationRequested(options.cancellation)
+    const currentAttemptText = formatAiAttemptText(attemptNo, maxAttempts)
     notifyStatus(
       options,
-      `正在执行${stepLabel}（${attemptNo}/${maxAttempts}）`,
+      `正在执行${stepLabel}（${currentAttemptText}）`,
       {
         stepKey: getStepKey(options),
         stepLabel,
@@ -202,7 +204,7 @@ async function runAiStepWithRetry(operation, options = {}) {
     if (attemptNo > 1) {
       notifyStatus(
         options,
-        `正在重试${stepLabel}（${attemptNo}/${maxAttempts}）`,
+        `正在重试${stepLabel}（${currentAttemptText}）`,
         {
           stepKey: getStepKey(options),
           stepLabel,
@@ -257,9 +259,10 @@ async function runAiStepWithRetry(operation, options = {}) {
         throw buildRetryExhaustedError(error, options, attemptNo, maxAttempts)
       }
 
+      const nextAttemptText = formatAiAttemptText(attemptNo + 1, maxAttempts)
       notifyStatus(
         options,
-        `${stepLabel}执行失败，准备重试（${attemptNo + 1}/${maxAttempts}）：${getErrorMessage(error)}`,
+        `${stepLabel}执行失败，准备进行${nextAttemptText}：${getErrorMessage(error)}`,
         {
           stepKey: getStepKey(options),
           stepLabel,
