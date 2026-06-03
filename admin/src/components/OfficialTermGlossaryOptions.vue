@@ -11,6 +11,7 @@
     >
       {{ autoOrganizeDisabledTip }}
     </div>
+    <slot name="auto-organize-related-posts" />
   </el-form-item>
 
   <el-form-item label="名词检索">
@@ -20,6 +21,7 @@
       active-text="联网检索官方译名"
     />
     <AiFeatureUnavailableTip :message="searchTipMessage" />
+    <slot name="search-related-posts" />
   </el-form-item>
 </template>
 

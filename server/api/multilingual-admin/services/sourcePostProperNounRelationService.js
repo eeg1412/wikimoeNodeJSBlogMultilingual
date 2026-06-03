@@ -11,6 +11,24 @@ const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 const MAX_INTERNET_SEARCH_TERM_COUNT = 100
 const RELATION_SOURCE_VALUES = ['manual', 'aiOrganize', 'translationWorkflow']
+const SOURCE_POST_RELATED_FIELDS = [
+  'postList',
+  'tweetList',
+  'contentPostList',
+  'contentTweetList'
+]
+const SOURCE_POST_SUMMARY_SELECT_FIELDS = [
+  '_id',
+  'title',
+  'excerpt',
+  'alias',
+  'type',
+  'status',
+  'sourceLanguageCode',
+  'updatedAt',
+  'createdAt',
+  ...SOURCE_POST_RELATED_FIELDS
+].join(' ')
 
 function getRelationModel() {
   const repository =
@@ -181,7 +199,7 @@ async function getSourcePostSummary(sourceId) {
   const repository = getSourcePostRepository()
   const sourcePost = await repository.findOne(
     { _id: sourceId },
-    '_id title excerpt alias type status sourceLanguageCode updatedAt createdAt',
+    SOURCE_POST_SUMMARY_SELECT_FIELDS,
     { lean: true }
   )
   if (!sourcePost) {
@@ -192,7 +210,7 @@ async function getSourcePostSummary(sourceId) {
       404
     )
   }
-  return {
+  const summary = {
     _id: sourcePost._id,
     sourceId: sourcePost._id,
     title: sourcePost.title || '',
@@ -204,6 +222,14 @@ async function getSourcePostSummary(sourceId) {
     updatedAt: sourcePost.updatedAt || null,
     createdAt: sourcePost.createdAt || null
   }
+  SOURCE_POST_RELATED_FIELDS.forEach(fieldName => {
+    if (Array.isArray(sourcePost[fieldName])) {
+      summary[fieldName] = sourcePost[fieldName]
+      return
+    }
+    summary[fieldName] = []
+  })
+  return summary
 }
 
 function buildRelationSnapshotPayload(sourcePost) {

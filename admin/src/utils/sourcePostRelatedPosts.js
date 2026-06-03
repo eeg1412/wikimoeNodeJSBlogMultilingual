@@ -5,22 +5,48 @@ export const POST_RELATED_SOURCE_FIELDS = [
   'contentTweetList'
 ]
 
-export function getRelatedPostSourceId(record) {
-  if (!record || typeof record !== 'object') {
+function normalizeRelatedPostSourceId(value) {
+  if (value === null || typeof value === 'undefined') {
     return ''
   }
-  return String(record.sourceId || record._id || '').trim()
+  return String(value).trim()
+}
+
+export function getRelatedPostSourceId(record) {
+  if (record === null || typeof record === 'undefined') {
+    return ''
+  }
+  if (typeof record === 'string' || typeof record === 'number') {
+    return normalizeRelatedPostSourceId(record)
+  }
+  if (typeof record !== 'object') {
+    return ''
+  }
+  const sourceId = normalizeRelatedPostSourceId(record.sourceId)
+  if (sourceId) {
+    return sourceId
+  }
+  const id = normalizeRelatedPostSourceId(record._id)
+  if (id) {
+    return id
+  }
+  if (typeof record.toHexString === 'function') {
+    return normalizeRelatedPostSourceId(record.toHexString())
+  }
+  return ''
 }
 
 export function collectRelatedPostSourceIds(sourcePost, targetPost = null) {
   const sourceIdSet = new Set()
   POST_RELATED_SOURCE_FIELDS.forEach(fieldName => {
-    const sourceRelationList = Array.isArray(sourcePost?.[fieldName])
-      ? sourcePost[fieldName]
-      : []
-    const targetRelationList = Array.isArray(targetPost?.[fieldName])
-      ? targetPost[fieldName]
-      : []
+    let sourceRelationList = []
+    if (Array.isArray(sourcePost?.[fieldName])) {
+      sourceRelationList = sourcePost[fieldName]
+    }
+    let targetRelationList = []
+    if (Array.isArray(targetPost?.[fieldName])) {
+      targetRelationList = targetPost[fieldName]
+    }
     const targetRelationMap = new Map()
     targetRelationList.forEach(record => {
       const sourceId = getRelatedPostSourceId(record)
@@ -49,7 +75,10 @@ export function hasPostRelatedSourcePosts(post) {
     return false
   }
   return POST_RELATED_SOURCE_FIELDS.some(fieldName => {
-    const relationList = Array.isArray(post[fieldName]) ? post[fieldName] : []
+    let relationList = []
+    if (Array.isArray(post[fieldName])) {
+      relationList = post[fieldName]
+    }
     return relationList.some(record => {
       return Boolean(getRelatedPostSourceId(record))
     })

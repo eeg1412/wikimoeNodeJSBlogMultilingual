@@ -249,6 +249,9 @@ export default {
             sourceLanguageCode: form.sourceLanguageCode,
             targetLanguageCodes: form.targetLanguageCodes,
             title: sourcePostTitle.value,
+            recursion: {
+              maxDepth: 3
+            },
             searchOfficialTermTranslations:
               shouldSearchOfficialTermTranslations(),
             syncRelatedPosts:

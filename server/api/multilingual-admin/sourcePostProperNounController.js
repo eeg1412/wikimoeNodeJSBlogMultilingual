@@ -32,6 +32,22 @@ async function unbindTerm(req) {
   )
 }
 
+function getOrganizeJobRecursion(body) {
+  if (body.recursion && body.recursion.maxDepth !== undefined) {
+    return {
+      maxDepth: body.recursion.maxDepth
+    }
+  }
+  if (body.maxDepth !== undefined) {
+    return {
+      maxDepth: body.maxDepth
+    }
+  }
+  return {
+    maxDepth: 3
+  }
+}
+
 async function createOrganizeJob(req) {
   const body = req.body || {}
   return await translationJobService.createTranslationJob(
@@ -48,6 +64,7 @@ async function createOrganizeJob(req) {
       },
       request: {
         targetLanguageCodes: body.targetLanguageCodes || [],
+        recursion: getOrganizeJobRecursion(body),
         options: {
           searchOfficialTermTranslations:
             body.searchOfficialTermTranslations === true,

@@ -382,7 +382,7 @@
                 <el-checkbox
                   v-for="item in targetLanguageOptions"
                   :key="item.value"
-                  :label="item.value"
+                  :value="item.value"
                 >
                   {{ item.label }}
                 </el-checkbox>
@@ -409,7 +409,28 @@
               :source-proper-noun-term-count-loading="
                 sourceProperNounTermCountLoading
               "
-            />
+            >
+              <template #auto-organize-related-posts>
+                <RelatedPostFeatureScopeSelector
+                  v-if="showAutoOrganizeRelatedPostScopeSelector"
+                  v-model="selectedAutoOrganizeRelatedSourceIds"
+                  title="自动整理词库的相关文章"
+                  :options="relatedPostScopeOptions"
+                  :loading="relatedPostScopeLoading"
+                  :disabled="isAiImportBusy"
+                />
+              </template>
+              <template #search-related-posts>
+                <RelatedPostFeatureScopeSelector
+                  v-if="showSearchRelatedPostScopeSelector"
+                  v-model="selectedSearchRelatedSourceIds"
+                  title="名词检索的相关文章"
+                  :options="relatedPostScopeOptions"
+                  :loading="relatedPostScopeLoading"
+                  :disabled="isAiImportBusy"
+                />
+              </template>
+            </OfficialTermGlossaryOptions>
             <el-form-item label="AI判译">
               <el-switch
                 v-model="aiForm.allowAiKeepOriginalJudgement"
@@ -446,6 +467,15 @@
               />
               <AiFeatureUnavailableTip
                 :message="aiCoverImageAutoModeUnavailableReason"
+              />
+              <RelatedPostFeatureScopeSelector
+                v-if="showCoverImageRelatedPostScopeSelector"
+                v-model="selectedCoverImageRelatedSourceIds"
+                title="翻译封面图的相关文章"
+                empty-text="没有可翻译封面图的相关文章"
+                :options="coverImageRelatedPostScopeOptions"
+                :loading="relatedPostScopeLoading"
+                :disabled="isAiImportBusy"
               />
             </el-form-item>
           </el-form>
@@ -500,7 +530,7 @@
                 <el-checkbox
                   v-for="item in aiResultList"
                   :key="item.languageCode"
-                  :label="item.languageCode"
+                  :value="item.languageCode"
                 >
                   {{ getLanguageText(item.languageCode) }}
                 </el-checkbox>
@@ -515,7 +545,7 @@
                 <el-checkbox
                   v-for="item in aiResultList"
                   :key="item.languageCode"
-                  :label="item.languageCode"
+                  :value="item.languageCode"
                   :disabled="
                     !selectedAiResultLanguageCodes.includes(item.languageCode)
                   "
@@ -1122,6 +1152,7 @@ import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import RelatedPostFeatureScopeSelector from '@/components/RelatedPostFeatureScopeSelector.vue'
 import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
@@ -1195,6 +1226,7 @@ export default {
     AiFeatureUnavailableTip,
     OfficialTermGlossaryOptions,
     PostRelationSummary,
+    RelatedPostFeatureScopeSelector,
     SourcePostTermOrganizeDialog,
     TranslationEntrySelectableGroups,
     TranslationEntryMeta
@@ -1224,6 +1256,11 @@ export default {
     const selectedAiResultLanguageCodes = ref([])
     const selectedAiResultEntryIdsMap = ref({})
     const selectedAiRelatedEntryIdsMap = ref({})
+    const relatedPostScopeLoading = ref(false)
+    const relatedPostScopeOptions = ref([])
+    const selectedAutoOrganizeRelatedSourceIds = ref([])
+    const selectedSearchRelatedSourceIds = ref([])
+    const selectedCoverImageRelatedSourceIds = ref([])
     const aiPublishLanguageCodes = ref([])
     const activeAiPreviewLanguageCode = ref('')
     const aiProgressList = ref([])
@@ -1238,6 +1275,7 @@ export default {
     const rowActionLoadingMap = reactive({})
     let officialTermSearchDefaultRequestId = 0
     let sourceProperNounTermCountRequestId = 0
+    let relatedPostScopeRequestId = 0
     const languageForm = reactive({
       sourceLanguageCode: 'zh-CN'
     })
@@ -1249,7 +1287,8 @@ export default {
       autoOrganizeOfficialTermGlossary: true,
       searchOfficialTermTranslations: false,
       allowAiKeepOriginalJudgement: false,
-      syncRelatedPosts: true
+      syncRelatedPosts: true,
+      recursionMaxDepth: 3
     })
     const params = reactive({
       page: 1,
@@ -1500,6 +1539,10 @@ export default {
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
       selectedAiRelatedEntryIdsMap.value = {}
+      relatedPostScopeOptions.value = []
+      selectedAutoOrganizeRelatedSourceIds.value = []
+      selectedSearchRelatedSourceIds.value = []
+      selectedCoverImageRelatedSourceIds.value = []
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1510,6 +1553,9 @@ export default {
       aiForm.searchOfficialTermTranslations = false
       aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
+      aiForm.recursionMaxDepth = 3
+      relatedPostScopeLoading.value = false
+      relatedPostScopeRequestId += 1
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -1684,6 +1730,10 @@ export default {
       selectedAiResultLanguageCodes.value = []
       selectedAiResultEntryIdsMap.value = {}
       selectedAiRelatedEntryIdsMap.value = {}
+      relatedPostScopeOptions.value = []
+      selectedAutoOrganizeRelatedSourceIds.value = []
+      selectedSearchRelatedSourceIds.value = []
+      selectedCoverImageRelatedSourceIds.value = []
       aiPublishLanguageCodes.value = []
       activeAiPreviewLanguageCode.value = ''
       aiProgressList.value = []
@@ -1701,10 +1751,14 @@ export default {
       aiForm.searchOfficialTermTranslations = false
       aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
+      aiForm.recursionMaxDepth = 3
+      relatedPostScopeLoading.value = false
+      relatedPostScopeRequestId += 1
       aiSettingsAvailability.value = createAiSettingsAvailability()
       aiDialogVisible.value = true
       applyOfficialTermSearchDefault()
       refreshSourceProperNounTermCount({ applyDefault: true })
+      loadAiRelatedPostScopeOptions()
     }
 
     const openOrganizeDialog = row => {
@@ -1722,6 +1776,7 @@ export default {
         )
       }
       refreshSourceProperNounTermCount({ applyDefault: true })
+      loadAiRelatedPostScopeOptions()
     }
 
     const getAiActionKey = row => {
@@ -2155,15 +2210,38 @@ export default {
       return hasPostRelatedSourcePosts(aiRow.value)
     })
 
+    const showRelatedPostFeatureScopeBase = computed(() => {
+      if (!showSyncRelatedPostsOption.value) {
+        return false
+      }
+      return aiForm.syncRelatedPosts === true
+    })
+
+    const coverImageRelatedPostScopeOptions = computed(() => {
+      return relatedPostScopeOptions.value.filter(item => {
+        return isCoverImageTranslationSupportedPostType(item.type)
+      })
+    })
+
     const officialTermSearchUnavailableReason = computed(() => {
       return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
     })
 
     const showAiCoverImageTranslationOption = computed(() => {
-      if (!aiRow.value) {
+      const row = aiRow.value
+      if (!row) {
         return false
       }
-      return isCoverImageTranslationSupportedPostType(aiRow.value.type)
+      if (isCoverImageTranslationSupportedPostType(row.type)) {
+        return true
+      }
+      if (!showRelatedPostFeatureScopeBase.value) {
+        return false
+      }
+      if (relatedPostScopeLoading.value) {
+        return true
+      }
+      return coverImageRelatedPostScopeOptions.value.length > 0
     })
 
     const aiCoverImageTranslationUnavailableReason = computed(() => {
@@ -2844,12 +2922,232 @@ export default {
       return data
     }
 
+    function getAiRelatedPostMaxDepth() {
+      const maxDepth = Number(aiForm.recursionMaxDepth || 3)
+      if (!Number.isInteger(maxDepth) || maxDepth < 1) {
+        return 3
+      }
+      return maxDepth
+    }
+
+    function getAiRelatedPostRootSourceId() {
+      return String(aiRow.value?.sourceId || aiRow.value?._id || '').trim()
+    }
+
+    function getRelatedPostScopeTitle(sourcePost, sourceId) {
+      const title = getPostDisplayTitle(sourcePost)
+      if (title && title !== '-') {
+        return title
+      }
+      if (sourceId) {
+        return sourceId
+      }
+      return '未命名内容'
+    }
+
+    function getRelatedPostScopeTypeLabel(sourcePost) {
+      const typeText = getPostTypeText(sourcePost?.type)
+      if (typeText && typeText !== '-') {
+        return typeText
+      }
+      return getRelatedPostTypeLabel(sourcePost)
+    }
+
+    function upsertRelatedPostScopeOption({
+      optionMap,
+      sourcePost,
+      sourceId,
+      depth,
+      parentSourceId
+    }) {
+      const normalizedSourceId = String(sourceId || '').trim()
+      if (!normalizedSourceId) {
+        return
+      }
+      const relatedDepth = Math.max(Number(depth || 1) - 1, 1)
+      const existing = optionMap.get(normalizedSourceId)
+      if (existing) {
+        if (relatedDepth < existing.relatedDepth) {
+          existing.relatedDepth = relatedDepth
+          existing.depth = depth
+        }
+        if (
+          parentSourceId &&
+          !existing.parentSourceIds.includes(parentSourceId)
+        ) {
+          existing.parentSourceIds.push(parentSourceId)
+        }
+        if (!existing.title || existing.title === normalizedSourceId) {
+          existing.title = getRelatedPostScopeTitle(
+            sourcePost,
+            normalizedSourceId
+          )
+        }
+        if (!existing.type && sourcePost?.type) {
+          existing.type = Number(sourcePost.type || 0)
+          existing.typeLabel = getRelatedPostScopeTypeLabel(sourcePost)
+        }
+        return
+      }
+      const parentSourceIds = []
+      if (parentSourceId) {
+        parentSourceIds.push(parentSourceId)
+      }
+      optionMap.set(normalizedSourceId, {
+        sourceId: normalizedSourceId,
+        title: getRelatedPostScopeTitle(sourcePost, normalizedSourceId),
+        type: Number(sourcePost?.type || 0),
+        typeLabel: getRelatedPostScopeTypeLabel(sourcePost),
+        depth,
+        relatedDepth,
+        parentSourceIds
+      })
+    }
+
+    function resetRelatedPostScopeSelections(options) {
+      const allSourceIds = options.map(item => {
+        return item.sourceId
+      })
+      selectedAutoOrganizeRelatedSourceIds.value = allSourceIds
+      selectedSearchRelatedSourceIds.value = allSourceIds
+      selectedCoverImageRelatedSourceIds.value = options
+        .filter(item => {
+          return isCoverImageTranslationSupportedPostType(item.type)
+        })
+        .map(item => {
+          return item.sourceId
+        })
+    }
+
+    async function loadAiRelatedPostScopeOptions() {
+      const requestId = relatedPostScopeRequestId + 1
+      relatedPostScopeRequestId = requestId
+      if (
+        !aiDialogVisible.value ||
+        !showSyncRelatedPostsOption.value ||
+        aiForm.syncRelatedPosts !== true ||
+        aiForm.targetLanguageCodes.length === 0
+      ) {
+        relatedPostScopeOptions.value = []
+        resetRelatedPostScopeSelections([])
+        relatedPostScopeLoading.value = false
+        return
+      }
+
+      const rootSourceId = getAiRelatedPostRootSourceId()
+      if (!rootSourceId) {
+        relatedPostScopeOptions.value = []
+        resetRelatedPostScopeSelections([])
+        relatedPostScopeLoading.value = false
+        return
+      }
+
+      relatedPostScopeLoading.value = true
+      try {
+        const optionMap = new Map()
+        const maxDepth = getAiRelatedPostMaxDepth()
+        for (const languageCode of aiForm.targetLanguageCodes) {
+          const queue = [
+            {
+              sourceId: rootSourceId,
+              parentSourceId: '',
+              depth: 1
+            }
+          ]
+          const visited = new Set()
+
+          while (queue.length > 0) {
+            if (requestId !== relatedPostScopeRequestId) {
+              return
+            }
+            const task = queue.shift()
+            const sourceId = String(task?.sourceId || '').trim()
+            if (!sourceId || visited.has(sourceId)) {
+              continue
+            }
+            visited.add(sourceId)
+
+            const previewContext = await loadAiImportPreviewContext({
+              sourcePost: { sourceId },
+              languageCode
+            })
+            const sourcePost = previewContext.sourcePost
+            const normalizedSourceId = String(
+              sourcePost?.sourceId || sourcePost?._id || sourceId
+            ).trim()
+            if (normalizedSourceId && normalizedSourceId !== rootSourceId) {
+              upsertRelatedPostScopeOption({
+                optionMap,
+                sourcePost,
+                sourceId: normalizedSourceId,
+                depth: task.depth,
+                parentSourceId: task.parentSourceId
+              })
+            }
+
+            if (task.depth >= maxDepth) {
+              continue
+            }
+
+            const relatedSourceIds = collectRelatedPostSourceIds(
+              sourcePost,
+              previewContext.targetPost
+            )
+            relatedSourceIds.forEach(relatedSourceId => {
+              const relatedId = String(relatedSourceId || '').trim()
+              if (!relatedId || relatedId === rootSourceId) {
+                return
+              }
+              if (!visited.has(relatedId)) {
+                queue.push({
+                  sourceId: relatedId,
+                  parentSourceId: normalizedSourceId,
+                  depth: task.depth + 1
+                })
+              }
+            })
+          }
+        }
+
+        if (requestId !== relatedPostScopeRequestId) {
+          return
+        }
+        const options = Array.from(optionMap.values()).sort(
+          (leftItem, rightItem) => {
+            if (leftItem.relatedDepth !== rightItem.relatedDepth) {
+              return leftItem.relatedDepth - rightItem.relatedDepth
+            }
+            return leftItem.title.localeCompare(rightItem.title)
+          }
+        )
+        relatedPostScopeOptions.value = options
+        resetRelatedPostScopeSelections(options)
+      } catch (error) {
+        if (requestId === relatedPostScopeRequestId) {
+          relatedPostScopeOptions.value = []
+          resetRelatedPostScopeSelections([])
+          const errorMessages = extractApiErrorMessages(error)
+          if (errorMessages.length === 0 && error?.message) {
+            errorMessages.push(error.message)
+          }
+          errorMessages.forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === relatedPostScopeRequestId) {
+          relatedPostScopeLoading.value = false
+        }
+      }
+    }
+
     const translateOnePostForLanguage = async ({
       sourcePost,
       languageCode,
       abortSignal,
       progressContextLabel,
-      translatedEntryKeySet
+      translatedEntryKeySet,
+      isRoot
     }) => {
       throwAiAbortIfNeeded(abortSignal)
       const previewContext = await loadAiImportPreviewContext({
@@ -2927,9 +3225,15 @@ export default {
             prompt: aiForm.prompt,
             skipUsageLog: true,
             autoOrganizeOfficialTermGlossary:
-              shouldAutoOrganizeOfficialTermGlossary(),
+              shouldAutoOrganizeOfficialTermGlossaryForSource({
+                sourceId: sourcePostId,
+                isRoot
+              }),
             searchOfficialTermTranslations:
-              shouldSearchOfficialTermTranslations(),
+              shouldSearchOfficialTermTranslationsForSource({
+                sourceId: sourcePostId,
+                isRoot
+              }),
             allowAiKeepOriginalJudgement:
               aiForm.allowAiKeepOriginalJudgement === true,
             translateCoverImage: false,
@@ -3003,7 +3307,15 @@ export default {
       resultList.forEach(resultItem => {
         const sourceId = String(resultItem?.sourceId || '').trim()
         const languageCode = String(resultItem?.languageCode || '').trim()
-        if (sourceId && languageCode) {
+        if (
+          sourceId &&
+          languageCode &&
+          shouldTranslateAiCoverImageForSource({
+            sourceId,
+            sourcePost: resultItem.sourcePost,
+            isRoot: true
+          })
+        ) {
           items.push({
             requestKey: buildAiImportCoverRequestKey(languageCode, sourceId),
             sourceId,
@@ -3018,6 +3330,15 @@ export default {
         relatedResults.forEach(relatedItem => {
           const relatedSourceId = String(relatedItem?.sourceId || '').trim()
           if (!relatedSourceId || !languageCode) {
+            return
+          }
+          if (
+            !shouldTranslateAiCoverImageForSource({
+              sourceId: relatedSourceId,
+              sourcePost: relatedItem.sourcePost,
+              isRoot: false
+            })
+          ) {
             return
           }
           items.push({
@@ -3120,6 +3441,111 @@ export default {
       )
     }
 
+    const showAutoOrganizeRelatedPostScopeSelector = computed(() => {
+      if (!showRelatedPostFeatureScopeBase.value) {
+        return false
+      }
+      return shouldAutoOrganizeOfficialTermGlossary()
+    })
+
+    const showSearchRelatedPostScopeSelector = computed(() => {
+      if (!showRelatedPostFeatureScopeBase.value) {
+        return false
+      }
+      return shouldSearchOfficialTermTranslations()
+    })
+
+    const showCoverImageRelatedPostScopeSelector = computed(() => {
+      if (!showRelatedPostFeatureScopeBase.value) {
+        return false
+      }
+      return shouldTranslateAiCoverImage()
+    })
+
+    function isSelectedRelatedSource(sourceId, selectedSourceIds) {
+      const normalizedSourceId = String(sourceId || '').trim()
+      if (!normalizedSourceId) {
+        return false
+      }
+      return selectedSourceIds.includes(normalizedSourceId)
+    }
+
+    function shouldAutoOrganizeOfficialTermGlossaryForSource({
+      sourceId,
+      isRoot
+    }) {
+      if (!shouldAutoOrganizeOfficialTermGlossary()) {
+        return false
+      }
+      if (isRoot === true) {
+        return true
+      }
+      return isSelectedRelatedSource(
+        sourceId,
+        selectedAutoOrganizeRelatedSourceIds.value
+      )
+    }
+
+    function shouldSearchOfficialTermTranslationsForSource({
+      sourceId,
+      isRoot
+    }) {
+      if (!shouldSearchOfficialTermTranslations()) {
+        return false
+      }
+      if (isRoot === true) {
+        return true
+      }
+      if (
+        !isSelectedRelatedSource(
+          sourceId,
+          selectedAutoOrganizeRelatedSourceIds.value
+        )
+      ) {
+        return false
+      }
+      return isSelectedRelatedSource(
+        sourceId,
+        selectedSearchRelatedSourceIds.value
+      )
+    }
+
+    function shouldTranslateAiCoverImageForSource({
+      sourceId,
+      sourcePost,
+      isRoot
+    }) {
+      if (!shouldTranslateAiCoverImage()) {
+        return false
+      }
+      if (!isCoverImageTranslationSupportedPostType(sourcePost?.type)) {
+        return false
+      }
+      if (isRoot === true) {
+        return true
+      }
+      return isSelectedRelatedSource(
+        sourceId,
+        selectedCoverImageRelatedSourceIds.value
+      )
+    }
+
+    function buildRelatedSourceFeatureScopes() {
+      return {
+        autoOrganizeOfficialTermGlossary:
+          selectedAutoOrganizeRelatedSourceIds.value,
+        searchOfficialTermTranslations: selectedSearchRelatedSourceIds.value,
+        coverImageTranslation: selectedCoverImageRelatedSourceIds.value
+      }
+    }
+
+    function shouldWaitRelatedPostScopeLoading() {
+      if (!showRelatedPostFeatureScopeBase.value) {
+        return false
+      }
+      return relatedPostScopeLoading.value === true
+    }
+
     const requestAiImportCoverTranslations = async ({
       resultList,
       abortSignal
@@ -3173,12 +3599,14 @@ export default {
         {
           sourceId: rootSourceId,
           sourcePost,
-          isRoot: true
+          isRoot: true,
+          depth: 1
         }
       ]
       const visited = new Set()
       const postResultList = []
       const translatedEntryKeySet = new Set()
+      const maxDepth = getAiRelatedPostMaxDepth()
 
       while (queue.length > 0) {
         throwAiAbortIfNeeded(abortSignal)
@@ -3210,10 +3638,14 @@ export default {
           languageCode,
           abortSignal,
           progressContextLabel,
-          translatedEntryKeySet
+          translatedEntryKeySet,
+          isRoot: currentTask.isRoot === true
         })
         postResult.isRoot = currentTask.isRoot === true
         postResultList.push(postResult)
+        if (currentTask.depth >= maxDepth) {
+          continue
+        }
         ;(postResult.relatedSourceIds || []).forEach(relatedSourceId => {
           if (!relatedSourceId) {
             return
@@ -3224,7 +3656,8 @@ export default {
           queue.push({
             sourceId: relatedSourceId,
             sourcePost: null,
-            isRoot: false
+            isRoot: false,
+            depth: currentTask.depth + 1
           })
         })
       }
@@ -3255,6 +3688,10 @@ export default {
       }
       if (sourceProperNounTermCountLoading.value) {
         ElMessage.warning('正在检查源文章名词词库，请稍候')
+        return
+      }
+      if (shouldWaitRelatedPostScopeLoading()) {
+        ElMessage.warning('正在分析相关文章范围，请稍候')
         return
       }
 
@@ -3345,6 +3782,10 @@ export default {
         ElMessage.warning('正在检查源文章名词词库，请稍候')
         return
       }
+      if (shouldWaitRelatedPostScopeLoading()) {
+        ElMessage.warning('正在分析相关文章范围，请稍候')
+        return
+      }
 
       if (aiImportMode.value === AI_IMPORT_MODE_OVERWRITE) {
         try {
@@ -3401,7 +3842,8 @@ export default {
                 aiForm.allowAiKeepOriginalJudgement === true,
               syncRelatedPosts:
                 showSyncRelatedPostsOption.value &&
-                aiForm.syncRelatedPosts === true
+                aiForm.syncRelatedPosts === true,
+              relatedSourceFeatureScopes: buildRelatedSourceFeatureScopes()
             },
             targetLanguageCodes: aiForm.targetLanguageCodes,
             recursion: {
@@ -3692,6 +4134,18 @@ export default {
 
     watch(
       [
+        () => aiForm.syncRelatedPosts,
+        () => aiForm.targetLanguageCodes.join(','),
+        () => aiForm.recursionMaxDepth,
+        () => aiRow.value?.sourceId || ''
+      ],
+      () => {
+        loadAiRelatedPostScopeOptions()
+      }
+    )
+
+    watch(
+      [
         showAiCoverImageTranslationOption,
         aiCoverImageTranslationUnavailableReason,
         aiCoverImageAutoModeUnavailableReason
@@ -3747,6 +4201,12 @@ export default {
       aiCoverImageTranslationUnavailableReason,
       sourceProperNounTermCount,
       sourceProperNounTermCountLoading,
+      relatedPostScopeLoading,
+      relatedPostScopeOptions,
+      coverImageRelatedPostScopeOptions,
+      selectedAutoOrganizeRelatedSourceIds,
+      selectedSearchRelatedSourceIds,
+      selectedCoverImageRelatedSourceIds,
       selectedAiResultLanguageCodes,
       selectedAiResultEntryIdsMap,
       selectedAiRelatedEntryIdsMap,
@@ -3765,6 +4225,9 @@ export default {
       rowActionLoadingMap,
       showSyncRelatedPostsOption,
       showAiCoverImageTranslationOption,
+      showAutoOrganizeRelatedPostScopeSelector,
+      showSearchRelatedPostScopeSelector,
+      showCoverImageRelatedPostScopeSelector,
       targetLanguageOptions,
       getLanguageText,
       getPostTypeTagType,

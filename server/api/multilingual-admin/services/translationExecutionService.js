@@ -135,6 +135,86 @@ function shouldCreateRelatedChildJobs(job) {
   return !isSourcePostImportChildJob(job)
 }
 
+function normalizeRelatedSourceFeatureScopeList(value) {
+  const sourceIdList = []
+  if (!Array.isArray(value)) {
+    return sourceIdList
+  }
+  value.forEach(item => {
+    const sourceId = normalizeString(item)
+    if (!sourceId || sourceIdList.includes(sourceId)) {
+      return
+    }
+    sourceIdList.push(sourceId)
+  })
+  return sourceIdList
+}
+
+function getRelatedSourceFeatureScopes(job) {
+  const scopes = job?.request?.options?.relatedSourceFeatureScopes
+  if (!scopes || typeof scopes !== 'object' || Array.isArray(scopes)) {
+    return null
+  }
+  return {
+    autoOrganizeOfficialTermGlossary:
+      normalizeRelatedSourceFeatureScopeList(
+        scopes.autoOrganizeOfficialTermGlossary
+      ),
+    searchOfficialTermTranslations: normalizeRelatedSourceFeatureScopeList(
+      scopes.searchOfficialTermTranslations
+    ),
+    coverImageTranslation: normalizeRelatedSourceFeatureScopeList(
+      scopes.coverImageTranslation
+    )
+  }
+}
+
+function isRelatedSourceFeatureSelected(scopes, featureKey, sourceId) {
+  if (!scopes) {
+    return true
+  }
+  const selectedSourceIds = scopes[featureKey]
+  if (!Array.isArray(selectedSourceIds)) {
+    return false
+  }
+  return selectedSourceIds.includes(sourceId)
+}
+
+function applyChildTaskFeatureScopes({ job, planItem, options }) {
+  const scopes = getRelatedSourceFeatureScopes(job)
+  if (!scopes) {
+    return options
+  }
+  const sourceId = normalizeString(planItem?.sourceId)
+  const autoOrganizeSelected = isRelatedSourceFeatureSelected(
+    scopes,
+    'autoOrganizeOfficialTermGlossary',
+    sourceId
+  )
+  const searchSelected = isRelatedSourceFeatureSelected(
+    scopes,
+    'searchOfficialTermTranslations',
+    sourceId
+  )
+  const coverImageSelected = isRelatedSourceFeatureSelected(
+    scopes,
+    'coverImageTranslation',
+    sourceId
+  )
+
+  options.autoOrganizeOfficialTermGlossary =
+    options.autoOrganizeOfficialTermGlossary !== false && autoOrganizeSelected
+  options.searchOfficialTermTranslations =
+    options.searchOfficialTermTranslations === true &&
+    autoOrganizeSelected &&
+    searchSelected
+  if (!coverImageSelected) {
+    options.coverImageTranslationMode = 'never'
+    options.translateCoverImage = false
+  }
+  return options
+}
+
 function getSharedTranslationCacheKey(job) {
   const relation = getJobTaskRelation(job)
   const sharedCacheKey = normalizeString(job?.request?.options?.sharedCacheKey)
@@ -1121,10 +1201,30 @@ async function executeContentAiTranslation(job, context) {
 }
 
 function getRecordSourceId(record) {
-  if (!record || typeof record !== 'object') {
+  if (record === null || typeof record === 'undefined') {
     return ''
   }
-  return String(record.sourceId || record._id || '').trim()
+  if (typeof record === 'string' || typeof record === 'number') {
+    return normalizeString(record)
+  }
+  if (record instanceof mongoose.Types.ObjectId) {
+    return normalizeString(record)
+  }
+  if (typeof record !== 'object') {
+    return ''
+  }
+  const sourceId = normalizeString(record.sourceId)
+  if (sourceId) {
+    return sourceId
+  }
+  const id = normalizeString(record._id)
+  if (id) {
+    return id
+  }
+  if (typeof record.toHexString === 'function') {
+    return normalizeString(record.toHexString())
+  }
+  return ''
 }
 
 function collectRelatedSourceIdsByFields(sourcePost, targetPost, fieldNames) {
@@ -1999,13 +2099,14 @@ async function buildSourcePostImportChildPlan({
 
 function buildChildTaskRequest(job, planItem, rootId) {
   const request = job.request || {}
-  const options = {
+  let options = {
     ...(request.options || {}),
     syncRelatedPosts: true,
     sharedCacheKey: String(rootId),
     plannedRelatedSourceIdsByLanguage:
       planItem.plannedRelatedSourceIdsByLanguage || {}
   }
+  options = applyChildTaskFeatureScopes({ job, planItem, options })
   return {
     selectedEntryKeys: Array.isArray(request.selectedEntryKeys)
       ? request.selectedEntryKeys
