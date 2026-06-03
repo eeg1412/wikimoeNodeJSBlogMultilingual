@@ -11,30 +11,40 @@ module.exports = async function (req, res, next) {
     return
   }
 
-  let { id } = req.query
+  const { id } = req.query
 
-  const params = {
-    _id: id,
-    languageCode,
-    recordKind: 'translation',
-    status: 1
+  const validateParams = {
+    id
   }
 
   const rule = [
     {
-      key: '_id',
+      key: 'id',
       label: 'ID',
       type: 'isMongoId',
       required: true
     }
   ]
-  const errors = utils.checkForm(params, rule)
+  const errors = utils.checkForm(validateParams, rule)
   if (errors.length > 0) {
     res.status(400).json({ errors })
     return
   }
 
   try {
+    const params = {
+      languageCode,
+      status: 1,
+      recordKind: 'translation',
+      $or: [
+        {
+          _id: id
+        },
+        {
+          sourceId: id
+        }
+      ]
+    }
     const data = await eventUtils.findOne(params)
 
     if (!data) {

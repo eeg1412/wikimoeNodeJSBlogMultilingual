@@ -19,11 +19,13 @@
 | 名称 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
 | `languageCode` | Query/Body | string | 否 | 语言代码；前端 `multilingualRequest` 会自动补齐，缺省时服务端使用默认语言。 |
-| `id` | Query | ObjectId | 是 | 事件 ID。 |
+| `id` | Query | ObjectId | 是 | 事件 ID；支持传当前语言活动 `_id`，也支持传源活动 `sourceId` 来获取对应语言活动。 |
 
 ## 行为
 
-- 按 `_id`、语言、`recordKind=translation`、`status=1` 查询。
+- 使用单次查询按请求 `languageCode` 与 `status=1` 限定活动。
+- `id` 只用于匹配当前语言活动 `_id` 或活动 `sourceId`。
+- 若没有匹配到对应语言的可显示活动，返回 404。
 
 ## 成功响应
 
