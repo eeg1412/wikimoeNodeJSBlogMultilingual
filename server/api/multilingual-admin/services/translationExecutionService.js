@@ -105,8 +105,12 @@ function getJobTaskRelation(job) {
   return job.taskRelation
 }
 
-function isSourcePostImportChildJob(job) {
+function isTaskRelationChildJob(job) {
   return getJobTaskRelation(job).role === 'child'
+}
+
+function isSourcePostImportChildJob(job) {
+  return isTaskRelationChildJob(job)
 }
 
 function shouldSyncRelatedPosts(job) {
@@ -133,6 +137,13 @@ function shouldCreateRelatedChildJobs(job) {
     return false
   }
   return !isSourcePostImportChildJob(job)
+}
+
+function shouldCreateProperNounOrganizeChildJobs(job) {
+  if (!shouldOrganizeRelatedPosts(job)) {
+    return false
+  }
+  return !isTaskRelationChildJob(job)
 }
 
 function normalizeRelatedSourceFeatureScopeList(value) {
@@ -2289,6 +2300,195 @@ async function createSourcePostImportChildJobs({
   return childTaskResults
 }
 
+function buildProperNounOrganizeChildTaskRequest(job, planItem) {
+  const request = job.request || {}
+  return {
+    selectedEntryKeys: [],
+    prompt: '',
+    baseMode: '',
+    targetLanguageCodes: planItem.languageCodes || [],
+    recursion: {
+      maxDepth: 1
+    },
+    entries: [],
+    options: {
+      ...(request.options || {}),
+      syncRelatedPosts: false,
+      organizeRelatedPosts: false
+    }
+  }
+}
+
+function buildProperNounOrganizeChildTaskRelation({ job, planItem, rootId }) {
+  return {
+    role: 'child',
+    rootId,
+    parentId: job._id,
+    depth: planItem.minDepth,
+    sourcePostId: toObjectId(planItem.sourceId),
+    childJobIds: [],
+    plannedRelatedSourceIdsByLanguage:
+      planItem.plannedRelatedSourceIdsByLanguage || {},
+    plan: {
+      parentSourceIds: planItem.parentSourceIds || [],
+      languageCodes: planItem.languageCodes || []
+    }
+  }
+}
+
+async function createSourcePostProperNounOrganizeChildJobs({
+  job,
+  languageCodes,
+  maxDepth,
+  context
+}) {
+  await context.updateProgress({
+    currentStage: 'AnalyzeRelatedPosts',
+    currentStep: '正在分析相关文章并拆解名词整理子任务',
+    percent: 1
+  })
+  const childPlan = await buildSourcePostImportChildPlan({
+    job,
+    languageCodes,
+    maxDepth,
+    context
+  })
+  if (childPlan.length === 0) {
+    await context.saveCheckpoint({
+      stage: 'AnalyzeRelatedPosts',
+      stateSummary: {
+        childTaskCount: 0,
+        message: '没有需要同步整理名词的相关文章'
+      }
+    })
+    return []
+  }
+
+  const JobModel = getTranslationJobModel()
+  const rootId = getJobTaskRelation(job).rootId || job._id
+  const childJobIds = []
+  const childTaskResults = []
+  for (const planItem of childPlan) {
+    const sourcePostId = toObjectId(planItem.sourceId)
+    if (!sourcePostId) {
+      continue
+    }
+    const existingChild = await JobModel.findOne({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
+      'taskRelation.parentId': job._id,
+      'source.postId': sourcePostId
+    }).lean()
+    if (existingChild) {
+      childJobIds.push(existingChild._id)
+      childTaskResults.push({
+        sourceId: planItem.sourceId,
+        title: planItem.title || '',
+        depth: planItem.minDepth,
+        languageCodes: planItem.languageCodes,
+        childJobId: existingChild._id
+      })
+      continue
+    }
+
+    const title = planItem.title || `源文章 ${planItem.sourceId}`
+    const childJob = await JobModel.create({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
+      status: TRANSLATION_JOB_STATUS.PENDING,
+      queueControl: {
+        active: true,
+        deferred: false,
+        priority: job.queueControl?.priority || 0
+      },
+      source: {
+        postId: sourcePostId,
+        languageCode: job.source.languageCode,
+        title,
+        meta: {
+          parentJobId: getJobId(job),
+          rootJobId: String(rootId)
+        }
+      },
+      target: {
+        languageCodes: planItem.languageCodes,
+        title
+      },
+      request: buildProperNounOrganizeChildTaskRequest(job, planItem),
+      taskRelation: buildProperNounOrganizeChildTaskRelation({
+        job,
+        planItem,
+        rootId
+      }),
+      progress: {
+        currentStep: '等待后台 worker 领取相关文章名词整理子任务',
+        currentStage: 'pending',
+        totalSteps: 0,
+        completedSteps: 0,
+        percent: 0,
+        recentLogs: [
+          buildExecutionLog(
+            `由父任务 ${getJobId(job)} 拆解创建`,
+            'info',
+            'createChildTask'
+          )
+        ]
+      },
+      createdBy: job.createdBy || null,
+      updatedBy: job.updatedBy || job.createdBy || null
+    })
+    childJobIds.push(childJob._id)
+    childTaskResults.push({
+      sourceId: planItem.sourceId,
+      title: planItem.title || '',
+      depth: planItem.minDepth,
+      languageCodes: planItem.languageCodes,
+      childJobId: childJob._id
+    })
+  }
+
+  await JobModel.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        'taskRelation.role': 'parent',
+        'taskRelation.rootId': rootId,
+        'taskRelation.sourcePostId': job.source.postId,
+        'taskRelation.childJobIds': childJobIds,
+        'taskRelation.plan': {
+          schema: 'wikimoe.ai.proper_noun.organize.child-plan',
+          version: 1,
+          childTaskCount: childJobIds.length,
+          sourceCount: childPlan.length,
+          maxDepth,
+          generatedAt: new Date()
+        }
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildExecutionLog(
+              `已拆解 ${childJobIds.length} 个相关文章名词整理子任务`,
+              'info',
+              'AnalyzeRelatedPosts'
+            )
+          ],
+          $slice: -20
+        }
+      }
+    }
+  )
+
+  await context.saveCheckpoint({
+    stage: 'AnalyzeRelatedPosts',
+    stateSummary: {
+      childTaskCount: childJobIds.length,
+      sourceCount: childPlan.length,
+      maxDepth
+    }
+  })
+
+  return childTaskResults
+}
+
 async function overwriteSourceSnapshotForAiImportJob(job, context) {
   if (job.source?.overwriteSnapshot !== true) {
     return
@@ -2516,35 +2716,6 @@ function buildProperNounOrganizeEntries(sourcePost) {
   return sourceEntries.filter(shouldSubmitProperNounOrganizeEntry)
 }
 
-function appendRelatedProperNounOrganizeTasks({
-  queue,
-  visited,
-  relatedSourceIds,
-  depth,
-  maxDepth
-}) {
-  if (depth >= maxDepth) {
-    return
-  }
-  relatedSourceIds.forEach(relatedSourceId => {
-    const sourceId = normalizeString(relatedSourceId)
-    if (!sourceId || visited.has(sourceId)) {
-      return
-    }
-    const alreadyQueued = queue.some(item => {
-      return normalizeString(item.sourceId) === sourceId
-    })
-    if (alreadyQueued) {
-      return
-    }
-    queue.push({
-      sourceId,
-      isRoot: false,
-      depth: depth + 1
-    })
-  })
-}
-
 function mergeProperNounOrganizeStats(sourceResults) {
   const mergedStats = {
     sourceCount: sourceResults.length,
@@ -2654,6 +2825,7 @@ async function organizeOneSourcePostProperNouns({
   languageCodes,
   isRoot,
   depth,
+  allowEmptyEntries,
   officialTermGlossaryTaskCache
 }) {
   await context.updateProgress({
@@ -2676,7 +2848,7 @@ async function organizeOneSourcePostProperNouns({
     previewContext.targetPost
   )
   if (entries.length === 0) {
-    if (isRoot === true) {
+    if (isRoot === true && allowEmptyEntries !== true) {
       throw new ApiError(
         ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
         '源文章没有可用于名词整理的正文条目',
@@ -2688,7 +2860,7 @@ async function organizeOneSourcePostProperNouns({
     return {
       sourceId: sourcePostStableId,
       title,
-      isRoot: false,
+      isRoot: isRoot === true,
       depth,
       relatedSourceIds,
       entryCount: 0,
@@ -2816,43 +2988,25 @@ async function executeSourcePostProperNounOrganize(job, context) {
 
   const organizeRelatedPosts = shouldOrganizeRelatedPosts(job)
   const maxDepth = getProperNounOrganizeMaxDepth(job)
-  const queue = [
-    {
-      sourceId: sourcePostId,
-      isRoot: true,
-      depth: 1
-    }
-  ]
-  const visited = new Set()
-  const sourceResults = []
   const officialTermGlossaryTaskCache = new Map()
-
-  while (queue.length > 0) {
-    const task = queue.shift()
-    const currentSourceId = normalizeString(task?.sourceId)
-    if (!currentSourceId || visited.has(currentSourceId)) {
-      continue
-    }
-    visited.add(currentSourceId)
-    const sourceResult = await organizeOneSourcePostProperNouns({
+  const rootSourceResult = await organizeOneSourcePostProperNouns({
+    job,
+    context,
+    sourceId: sourcePostId,
+    languageCodes,
+    isRoot: true,
+    depth: 1,
+    allowEmptyEntries: isTaskRelationChildJob(job),
+    officialTermGlossaryTaskCache
+  })
+  const sourceResults = [rootSourceResult]
+  let childTaskResults = []
+  if (shouldCreateProperNounOrganizeChildJobs(job)) {
+    childTaskResults = await createSourcePostProperNounOrganizeChildJobs({
       job,
-      context,
-      sourceId: currentSourceId,
       languageCodes,
-      isRoot: task.isRoot === true,
-      depth: task.depth,
-      officialTermGlossaryTaskCache
-    })
-    sourceResults.push(sourceResult)
-    if (organizeRelatedPosts !== true) {
-      continue
-    }
-    appendRelatedProperNounOrganizeTasks({
-      queue,
-      visited,
-      relatedSourceIds: sourceResult.relatedSourceIds || [],
-      depth: task.depth,
-      maxDepth
+      maxDepth,
+      context
     })
   }
 
@@ -2886,6 +3040,7 @@ async function executeSourcePostProperNounOrganize(job, context) {
         matchedTermCount: sourceResult.matchedTermIds.length
       }
     }),
+    childTaskResults,
     languageResults: [],
     translationPostMap: {},
     aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(

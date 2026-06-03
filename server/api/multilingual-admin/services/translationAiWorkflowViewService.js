@@ -443,8 +443,12 @@ function getWorkflowTaskRelation(job) {
   return job.taskRelation
 }
 
-function isSourcePostImportChildWorkflowJob(job) {
+function isTaskRelationChildWorkflowJob(job) {
   return getWorkflowTaskRelation(job).role === 'child'
+}
+
+function isSourcePostImportChildWorkflowJob(job) {
+  return isTaskRelationChildWorkflowJob(job)
 }
 
 function shouldSyncRelatedPostsForWorkflow(job) {
@@ -471,6 +475,13 @@ function shouldOrganizeRelatedPostsForWorkflow(job) {
     return true
   }
   return options.organizeRelatedPosts === true
+}
+
+function shouldCreateProperNounOrganizeChildJobsForWorkflow(job) {
+  if (!shouldOrganizeRelatedPostsForWorkflow(job)) {
+    return false
+  }
+  return !isTaskRelationChildWorkflowJob(job)
 }
 
 function shouldAutoOrganizeOfficialTermGlossaryForWorkflow(job) {
@@ -877,15 +888,16 @@ function buildSourcePostProperNounOrganizePlannedSteps(job) {
     stageKeys: ['BindProperNouns'],
     targetLanguageCodes
   })
-  if (shouldOrganizeRelatedPostsForWorkflow(job)) {
-    steps.forEach(step => {
-      if (!Array.isArray(step.badges)) {
-        step.badges = []
-      }
-      step.badges.push({
-        label: '范围',
-        value: '包含相关文章'
-      })
+  if (shouldCreateProperNounOrganizeChildJobsForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'proper-noun.analyze-related-posts',
+      majorKey: 'source-post.analyze-related-posts',
+      title: '拆解相关文章子任务',
+      description: '分析相关文章关系，并为需要独立整理名词的源文章创建子任务。',
+      stage: 'AnalyzeRelatedPosts',
+      stageKeys: ['AnalyzeRelatedPosts'],
+      targetLanguageCodes,
+      dynamicDetailText: '子任务数量需要读取源文章关联关系后才能确定。'
     })
   }
   return steps

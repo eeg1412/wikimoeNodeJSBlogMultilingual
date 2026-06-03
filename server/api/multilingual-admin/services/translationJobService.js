@@ -2300,7 +2300,10 @@ async function completeRunningTranslationJobForReview(options = {}) {
   const hasChildTaskResults =
     Array.isArray(resultData.childTaskResults) &&
     resultData.childTaskResults.length > 0
-  if (!hasChildTaskResults) {
+  const shouldKeepAiChunkCache =
+    options.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT &&
+    hasChildTaskResults
+  if (!shouldKeepAiChunkCache) {
     await tryClearTranslationJobAiChunkCacheById(String(options.id || ''))
   }
 }
