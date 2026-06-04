@@ -182,6 +182,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       type: 'richText',
       translationExport: true
     },
+    {
+      name: 'urlList',
+      label: '自定义链接',
+      type: 'urlList',
+      translationExport: true
+    },
     { name: 'status', label: '状态', type: 'number' }
   ],
   eventtypes: [

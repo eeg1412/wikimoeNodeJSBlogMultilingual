@@ -147,7 +147,8 @@ const RELATION_TRANSLATION_FIELDS = {
   booktypes: [{ name: 'name', label: '类型名' }],
   events: [
     { name: 'title', label: '活动标题' },
-    { name: 'content', label: '内容', type: 'richText' }
+    { name: 'content', label: '内容', type: 'richText' },
+    { name: 'urlList', label: '自定义链接', type: 'urlList' }
   ],
   eventtypes: [{ name: 'name', label: '类型名' }],
   posts: [
