@@ -8,7 +8,12 @@
     </div>
 
     <el-skeleton v-if="loading" :rows="8" animated />
-    <el-form v-else :model="settingsForm" label-width="180px">
+    <el-form
+      v-else
+      :model="settingsForm"
+      label-width="180px"
+      autocomplete="off"
+    >
       <div
         v-for="section in sectionList"
         :key="section.key"
