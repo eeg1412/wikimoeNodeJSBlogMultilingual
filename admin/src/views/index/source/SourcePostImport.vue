@@ -198,9 +198,7 @@
               <el-dropdown
                 v-if="row.hasSnapshot"
                 trigger="click"
-                @command="
-                  command => handleOverwriteSnapshotCommand(row, command)
-                "
+                @command="command => handleSnapshotActionCommand(row, command)"
               >
                 <el-button
                   type="warning"
@@ -212,7 +210,22 @@
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="overwrite">
+                    <el-dropdown-item
+                      v-for="snapshot in row.snapshotSummary"
+                      :key="snapshot._id"
+                      :command="{ action: 'languageList', snapshot }"
+                    >
+                      <el-icon><Document /></el-icon>
+                      <span>
+                        语言版本<template v-if="row.snapshotSummary.length > 1"
+                          >（{{
+                            getLanguageText(snapshot.sourceLanguageCode)
+                          }}
+                          / v{{ snapshot.snapshotVersion || 1 }}）</template
+                        >
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="overwrite" divided>
                       <el-icon><Refresh /></el-icon>
                       <span>覆盖快照</span>
                     </el-dropdown-item>
@@ -4059,6 +4072,18 @@ export default {
       })
     }
 
+    const goPostLanguageList = snapshot => {
+      if (!snapshot || !snapshot._id) {
+        return
+      }
+      router.push({
+        name: 'TranslationPostLanguageList',
+        params: {
+          sourceSnapshotId: String(snapshot._id)
+        }
+      })
+    }
+
     const goProperNounManager = row => {
       router.push({
         name: 'SourcePostProperNounList',
@@ -4101,7 +4126,11 @@ export default {
       }
     }
 
-    const handleOverwriteSnapshotCommand = (row, command) => {
+    const handleSnapshotActionCommand = (row, command) => {
+      if (command && command.action === 'languageList') {
+        goPostLanguageList(command.snapshot)
+        return
+      }
       if (command === 'overwrite') {
         openLanguageDialog(row, 'overwrite')
         return
@@ -4237,7 +4266,7 @@ export default {
       getPostDisplayTitle,
       getProperNounTermCount,
       handleSourcePostAction,
-      handleOverwriteSnapshotCommand,
+      handleSnapshotActionCommand,
       getAiRelatedCoverImageEntries,
       getAiResultCoverImageEntries,
       getAiRelatedSelectableEntryIds,
