@@ -1575,6 +1575,42 @@ async function getSourcePostList(query = {}) {
   }
 }
 
+/**
+ * 标准化源文章标签筛选参数。
+ * 前端以数组传入标签 id，经查询字符串序列化后可能是数组或单个字符串，统一转成合法 ObjectId 字符串数组。
+ * @param {Array|string} rawTags - 查询里的标签 id 集合
+ * @returns {string[]} 去重后的合法标签 id 列表
+ * @throws {ApiError} 存在非法标签 id 时抛出
+ */
+function normalizeSourcePostTagFilter(rawTags) {
+  if (rawTags === undefined || rawTags === null || rawTags === '') {
+    return []
+  }
+
+  const rawList = Array.isArray(rawTags) ? rawTags : [rawTags]
+  const tagIdList = []
+
+  rawList.forEach(rawTag => {
+    const tagId = String(rawTag || '').trim()
+    if (!tagId) {
+      return
+    }
+    if (!mongoose.Types.ObjectId.isValid(tagId)) {
+      throw new ApiError(
+        ERROR_CODES.SOURCE_POST_NOT_FOUND,
+        undefined,
+        'tags',
+        400
+      )
+    }
+    if (!tagIdList.includes(tagId)) {
+      tagIdList.push(tagId)
+    }
+  })
+
+  return tagIdList
+}
+
 async function getSourceDatabasePostList(query = {}) {
   const page = parsePositiveInteger(query.page, 1)
   const limit = parsePositiveInteger(query.limit, 20, 100)
@@ -1633,6 +1669,24 @@ async function getSourceDatabasePostList(query = {}) {
       keywordConditions.push({ _id: new mongoose.Types.ObjectId(keyword) })
     }
     params.$or = keywordConditions
+  }
+
+  if (query.sort !== undefined && query.sort !== '') {
+    const sortId = String(query.sort).trim()
+    if (!mongoose.Types.ObjectId.isValid(sortId)) {
+      throw new ApiError(
+        ERROR_CODES.SOURCE_POST_NOT_FOUND,
+        undefined,
+        'sort',
+        400
+      )
+    }
+    params.sort = sortId
+  }
+
+  const tagIdList = normalizeSourcePostTagFilter(query.tags)
+  if (tagIdList.length > 0) {
+    params.tags = { $in: tagIdList }
   }
 
   const sourcePostsRepository = getSourceRepository('posts')

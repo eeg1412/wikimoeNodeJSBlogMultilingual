@@ -55,6 +55,15 @@
             </el-select>
           </el-form-item>
           <el-form-item>
+            <SortSelector v-model="params.sort" />
+          </el-form-item>
+          <el-form-item>
+            <TagSelector
+              v-model="params.tags"
+              v-model:tagList="searchTagList"
+            />
+          </el-form-item>
+          <el-form-item>
             <el-button type="primary" @click="getSourceDatabasePostList(true)">
               搜索
             </el-button>
@@ -1161,7 +1170,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { multilingualApi } from '@/api'
+import { multilingualApi, authApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
@@ -1169,6 +1178,8 @@ import RelatedPostFeatureScopeSelector from '@/components/RelatedPostFeatureScop
 import SourcePostTermOrganizeDialog from './SourcePostTermOrganizeDialog.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
+import SortSelector from '@/components/SortSelector.vue'
+import TagSelector from '@/components/TagSelector.vue'
 import ls from '@/utils/ls'
 import store from '@/store'
 import {
@@ -1242,7 +1253,9 @@ export default {
     RelatedPostFeatureScopeSelector,
     SourcePostTermOrganizeDialog,
     TranslationEntrySelectableGroups,
-    TranslationEntryMeta
+    TranslationEntryMeta,
+    SortSelector,
+    TagSelector
   },
   setup() {
     const route = useRoute()
@@ -1308,8 +1321,11 @@ export default {
       limit: 20,
       keyword: '',
       type: '',
-      status: ''
+      status: '',
+      sort: '',
+      tags: []
     })
+    const searchTagList = ref([])
     restoreListSessionParams(route, params)
 
     const languageDialogTitle = computed(() => {
@@ -1406,6 +1422,12 @@ export default {
       }
       if (params.status !== '') {
         requestParams.status = params.status
+      }
+      if (params.sort) {
+        requestParams.sort = params.sort
+      }
+      if (Array.isArray(params.tags) && params.tags.length > 0) {
+        requestParams.tags = params.tags
       }
       return requestParams
     }
@@ -4198,11 +4220,30 @@ export default {
     onMounted(() => {
       restoreTableScrollOnNextDataRefresh()
       getSourceDatabasePostList(false)
+      // 恢复会话里保存的标签筛选时，回填已选标签的展示数据
+      if (Array.isArray(params.tags) && params.tags.length > 0) {
+        authApi
+          .getTagList(
+            {
+              idList: params.tags,
+              page: 1,
+              size: 999999
+            },
+            true
+          )
+          .then(response => {
+            searchTagList.value = response.data.list || []
+          })
+          .catch(error => {
+            console.log(error)
+          })
+      }
     })
 
     return {
       tableRef,
       params,
+      searchTagList,
       sourcePostList,
       total,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,

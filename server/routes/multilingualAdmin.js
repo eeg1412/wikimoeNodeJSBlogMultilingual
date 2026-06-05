@@ -478,6 +478,18 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/post/getSourcePostList')
   },
   {
+    path: '/sort/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/taxonomy/getSourceSortList')
+  },
+  {
+    path: '/tag/list',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/taxonomy/getSourceTagList')
+  },
+  {
     path: '/source/post/source-detail',
     method: 'get',
     middleware: [checkAuth],
