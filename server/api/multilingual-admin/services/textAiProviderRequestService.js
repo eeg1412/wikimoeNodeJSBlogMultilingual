@@ -1,5 +1,6 @@
 const http = require('http')
 const https = require('https')
+const { StringDecoder } = require('string_decoder')
 const {
   ApiError,
   ERROR_CODES
@@ -387,6 +388,8 @@ function requestDeepSeekStream(
         }
 
         const streamChunks = []
+        // 用 StringDecoder 处理流式分片，避免多字节 UTF-8 字符被 TCP 分片切断后解码成乱码
+        const streamDecoder = new StringDecoder('utf8')
         let buffer = ''
         let content = ''
         let reasoningContent = ''
@@ -462,7 +465,7 @@ function requestDeepSeekStream(
 
         response.on('data', chunk => {
           try {
-            buffer += chunk.toString('utf8')
+            buffer += streamDecoder.write(chunk)
             consumeBuffer()
           } catch (error) {
             responseStreamError = error
@@ -501,6 +504,8 @@ function requestDeepSeekStream(
         response.on('end', () => {
           try {
             responseEnded = true
+            // 冲洗解码器里残留的字节，确保末尾未完结的多字节字符被正确处理
+            buffer += streamDecoder.end()
             if (buffer.trim()) {
               const dataText = parseSseBlock(buffer)
               handleDataText(dataText)
