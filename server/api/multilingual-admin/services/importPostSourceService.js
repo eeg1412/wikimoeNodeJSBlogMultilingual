@@ -1827,5 +1827,9 @@ module.exports = {
   getSourceDatabasePostList,
   getSourceDatabasePostDetail,
   getSourcePostList,
-  getSourcePostDetail
+  getSourcePostDetail,
+  buildEmptyTranslationSummary,
+  buildTranslationSummaryMap,
+  getSourcePostGroupKey,
+  normalizeSourcePostSnapshotIdentityList
 }

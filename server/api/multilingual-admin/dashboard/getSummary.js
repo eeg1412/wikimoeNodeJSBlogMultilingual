@@ -1,5 +1,6 @@
 const { SUPPORTED_LANGUAGE_CODES } = require('../../../utils/language')
 const { handleApiError } = require('../../../utils/multilingualAdminResponse')
+const importPostSourceService = require('../services/importPostSourceService')
 
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
@@ -44,52 +45,25 @@ async function getSourceGroupTotal(PostModel) {
   return rows[0]?.total || 0
 }
 
-async function attachRecentImportTranslationSummary(PostModel, recentImports) {
-  const groupIds = recentImports
-    .map(item => item.translationGroupId)
-    .filter(Boolean)
-
-  if (groupIds.length === 0) {
+async function attachRecentImportTranslationSummary(recentImports) {
+  if (recentImports.length === 0) {
     return recentImports
   }
 
-  const rows = await PostModel.aggregate([
-    {
-      $match: {
-        recordKind: TRANSLATION_RECORD_KIND,
-        translationGroupId: { $in: groupIds }
-      }
-    },
-    {
-      $group: {
-        _id: '$translationGroupId',
-        total: { $sum: 1 },
-        published: {
-          $sum: {
-            $cond: [{ $eq: ['$status', 1] }, 1, 0]
-          }
-        },
-        pendingReview: {
-          $sum: {
-            $cond: ['$pendingReview', 1, 0]
-          }
-        }
-      }
-    }
-  ])
+  // 复用源文章快照列表（多语言文字）的同一套摘要计算逻辑，
+  // 保证工作台「语言版本」列展示的各语言状态与快照列表完全一致。
+  const normalizedList =
+    await importPostSourceService.normalizeSourcePostSnapshotIdentityList(
+      recentImports
+    )
+  const summaryMap =
+    await importPostSourceService.buildTranslationSummaryMap(normalizedList)
 
-  const summaryMap = new Map()
-  for (const row of rows) {
-    summaryMap.set(String(row._id), row)
-  }
-
-  return recentImports.map(item => ({
+  return normalizedList.map(item => ({
     ...item,
-    translationSummary: summaryMap.get(String(item.translationGroupId)) || {
-      total: 0,
-      published: 0,
-      pendingReview: 0
-    }
+    translationSummary:
+      summaryMap[importPostSourceService.getSourcePostGroupKey(item)] ||
+      importPostSourceService.buildEmptyTranslationSummary()
   }))
 }
 
@@ -129,10 +103,8 @@ module.exports = async function (req, res) {
         .limit(5)
         .lean()
     ])
-    const recentImportsWithSummary = await attachRecentImportTranslationSummary(
-      PostModel,
-      recentImports
-    )
+    const recentImportsWithSummary =
+      await attachRecentImportTranslationSummary(recentImports)
 
     res.send({
       data: {

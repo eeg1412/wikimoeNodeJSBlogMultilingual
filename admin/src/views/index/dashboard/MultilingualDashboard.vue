@@ -71,9 +71,20 @@
             v{{ row.snapshotVersion || 1 }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="翻译进度" width="120">
+        <ResponsiveTableColumn label="语言版本" min-width="260">
           <template #default="{ row }">
-            {{ getTranslationProgress(row.translationSummary) }}
+            <div class="recent-language-tags">
+              <el-tag
+                v-for="item in getSummaryLanguageList(row.translationSummary)"
+                :key="item.value"
+                size="small"
+                class="mr5 mt5"
+                :type="item.exists ? 'success' : 'info'"
+                effect="plain"
+              >
+                {{ item.value }}
+              </el-tag>
+            </div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="导入时间" width="180">
@@ -94,7 +105,7 @@ import {
   getLanguageText,
   getPostDisplayTitle,
   getPostTypeText,
-  getTranslationProgress
+  getSummaryLanguageList
 } from '@/utils/multilingual'
 
 export default {
@@ -150,7 +161,7 @@ export default {
       getLanguageText,
       getPostDisplayTitle,
       getPostTypeText,
-      getTranslationProgress
+      getSummaryLanguageList
     }
   }
 }
@@ -211,6 +222,11 @@ export default {
   font-size: 12px;
   margin-top: 4px;
   word-break: break-all;
+}
+
+.recent-language-tags {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 767px) {

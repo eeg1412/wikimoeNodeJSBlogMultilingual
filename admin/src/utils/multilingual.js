@@ -286,9 +286,20 @@ export function getPostStatusTagType(value) {
   return 'info'
 }
 
-export function getTranslationProgress(summary) {
-  const total = Number(summary?.total || 0)
-  return `${total}/${SUPPORTED_LANGUAGE_OPTIONS.length}`
+/**
+ * 根据翻译摘要构建各支持语言的版本状态列表。
+ * 工作台「语言版本」列与源文章快照（多语言文字）列表共用该逻辑，保证展示一致。
+ * @param {Object} summary - 翻译摘要，包含 languages 映射
+ * @returns {Array<Object>} 各语言选项及其是否已存在译文的标记
+ */
+export function getSummaryLanguageList(summary) {
+  const languages = summary?.languages || {}
+  return SUPPORTED_LANGUAGE_OPTIONS.map(item => {
+    return {
+      ...item,
+      exists: Boolean(languages[item.value])
+    }
+  })
 }
 
 export function stripText(value) {

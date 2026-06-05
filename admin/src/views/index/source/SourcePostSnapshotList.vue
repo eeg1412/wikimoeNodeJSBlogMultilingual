@@ -117,11 +117,8 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn prop="alias" label="Alias" min-width="150" />
         <ResponsiveTableColumn prop="snapshotVersion" label="版本" width="80" />
-        <ResponsiveTableColumn label="翻译摘要" min-width="260">
+        <ResponsiveTableColumn label="语言版本" min-width="260">
           <template #default="{ row }">
-            <div class="translation-summary-line">
-              {{ getTranslationProgress(row.translationSummary) }}
-            </div>
             <div class="translation-language-tags">
               <el-tag
                 v-for="item in getSummaryLanguageList(row.translationSummary)"
@@ -272,7 +269,7 @@ import {
   getPostDisplayTitle,
   getPostTypeTagType,
   getPostTypeText,
-  getTranslationProgress
+  getSummaryLanguageList
 } from '@/utils/multilingual'
 
 export default {
@@ -296,10 +293,7 @@ export default {
       snapshotVersionMin: null,
       snapshotVersionMax: null
     })
-    restoreListSessionParams(route, params, [
-      'keyword',
-      'sourceLanguageCode'
-    ])
+    restoreListSessionParams(route, params, ['keyword', 'sourceLanguageCode'])
 
     const getRequestParams = () => {
       const requestParams = {
@@ -346,16 +340,6 @@ export default {
 
     const preserveTableScrollForNextRefresh = () => {
       tableRef.value?.preserveScrollOnNextDataRefresh()
-    }
-
-    const getSummaryLanguageList = summary => {
-      const languages = summary?.languages || {}
-      return SUPPORTED_LANGUAGE_OPTIONS.map(item => {
-        return {
-          ...item,
-          exists: Boolean(languages[item.value])
-        }
-      })
     }
 
     const overwrite = row => {
@@ -443,7 +427,6 @@ export default {
       getPostDisplayTitle,
       getPostTypeTagType,
       getPostTypeText,
-      getTranslationProgress,
       getSummaryLanguageList,
       getSourcePostList,
       overwrite,
@@ -476,10 +459,6 @@ export default {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   word-break: break-all;
-}
-
-.translation-summary-line {
-  font-weight: 600;
 }
 
 .translation-language-tags {
