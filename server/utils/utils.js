@@ -8,6 +8,7 @@ const path = require('path')
 const { IP2Location } = require('ip2location-nodejs')
 const parser = require('ua-parser-js')
 const referrerUtils = require('../mongodb/utils/referrers')
+const { getSourceReferrerWhiteListSync } = require('./sourceSeoSettings')
 const AsyncLock = require('async-lock')
 const lock = new AsyncLock({ timeout: 60000 })
 const crawlerUserAgents = require('./crawler-user-agents.json')
@@ -654,6 +655,15 @@ exports.referrerRecord = function (referrer, referrerType) {
     // referrer最大长度为300
     if (referrer.length > 300) {
       referrer = referrer.substring(0, 300)
+    }
+    // 读取源站引用域名白名单，命中白名单的引用来源属于自家站点，不记录
+    const referrerDomainWhitelist = getSourceReferrerWhiteListSync()
+    const isReferrerDomainWhitelist = referrerDomainWhitelist.some(item => {
+      // 白名单仅包含域名，不包含协议和路径
+      return referrer.includes(item)
+    })
+    if (isReferrerDomainWhitelist) {
+      return
     }
     const md5Id = md5hex(`${referrerType}:${referrer}`)
     // 判断是否存在计时器

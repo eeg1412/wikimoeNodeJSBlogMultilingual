@@ -2,9 +2,7 @@ const cacheDataUtils = require('../config/cacheData')
 const languageSettingsService = require('../api/multilingual-admin/services/languageSettingsService')
 const rssToolUtils = require('../utils/rss')
 const sitemapToolUtils = require('../utils/sitemap')
-const {
-  refreshSourceSeoSettingsCache
-} = require('../utils/sourceSeoSettings')
+const { refreshSourceSeoSettingsCache } = require('../utils/sourceSeoSettings')
 const sourceConnectionInfo = require('./sourceConnection')
 const multilingualConnectionInfo = require('./multilingualConnection')
 const registerModels = require('./modelFactory/registerModels')

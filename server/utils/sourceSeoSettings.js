@@ -4,7 +4,10 @@ const SOURCE_SEO_SETTING_DEFAULTS = {
   sitePageSize: 10,
   sitePostRandomSimilarCount: 0,
   sitePostRandomSimilarRange: [],
-  sitePostRandomSimilarShowRange: []
+  sitePostRandomSimilarShowRange: [],
+  // 源站引用域名白名单与上述 SEO 配置同属一份源站配置缓存包，
+  // 由源站保存配置后通过 HTTP 回调统一同步刷新，命中白名单的引用来源不计入 referrer 统计。
+  siteReferrerWhiteList: []
 }
 
 const SOURCE_SEO_SETTING_NAMES = Object.keys(SOURCE_SEO_SETTING_DEFAULTS)
@@ -164,9 +167,26 @@ async function getSourceSeoSettingsCacheData() {
   }
 }
 
+/**
+ * 同步读取源站引用域名白名单。
+ * referrerRecord 在请求中间件里高频同步调用，必须直接读取已同步到本地的源站配置缓存，
+ * 不能查询数据库，保证性能并遵循源站配置异步同步机制。
+ * @returns {string[]} 当前生效的引用域名白名单；缓存未就绪时返回空数组
+ */
+function getSourceReferrerWhiteListSync() {
+  const cacheData = getSourceSeoSettingsCache()
+  const value = cacheData?.values?.siteReferrerWhiteList
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.slice()
+}
+
 module.exports = {
   getSourceSeoSettings,
   getSourceSeoSettingsCacheData,
+  getSourceReferrerWhiteListSync,
   refreshSourceSeoSettingsCache,
   normalizeSiteUrl
 }

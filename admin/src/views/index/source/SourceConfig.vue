@@ -83,7 +83,7 @@ const SOURCE_CONFIG_FIELD_MAP = {
   siteReferrerWhiteList: {
     label: '引用域名白名单',
     usage:
-      '源站引用过滤白名单；当前多语言后台仅做只读展示，不参与 referrer/list 过滤'
+      '源站引用过滤白名单；命中白名单的引用来源不计入多语言站 referrer/list 统计'
   }
 }
 
