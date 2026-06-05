@@ -19,7 +19,7 @@
           <el-form-item>
             <el-input
               v-model="params.keyword"
-              placeholder="标题、alias、源 ID"
+              placeholder="标题、别名、源 ID"
               clearable
               style="width: 220px"
             />
@@ -115,7 +115,7 @@
             {{ getLanguageText(row.sourceLanguageCode) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn prop="alias" label="Alias" min-width="150" />
+        <ResponsiveTableColumn prop="alias" label="别名" min-width="150" />
         <ResponsiveTableColumn prop="snapshotVersion" label="版本" width="80" />
         <ResponsiveTableColumn label="语言版本" min-width="260">
           <template #default="{ row }">
@@ -183,7 +183,7 @@
           <el-descriptions-item label="标题">
             {{ getPostDisplayTitle(detailData.post) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Alias">
+          <el-descriptions-item label="别名">
             {{ detailData.post?.alias || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="源语言">

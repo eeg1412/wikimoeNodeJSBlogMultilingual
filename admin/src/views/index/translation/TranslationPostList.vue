@@ -112,7 +112,7 @@
               {{ getPostDisplayTitle(row.sourcePost) }}
             </div>
             <div v-if="row.sourcePost.alias" class="source-meta">
-              Alias: {{ row.sourcePost.alias }}
+              别名：{{ row.sourcePost.alias }}
             </div>
             <div class="source-meta">源 ID：{{ row.sourcePost.sourceId }}</div>
           </template>
@@ -267,7 +267,7 @@
           <el-descriptions-item label="语言">
             {{ getLanguageText(detailData.post?.languageCode) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Alias">
+          <el-descriptions-item label="别名">
             {{ detailData.post?.alias || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -296,7 +296,7 @@
           <el-form-item label="标题">
             <el-input v-model="editForm.title" clearable />
           </el-form-item>
-          <el-form-item label="Alias">
+          <el-form-item label="别名">
             <el-input v-model="editForm.alias" clearable />
           </el-form-item>
           <el-form-item label="摘要">

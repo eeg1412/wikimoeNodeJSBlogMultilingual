@@ -19,7 +19,7 @@
           <el-form-item>
             <el-input
               v-model="params.keyword"
-              placeholder="标题、alias、摘要、源 ID"
+              placeholder="标题、别名、摘要、源 ID"
               clearable
               style="width: 240px"
             />
@@ -102,7 +102,7 @@
             {{ row.author?.nickname || row.author?.username || '-' }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn prop="alias" label="Alias" min-width="150" />
+        <ResponsiveTableColumn prop="alias" label="别名" min-width="150" />
         <ResponsiveTableColumn label="分类" min-width="160">
           <template #default="{ row }">
             {{ row.sort?.sortname || '-' }}

@@ -45,7 +45,7 @@
                   {{ getPostDisplayTitle(row.translation) }}
                 </div>
                 <div v-if="row.translation.alias" class="source-meta">
-                  Alias: {{ row.translation.alias }}
+                  别名：{{ row.translation.alias }}
                 </div>
               </span>
               <el-tag v-else type="info" effect="plain">未创建</el-tag>
