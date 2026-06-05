@@ -1125,21 +1125,48 @@ function buildPayloadSummary(payload) {
 
 async function getTranslationJobAiJsonLogs(result) {
   if (result?.aiJsonLogStorage?.storage === 'file') {
-    return await aiLogFileService.readTranslationJobAiJsonLogs(
-      result.aiJsonLogStorage
-    )
+    try {
+      const logs = await aiLogFileService.readTranslationJobAiJsonLogs(
+        result.aiJsonLogStorage
+      )
+      return {
+        logs,
+        missing: false,
+        errorMessage: ''
+      }
+    } catch (error) {
+      // AI JSON 日志文件缺失属于可恢复情况：日志文件可能被清理或迁移，
+      // 详情接口仍要返回任务数据，仅把缺失状态透传给前端提示，不当作严重错误抛出。
+      if (error && error.code === 'ENOENT') {
+        return {
+          logs: [],
+          missing: true,
+          errorMessage: 'AI 任务 JSON 日志文件已缺失，无法展示详细调用日志'
+        }
+      }
+      throw error
+    }
   }
 
   if (Array.isArray(result?.aiJsonLogs)) {
-    return result.aiJsonLogs
+    return {
+      logs: result.aiJsonLogs,
+      missing: false,
+      errorMessage: ''
+    }
   }
 
-  return []
+  return {
+    logs: [],
+    missing: false,
+    errorMessage: ''
+  }
 }
 
 async function buildTranslationJobDetailResponse(job) {
   const result = job.result || {}
-  const aiJsonLogs = await getTranslationJobAiJsonLogs(result)
+  const aiJsonLogsResult = await getTranslationJobAiJsonLogs(result)
+  const aiJsonLogs = aiJsonLogsResult.logs
   const workflowJob = {
     ...job,
     result: {
@@ -1160,6 +1187,8 @@ async function buildTranslationJobDetailResponse(job) {
       aiJsonLogs: [],
       aiJsonLogCount: aiJsonLogs.length,
       aiJsonLogStorage: result.aiJsonLogStorage || null,
+      aiJsonLogStorageMissing: aiJsonLogsResult.missing,
+      aiJsonLogStorageError: aiJsonLogsResult.errorMessage,
       aiWorkflow,
       relatedResults: [],
       languageResults: [],

@@ -388,6 +388,15 @@
           </span>
         </div>
 
+        <el-alert
+          v-if="aiJsonLogStorageMissing"
+          class="ai-json-log-missing-alert"
+          :title="aiJsonLogStorageMissingMessage"
+          type="warning"
+          show-icon
+          :closable="false"
+        />
+
         <div v-if="hasExecutionWorkflow" class="job-workflow-panel">
           <div class="job-workflow-panel-header">
             <div>
@@ -1588,6 +1597,17 @@ export default {
       return currentJob.value?.result?.aiWorkflow || null
     })
 
+    const aiJsonLogStorageMissing = computed(() => {
+      return currentJob.value?.result?.aiJsonLogStorageMissing === true
+    })
+
+    const aiJsonLogStorageMissingMessage = computed(() => {
+      return (
+        currentJob.value?.result?.aiJsonLogStorageError ||
+        'AI 任务 JSON 日志文件已缺失，无法展示详细调用日志'
+      )
+    })
+
     const hasAiWorkflow = computed(() => {
       return (
         Array.isArray(aiWorkflow.value?.steps) &&
@@ -2730,6 +2750,8 @@ export default {
 
     return {
       aiWorkflow,
+      aiJsonLogStorageMissing,
+      aiJsonLogStorageMissingMessage,
       aiWorkflowDialogVisible,
       applyForm,
       activeReviewLanguageCode,
@@ -3018,6 +3040,10 @@ html.dark .translation-job-storage-panel {
   color: var(--el-text-color-secondary);
   margin-bottom: 16px;
   padding: 14px 0;
+}
+
+.ai-json-log-missing-alert {
+  margin-bottom: 16px;
 }
 
 .job-workflow-panel {
