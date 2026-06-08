@@ -119,6 +119,108 @@ export const LANGUAGE_CONFIG_LIST = [
       14: '플레이 중',
       15: '읽는 중'
     }
+  },
+  {
+    code: 'th-TH',
+    label: 'ไทย (ประเทศไทย)',
+    sidebarBuiltinTitles: {
+      1: 'เนื้อหากำหนดเอง',
+      3: 'ความคิดเห็นล่าสุด',
+      4: 'แท็กสุ่ม',
+      8: 'หมวดหมู่',
+      9: 'คลังเก็บ',
+      10: 'โฆษณา Google',
+      11: 'HTML กำหนดเอง',
+      12: 'บทความยอดนิยม',
+      13: 'ซีซันนี้',
+      14: 'กำลังเล่น',
+      15: 'กำลังอ่าน'
+    }
+  },
+  {
+    code: 'vi-VN',
+    label: 'Tiếng Việt (Việt Nam)',
+    sidebarBuiltinTitles: {
+      1: 'Nội dung tùy chỉnh',
+      3: 'Bình luận mới nhất',
+      4: 'Thẻ ngẫu nhiên',
+      8: 'Chuyên mục',
+      9: 'Lưu trữ',
+      10: 'Quảng cáo Google',
+      11: 'HTML tùy chỉnh',
+      12: 'Bài viết phổ biến',
+      13: 'Mùa này',
+      14: 'Đang chơi',
+      15: 'Đang đọc'
+    }
+  },
+  {
+    code: 'fr-FR',
+    label: 'Français (France)',
+    sidebarBuiltinTitles: {
+      1: 'Contenu personnalisé',
+      3: 'Commentaires récents',
+      4: 'Tags aléatoires',
+      8: 'Catégories',
+      9: 'Archives',
+      10: 'Publicités Google',
+      11: 'HTML personnalisé',
+      12: 'Articles populaires',
+      13: 'Anime de la saison',
+      14: 'Jeux en cours',
+      15: 'Lectures en cours'
+    }
+  },
+  {
+    code: 'de-DE',
+    label: 'Deutsch (Deutschland)',
+    sidebarBuiltinTitles: {
+      1: 'Benutzerdefinierter Inhalt',
+      3: 'Neueste Kommentare',
+      4: 'Zufällige Tags',
+      8: 'Kategorien',
+      9: 'Archiv',
+      10: 'Google-Anzeigen',
+      11: 'Benutzerdefiniertes HTML',
+      12: 'Beliebte Beiträge',
+      13: 'Diese Saison',
+      14: 'Aktuelle Spiele',
+      15: 'Aktuelle Lektüre'
+    }
+  },
+  {
+    code: 'es-ES',
+    label: 'Español (España)',
+    sidebarBuiltinTitles: {
+      1: 'Contenido personalizado',
+      3: 'Comentarios recientes',
+      4: 'Etiquetas aleatorias',
+      8: 'Categorías',
+      9: 'Archivo',
+      10: 'Anuncios de Google',
+      11: 'HTML personalizado',
+      12: 'Publicaciones populares',
+      13: 'Esta temporada',
+      14: 'Jugando actualmente',
+      15: 'Leyendo actualmente'
+    }
+  },
+  {
+    code: 'pt-PT',
+    label: 'Português (Portugal)',
+    sidebarBuiltinTitles: {
+      1: 'Conteúdo personalizado',
+      3: 'Comentários recentes',
+      4: 'Etiquetas aleatórias',
+      8: 'Categorias',
+      9: 'Arquivo',
+      10: 'Anúncios Google',
+      11: 'HTML personalizado',
+      12: 'Artigos populares',
+      13: 'Esta temporada',
+      14: 'A jogar',
+      15: 'A ler'
+    }
   }
 ]
 
