@@ -125,7 +125,7 @@ Server 只认后端语言。完整新增一种站点语言时，还必须同步�
 至少补齐：
 
 - 多语言站点配置：标题、描述、关键词、Logo、Favicon、默认封面。
-- 博客端语言启用状态：新增语言默认启用，可在 Admin 多语言站点配置中关闭。
+- 博客端语言启用状态：新增语言默认关闭，内容和站点配置准备完成后再在 Admin 多语言站点配置中手动开启。
 - RSS/Sitemap 设置：是否开启、最大数量、是否在页脚显示。
 - RSS 品牌字段 `siteTitle`、`siteDescription`、`siteLogo`、`siteFavicon` 来自当前语言的多语言站点配置；源站运行配置只提供 `siteUrl`、`siteTimeZone`、`sitePageSize` 和相似内容查询参数。
 - 导航：`navis`。

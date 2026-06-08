@@ -25,7 +25,7 @@ const LANGUAGE_SETTING_FIELDS = [
     label: '启用博客端语言',
     type: 'boolean',
     group: 'site',
-    defaultValue: true
+    defaultValue: false
   },
   {
     name: 'siteTitle',
