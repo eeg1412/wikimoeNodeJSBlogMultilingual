@@ -155,6 +155,23 @@ export const LANGUAGE_CONFIG_LIST = [
     }
   },
   {
+    code: 'id-ID',
+    label: 'Bahasa Indonesia (Indonesia)',
+    sidebarBuiltinTitles: {
+      1: 'Konten kustom',
+      3: 'Komentar terbaru',
+      4: 'Tag acak',
+      8: 'Kategori',
+      9: 'Arsip',
+      10: 'Iklan Google',
+      11: 'HTML kustom',
+      12: 'Postingan populer',
+      13: 'Musim ini',
+      14: 'Sedang bermain',
+      15: 'Sedang membaca'
+    }
+  },
+  {
     code: 'fr-FR',
     label: 'Français (France)',
     sidebarBuiltinTitles: {
