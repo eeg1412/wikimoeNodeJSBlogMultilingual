@@ -839,6 +839,19 @@ function normalizePreviewText(value) {
   return String(value).trim()
 }
 
+function getFirstPreviewText(valueList) {
+  if (!Array.isArray(valueList)) {
+    return ''
+  }
+  for (const value of valueList) {
+    const text = normalizePreviewText(value)
+    if (text) {
+      return text
+    }
+  }
+  return ''
+}
+
 function stringifyPreviewValue(value) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -851,6 +864,22 @@ function stringifyPreviewValue(value) {
   } catch (error) {
     return String(value)
   }
+}
+
+function getFullPreviewText(options = {}) {
+  const rawText = getFirstPreviewText(options.rawValues)
+  if (rawText) {
+    return rawText
+  }
+
+  const fallbackText = normalizePreviewText(
+    stringifyPreviewValue(options.fallbackValue)
+  )
+  if (fallbackText) {
+    return fallbackText
+  }
+
+  return getFirstPreviewText(options.previewValues)
 }
 
 function getJsonValueType(value) {
@@ -1934,22 +1963,42 @@ export default {
           requestEntryMap.value.get(String(entry.originalEntryKey || '')) ||
           requestEntryMap.value.get(String(entry.entryKey || '')) ||
           {}
-        const currentPreviewText =
-          normalizePreviewText(entry.currentPreviewText) ||
-          normalizePreviewText(entry.currentPreviewRawValue) ||
-          normalizePreviewText(requestEntry.currentPreviewText) ||
-          normalizePreviewText(requestEntry.currentPreviewRawValue) ||
-          stringifyPreviewValue(entry.targetValueSnapshotAtCompletion)
-        const sourcePreviewText =
-          normalizePreviewText(entry.sourcePreviewText) ||
-          normalizePreviewText(entry.sourcePreviewRawValue) ||
-          normalizePreviewText(requestEntry.sourcePreviewText) ||
-          normalizePreviewText(requestEntry.sourcePreviewRawValue)
-        const nextPreviewText =
-          normalizePreviewText(entry.nextPreviewText) ||
-          normalizePreviewText(entry.nextPreviewRawValue) ||
-          normalizePreviewText(entry.previewRawValue) ||
-          stringifyPreviewValue(entry.value)
+        const currentPreviewText = getFullPreviewText({
+          rawValues: [
+            entry.currentPreviewRawValue,
+            requestEntry.currentPreviewRawValue
+          ],
+          fallbackValue: entry.targetValueSnapshotAtCompletion,
+          previewValues: [
+            entry.currentPreviewText,
+            requestEntry.currentPreviewText
+          ]
+        })
+        const sourcePreviewText = getFullPreviewText({
+          rawValues: [
+            entry.sourcePreviewRawValue,
+            requestEntry.sourcePreviewRawValue
+          ],
+          previewValues: [
+            entry.sourcePreviewText,
+            requestEntry.sourcePreviewText
+          ]
+        })
+        const nextPreviewText = getFullPreviewText({
+          rawValues: [
+            entry.nextPreviewRawValue,
+            entry.previewRawValue,
+            requestEntry.nextPreviewRawValue,
+            requestEntry.previewRawValue
+          ],
+          fallbackValue: entry.value,
+          previewValues: [
+            entry.nextPreviewText,
+            entry.previewText,
+            requestEntry.nextPreviewText,
+            requestEntry.previewText
+          ]
+        })
         const currentPreviewHtml =
           normalizePreviewText(entry.currentPreviewHtml) ||
           normalizePreviewText(requestEntry.currentPreviewHtml)

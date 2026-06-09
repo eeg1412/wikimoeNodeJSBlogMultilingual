@@ -53,6 +53,15 @@ function normalizePreviewText(value) {
   return String(value).trim()
 }
 
+function getFullPreviewText(rawValue, previewText) {
+  const fullText = normalizePreviewText(rawValue)
+  if (fullText) {
+    return fullText
+  }
+
+  return normalizePreviewText(previewText)
+}
+
 export default {
   name: 'TranslationEntryPreviewRows',
   props: {
@@ -75,19 +84,28 @@ export default {
   },
   setup(props) {
     const currentText = computed(() => {
-      return normalizePreviewText(props.entry.currentPreviewText)
+      return getFullPreviewText(
+        props.entry.currentPreviewRawValue,
+        props.entry.currentPreviewText
+      )
     })
     const currentHtml = computed(() => {
       return normalizePreviewText(props.entry.currentPreviewHtml)
     })
     const sourceText = computed(() => {
-      return normalizePreviewText(props.entry.sourcePreviewText)
+      return getFullPreviewText(
+        props.entry.sourcePreviewRawValue,
+        props.entry.sourcePreviewText
+      )
     })
     const sourceHtml = computed(() => {
       return normalizePreviewText(props.entry.sourcePreviewHtml)
     })
     const nextText = computed(() => {
-      return normalizePreviewText(props.entry.nextPreviewText)
+      const rawValue =
+        props.entry.nextPreviewRawValue || props.entry.previewRawValue
+      const previewText = props.entry.nextPreviewText || props.entry.previewText
+      return getFullPreviewText(rawValue, previewText)
     })
     const nextHtml = computed(() => {
       return normalizePreviewText(props.entry.nextPreviewHtml)
