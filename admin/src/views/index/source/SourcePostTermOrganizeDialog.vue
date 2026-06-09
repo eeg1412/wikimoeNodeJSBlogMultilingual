@@ -92,6 +92,10 @@ import {
   loadAiSettingsAvailability
 } from '@/utils/aiSettingsAvailability'
 import { hasPostRelatedSourcePosts } from '@/utils/sourcePostRelatedPosts'
+import ls from '@/utils/ls'
+
+const TERM_ORGANIZE_TARGET_LANGUAGES_STORAGE_KEY =
+  'wikimoe-source-post-term-organize-target-languages'
 
 function getSourcePostId(sourcePost) {
   return String(sourcePost?.sourceId || sourcePost?._id || '').trim()
@@ -101,6 +105,52 @@ function getDefaultTargetLanguageCodes(sourceLanguageCode) {
   return SUPPORTED_LANGUAGE_OPTIONS.filter(item => {
     return item.value !== sourceLanguageCode
   }).map(item => item.value)
+}
+
+function parseStoredTargetLanguageCodes() {
+  const storedValue = ls.getItem(TERM_ORGANIZE_TARGET_LANGUAGES_STORAGE_KEY)
+  if (!storedValue) {
+    return []
+  }
+  try {
+    const parsedValue = JSON.parse(storedValue)
+    if (Array.isArray(parsedValue)) {
+      return parsedValue
+    }
+  } catch (error) {
+    return String(storedValue)
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+function getStoredTargetLanguageCodes(sourceLanguageCode) {
+  const supportedCodeSet = new Set(
+    SUPPORTED_LANGUAGE_OPTIONS.map(item => item.value)
+  )
+  const storedList = parseStoredTargetLanguageCodes()
+  const targetList = storedList.filter(languageCode => {
+    return (
+      supportedCodeSet.has(languageCode) &&
+      languageCode !== sourceLanguageCode
+    )
+  })
+  if (targetList.length > 0) {
+    return targetList
+  }
+  return getDefaultTargetLanguageCodes(sourceLanguageCode)
+}
+
+function rememberTargetLanguageCodes(targetLanguageCodes) {
+  if (!Array.isArray(targetLanguageCodes)) {
+    return
+  }
+  ls.setItem(
+    TERM_ORGANIZE_TARGET_LANGUAGES_STORAGE_KEY,
+    JSON.stringify(targetLanguageCodes)
+  )
 }
 
 export default {
@@ -175,7 +225,7 @@ export default {
 
     function resetForm() {
       form.sourceLanguageCode = DEFAULT_LANGUAGE_CODE
-      form.targetLanguageCodes = getDefaultTargetLanguageCodes(
+      form.targetLanguageCodes = getStoredTargetLanguageCodes(
         form.sourceLanguageCode
       )
       form.searchOfficialTermTranslations = false
@@ -190,7 +240,7 @@ export default {
         languageCode => languageCode !== form.sourceLanguageCode
       )
       if (form.targetLanguageCodes.length === 0) {
-        form.targetLanguageCodes = getDefaultTargetLanguageCodes(
+        form.targetLanguageCodes = getStoredTargetLanguageCodes(
           form.sourceLanguageCode
         )
       }
@@ -241,6 +291,7 @@ export default {
         ElMessage.warning('请至少选择一个目标语言')
         return
       }
+      rememberTargetLanguageCodes(form.targetLanguageCodes)
       submitting.value = true
       try {
         await multilingualApi.createSourcePostProperNounOrganizeJob(
@@ -286,6 +337,16 @@ export default {
       }
       form.searchOfficialTermTranslations = false
     })
+
+    watch(
+      () => form.targetLanguageCodes.join(','),
+      () => {
+        if (form.targetLanguageCodes.length === 0) {
+          return
+        }
+        rememberTargetLanguageCodes(form.targetLanguageCodes)
+      }
+    )
 
     return {
       defaultLoading,
