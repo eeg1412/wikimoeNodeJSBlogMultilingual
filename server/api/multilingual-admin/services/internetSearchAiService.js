@@ -37,6 +37,7 @@ const TERM_TRANSLATION_SOURCE_INTERNET_SEARCH = 'internetSearchAi'
 const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const OFFICIAL_TERM_SEARCH_REPAIR_MAX_ROUNDS = 1
 const OFFICIAL_TERM_SEARCH_REPAIR_BATCH_TERM_COUNT = 50
+const OFFICIAL_TERM_KNOWLEDGE_CONFIDENCE_THRESHOLD = 80
 
 const officialTermKnowledgeResponseJsonSchema = {
   type: 'object',
@@ -48,12 +49,25 @@ const officialTermKnowledgeResponseJsonSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['sourceText', 'translations', 'needsSearchLanguageCodes'],
+        required: [
+          'sourceText',
+          'translations',
+          'translationConfidenceScores',
+          'needsSearchLanguageCodes'
+        ],
         properties: {
           sourceText: { type: 'string' },
           translations: {
             type: 'object',
             additionalProperties: { type: 'string' }
+          },
+          translationConfidenceScores: {
+            type: 'object',
+            additionalProperties: {
+              type: 'number',
+              minimum: 0,
+              maximum: 100
+            }
           },
           translationNotes: {
             type: 'object',
@@ -343,6 +357,29 @@ function normalizeResultTranslationNotes(termItem, targetLanguageCodes) {
   return translationNotes
 }
 
+function normalizeResultTranslationConfidenceScores(termItem, targetLanguageCodes) {
+  const confidenceScores = {}
+  const sourceConfidenceScores = termItem?.translationConfidenceScores
+  if (
+    !sourceConfidenceScores ||
+    typeof sourceConfidenceScores !== 'object' ||
+    Array.isArray(sourceConfidenceScores)
+  ) {
+    return confidenceScores
+  }
+  targetLanguageCodes.forEach(languageCode => {
+    const confidenceScore = Number(sourceConfidenceScores[languageCode])
+    if (
+      Number.isFinite(confidenceScore) &&
+      confidenceScore >= 0 &&
+      confidenceScore <= 100
+    ) {
+      confidenceScores[languageCode] = confidenceScore
+    }
+  })
+  return confidenceScores
+}
+
 function shouldSkipSameSourceTranslation({
   sourceText,
   translatedText,
@@ -497,6 +534,7 @@ function buildOfficialTermKnowledgePrompt({
     'sourceTermRequests 旁可能包含 contentContextSummary；确认译名时必须优先按它和 note 识别对象身份，短人名、昵称、单字名或同形异义词不能只按字面普通词处理。',
     '必须优先让 needsSearchLanguageCodes 覆盖所有不确定语言，不要为了完整率补 translations。',
     '如果目标语言确实没有固定译名，但这一结论仍需要查证，也应放入 needsSearchLanguageCodes，由联网检索阶段确认后再直译或音译。',
+    'translationConfidenceScores 是每种目标语言译名可信度字段，取值范围为 0 到 100；每个 sourceText 的每个目标语言 code 都必须单独返回对应数值。',
     '必须返回每一个输入 sourceText；translations 只包含你完美确认的语言。',
     '只返回合法 JSON，不要使用 Markdown，不要解释。'
   ]
@@ -505,12 +543,12 @@ function buildOfficialTermKnowledgePrompt({
     promptLines.push(
       '特别重要：如果 translations 中某个目标语言的译名与 sourceText 文本完全一致，必须同时在 translationNotes[languageCode] 写中文译名备注，明确说明为什么该目标语言应保留原名。',
       '再次强调：译名和原名完全一致但没有 translationNotes[languageCode]，后台会把该语言视为未翻译；如果不能确定保留原名是否正确，必须放入 needsSearchLanguageCodes。',
-      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationNotes":{"zh-CN":"译名与原名一致时的原因"},"needsSearchLanguageCodes":["zh-HK"]}]}。'
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationConfidenceScores":{"zh-CN":96,"zh-HK":42},"translationNotes":{"zh-CN":"译名与原名一致时的原因"},"needsSearchLanguageCodes":["zh-HK"]}]}。'
     )
   } else {
     promptLines.push(
       '本步骤属于正文 AI 翻译前的自动名词整理，禁止把与 sourceText 完全一致的文本写入 translations；遇到必须保留原名或目标语言没有固定译名的情况，必须放入 needsSearchLanguageCodes，不要写 translationNotes。',
-      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"needsSearchLanguageCodes":["zh-HK"]}]}。'
+      'JSON 格式固定为：{"terms":[{"sourceText":"原名","translations":{"zh-CN":"译名"},"translationConfidenceScores":{"zh-CN":96,"zh-HK":42},"needsSearchLanguageCodes":["zh-HK"]}]}。'
     )
   }
 
@@ -834,6 +872,11 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
       termItem,
       termRequest.targetLanguageCodes
     )
+    const translationConfidenceScores =
+      normalizeResultTranslationConfidenceScores(
+        termItem,
+        termRequest.targetLanguageCodes
+      )
     termRequest.targetLanguageCodes.forEach(languageCode => {
       if (needsSearchLanguageCodes.includes(languageCode)) {
         return
@@ -843,6 +886,13 @@ function normalizeKnowledgeTerms(resultData, termRequests, options = {}) {
         300
       )
       if (translatedText) {
+        const confidenceScore = translationConfidenceScores[languageCode]
+        if (
+          !Number.isFinite(confidenceScore) ||
+          confidenceScore < OFFICIAL_TERM_KNOWLEDGE_CONFIDENCE_THRESHOLD
+        ) {
+          return
+        }
         const translationNote = normalizeString(
           resultTranslationNotes[languageCode],
           2000
