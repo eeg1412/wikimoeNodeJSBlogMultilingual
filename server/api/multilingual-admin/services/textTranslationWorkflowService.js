@@ -3726,6 +3726,7 @@ function parseAiContentText(content, settings, finishReason = '') {
   if (finishReason === 'length') {
     message = `${getProviderLabelBySettings(settings)} 返回内容被最大输出 Token 截断，JSON 内容解析失败`
     extra.retryable = false
+    extra.manualRetryRequired = true
   }
   if (preview) {
     message = `${message}，内容开头：${preview}`

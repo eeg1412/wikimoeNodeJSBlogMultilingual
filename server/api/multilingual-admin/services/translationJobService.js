@@ -1614,8 +1614,19 @@ async function retryTranslationJob(body = {}, options = {}) {
   job.runtime.lockedAt = null
   job.runtime.heartbeatAt = null
   job.runtime.leaseExpiresAt = null
-  job.runtime.recovering = true
+  job.runtime.recovering = false
   job.runtime.attempts = 0
+  job.runtime.finishedAt = null
+  job.failure.failedStep = ''
+  job.failure.errorCode = ''
+  job.failure.errorMessage = ''
+  job.failure.retryable = true
+  job.failure.attempts = 0
+  job.failure.stackSummary = ''
+  job.failure.lastFailedAt = null
+  job.progress.currentStep = '等待后台 worker 领取'
+  job.progress.currentStage = 'pending'
+  job.progress.percent = 0
   job.updatedBy = adminSnapshot
   appendLog(job, '用户已请求重试，任务重新进入队列', 'info', 'retry')
   await job.save()
@@ -1783,7 +1794,10 @@ async function claimNextRunnableTranslationJob(options = {}) {
   const isRecovering = candidate.status === TRANSLATION_JOB_STATUS.RUNNING
   const attemptNo = Number(candidate.runtime?.attempts || 0) + 1
   const leaseExpiresAt = getLeaseExpiresAt(options.leaseMs)
-  const currentStage = candidate.progress?.currentStage || 'claimed'
+  let currentStage = candidate.progress?.currentStage || 'claimed'
+  if (!isRecovering) {
+    currentStage = 'claimed'
+  }
   const update = {
     $set: {
       status: TRANSLATION_JOB_STATUS.RUNNING,
