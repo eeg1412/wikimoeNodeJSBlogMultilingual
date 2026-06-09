@@ -769,6 +769,7 @@ import {
 } from '@/composables/useListSessionParams'
 import { getLanguageText as getSharedLanguageText } from '@/utils/multilingual'
 import { getTranslationGroupDisplayMeta } from '@/utils/translationEntryDisplay'
+import { renderRichTextDocument } from '@/utils/translationJson'
 
 const jobTypeOptions = [
   { label: '文章 AI 翻译', value: 'post-ai-translation' },
@@ -777,6 +778,8 @@ const jobTypeOptions = [
   { label: '通用内容 AI 翻译', value: 'content-ai-translation' }
 ]
 const sourcePostProperNounOrganizeJobType = 'source-post-proper-noun-organize'
+const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
+const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 
 const statusOptions = [
   { label: '未开始', value: '未开始' },
@@ -852,6 +855,83 @@ function getFirstPreviewText(valueList) {
   return ''
 }
 
+function isRichTextValueType(valueType) {
+  if (valueType === LEGACY_RICH_TEXT_VALUE_TYPE) {
+    return true
+  }
+  return valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE
+}
+
+function parseRichTextDocumentValue(value) {
+  if (value === null || typeof value === 'undefined') {
+    return null
+  }
+  if (typeof value === 'object') {
+    return value
+  }
+
+  const text = normalizePreviewText(value)
+  if (!text) {
+    return null
+  }
+
+  try {
+    const parsedValue = JSON.parse(text)
+    if (parsedValue && typeof parsedValue === 'object') {
+      return parsedValue
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function renderRichTextDocumentPreview(value) {
+  const documentValue = parseRichTextDocumentValue(value)
+  if (!documentValue) {
+    return ''
+  }
+
+  try {
+    return normalizePreviewText(renderRichTextDocument(documentValue))
+  } catch {
+    return ''
+  }
+}
+
+function getRichTextPreviewHtml(valueType, rawValues) {
+  if (valueType === LEGACY_RICH_TEXT_VALUE_TYPE) {
+    return getFirstPreviewText(rawValues)
+  }
+
+  if (valueType !== STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return ''
+  }
+
+  if (!Array.isArray(rawValues)) {
+    return ''
+  }
+
+  for (const rawValue of rawValues) {
+    const renderedHtml = renderRichTextDocumentPreview(rawValue)
+    if (renderedHtml) {
+      return renderedHtml
+    }
+  }
+
+  return ''
+}
+
+function getFullPreviewHtml(options = {}) {
+  const html = getFirstPreviewText(options.htmlValues)
+  if (html) {
+    return html
+  }
+
+  return getRichTextPreviewHtml(options.valueType, options.rawValues)
+}
+
 function stringifyPreviewValue(value) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -867,6 +947,10 @@ function stringifyPreviewValue(value) {
 }
 
 function getFullPreviewText(options = {}) {
+  if (isRichTextValueType(options.valueType)) {
+    return getFirstPreviewText(options.previewValues)
+  }
+
   const rawText = getFirstPreviewText(options.rawValues)
   if (rawText) {
     return rawText
@@ -1964,6 +2048,7 @@ export default {
           requestEntryMap.value.get(String(entry.entryKey || '')) ||
           {}
         const currentPreviewText = getFullPreviewText({
+          valueType: entry.valueType,
           rawValues: [
             entry.currentPreviewRawValue,
             requestEntry.currentPreviewRawValue
@@ -1975,6 +2060,7 @@ export default {
           ]
         })
         const sourcePreviewText = getFullPreviewText({
+          valueType: entry.valueType,
           rawValues: [
             entry.sourcePreviewRawValue,
             requestEntry.sourcePreviewRawValue
@@ -1985,6 +2071,7 @@ export default {
           ]
         })
         const nextPreviewText = getFullPreviewText({
+          valueType: entry.valueType,
           rawValues: [
             entry.nextPreviewRawValue,
             entry.previewRawValue,
@@ -1999,15 +2086,37 @@ export default {
             requestEntry.previewText
           ]
         })
-        const currentPreviewHtml =
-          normalizePreviewText(entry.currentPreviewHtml) ||
-          normalizePreviewText(requestEntry.currentPreviewHtml)
-        const sourcePreviewHtml =
-          normalizePreviewText(entry.sourcePreviewHtml) ||
-          normalizePreviewText(requestEntry.sourcePreviewHtml)
-        const nextPreviewHtml =
-          normalizePreviewText(entry.nextPreviewHtml) ||
-          normalizePreviewText(requestEntry.nextPreviewHtml)
+        const currentPreviewHtml = getFullPreviewHtml({
+          valueType: entry.valueType,
+          htmlValues: [
+            entry.currentPreviewHtml,
+            requestEntry.currentPreviewHtml
+          ],
+          rawValues: [
+            entry.currentPreviewRawValue,
+            requestEntry.currentPreviewRawValue,
+            entry.targetValueSnapshotAtCompletion
+          ]
+        })
+        const sourcePreviewHtml = getFullPreviewHtml({
+          valueType: entry.valueType,
+          htmlValues: [entry.sourcePreviewHtml, requestEntry.sourcePreviewHtml],
+          rawValues: [
+            entry.sourcePreviewRawValue,
+            requestEntry.sourcePreviewRawValue
+          ]
+        })
+        const nextPreviewHtml = getFullPreviewHtml({
+          valueType: entry.valueType,
+          htmlValues: [entry.nextPreviewHtml, requestEntry.nextPreviewHtml],
+          rawValues: [
+            entry.nextPreviewRawValue,
+            entry.previewRawValue,
+            requestEntry.nextPreviewRawValue,
+            requestEntry.previewRawValue,
+            entry.value
+          ]
+        })
 
         const appliedBy = adoptionEntry?.appliedBy || null
         const appliedByName =

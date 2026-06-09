@@ -44,6 +44,10 @@
 
 <script>
 import { computed } from 'vue'
+import { renderRichTextDocument } from '@/utils/translationJson'
+
+const LEGACY_RICH_TEXT_VALUE_TYPE = 'richTextLite'
+const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 
 function normalizePreviewText(value) {
   if (value === null || value === undefined) {
@@ -53,7 +57,95 @@ function normalizePreviewText(value) {
   return String(value).trim()
 }
 
-function getFullPreviewText(rawValue, previewText) {
+function isRichTextEntry(entry) {
+  if (entry?.valueType === LEGACY_RICH_TEXT_VALUE_TYPE) {
+    return true
+  }
+  return entry?.valueType === STRUCTURED_RICH_TEXT_VALUE_TYPE
+}
+
+function parseRichTextDocumentValue(value) {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'object') {
+    return value
+  }
+
+  const text = normalizePreviewText(value)
+  if (!text) {
+    return null
+  }
+
+  try {
+    const parsedValue = JSON.parse(text)
+    if (parsedValue && typeof parsedValue === 'object') {
+      return parsedValue
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function renderRichTextDocumentPreview(value) {
+  const documentValue = parseRichTextDocumentValue(value)
+  if (!documentValue) {
+    return ''
+  }
+
+  try {
+    return normalizePreviewText(renderRichTextDocument(documentValue))
+  } catch {
+    return ''
+  }
+}
+
+function getPreviewHtml(entry, explicitHtml, rawValueList) {
+  const html = normalizePreviewText(explicitHtml)
+  if (html) {
+    return html
+  }
+
+  if (entry?.valueType === LEGACY_RICH_TEXT_VALUE_TYPE) {
+    return getFirstPreviewText(rawValueList)
+  }
+
+  if (entry?.valueType !== STRUCTURED_RICH_TEXT_VALUE_TYPE) {
+    return ''
+  }
+
+  for (const rawValue of rawValueList) {
+    const renderedHtml = renderRichTextDocumentPreview(rawValue)
+    if (renderedHtml) {
+      return renderedHtml
+    }
+  }
+
+  return ''
+}
+
+function getFirstPreviewText(valueList) {
+  if (!Array.isArray(valueList)) {
+    return ''
+  }
+
+  for (const value of valueList) {
+    const text = normalizePreviewText(value)
+    if (text) {
+      return text
+    }
+  }
+
+  return ''
+}
+
+function getFullPreviewText(entry, rawValue, previewText) {
+  if (isRichTextEntry(entry)) {
+    return normalizePreviewText(previewText)
+  }
+
   const fullText = normalizePreviewText(rawValue)
   if (fullText) {
     return fullText
@@ -85,30 +177,43 @@ export default {
   setup(props) {
     const currentText = computed(() => {
       return getFullPreviewText(
+        props.entry,
         props.entry.currentPreviewRawValue,
         props.entry.currentPreviewText
       )
     })
     const currentHtml = computed(() => {
-      return normalizePreviewText(props.entry.currentPreviewHtml)
+      return getPreviewHtml(props.entry, props.entry.currentPreviewHtml, [
+        props.entry.currentPreviewRawValue,
+        props.entry.currentValue,
+        props.entry.targetValueSnapshotAtCompletion
+      ])
     })
     const sourceText = computed(() => {
       return getFullPreviewText(
+        props.entry,
         props.entry.sourcePreviewRawValue,
         props.entry.sourcePreviewText
       )
     })
     const sourceHtml = computed(() => {
-      return normalizePreviewText(props.entry.sourcePreviewHtml)
+      return getPreviewHtml(props.entry, props.entry.sourcePreviewHtml, [
+        props.entry.sourcePreviewRawValue,
+        props.entry.sourceValue
+      ])
     })
     const nextText = computed(() => {
       const rawValue =
         props.entry.nextPreviewRawValue || props.entry.previewRawValue
       const previewText = props.entry.nextPreviewText || props.entry.previewText
-      return getFullPreviewText(rawValue, previewText)
+      return getFullPreviewText(props.entry, rawValue, previewText)
     })
     const nextHtml = computed(() => {
-      return normalizePreviewText(props.entry.nextPreviewHtml)
+      return getPreviewHtml(props.entry, props.entry.nextPreviewHtml, [
+        props.entry.nextPreviewRawValue,
+        props.entry.previewRawValue,
+        props.entry.value
+      ])
     })
     const hasCurrentContent = computed(() => {
       if (currentHtml.value) {
