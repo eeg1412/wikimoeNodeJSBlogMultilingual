@@ -9,7 +9,7 @@ const properNounTranslationService = require('./properNounTranslationService')
 const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 
 const MAX_DIRECT_SEARCH_TERM_COUNT = 100
-const MAX_REALTIME_SEARCH_LANGUAGE_PAIR_COUNT = 30
+const MAX_REALTIME_SEARCH_LANGUAGE_PAIR_COUNT = 100
 const REALTIME_INTERNET_SEARCH_TIMEOUT_SECONDS = 120
 
 function getTermModel() {
