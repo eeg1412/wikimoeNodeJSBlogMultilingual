@@ -28,6 +28,20 @@ function normalizeString(value, maxLength = 600) {
   return String(value).replace(/\r\n?/g, '\n').trim().slice(0, maxLength)
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype === Object.prototype) {
+    return true
+  }
+  if (prototype === null) {
+    return true
+  }
+  return false
+}
+
 function parseObjectId(value, fieldName = 'id') {
   const text = normalizeString(value, 80)
   if (!mongoose.Types.ObjectId.isValid(text)) {
@@ -226,10 +240,10 @@ function getOriginalTermNote(term, noteMap) {
   return ''
 }
 
-function normalizePreviewTerm(term, noteMap = null) {
+function normalizeTermTranslationFields(term) {
   const translations = {}
   const translationNotes = {}
-  if (term?.translations && typeof term.translations === 'object') {
+  if (isPlainObject(term?.translations)) {
     Object.keys(term.translations).forEach(languageCode => {
       const normalizedLanguageCode = normalizeLanguageCode(languageCode)
       const translatedText = normalizeString(
@@ -249,20 +263,42 @@ function normalizePreviewTerm(term, noteMap = null) {
     })
   }
   return {
+    translations,
+    translationNotes
+  }
+}
+
+function normalizePreviewTerm(term) {
+  const { translations, translationNotes } = normalizeTermTranslationFields(term)
+  let searchMetadata = {}
+  if (isPlainObject(term?.searchMetadata)) {
+    searchMetadata = term.searchMetadata
+  }
+  return {
     sourceText: normalizeString(term?.sourceText, 300),
     termId: normalizeString(term?.termId, 80),
-    note: noteMap
-      ? getOriginalTermNote(term, noteMap)
-      : normalizeString(term?.note, 2000),
+    note: normalizeString(term?.note, 2000),
     shouldUpdateTermNote: false,
     translationSource: 'internetSearchAi',
     translations,
     translationNotes,
-    searchMetadata:
-      term?.searchMetadata && typeof term.searchMetadata === 'object'
-        ? term.searchMetadata
-        : {}
+    searchMetadata
   }
+}
+
+function normalizeSearchPreviewTerm(term, originalTermNoteMap) {
+  const previewTerm = normalizePreviewTerm(term)
+  previewTerm.note = getOriginalTermNote(term, originalTermNoteMap)
+  return previewTerm
+}
+
+function normalizeApplyTerm(term) {
+  const applyTerm = normalizePreviewTerm(term)
+  applyTerm.shouldUpdateTermNote = term?.shouldUpdateTermNote === true
+  applyTerm.sourceLanguageCode = normalizeLanguageCode(
+    normalizeString(term?.sourceLanguageCode, 20)
+  )
+  return applyTerm
 }
 
 function notifyStatus(options, message, payload = {}) {
@@ -329,7 +365,7 @@ async function searchInternetTranslations(body = {}, options = {}) {
     provider: searchResult.provider || '',
     model: searchResult.model || '',
     terms: searchResult.terms.map(term => {
-      return normalizePreviewTerm(term, originalTermNoteMap)
+      return normalizeSearchPreviewTerm(term, originalTermNoteMap)
     }),
     stats: {
       ...(searchResult.stats || {}),
@@ -346,7 +382,7 @@ function normalizeApplyTerms(terms) {
   if (!Array.isArray(terms)) {
     return []
   }
-  return terms.map(normalizePreviewTerm).filter(term => {
+  return terms.map(term => normalizeApplyTerm(term)).filter(term => {
     return term.sourceText && Object.keys(term.translations).length > 0
   })
 }
