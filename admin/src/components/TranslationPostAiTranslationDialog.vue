@@ -1486,6 +1486,7 @@ export default {
       aiTranslateCoverImage.value = false
       aiAutoOrganizeOfficialTermGlossary.value = true
       aiSearchOfficialTermTranslations.value = false
+      aiVerificationEnabled.value = false
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -2429,6 +2430,7 @@ export default {
       aiSearchOfficialTermTranslations,
       aiSourceLanguageCode,
       aiTranslateCoverImage,
+      aiVerificationEnabled,
       aiSkippedEntries,
       aiStreamFeedbackRef,
       aiStreamContent,

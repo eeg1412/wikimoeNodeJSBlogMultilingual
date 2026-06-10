@@ -404,6 +404,7 @@ export default {
       selectedEntryIds.value = []
       prompt.value = ''
       searchOfficialTermTranslations.value = false
+      aiVerificationEnabled.value = false
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -910,6 +911,7 @@ export default {
       clearAll,
       confirmApply,
       createBackgroundJob,
+      aiVerificationEnabled,
       entryGroups,
       entryList,
       getLanguageText,

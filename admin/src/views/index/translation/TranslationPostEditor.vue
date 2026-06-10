@@ -3250,6 +3250,7 @@ export default {
       aiSourceLanguageCode.value = getDefaultAiSourceLanguageCode()
       aiTranslateCoverImage.value = false
       aiSearchOfficialTermTranslations.value = false
+      aiVerificationEnabled.value = false
       aiSettingsAvailability.value = createAiSettingsAvailability()
       officialTermSearchDefaultLoading.value = false
       officialTermSearchDefaultRequestId += 1
@@ -4080,6 +4081,7 @@ export default {
       relationSaving,
       isAiBusy,
       isOfficialTermSearchDisabled,
+      aiVerificationEnabled,
       officialTermSearchDefaultLoading,
       officialTermSearchUnavailableReason,
       postAiDialogVisible,
