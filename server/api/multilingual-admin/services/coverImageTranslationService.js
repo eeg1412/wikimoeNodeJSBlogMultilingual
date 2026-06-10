@@ -223,15 +223,44 @@ function getJobId(job) {
   return String(job?._id || job?.id || 'browser-request')
 }
 
+function getCoverSourceId(sourcePost) {
+  const sourceId = normalizeIdValue(sourcePost?.sourceId)
+  if (sourceId) {
+    return sourceId
+  }
+  return normalizeIdValue(sourcePost?._id)
+}
+
+function getCoverSourceSnapshotId(sourcePost) {
+  const sourceSnapshotId = normalizeIdValue(sourcePost?.sourceSnapshotId)
+  if (sourceSnapshotId) {
+    return sourceSnapshotId
+  }
+
+  const sourceId = normalizeIdValue(sourcePost?.sourceId)
+  const postId = normalizeIdValue(sourcePost?._id)
+  if (sourceId && postId && sourceId !== postId) {
+    return postId
+  }
+  return ''
+}
+
+function getCoverTranslationGroupId(sourcePost) {
+  const translationGroupId = normalizeIdValue(sourcePost?.translationGroupId)
+  if (translationGroupId) {
+    return translationGroupId
+  }
+  return getCoverSourceSnapshotId(sourcePost)
+}
+
 function buildCoverStageDiagnostics(options = {}) {
   return {
     layer: 'cover-image-translation-service',
     context: {
       phase: options.phase || '',
       jobId: getJobId(options.job),
-      sourcePostId: normalizeIdValue(
-        options.sourcePost?._id || options.sourcePost?.sourceId
-      ),
+      sourcePostId: getCoverSourceId(options.sourcePost),
+      sourceSnapshotId: getCoverSourceSnapshotId(options.sourcePost),
       targetPostId: normalizeIdValue(options.targetPost?._id),
       sourceLanguageCode: options.sourceLanguageCode || '',
       targetLanguageCode: options.targetLanguageCode || '',
@@ -713,16 +742,22 @@ function buildCoverImagePreviewEntry({
   warningMessage = ''
 }) {
   const currentCoverAttachment = resolveFirstCoverImage(targetPost)
+  const sourceId = getCoverSourceId(sourcePost)
+  const sourceSnapshotId = getCoverSourceSnapshotId(sourcePost)
+  const translationGroupId = getCoverTranslationGroupId(sourcePost)
   return {
     entryType: COVER_IMAGE_ENTRY_TYPE,
     entryKey: [
       'cover-image',
-      normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+      sourceId,
       normalizeIdValue(targetPost?._id),
       languageCode || ''
     ].join(':'),
     scope: 'post-cover-image',
-    sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+    sourceId,
+    sourcePostId: sourceId,
+    sourceSnapshotId,
+    translationGroupId,
     targetPostId: normalizeIdValue(targetPost?._id),
     languageCode: languageCode || '',
     artifactId: artifact.artifactId,
@@ -769,7 +804,10 @@ function buildBaseArtifact({
     recognitionKey,
     sourceCoverKey: coverInfo.sourceCoverKey,
     sourceCoverAttachmentId: getAttachmentId(coverInfo.attachment),
-    sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+    sourceId: getCoverSourceId(sourcePost),
+    sourcePostId: getCoverSourceId(sourcePost),
+    sourceSnapshotId: getCoverSourceSnapshotId(sourcePost),
+    translationGroupId: getCoverTranslationGroupId(sourcePost),
     sourcePostType: Number(sourcePost?.type || 0),
     targetPostId: normalizeIdValue(targetPost?._id),
     sourceTitle,
@@ -924,7 +962,10 @@ function createSkippedResult({
     recognitionKey: '',
     sourceCoverKey: '',
     sourceCoverAttachmentId: '',
-    sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+    sourceId: getCoverSourceId(sourcePost),
+    sourcePostId: getCoverSourceId(sourcePost),
+    sourceSnapshotId: getCoverSourceSnapshotId(sourcePost),
+    translationGroupId: getCoverTranslationGroupId(sourcePost),
     sourcePostType: Number(sourcePost?.type || 0),
     targetPostId: normalizeIdValue(targetPost?._id),
     sourceTitle: sourcePost?.title || '',
@@ -982,7 +1023,10 @@ function createNotRequiredResult({
     recognitionKey: '',
     sourceCoverKey: '',
     sourceCoverAttachmentId: '',
-    sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+    sourceId: getCoverSourceId(sourcePost),
+    sourcePostId: getCoverSourceId(sourcePost),
+    sourceSnapshotId: getCoverSourceSnapshotId(sourcePost),
+    translationGroupId: getCoverTranslationGroupId(sourcePost),
     sourcePostType: Number(sourcePost?.type || 0),
     targetPostId: normalizeIdValue(targetPost?._id),
     sourceTitle: sourcePost?.title || '',
@@ -1076,7 +1120,8 @@ async function runRecognition({
         phase: 'recognition',
         jobId: getJobId(job),
         recognitionKey,
-        sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+        sourcePostId: getCoverSourceId(sourcePost),
+        sourceSnapshotId: getCoverSourceSnapshotId(sourcePost),
         sourceLanguageCode,
         targetLanguageCode
       },
@@ -1242,7 +1287,8 @@ async function runGeneration({
         jobId: getJobId(job),
         recognitionKey,
         generationKey,
-        sourcePostId: normalizeIdValue(sourcePost?._id || sourcePost?.sourceId),
+        sourcePostId: getCoverSourceId(sourcePost),
+        sourceSnapshotId: getCoverSourceSnapshotId(sourcePost),
         targetPostId: normalizeIdValue(targetPost?._id),
         sourceLanguageCode,
         targetLanguageCode

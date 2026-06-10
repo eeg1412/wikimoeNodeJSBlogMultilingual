@@ -120,6 +120,22 @@ function toObjectId(value, field, required = false) {
   return new mongoose.Types.ObjectId(text)
 }
 
+function toOptionalObjectId(value) {
+  if (value instanceof mongoose.Types.ObjectId) {
+    return value
+  }
+  if (value && typeof value.toHexString === 'function') {
+    return new mongoose.Types.ObjectId(value.toHexString())
+  }
+
+  const text = normalizeIdentityValue(value)
+  if (!text || !mongoose.Types.ObjectId.isValid(text)) {
+    return null
+  }
+
+  return new mongoose.Types.ObjectId(text)
+}
+
 function normalizeAdminSnapshot(admin) {
   if (!admin || !admin._id) {
     return null
@@ -978,6 +994,90 @@ async function applySourcePostTranslationJob({
   }
 }
 
+function getSourcePostImportCoverSourceSnapshotId(job, entry) {
+  const entrySourceSnapshotId = toOptionalObjectId(entry?.sourceSnapshotId)
+  if (entrySourceSnapshotId) {
+    return String(entrySourceSnapshotId)
+  }
+
+  const rootSourceSnapshotId = toOptionalObjectId(
+    job.source?.snapshotId || job.result?.sourceSnapshotId
+  )
+  if (!rootSourceSnapshotId) {
+    return ''
+  }
+
+  const rootSourceId = toOptionalObjectId(job.source?.postId)
+  const entrySourceId = toOptionalObjectId(entry?.sourceId)
+  const entrySourcePostId = toOptionalObjectId(entry?.sourcePostId)
+  const entrySourceCandidates = [entrySourceId, entrySourcePostId].filter(
+    Boolean
+  )
+  if (entrySourceCandidates.length === 0) {
+    return String(rootSourceSnapshotId)
+  }
+
+  const rootIdentitySet = new Set()
+  if (rootSourceId) {
+    rootIdentitySet.add(String(rootSourceId))
+  }
+  rootIdentitySet.add(String(rootSourceSnapshotId))
+
+  const matchesRootSource = entrySourceCandidates.some(candidate => {
+    return rootIdentitySet.has(String(candidate))
+  })
+  if (matchesRootSource) {
+    return String(rootSourceSnapshotId)
+  }
+
+  return ''
+}
+
+async function createOrGetSourcePostImportCoverTargetPost(job, entry) {
+  const targetPostId = toOptionalObjectId(entry?.targetPostId)
+  if (targetPostId) {
+    return String(targetPostId)
+  }
+
+  const languageCode = normalizeIdentityValue(
+    entry?.languageCode || job.target?.languageCode
+  )
+  if (!languageCode) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      '封面图条目缺少目标语言',
+      'entry.languageCode',
+      400
+    )
+  }
+
+  const sourceSnapshotId = getSourcePostImportCoverSourceSnapshotId(job, entry)
+  if (!sourceSnapshotId) {
+    return ''
+  }
+
+  try {
+    const createResult = await translationPostService.createTranslationPost(
+      {
+        sourceSnapshotId,
+        languageCode,
+        copyMode: 'source'
+      },
+      { skipContentRefresh: true }
+    )
+    return String(createResult.translationPostId)
+  } catch (error) {
+    if (
+      error?.name === 'ApiError' &&
+      error.code === ERROR_CODES.TRANSLATION_EXISTS &&
+      error.extra?.translationPostId
+    ) {
+      return String(error.extra.translationPostId)
+    }
+    throw error
+  }
+}
+
 function buildAggregateApplyJobForLanguage(job, languageCode) {
   const targetInfo = job.result?.translationPostMap?.[languageCode]
   if (!targetInfo?.translationPostId) {
@@ -1453,12 +1553,16 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
           400
         )
       }
+      const targetPostId = await createOrGetSourcePostImportCoverTargetPost(
+        job,
+        entry
+      )
       const result = await coverImageAdoptionService.adoptCoverImage(
         {
           jobId: job._id,
           artifactId: entry.artifactId,
           entryKey: entry.entryKey,
-          targetPostId: entry.targetPostId,
+          targetPostId,
           languageCode: entry.languageCode,
           applyBatchId
         },

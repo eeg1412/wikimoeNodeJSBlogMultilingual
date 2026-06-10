@@ -12,6 +12,7 @@ const {
   COVER_IMAGE_ENTRY_TYPE
 } = require('../utils/coverImageTranslationUtils')
 
+const TRANSLATION_RECORD_KIND = 'translation'
 const APPLY_ALLOWED_STATUS_SET = new Set([
   '等待审核',
   '不采纳',
@@ -51,6 +52,95 @@ function toOptionalObjectId(value) {
     return null
   }
   return new mongoose.Types.ObjectId(text)
+}
+
+function addObjectIdCandidate(candidateList, value) {
+  const objectId = toOptionalObjectId(value)
+  if (!objectId) {
+    return
+  }
+
+  const objectIdText = String(objectId)
+  const exists = candidateList.some(candidate => {
+    return String(candidate) === objectIdText
+  })
+  if (exists) {
+    return
+  }
+
+  candidateList.push(objectId)
+}
+
+function buildCoverSourceIdentityCandidates(artifact, previewEntry) {
+  const sourceIdCandidates = []
+  const sourceSnapshotIdCandidates = []
+  const translationGroupIdCandidates = []
+
+  addObjectIdCandidate(sourceIdCandidates, artifact?.sourceId)
+  addObjectIdCandidate(sourceIdCandidates, previewEntry?.sourceId)
+  addObjectIdCandidate(sourceIdCandidates, artifact?.sourcePostId)
+  addObjectIdCandidate(sourceIdCandidates, previewEntry?.sourcePostId)
+
+  addObjectIdCandidate(sourceSnapshotIdCandidates, artifact?.sourceSnapshotId)
+  addObjectIdCandidate(
+    sourceSnapshotIdCandidates,
+    previewEntry?.sourceSnapshotId
+  )
+  addObjectIdCandidate(sourceSnapshotIdCandidates, artifact?.sourcePostId)
+  addObjectIdCandidate(sourceSnapshotIdCandidates, previewEntry?.sourcePostId)
+
+  addObjectIdCandidate(translationGroupIdCandidates, artifact?.translationGroupId)
+  addObjectIdCandidate(
+    translationGroupIdCandidates,
+    previewEntry?.translationGroupId
+  )
+  addObjectIdCandidate(translationGroupIdCandidates, artifact?.sourceSnapshotId)
+  addObjectIdCandidate(
+    translationGroupIdCandidates,
+    previewEntry?.sourceSnapshotId
+  )
+  addObjectIdCandidate(translationGroupIdCandidates, artifact?.sourcePostId)
+  addObjectIdCandidate(translationGroupIdCandidates, previewEntry?.sourcePostId)
+
+  return {
+    sourceIdCandidates,
+    sourceSnapshotIdCandidates,
+    translationGroupIdCandidates
+  }
+}
+
+function buildTargetPostSourceQueryList(artifact, previewEntry) {
+  const identityCandidates = buildCoverSourceIdentityCandidates(
+    artifact,
+    previewEntry
+  )
+  const queryList = []
+
+  if (identityCandidates.sourceIdCandidates.length > 0) {
+    queryList.push({
+      sourceId: {
+        $in: identityCandidates.sourceIdCandidates
+      }
+    })
+  }
+
+  if (identityCandidates.sourceSnapshotIdCandidates.length > 0) {
+    queryList.push({
+      sourceSnapshotId: {
+        $in: identityCandidates.sourceSnapshotIdCandidates
+      }
+    })
+  }
+
+  if (identityCandidates.translationGroupIdCandidates.length > 0) {
+    queryList.push({
+      translationGroupId: {
+        $in: identityCandidates.translationGroupIdCandidates
+      }
+    })
+  }
+
+  return queryList
 }
 
 function normalizeArtifactId(value) {
@@ -136,6 +226,17 @@ async function findTargetPost(targetPostId) {
   return targetPost
 }
 
+function buildTargetPostSummary(targetPost, coverImages) {
+  return {
+    targetPostId: String(targetPost._id),
+    languageCode: String(targetPost.languageCode || ''),
+    sourceId: targetPost.sourceId || null,
+    sourceSnapshotId: targetPost.sourceSnapshotId || null,
+    translationGroupId: targetPost.translationGroupId || null,
+    coverImages
+  }
+}
+
 function getTargetPostCoverImages(targetPost) {
   const currentCoverImages = Array.isArray(targetPost.coverImages)
     ? targetPost.coverImages
@@ -174,12 +275,10 @@ async function touchTargetPostCoverImage(targetPost) {
     }
   )
 
-  return {
-    targetPostId: String(targetPost._id),
-    coverImages: getTargetPostCoverImages(targetPost).map(item => {
-      return normalizeCoverImageId(item)
-    })
-  }
+  const coverImages = getTargetPostCoverImages(targetPost).map(item => {
+    return normalizeCoverImageId(item)
+  })
+  return buildTargetPostSummary(targetPost, coverImages)
 }
 
 async function updateTargetPostCoverImage(targetPost, attachmentId) {
@@ -198,12 +297,10 @@ async function updateTargetPostCoverImage(targetPost, attachmentId) {
       }
     }
   )
-  return {
-    targetPostId: String(targetPost._id),
-    coverImages: nextCoverImages.map(item => {
-      return normalizeCoverImageId(item)
-    })
-  }
+  const coverImages = nextCoverImages.map(item => {
+    return normalizeCoverImageId(item)
+  })
+  return buildTargetPostSummary(targetPost, coverImages)
 }
 
 async function saveTargetPostCoverAttachment({
@@ -326,21 +423,22 @@ async function resolveTargetPostId({ body, artifact, previewEntry }) {
     return String(previewTargetPostId)
   }
 
-  const sourcePostId = toObjectId(
-    artifact?.sourcePostId || previewEntry?.sourcePostId,
-    'sourcePostId',
-    ERROR_CODES.SOURCE_ID_INVALID
-  )
   const languageCode = resolveCoverLanguageCode(body, artifact, previewEntry)
   const PostModel = getRepositoryModel('posts')
-  const targetPost = await PostModel.findOne({
-    sourceCollection: 'posts',
-    sourceId: sourcePostId,
-    languageCode,
-    recordKind: 'translation'
-  })
-    .select('_id')
-    .lean()
+  const sourceQueryList = buildTargetPostSourceQueryList(
+    artifact,
+    previewEntry
+  )
+  let targetPost = null
+  if (sourceQueryList.length > 0) {
+    targetPost = await PostModel.findOne({
+      languageCode,
+      recordKind: TRANSLATION_RECORD_KIND,
+      $or: sourceQueryList
+    })
+      .select('_id')
+      .lean()
+  }
   if (!targetPost?._id) {
     const artifactTargetPostId = toOptionalObjectId(artifact?.targetPostId)
     if (artifactTargetPostId) {
@@ -354,6 +452,18 @@ async function resolveTargetPostId({ body, artifact, previewEntry }) {
     )
   }
   return String(targetPost._id)
+}
+
+function resolveAdoptionSourceId({ artifact, previewEntry, targetPost }) {
+  return toObjectId(
+    artifact?.sourceId ||
+      previewEntry?.sourceId ||
+      targetPost?.sourceId ||
+      artifact?.sourcePostId ||
+      previewEntry?.sourcePostId,
+    'sourcePostId',
+    ERROR_CODES.SOURCE_ID_INVALID
+  )
 }
 
 function updateArtifactList(job, artifactId, updateData) {
@@ -405,6 +515,7 @@ function buildCoverImageAdoptionEntry({
   artifact,
   previewEntry,
   targetPostId,
+  targetPost,
   adminSnapshot,
   applyBatchId,
   now
@@ -413,11 +524,7 @@ function buildCoverImageAdoptionEntry({
     entryKey: String(previewEntry?.entryKey || '').trim(),
     scope: 'coverImage',
     collectionName: 'posts',
-    sourceId: toObjectId(
-      artifact?.sourcePostId || previewEntry?.sourcePostId,
-      'sourcePostId',
-      ERROR_CODES.SOURCE_ID_INVALID
-    ),
+    sourceId: resolveAdoptionSourceId({ artifact, previewEntry, targetPost }),
     recordId: toObjectId(
       targetPostId,
       'targetPostId',
@@ -668,6 +775,7 @@ async function adoptCoverImage(body = {}, options = {}) {
     artifact,
     previewEntry,
     targetPostId: resolvedTargetPostId,
+    targetPost: targetUpdate,
     adminSnapshot,
     applyBatchId,
     now
