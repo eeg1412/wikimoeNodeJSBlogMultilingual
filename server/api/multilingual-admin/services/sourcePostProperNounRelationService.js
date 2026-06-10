@@ -10,6 +10,7 @@ const SOURCE_COLLECTION_POSTS = 'posts'
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 const MAX_INTERNET_SEARCH_TERM_COUNT = 100
+const MAX_BATCH_BIND_TERM_COUNT = 100
 const RELATION_SOURCE_VALUES = ['manual', 'aiOrganize', 'translationWorkflow']
 const SOURCE_POST_RELATED_FIELDS = [
   'postList',
@@ -273,6 +274,54 @@ function getUniqueTermIdList(values) {
   return Array.from(idMap.values())
 }
 
+function parseTermIdList(values, fieldName = 'termIds') {
+  if (!Array.isArray(values)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'termIds 不能为空',
+      fieldName,
+      400
+    )
+  }
+
+  const idMap = new Map()
+  values.forEach(value => {
+    const idText = getTermIdText(value)
+    if (!mongoose.Types.ObjectId.isValid(idText)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_ID_INVALID,
+        undefined,
+        fieldName,
+        400
+      )
+    }
+    if (idMap.has(idText)) {
+      return
+    }
+    idMap.set(idText, new mongoose.Types.ObjectId(idText))
+  })
+
+  if (idMap.size === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'termIds 不能为空',
+      fieldName,
+      400
+    )
+  }
+
+  if (idMap.size > MAX_BATCH_BIND_TERM_COUNT) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `单次最多绑定 ${MAX_BATCH_BIND_TERM_COUNT} 个专有名词`,
+      fieldName,
+      400
+    )
+  }
+
+  return Array.from(idMap.values())
+}
+
 async function getRelationCountMapBySourceIds(sourceIds, options = {}) {
   const sourceIdList = getSourcePostIdList(sourceIds)
   const countMap = new Map()
@@ -295,7 +344,7 @@ async function getRelationCountMapBySourceIds(sourceIds, options = {}) {
   return countMap
 }
 
-function buildTermKeywordMatch(keyword) {
+function buildTermSourceTextKeywordMatch(keyword) {
   const text = normalizeString(keyword, 120)
   if (!text) {
     return {}
@@ -304,9 +353,18 @@ function buildTermKeywordMatch(keyword) {
   return {
     $or: [
       { sourceText: keywordRegExp },
-      { normalizedSourceText: keywordRegExp },
-      { note: keywordRegExp }
+      { normalizedSourceText: keywordRegExp }
     ]
+  }
+}
+
+function buildTermNoteKeywordMatch(keyword) {
+  const text = normalizeString(keyword, 120)
+  if (!text) {
+    return {}
+  }
+  return {
+    note: new RegExp(escapeRegexp(text), 'i')
   }
 }
 
@@ -381,7 +439,8 @@ async function getSourcePostTermList(query = {}) {
     _id: { $in: relationTermIdList },
     enabled: true,
     ...properNounTranslationService.buildTermStarredMatch(query.isStarred),
-    ...buildTermKeywordMatch(query.keyword)
+    ...buildTermSourceTextKeywordMatch(query.sourceTextKeyword),
+    ...buildTermNoteKeywordMatch(query.noteKeyword)
   }
   const matchedTerms = await TermModel.find(termMatch)
     .sort({ updatedAt: -1, _id: -1 })
@@ -615,6 +674,102 @@ async function bindTermsToSourcePost({
     sourcePost: sourcePostSummary,
     requestedCount: termIdList.length,
     relationCount: relations.length,
+    relations
+  }
+}
+
+async function getSourcePostTermRelationMap({
+  sourceId,
+  termIds = [],
+  enabled = true
+}) {
+  const relationMap = new Map()
+  const normalizedSourceId = parseSourceId(sourceId)
+  const termIdList = getUniqueTermIdList(termIds)
+  if (termIdList.length === 0) {
+    return relationMap
+  }
+
+  const RelationModel = getRelationModel()
+  const relationMatch = buildRelationMatch({
+    sourceId: normalizedSourceId,
+    enabled
+  })
+  relationMatch.termId = { $in: termIdList }
+  const relations = await RelationModel.find(relationMatch).lean()
+  relations.forEach(relation => {
+    relationMap.set(String(relation.termId || ''), relation)
+  })
+  return relationMap
+}
+
+async function batchBindExistingTermsToSourcePost(body = {}) {
+  const sourceId = parseSourceId(body.sourceId || body.id)
+  const sourcePost = await getSourcePostSummary(sourceId)
+  const sourceLanguageCode = normalizeOptionalLanguageCode(
+    body.sourceLanguageCode || sourcePost.sourceLanguageCode,
+    'sourceLanguageCode'
+  )
+  const termIdList = parseTermIdList(body.termIds || body.ids, 'termIds')
+  const TermModel = getTermModel()
+  const termList = await TermModel.find({
+    _id: { $in: termIdList },
+    enabled: true
+  })
+    .select('_id sourceText')
+    .lean()
+  const existingTermIdSet = new Set()
+  termList.forEach(term => {
+    existingTermIdSet.add(String(term._id))
+  })
+  const missingTermIds = termIdList
+    .map(termId => String(termId))
+    .filter(termId => {
+      return !existingTermIdSet.has(termId)
+    })
+  if (missingTermIds.length > 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      `以下专有名词不存在或已停用：${missingTermIds.join('、')}`,
+      'termIds',
+      400,
+      { missingTermIds }
+    )
+  }
+
+  const existingRelationMap = await getSourcePostTermRelationMap({
+    sourceId,
+    termIds: termIdList,
+    enabled: true
+  })
+  const bindTermIdList = termIdList.filter(termId => {
+    return !existingRelationMap.has(String(termId))
+  })
+  const relations = []
+  for (const termId of bindTermIdList) {
+    relations.push(
+      await bindTermToSourcePost({
+        sourceId,
+        sourceLanguageCode,
+        termId,
+        relationSource: 'manual',
+        sourcePost
+      })
+    )
+  }
+
+  let requestedCount = 0
+  const requestedValues = body.termIds || body.ids
+  if (Array.isArray(requestedValues)) {
+    requestedCount = requestedValues.length
+  }
+
+  return {
+    sourcePost,
+    requestedCount,
+    uniqueRequestedCount: termIdList.length,
+    boundCount: relations.length,
+    skippedAlreadyBoundCount: existingRelationMap.size,
     relations
   }
 }
@@ -1169,10 +1324,12 @@ async function mergeArticleLinkedCandidateCoverage({
 
 module.exports = {
   SOURCE_COLLECTION_POSTS,
+  batchBindExistingTermsToSourcePost,
   bindTermsToSourcePost,
   createOrBindSourcePostTerm,
   deleteRelationsByTermIds,
   getRelationCountMapBySourceIds,
+  getSourcePostTermRelationMap,
   getSourcePostIdFromScopeKey,
   getSourcePostLinkedTermGlossaryCoverage,
   getSourcePostSummary,

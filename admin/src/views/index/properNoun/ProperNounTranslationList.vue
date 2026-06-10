@@ -18,10 +18,18 @@
         >
           <el-form-item>
             <el-input
-              v-model="params.keyword"
-              placeholder="原文、备注"
+              v-model="params.sourceTextKeyword"
+              placeholder="原文名词"
               clearable
-              style="width: 220px"
+              style="width: 180px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-input
+              v-model="params.noteKeyword"
+              placeholder="备注"
+              clearable
+              style="width: 180px"
             />
           </el-form-item>
           <el-form-item>
@@ -529,7 +537,8 @@ export default {
     const params = reactive({
       page: 1,
       limit: 20,
-      keyword: '',
+      sourceTextKeyword: '',
+      noteKeyword: '',
       languageCode: '',
       isStarred: ''
       // enabled: ''
@@ -615,8 +624,11 @@ export default {
         page: params.page,
         limit: params.limit
       }
-      if (params.keyword) {
-        requestParams.keyword = params.keyword
+      if (params.sourceTextKeyword) {
+        requestParams.sourceTextKeyword = params.sourceTextKeyword
+      }
+      if (params.noteKeyword) {
+        requestParams.noteKeyword = params.noteKeyword
       }
       if (params.languageCode) {
         requestParams.languageCode = params.languageCode

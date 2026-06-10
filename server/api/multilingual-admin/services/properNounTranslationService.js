@@ -572,17 +572,34 @@ function escapeRegexp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function buildTermSearchMatch(query = {}) {
-  const match = {}
-  const keyword = normalizeString(query.keyword, 120)
-  if (keyword) {
-    const keywordRegExp = new RegExp(escapeRegexp(keyword), 'i')
-    match.$or = [
+function buildSourceTextKeywordMatch(keyword) {
+  const text = normalizeString(keyword, 120)
+  if (!text) {
+    return {}
+  }
+  const keywordRegExp = new RegExp(escapeRegexp(text), 'i')
+  return {
+    $or: [
       { sourceText: keywordRegExp },
-      { normalizedSourceText: keywordRegExp },
-      { note: keywordRegExp }
+      { normalizedSourceText: keywordRegExp }
     ]
   }
+}
+
+function buildNoteKeywordMatch(keyword) {
+  const text = normalizeString(keyword, 120)
+  if (!text) {
+    return {}
+  }
+  return {
+    note: new RegExp(escapeRegexp(text), 'i')
+  }
+}
+
+function buildTermSearchMatch(query = {}) {
+  const match = {}
+  Object.assign(match, buildSourceTextKeywordMatch(query.sourceTextKeyword))
+  Object.assign(match, buildNoteKeywordMatch(query.noteKeyword))
 
   Object.assign(match, buildTermStarredMatch(query.isStarred))
 
@@ -685,6 +702,41 @@ function attachTranslationsToTerms(termList, translationList) {
   })
 }
 
+function getSourcePostBindingScopeId(query = {}) {
+  const sourceId = normalizeString(query.sourceId, 80)
+  if (sourceId) {
+    return sourceId
+  }
+  const sourcePostId = normalizeString(query.sourcePostId, 80)
+  if (sourcePostId) {
+    return sourcePostId
+  }
+  return normalizeString(query.boundSourceId, 80)
+}
+
+async function attachSourcePostBindingStateToTerms(termList, query = {}) {
+  const sourceId = getSourcePostBindingScopeId(query)
+  if (!sourceId || termList.length === 0) {
+    return termList
+  }
+  const relationMap =
+    await getSourcePostProperNounRelationService().getSourcePostTermRelationMap(
+      {
+        sourceId,
+        termIds: termList.map(term => term._id)
+      }
+    )
+
+  return termList.map(term => {
+    const relation = relationMap.get(String(term._id)) || null
+    return {
+      ...term,
+      isBoundToSourcePost: Boolean(relation),
+      sourcePostRelation: relation
+    }
+  })
+}
+
 async function getTermList(query = {}) {
   const page = parsePage(query.page)
   const limit = parseLimit(query.limit)
@@ -711,9 +763,13 @@ async function getTermList(query = {}) {
   const translationList = await TranslationModel.find(translationMatch)
     .sort({ languageCode: 1, updatedAt: -1 })
     .lean()
+  const list = await attachSourcePostBindingStateToTerms(
+    attachTranslationsToTerms(termList, translationList),
+    query
+  )
 
   return {
-    list: attachTranslationsToTerms(termList, translationList),
+    list,
     total,
     termCount,
     maxTermCount: MAX_TERM_COUNT,

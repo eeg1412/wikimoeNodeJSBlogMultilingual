@@ -225,6 +225,12 @@ export default function (api) {
         noLoading
       })
     },
+    batchBindSourcePostProperNounTerms(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/batch-bind', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     unbindSourcePostProperNounTerm(data, noLoading = false) {
       return api.delete('/source/post/proper-noun/unbind', {
         params: data,

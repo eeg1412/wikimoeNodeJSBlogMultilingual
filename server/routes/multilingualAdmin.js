@@ -226,6 +226,12 @@ const multilingualAdminRouteSetting = [
     controller: sourcePostProperNounController.createOrBindTerm
   },
   {
+    path: '/source/post/proper-noun/batch-bind',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.batchBindTerms
+  },
+  {
     path: '/source/post/proper-noun/unbind',
     method: 'delete',
     middleware: [checkAuth],

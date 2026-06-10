@@ -43,10 +43,18 @@
         >
           <el-form-item>
             <el-input
-              v-model="params.keyword"
-              placeholder="原文、备注"
+              v-model="params.sourceTextKeyword"
+              placeholder="原文名词"
               clearable
-              style="width: 220px"
+              style="width: 180px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-input
+              v-model="params.noteKeyword"
+              placeholder="备注"
+              clearable
+              style="width: 180px"
             />
           </el-form-item>
           <el-form-item>
@@ -88,6 +96,10 @@
         <div class="source-post-term-action-buttons">
           <el-button @click="getTermList(false)">
             <el-icon><Refresh /></el-icon>
+          </el-button>
+          <el-button type="primary" plain @click="openBindExistingTermDialog">
+            <el-icon><LinkIcon /></el-icon>
+            绑定既有名词
           </el-button>
           <el-button type="primary" @click="openCreateTermDialog">
             <el-icon><Plus /></el-icon>
@@ -273,6 +285,183 @@
     </el-dialog>
 
     <el-dialog
+      v-model="bindDialogVisible"
+      title="绑定既有名词"
+      width="min(1040px, 96vw)"
+      append-to-body
+      destroy-on-close
+      @closed="clearBindTermSelection"
+    >
+      <div class="source-post-term-bind-toolbar common-top-search-form-body">
+        <el-form
+          :inline="true"
+          :model="bindParams"
+          class="source-post-term-bind-search-form"
+          @submit.prevent
+          @keypress.enter="getBindableTermList(true)"
+        >
+          <el-form-item>
+            <el-input
+              v-model="bindParams.sourceTextKeyword"
+              placeholder="原文名词"
+              clearable
+              style="width: 180px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-input
+              v-model="bindParams.noteKeyword"
+              placeholder="备注"
+              clearable
+              style="width: 180px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="bindParams.languageCode"
+              placeholder="译名语言"
+              clearable
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in languageOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select
+              v-model="bindParams.isStarred"
+              placeholder="标星状态"
+              clearable
+              style="width: 130px"
+            >
+              <el-option label="已标星" value="true" />
+              <el-option label="未标星" value="false" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="getBindableTermList(true)">
+              搜索
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <ResponsiveTable
+        ref="bindTableRef"
+        v-loading="bindLoading"
+        :data="bindTermList"
+        row-key="_id"
+        max-height="420"
+        border
+        @selection-change="handleBindTermSelectionChange"
+      >
+        <ResponsiveTableColumn
+          type="selection"
+          width="48"
+          reserve-selection
+          :selectable="isBindableTermSelectable"
+        />
+        <ResponsiveTableColumn label="原文名词" min-width="240">
+          <template #default="{ row }">
+            <div class="source-post-term-source-text">
+              {{ row.sourceText }}
+            </div>
+            <el-tag
+              v-if="isTermBoundToSourcePost(row)"
+              class="source-post-term-bound-tag"
+              type="success"
+              effect="plain"
+            >
+              已绑定
+            </el-tag>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="原文语言" width="140">
+          <template #default="{ row }">
+            <span>{{ getSourceLanguageText(row.sourceLanguageCode) }}</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="译名" min-width="280">
+          <template #default="{ row }">
+            <div
+              v-if="getBindDisplayedTranslationItems(row).length > 0"
+              class="source-post-term-translation-list"
+            >
+              <el-tag
+                v-for="translation in getBindDisplayedTranslationItems(row)"
+                :key="translation.displayKey"
+                :type="getTranslationTagType(translation)"
+                effect="plain"
+              >
+                {{ getTranslationTagText(translation) }}
+              </el-tag>
+            </div>
+            <span v-else class="table-empty-text">暂无译名</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="备注" min-width="200">
+          <template #default="{ row }">
+            <div v-if="row.note" class="source-post-term-note-cell">
+              {{ row.note }}
+            </div>
+            <span v-else class="table-empty-text">-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="使用情况" width="180">
+          <template #default="{ row }">
+            <div class="source-post-term-usage">
+              <div class="source-post-term-usage-count">
+                {{ getCountText(row.usedCount) }} 次
+              </div>
+              <div class="source-post-term-usage-date">
+                最后：{{ getLastUsedAtText(row.lastUsedAt) }}
+              </div>
+            </div>
+          </template>
+        </ResponsiveTableColumn>
+      </ResponsiveTable>
+
+      <div class="source-post-term-bind-pagination">
+        <el-pagination
+          background
+          layout="total, prev, pager, next"
+          :total="bindTotal"
+          :pager-count="5"
+          size="small"
+          v-model:current-page="bindParams.page"
+          v-model:page-size="bindParams.limit"
+        />
+      </div>
+
+      <template #footer>
+        <div class="source-post-term-bind-footer">
+          <div class="source-post-term-bind-selected-count">
+            已选择 {{ selectedBindableTermIds.length }} 个
+          </div>
+          <div class="source-post-term-bind-footer-actions">
+            <el-button @click="bindDialogVisible = false">取消</el-button>
+            <el-button
+              type="primary"
+              :disabled="selectedBindableTermIds.length === 0"
+              :loading="bindSaving"
+              @click="bindSelectedTerms"
+            >
+              绑定
+              <span v-if="selectedBindableTermIds.length > 0">
+                {{ selectedBindableTermIds.length }}
+              </span>
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="translationDialogVisible"
       title="译名管理"
       width="min(920px, 96vw)"
@@ -439,7 +628,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Link as LinkIcon, Plus, Refresh } from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
 import { formatDate } from '@/utils/utils'
 import {
@@ -488,9 +677,21 @@ function getInitialTranslationForm() {
   }
 }
 
+function getInitialBindParams() {
+  return {
+    page: 1,
+    limit: 20,
+    sourceTextKeyword: '',
+    noteKeyword: '',
+    languageCode: '',
+    isStarred: ''
+  }
+}
+
 export default {
   name: 'SourcePostProperNounList',
   components: {
+    LinkIcon,
     Plus,
     Refresh,
     ProperNounInternetSearchButton,
@@ -501,6 +702,7 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const tableRef = ref(null)
+    const bindTableRef = ref(null)
     const loading = ref(false)
     const termList = ref([])
     const total = ref(0)
@@ -509,13 +711,21 @@ export default {
     const selectedTermRows = ref([])
     const starUpdatingId = ref('')
     const organizeDialogVisible = ref(false)
+    const bindDialogVisible = ref(false)
+    const bindLoading = ref(false)
+    const bindSaving = ref(false)
+    const bindTermList = ref([])
+    const bindTotal = ref(0)
+    const selectedBindTermRows = ref([])
     const params = reactive({
       page: 1,
       limit: 20,
-      keyword: '',
+      sourceTextKeyword: '',
+      noteKeyword: '',
       languageCode: '',
       isStarred: ''
     })
+    const bindParams = reactive(getInitialBindParams())
 
     const termDialogVisible = ref(false)
     const termSaving = ref(false)
@@ -568,6 +778,20 @@ export default {
       })
       return idList
     })
+    const selectedBindableTermIds = computed(() => {
+      const idList = []
+      selectedBindTermRows.value.forEach(row => {
+        if (!isBindableTermSelectable(row)) {
+          return
+        }
+        const id = String(row?._id || '')
+        if (!id || idList.includes(id)) {
+          return
+        }
+        idList.push(id)
+      })
+      return idList
+    })
     const internetSearchDefaultLanguageCodes = computed(() => {
       if (params.languageCode) {
         return [params.languageCode]
@@ -592,7 +816,8 @@ export default {
       assignReactive(params, {
         page: 1,
         limit: 20,
-        keyword: '',
+        sourceTextKeyword: '',
+        noteKeyword: '',
         languageCode: '',
         isStarred: ''
       })
@@ -605,14 +830,38 @@ export default {
         page: params.page,
         limit: params.limit
       }
-      if (params.keyword) {
-        requestParams.keyword = params.keyword
+      if (params.sourceTextKeyword) {
+        requestParams.sourceTextKeyword = params.sourceTextKeyword
+      }
+      if (params.noteKeyword) {
+        requestParams.noteKeyword = params.noteKeyword
       }
       if (params.languageCode) {
         requestParams.languageCode = params.languageCode
       }
       if (params.isStarred !== '') {
         requestParams.isStarred = params.isStarred
+      }
+      return requestParams
+    }
+
+    function getBindRequestParams() {
+      const requestParams = {
+        sourceId: sourceId.value,
+        page: bindParams.page,
+        limit: bindParams.limit
+      }
+      if (bindParams.sourceTextKeyword) {
+        requestParams.sourceTextKeyword = bindParams.sourceTextKeyword
+      }
+      if (bindParams.noteKeyword) {
+        requestParams.noteKeyword = bindParams.noteKeyword
+      }
+      if (bindParams.languageCode) {
+        requestParams.languageCode = bindParams.languageCode
+      }
+      if (bindParams.isStarred !== '') {
+        requestParams.isStarred = bindParams.isStarred
       }
       return requestParams
     }
@@ -644,6 +893,35 @@ export default {
         })
     }
 
+    function getBindableTermList(resetPage = false) {
+      if (!sourceId.value || !bindDialogVisible.value) {
+        return
+      }
+      if (resetPage === true) {
+        clearBindTermSelection()
+      }
+      if (resetPage === true && bindParams.page !== 1) {
+        bindParams.page = 1
+        return
+      }
+      bindLoading.value = true
+      multilingualApi
+        .getProperNounTermList(getBindRequestParams(), true)
+        .then(response => {
+          const data = response.data.data || {}
+          bindTermList.value = data.list || []
+          bindTotal.value = data.total || 0
+          selectedBindTermRows.value = selectedBindTermRows.value.filter(
+            row => {
+              return isBindableTermSelectable(row)
+            }
+          )
+        })
+        .finally(() => {
+          bindLoading.value = false
+        })
+    }
+
     function preserveTableScrollForNextRefresh() {
       tableRef.value?.preserveScrollOnNextDataRefresh()
     }
@@ -668,6 +946,19 @@ export default {
         note: row.note || ''
       })
       termDialogVisible.value = true
+    }
+
+    function resetBindParams() {
+      assignReactive(bindParams, getInitialBindParams())
+    }
+
+    function openBindExistingTermDialog() {
+      resetBindParams()
+      bindTermList.value = []
+      bindTotal.value = 0
+      selectedBindTermRows.value = []
+      bindDialogVisible.value = true
+      getBindableTermList(false)
     }
 
     function submitTerm() {
@@ -755,6 +1046,65 @@ export default {
     function clearTermSelection() {
       selectedTermRows.value = []
       tableRef.value?.clearSelection()
+    }
+
+    function clearBindTermSelection() {
+      selectedBindTermRows.value = []
+      bindTableRef.value?.clearSelection()
+    }
+
+    function isTermBoundToSourcePost(row) {
+      return row?.isBoundToSourcePost === true
+    }
+
+    function isBindableTermSelectable(row) {
+      return !isTermBoundToSourcePost(row)
+    }
+
+    function handleBindTermSelectionChange(selection) {
+      if (!Array.isArray(selection)) {
+        selectedBindTermRows.value = []
+        return
+      }
+      selectedBindTermRows.value = selection.filter(row => {
+        return isBindableTermSelectable(row)
+      })
+    }
+
+    async function bindSelectedTerms() {
+      const termIds = selectedBindableTermIds.value
+      if (termIds.length === 0) {
+        ElMessage.warning('请选择可绑定的名词')
+        return
+      }
+
+      bindSaving.value = true
+      try {
+        const response =
+          await multilingualApi.batchBindSourcePostProperNounTerms(
+            {
+              sourceId: sourceId.value,
+              termIds
+            },
+            true
+          )
+        const data = response.data.data || {}
+        let boundCount = termIds.length
+        if (typeof data.boundCount === 'number') {
+          boundCount = data.boundCount
+        }
+        if (boundCount > 0) {
+          ElMessage.success(`已绑定 ${boundCount} 个名词`)
+        } else {
+          ElMessage.warning('所选名词已绑定')
+        }
+        bindDialogVisible.value = false
+        clearBindTermSelection()
+        preserveTableScrollForNextRefresh()
+        getTermList(false)
+      } finally {
+        bindSaving.value = false
+      }
     }
 
     function isTermStarred(row) {
@@ -951,6 +1301,15 @@ export default {
       })
     }
 
+    function getBindDisplayedTranslationItems(row) {
+      return buildProperNounTranslationDisplayItems({
+        translations: row?.translations,
+        languageOptions,
+        selectedLanguageCode: bindParams.languageCode,
+        sourceLanguageCode: row?.sourceLanguageCode
+      })
+    }
+
     function getSourceLanguageText(sourceLanguageCode) {
       if (!sourceLanguageCode) {
         return '-'
@@ -988,9 +1347,19 @@ export default {
     )
 
     watch(
+      () => [bindParams.page, bindParams.limit],
+      () => {
+        getBindableTermList(false)
+      }
+    )
+
+    watch(
       () => sourceId.value,
       () => {
         restoreTermListParams()
+        if (bindDialogVisible.value) {
+          bindDialogVisible.value = false
+        }
         getTermList(false)
       }
     )
@@ -1001,9 +1370,20 @@ export default {
 
     return {
       activeTerm,
+      bindDialogVisible,
+      bindLoading,
+      bindParams,
+      bindSaving,
+      bindSelectedTerms,
+      bindTableRef,
+      bindTermList,
+      bindTotal,
+      clearBindTermSelection,
       deleteTerm,
       deleteTranslation,
+      getBindDisplayedTranslationItems,
       getCountText,
+      getBindableTermList,
       getDisplayedTranslationItems,
       getLanguageText,
       getLastUsedAtText,
@@ -1018,11 +1398,15 @@ export default {
       getTranslationTagType,
       goBack,
       handleInternetSearchApplied,
+      handleBindTermSelectionChange,
       handleTermSelectionChange,
       internetSearchDefaultLanguageCodes,
+      isBindableTermSelectable,
+      isTermBoundToSourcePost,
       isTermStarred,
       languageOptions,
       loading,
+      openBindExistingTermDialog,
       openCreateTermDialog,
       openCreateTranslationDialog,
       openEditTermDialog,
@@ -1032,6 +1416,7 @@ export default {
       organizeDialogVisible,
       params,
       relationCount,
+      selectedBindableTermIds,
       selectedTermIds,
       sourceId,
       sourcePost,
@@ -1071,6 +1456,8 @@ export default {
 .source-post-term-header-actions,
 .source-post-term-actions,
 .source-post-term-action-buttons,
+.source-post-term-bind-footer,
+.source-post-term-bind-footer-actions,
 .source-post-term-row-actions,
 .source-post-term-translation-header {
   align-items: center;
@@ -1114,11 +1501,13 @@ export default {
 }
 
 .source-post-term-action-buttons,
+.source-post-term-bind-footer-actions,
 .source-post-term-row-actions {
   flex-wrap: wrap;
 }
 
 .source-post-term-action-buttons :deep(.el-button + .el-button),
+.source-post-term-bind-footer-actions :deep(.el-button + .el-button),
 .source-post-term-row-actions :deep(.el-button + .el-button) {
   margin-left: 0;
 }
@@ -1134,6 +1523,10 @@ export default {
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
+}
+
+.source-post-term-bound-tag {
+  margin-top: 6px;
 }
 
 .source-post-term-note {
@@ -1184,6 +1577,31 @@ export default {
   margin-bottom: 14px;
 }
 
+.source-post-term-bind-toolbar {
+  margin-bottom: 12px;
+}
+
+.source-post-term-bind-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.source-post-term-bind-footer {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.source-post-term-bind-footer-actions {
+  justify-content: flex-end;
+}
+
+.source-post-term-bind-selected-count {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 32px;
+}
+
 .source-post-term-form {
   max-width: 560px;
 }
@@ -1226,8 +1644,30 @@ export default {
   }
 
   .source-post-term-search-form :deep(.el-input),
-  .source-post-term-search-form :deep(.el-select) {
+  .source-post-term-search-form :deep(.el-select),
+  .source-post-term-bind-search-form :deep(.el-input),
+  .source-post-term-bind-search-form :deep(.el-select) {
     width: 100% !important;
+  }
+
+  .source-post-term-bind-search-form :deep(.el-form-item) {
+    display: block;
+    margin-right: 0;
+    width: 100%;
+  }
+
+  .source-post-term-bind-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-post-term-bind-footer-actions {
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .source-post-term-bind-selected-count {
+    line-height: 1.5;
   }
 
   .source-post-term-form {

@@ -26,6 +26,12 @@ async function createOrBindTerm(req) {
   )
 }
 
+async function batchBindTerms(req) {
+  return await sourcePostProperNounRelationService.batchBindExistingTermsToSourcePost(
+    req.body || {}
+  )
+}
+
 async function unbindTerm(req) {
   return await sourcePostProperNounRelationService.unbindSourcePostTerm(
     req.query || {}
@@ -79,6 +85,10 @@ async function createOrganizeJob(req) {
 }
 
 module.exports = {
+  batchBindTerms: controller(
+    batchBindTerms,
+    'source post proper noun term batch bind fail'
+  ),
   createOrBindTerm: controller(
     createOrBindTerm,
     'source post proper noun term bind fail'
