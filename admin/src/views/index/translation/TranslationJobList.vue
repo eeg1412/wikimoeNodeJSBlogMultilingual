@@ -3861,30 +3861,32 @@ html.dark .job-state-panel-meta {
   word-break: break-word;
 }
 
-.translation-validation-before,
+.translation-validation-before {
+  display: block;
+  color: var(--el-color-danger);
+}
+
 .translation-validation-after {
   display: block;
-  color: var(--el-text-color-regular);
+  color: var(--el-color-success);
 }
 
 .translation-validation-diff-prefix {
-  color: var(--el-text-color-secondary);
   font-weight: 600;
 }
 
 .translation-validation-diff-removed {
-  background-color: var(--el-color-danger-light-8);
-  color: var(--el-color-danger);
-  text-decoration: line-through;
+  background-color: var(--el-color-danger-light-5);
   border-radius: 2px;
-  padding: 0 1px;
+  padding: 0 2px;
+  font-weight: 600;
 }
 
 .translation-validation-diff-added {
-  background-color: var(--el-color-success-light-8);
-  color: var(--el-color-success);
+  background-color: var(--el-color-success-light-5);
   border-radius: 2px;
-  padding: 0 1px;
+  padding: 0 2px;
+  font-weight: 600;
 }
 
 .translation-validation-empty-text,
