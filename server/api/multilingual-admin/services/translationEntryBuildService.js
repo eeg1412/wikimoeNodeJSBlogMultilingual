@@ -165,6 +165,41 @@ const RELATION_TRANSLATION_FIELDS = {
   ]
 }
 
+const PARENT_RELATION_FIELDS = {
+  sorts: [
+    {
+      name: 'parent',
+      label: '父级分类',
+      relationCollectionName: 'sorts',
+      parentEditableFieldNames: ['sortname', 'description']
+    }
+  ],
+  games: [
+    {
+      name: 'gamePlatform',
+      label: '所属平台',
+      relationCollectionName: 'gamePlatforms',
+      parentEditableFieldNames: ['name', 'color']
+    }
+  ],
+  books: [
+    {
+      name: 'booktype',
+      label: '所属类型',
+      relationCollectionName: 'booktypes',
+      parentEditableFieldNames: ['name', 'color']
+    }
+  ],
+  events: [
+    {
+      name: 'eventtype',
+      label: '活动类型',
+      relationCollectionName: 'eventtypes',
+      parentEditableFieldNames: ['name', 'color']
+    }
+  ]
+}
+
 function normalizeString(value) {
   if (value === null || typeof value === 'undefined') {
     return ''
@@ -597,10 +632,106 @@ function createRelationEntriesForRecord(relationField, record, includeEmpty) {
   return entries
 }
 
+function getParentRelationFields(collectionName) {
+  return PARENT_RELATION_FIELDS[collectionName] || []
+}
+
+function getParentTranslationFields(parentRelationField) {
+  const fieldList =
+    RELATION_TRANSLATION_FIELDS[parentRelationField.relationCollectionName] ||
+    []
+  const editableFieldNameList =
+    parentRelationField.parentEditableFieldNames || []
+  if (editableFieldNameList.length === 0) {
+    return fieldList
+  }
+  return fieldList.filter(field => {
+    return editableFieldNameList.includes(field.name)
+  })
+}
+
+function createParentRelationEntry(
+  parentRelationField,
+  parentRecord,
+  editField,
+  includeEmpty
+) {
+  const parentLabel = buildDisplayName(
+    parentRecord,
+    parentRelationField.relationCollectionName
+  )
+  return buildEntry(
+    {
+      id: `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${editField.name}`,
+      scope: 'parentRelation',
+      collectionName: parentRelationField.relationCollectionName,
+      recordId: normalizeString(parentRecord._id),
+      recordKind: parentRecord.recordKind,
+      sourceRecordId: normalizeString(parentRecord._id),
+      sourceId: normalizeSourceIdentity(parentRecord),
+      sourceSnapshotId: normalizeString(parentRecord.sourceSnapshotId),
+      relationTypeLabel: parentRelationField.label,
+      recordLabel: parentLabel,
+      fieldName: editField.name,
+      fieldLabel: editField.label,
+      label: `${parentLabel} / ${editField.label}`,
+      groupLabel: `父级关联 / ${parentRelationField.label}`,
+      groupCategory: '父级关联',
+      groupTitle: parentRelationField.label,
+      valueType: 'plainText',
+      value: parentRecord[editField.name],
+      aiTranslationSkip: parentRecord.aiTranslationSkip === true,
+      optional: Boolean(editField.translationOptional)
+    },
+    includeEmpty
+  )
+}
+
+function appendParentRelationEntries({
+  entries,
+  exportedParentIdSet,
+  parentRelationFieldList,
+  record,
+  includeEmpty
+}) {
+  parentRelationFieldList.forEach(parentRelationField => {
+    const parentRecord = record[parentRelationField.name]
+    if (
+      !parentRecord ||
+      typeof parentRecord !== 'object' ||
+      !parentRecord._id
+    ) {
+      return
+    }
+
+    getParentTranslationFields(parentRelationField).forEach(editField => {
+      const parentEntryId = `parent.${parentRelationField.relationCollectionName}.${parentRecord._id}.${editField.name}`
+      if (exportedParentIdSet.has(parentEntryId)) {
+        return
+      }
+      const entry = createParentRelationEntry(
+        parentRelationField,
+        parentRecord,
+        editField,
+        includeEmpty
+      )
+      if (!entry) {
+        return
+      }
+      exportedParentIdSet.add(parentEntryId)
+      entries.push(entry)
+    })
+  })
+}
+
 function createPostRelationEntries(detail, includeEmpty) {
   const post = detail.post || {}
   const entries = []
+  const exportedParentIdSet = new Set()
   POST_RELATION_FIELDS.forEach(relationField => {
+    const parentRelationFieldList = getParentRelationFields(
+      relationField.collectionName
+    )
     getPostRelationRecords(detail, post, relationField).forEach(record => {
       if (!record || !record._id) {
         return
@@ -608,6 +739,13 @@ function createPostRelationEntries(detail, includeEmpty) {
       entries.push(
         ...createRelationEntriesForRecord(relationField, record, includeEmpty)
       )
+      appendParentRelationEntries({
+        entries,
+        exportedParentIdSet,
+        parentRelationFieldList,
+        record,
+        includeEmpty
+      })
     })
   })
   return entries
@@ -626,7 +764,7 @@ function buildRecordTranslationEntries(
   collectionName,
   includeEmpty = false
 ) {
-  return createRelationEntriesForRecord(
+  const entries = createRelationEntriesForRecord(
     {
       field: 'record',
       label: '内容字段',
@@ -635,6 +773,14 @@ function buildRecordTranslationEntries(
     record,
     includeEmpty
   )
+  appendParentRelationEntries({
+    entries,
+    exportedParentIdSet: new Set(),
+    parentRelationFieldList: getParentRelationFields(collectionName),
+    record,
+    includeEmpty
+  })
+  return entries
 }
 
 function getEntryFieldKey(entry = {}) {
