@@ -2701,6 +2701,21 @@ function buildValidationTermGlossaryItem(term, index) {
   return createItem(label, valueParts.join(' ') || '-', { tone: 'output' })
 }
 
+function getValidationIssueTypeLabel(issueType) {
+  const normalized = normalizeText(issueType).toLowerCase()
+  const labelMap = {
+    inconsistent: '术语/译法不一致',
+    inaccurate: '语义不准确',
+    missing: '疑似漏译',
+    tone: '语气偏差',
+    other: '其他问题'
+  }
+  if (!normalized) {
+    return ''
+  }
+  return labelMap[normalized] || issueType
+}
+
 function buildValidationSuspectedIssueItem(issue, index) {
   if (!isPlainObject(issue)) {
     return createItem(`疑似问题 ${index + 1}`, issue, { tone: 'warning' })
@@ -2713,7 +2728,7 @@ function buildValidationSuspectedIssueItem(issue, index) {
     labelParts.push(`条目 ${entryId}`)
   }
   if (issueType) {
-    labelParts.push(`[${issueType}]`)
+    labelParts.push(`[${getValidationIssueTypeLabel(issueType)}]`)
   }
   const label = labelParts.join(' ') || `疑似问题 ${index + 1}`
   return createItem(label, note || '-', { tone: 'warning' })

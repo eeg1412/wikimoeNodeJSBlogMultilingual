@@ -881,7 +881,18 @@
                   :key="`issue-${index}`"
                   class="translation-validation-issue"
                 >
-                  [{{ issue.issueType || 'issue' }}] {{ issue.note }}
+                  <el-tag
+                    size="small"
+                    effect="light"
+                    :type="getSuspectedIssueStatus(issue, tab.validation).type"
+                    class="translation-validation-issue-status"
+                  >
+                    {{ getSuspectedIssueStatus(issue, tab.validation).text }}
+                  </el-tag>
+                  <span class="translation-validation-issue-type">
+                    [{{ getValidationIssueTypeText(issue.issueType) }}]
+                  </span>
+                  {{ issue.note }}
                 </div>
               </div>
               <div
@@ -2828,6 +2839,39 @@ export default {
       return diffTextSegments(item?.beforePreview, item?.afterPreview)
     }
 
+    const validationIssueTypeTextMap = {
+      inconsistent: '术语/译法不一致',
+      inaccurate: '语义不准确',
+      missing: '疑似漏译',
+      tone: '语气偏差',
+      other: '其他问题'
+    }
+
+    const getValidationIssueTypeText = issueType => {
+      const normalized = normalizePreviewText(issueType).toLowerCase()
+      if (!normalized) {
+        return '疑似问题'
+      }
+      return validationIssueTypeTextMap[normalized] || issueType
+    }
+
+    const getSuspectedIssueStatus = (issue, validation) => {
+      const entryId = normalizePreviewText(issue?.entryId)
+      if (!entryId) {
+        return { text: '无对应条目', type: 'info' }
+      }
+      const corrections = Array.isArray(validation?.corrections)
+        ? validation.corrections
+        : []
+      const matched = corrections.some(item => {
+        return String(item?.id || '') === entryId
+      })
+      if (matched) {
+        return { text: '对应条目已修正', type: 'success' }
+      }
+      return { text: '对应条目未改动', type: 'info' }
+    }
+
     const getSelectedEntryCount = entryKeys => {
       const entryKeySet = new Set(entryKeys || [])
       return selectedEntryKeys.value.filter(entryKey => {
@@ -3116,6 +3160,8 @@ export default {
       getAppliedEntryCount,
       getProgressStageText,
       getCorrectionDiff,
+      getValidationIssueTypeText,
+      getSuspectedIssueStatus,
       getSelectedEntryCount,
       getStatusTagType,
       getTaskRelationText,
@@ -3905,6 +3951,16 @@ html.dark .job-state-panel-meta {
   font-size: 12px;
   line-height: 1.7;
   word-break: break-word;
+}
+
+.translation-validation-issue-status {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.translation-validation-issue-type {
+  color: var(--el-text-color-secondary);
+  font-weight: 600;
 }
 
 .translation-validation-term-note {
