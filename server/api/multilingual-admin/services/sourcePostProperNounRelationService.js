@@ -1124,12 +1124,11 @@ async function getArticleLinkedCandidateTerms({
   const RelationModel = getRelationModel()
   const TermModel = getTermModel()
   const TranslationModel = getTranslationModel()
+  // 绑定关系由 sourceId 唯一确定，源文章只有一种源语言。
+  // 手动绑定或历史关系快照的 sourceLanguageCode 可能为空，
+  // 不按源语言过滤，避免漏掉已绑定的专有名词。
   const relationMatch = buildRelationMatch({
-    sourceId: new mongoose.Types.ObjectId(sourcePostId),
-    sourceLanguageCode: normalizeOptionalLanguageCode(
-      sourceLanguageCode,
-      'sourceLanguageCode'
-    )
+    sourceId: new mongoose.Types.ObjectId(sourcePostId)
   })
   const relations = await RelationModel.find(relationMatch)
     .sort({ updatedAt: -1, _id: -1 })
@@ -1217,10 +1216,12 @@ async function getSourcePostLinkedTermGlossaryCoverage({
   const RelationModel = getRelationModel()
   const TermModel = getTermModel()
   const TranslationModel = getTranslationModel()
+  // 一篇源文章只有一种源语言，绑定关系由 sourceId 唯一确定。
+  // 手动绑定或历史数据的关系快照里 sourceLanguageCode 可能为空，
+  // 因此这里不按源语言过滤，避免漏掉已绑定的专有名词词库。
   const relations = await RelationModel.find(
     buildRelationMatch({
-      sourceId,
-      sourceLanguageCode: normalizedSourceLanguageCode
+      sourceId
     })
   )
     .sort({ updatedAt: -1, _id: -1 })
