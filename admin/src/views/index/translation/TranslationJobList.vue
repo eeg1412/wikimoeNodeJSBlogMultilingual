@@ -805,10 +805,38 @@
                   </div>
                   <div class="translation-validation-correction-diff">
                     <span class="translation-validation-before">
-                      修正前：{{ item.beforePreview || '-' }}
+                      <span class="translation-validation-diff-prefix"
+                        >修正前：</span
+                      >
+                      <template v-if="getCorrectionDiff(item).before.length">
+                        <span
+                          v-for="(seg, segIndex) in getCorrectionDiff(item)
+                            .before"
+                          :key="`before-${segIndex}`"
+                          :class="{
+                            'translation-validation-diff-removed': seg.changed
+                          }"
+                          >{{ seg.text }}</span
+                        >
+                      </template>
+                      <template v-else>-</template>
                     </span>
                     <span class="translation-validation-after">
-                      修正后：{{ item.afterPreview || '-' }}
+                      <span class="translation-validation-diff-prefix"
+                        >修正后：</span
+                      >
+                      <template v-if="getCorrectionDiff(item).after.length">
+                        <span
+                          v-for="(seg, segIndex) in getCorrectionDiff(item)
+                            .after"
+                          :key="`after-${segIndex}`"
+                          :class="{
+                            'translation-validation-diff-added': seg.changed
+                          }"
+                          >{{ seg.text }}</span
+                        >
+                      </template>
+                      <template v-else>-</template>
                     </span>
                   </div>
                 </div>
@@ -902,6 +930,8 @@ import {
   saveListSessionParams
 } from '@/composables/useListSessionParams'
 import { getLanguageText as getSharedLanguageText } from '@/utils/multilingual'
+import { getProgressStageText } from '@/utils/translationStage'
+import { diffTextSegments } from '@/utils/textDiff'
 import { getTranslationGroupDisplayMeta } from '@/utils/translationEntryDisplay'
 import { renderRichTextDocument } from '@/utils/translationJson'
 
@@ -933,23 +963,6 @@ const deleteStatusSet = new Set([
   '部分采纳',
   '完全采纳'
 ])
-
-const progressStageTextMap = {
-  pending: '等待领取',
-  claimed: '已领取任务',
-  BuildEntries: '构建翻译条目',
-  TranslatePost: '翻译文章',
-  TranslateCoverImage: '翻译封面图',
-  TranslateContent: '翻译内容',
-  OrganizeProperNouns: '整理文章名词',
-  BindProperNouns: '关联文章名词',
-  ImportSourceSnapshot: '导入源快照',
-  OverwriteSourceSnapshot: '覆盖源快照',
-  PrepareTargetPost: '准备目标文章',
-  ValidateJob: '校验任务',
-  FinalizeProperNounOrganize: '完成名词整理',
-  FinalizeReview: '整理审核结果'
-}
 
 const failureCodeMeaningMap = {
   AI_TRANSLATION_FAILED:
@@ -2805,26 +2818,21 @@ export default {
       return getSharedLanguageText(languageCode)
     }
 
+    const getCorrectionDiff = item => {
+      if (
+        Array.isArray(item?.beforeSegments) &&
+        Array.isArray(item?.afterSegments)
+      ) {
+        return { before: item.beforeSegments, after: item.afterSegments }
+      }
+      return diffTextSegments(item?.beforePreview, item?.afterPreview)
+    }
+
     const getSelectedEntryCount = entryKeys => {
       const entryKeySet = new Set(entryKeys || [])
       return selectedEntryKeys.value.filter(entryKey => {
         return entryKeySet.has(entryKey)
       }).length
-    }
-
-    const getProgressStageText = stage => {
-      const normalizedStage = normalizePreviewText(stage)
-      if (!normalizedStage) {
-        return '-'
-      }
-      if (progressStageTextMap[normalizedStage]) {
-        return progressStageTextMap[normalizedStage]
-      }
-      const [stageName, languageCode] = normalizedStage.split(':')
-      if (progressStageTextMap[stageName] && languageCode) {
-        return `${progressStageTextMap[stageName]}（${getLanguageText(languageCode)}）`
-      }
-      return normalizedStage
     }
 
     const getStatusTagType = status => {
@@ -3107,6 +3115,7 @@ export default {
       getLanguageText,
       getAppliedEntryCount,
       getProgressStageText,
+      getCorrectionDiff,
       getSelectedEntryCount,
       getStatusTagType,
       getTaskRelationText,
@@ -3852,12 +3861,30 @@ html.dark .job-state-panel-meta {
   word-break: break-word;
 }
 
-.translation-validation-before {
-  color: var(--el-color-danger);
+.translation-validation-before,
+.translation-validation-after {
+  display: block;
+  color: var(--el-text-color-regular);
 }
 
-.translation-validation-after {
+.translation-validation-diff-prefix {
+  color: var(--el-text-color-secondary);
+  font-weight: 600;
+}
+
+.translation-validation-diff-removed {
+  background-color: var(--el-color-danger-light-8);
+  color: var(--el-color-danger);
+  text-decoration: line-through;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.translation-validation-diff-added {
+  background-color: var(--el-color-success-light-8);
   color: var(--el-color-success);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 .translation-validation-empty-text,

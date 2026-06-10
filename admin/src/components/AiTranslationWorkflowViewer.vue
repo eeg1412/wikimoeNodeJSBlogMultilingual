@@ -339,6 +339,8 @@
 </template>
 
 <script>
+import { getProgressStageText } from '@/utils/translationStage'
+
 export default {
   name: 'AiTranslationWorkflowViewer',
   props: {
@@ -619,7 +621,7 @@ export default {
         parts.push(step.model)
       }
       if (step.stage) {
-        parts.push(step.stage)
+        parts.push(getProgressStageText(step.stage))
       }
       return parts.join(' / ') || '日志缺少摘要信息'
     },

@@ -20,6 +20,14 @@ const OVERVIEW_ENTRY_TEXT_LIMIT = 600
 const OVERVIEW_BLOCK_CHAR_LIMIT = 18000
 // 校验报告中单条修正前后预览文本上限（字符）。
 const CORRECTION_PREVIEW_LIMIT = 160
+// 差异分段中，未变化文本在变化点前后保留的上下文字符数。
+const CORRECTION_DIFF_CONTEXT = 36
+// 单个变化分段保留的最大字符数，超出则折叠尾部。
+const CORRECTION_DIFF_CHANGED_LIMIT = 600
+// 单侧（修正前 / 修正后）分段文本的总字符上限。
+const CORRECTION_DIFF_SIDE_LIMIT = 2400
+// 去除公共前后缀后，仍参与字符级 LCS 比对的中间文本上限，超出则整体视为变化。
+const CORRECTION_DIFF_MIDDLE_LIMIT = 2000
 
 function getJobId(job) {
   if (!job) {
@@ -606,6 +614,260 @@ function serializeEntryValue(value, valueType) {
   }
 }
 
+function normalizeReadableText(value) {
+  return normalizeText(value).replace(/\s+/g, ' ').trim()
+}
+
+function toReadableCharList(value) {
+  return Array.from(normalizeReadableText(value))
+}
+
+function mergeDiffSegments(segments) {
+  const merged = []
+  segments.forEach(segment => {
+    if (!segment.text) {
+      return
+    }
+    const last = merged[merged.length - 1]
+    if (last && last.changed === segment.changed) {
+      last.text += segment.text
+      return
+    }
+    merged.push({ text: segment.text, changed: segment.changed })
+  })
+  return merged
+}
+
+function computeCommonPrefixLength(beforeChars, afterChars) {
+  const max = Math.min(beforeChars.length, afterChars.length)
+  let index = 0
+  while (index < max && beforeChars[index] === afterChars[index]) {
+    index++
+  }
+  return index
+}
+
+function computeCommonSuffixLength(beforeChars, afterChars, prefixLength) {
+  const max = Math.min(beforeChars.length, afterChars.length) - prefixLength
+  let index = 0
+  while (
+    index < max &&
+    beforeChars[beforeChars.length - 1 - index] ===
+      afterChars[afterChars.length - 1 - index]
+  ) {
+    index++
+  }
+  return index
+}
+
+// 对去除公共前后缀后的中间差异文本做字符级 LCS 比对。
+function diffMiddleSegments(beforeChars, afterChars) {
+  if (beforeChars.length === 0 && afterChars.length === 0) {
+    return { before: [], after: [] }
+  }
+  if (beforeChars.length === 0) {
+    return {
+      before: [],
+      after: [{ text: afterChars.join(''), changed: true }]
+    }
+  }
+  if (afterChars.length === 0) {
+    return {
+      before: [{ text: beforeChars.join(''), changed: true }],
+      after: []
+    }
+  }
+  if (
+    beforeChars.length > CORRECTION_DIFF_MIDDLE_LIMIT ||
+    afterChars.length > CORRECTION_DIFF_MIDDLE_LIMIT
+  ) {
+    return {
+      before: [{ text: beforeChars.join(''), changed: true }],
+      after: [{ text: afterChars.join(''), changed: true }]
+    }
+  }
+
+  const beforeLength = beforeChars.length
+  const afterLength = afterChars.length
+  const lcsTable = []
+  for (let i = 0; i <= beforeLength; i++) {
+    lcsTable.push(new Array(afterLength + 1).fill(0))
+  }
+  for (let i = beforeLength - 1; i >= 0; i--) {
+    for (let j = afterLength - 1; j >= 0; j--) {
+      if (beforeChars[i] === afterChars[j]) {
+        lcsTable[i][j] = lcsTable[i + 1][j + 1] + 1
+      } else {
+        lcsTable[i][j] = Math.max(lcsTable[i + 1][j], lcsTable[i][j + 1])
+      }
+    }
+  }
+
+  const before = []
+  const after = []
+  let i = 0
+  let j = 0
+  while (i < beforeLength && j < afterLength) {
+    if (beforeChars[i] === afterChars[j]) {
+      before.push({ text: beforeChars[i], changed: false })
+      after.push({ text: afterChars[j], changed: false })
+      i++
+      j++
+    } else if (lcsTable[i + 1][j] >= lcsTable[i][j + 1]) {
+      before.push({ text: beforeChars[i], changed: true })
+      i++
+    } else {
+      after.push({ text: afterChars[j], changed: true })
+      j++
+    }
+  }
+  while (i < beforeLength) {
+    before.push({ text: beforeChars[i], changed: true })
+    i++
+  }
+  while (j < afterLength) {
+    after.push({ text: afterChars[j], changed: true })
+    j++
+  }
+  return { before, after }
+}
+
+// 先去除公共前后缀（可处理超长文本里只改了一处的情况），再对中间差异做 LCS 比对。
+function diffReadableSegments(beforeText, afterText) {
+  const beforeChars = toReadableCharList(beforeText)
+  const afterChars = toReadableCharList(afterText)
+  const prefixLength = computeCommonPrefixLength(beforeChars, afterChars)
+  const suffixLength = computeCommonSuffixLength(
+    beforeChars,
+    afterChars,
+    prefixLength
+  )
+  const beforeMiddle = beforeChars.slice(
+    prefixLength,
+    beforeChars.length - suffixLength
+  )
+  const afterMiddle = afterChars.slice(
+    prefixLength,
+    afterChars.length - suffixLength
+  )
+
+  const before = []
+  const after = []
+  const prefixText = beforeChars.slice(0, prefixLength).join('')
+  if (prefixText) {
+    before.push({ text: prefixText, changed: false })
+    after.push({ text: prefixText, changed: false })
+  }
+  const middle = diffMiddleSegments(beforeMiddle, afterMiddle)
+  middle.before.forEach(segment => before.push(segment))
+  middle.after.forEach(segment => after.push(segment))
+  const suffixText = beforeChars
+    .slice(beforeChars.length - suffixLength)
+    .join('')
+  if (suffixText) {
+    before.push({ text: suffixText, changed: false })
+    after.push({ text: suffixText, changed: false })
+  }
+
+  return {
+    before: mergeDiffSegments(before),
+    after: mergeDiffSegments(after)
+  }
+}
+
+function clampChangedSegment(segment) {
+  const chars = Array.from(segment.text)
+  if (chars.length <= CORRECTION_DIFF_CHANGED_LIMIT) {
+    return segment
+  }
+  return {
+    text: `${chars.slice(0, CORRECTION_DIFF_CHANGED_LIMIT).join('')}…`,
+    changed: true
+  }
+}
+
+// 折叠较长的未变化文本：只在变化点附近保留上下文，远端用省略号代替。
+function collapseUnchangedSegment(segment, isFirst, isLast) {
+  const chars = Array.from(segment.text)
+  const context = CORRECTION_DIFF_CONTEXT
+  const keepHead = !isFirst
+  const keepTail = !isLast
+  const head = chars.slice(0, context).join('')
+  const tail = chars.slice(chars.length - context).join('')
+
+  if (keepHead && keepTail) {
+    if (chars.length <= context * 2 + 1) {
+      return segment
+    }
+    return { text: `${head}…${tail}`, changed: false }
+  }
+  if (keepHead) {
+    if (chars.length <= context + 1) {
+      return segment
+    }
+    return { text: `${head}…`, changed: false }
+  }
+  if (keepTail) {
+    if (chars.length <= context + 1) {
+      return segment
+    }
+    return { text: `…${tail}`, changed: false }
+  }
+  if (chars.length <= context * 2 + 1) {
+    return segment
+  }
+  return { text: `${head}…${tail}`, changed: false }
+}
+
+function collapseDiffSegments(segments) {
+  const total = segments.length
+  return segments
+    .map((segment, index) => {
+      if (segment.changed) {
+        return clampChangedSegment(segment)
+      }
+      return collapseUnchangedSegment(segment, index === 0, index === total - 1)
+    })
+    .filter(segment => segment.text.length > 0)
+}
+
+function enforceDiffSideLimit(segments) {
+  const result = []
+  let used = 0
+  for (const segment of segments) {
+    if (used >= CORRECTION_DIFF_SIDE_LIMIT) {
+      break
+    }
+    const chars = Array.from(segment.text)
+    if (used + chars.length <= CORRECTION_DIFF_SIDE_LIMIT) {
+      result.push(segment)
+      used += chars.length
+      continue
+    }
+    const remain = CORRECTION_DIFF_SIDE_LIMIT - used
+    result.push({
+      text: `${chars.slice(0, remain).join('')}…`,
+      changed: segment.changed
+    })
+    used = CORRECTION_DIFF_SIDE_LIMIT
+    break
+  }
+  return result
+}
+
+// 生成单条修正的差异分段及对应的纯文本预览（包含所有变化点）。
+function buildCorrectionDiff(beforeText, afterText) {
+  const diff = diffReadableSegments(beforeText, afterText)
+  const beforeSegments = enforceDiffSideLimit(collapseDiffSegments(diff.before))
+  const afterSegments = enforceDiffSideLimit(collapseDiffSegments(diff.after))
+  return {
+    beforeSegments,
+    afterSegments,
+    beforePreview: beforeSegments.map(segment => segment.text).join(''),
+    afterPreview: afterSegments.map(segment => segment.text).join('')
+  }
+}
+
 // 对比精校前后译文，生成校验报告。
 function buildValidationReport({
   guideline,
@@ -646,6 +908,10 @@ function buildValidationReport({
       return
     }
     const sourceEntry = sourceMap.get(id)
+    const correctionDiff = buildCorrectionDiff(
+      extractReadableText(beforeEntry.value, valueType),
+      extractReadableText(afterEntry.value, valueType)
+    )
     corrections.push({
       id,
       scope: afterEntry.scope || beforeEntry.scope || '',
@@ -655,14 +921,10 @@ function buildValidationReport({
         extractReadableText(sourceEntry ? sourceEntry.value : '', valueType),
         CORRECTION_PREVIEW_LIMIT
       ),
-      beforePreview: truncateText(
-        extractReadableText(beforeEntry.value, valueType),
-        CORRECTION_PREVIEW_LIMIT
-      ),
-      afterPreview: truncateText(
-        extractReadableText(afterEntry.value, valueType),
-        CORRECTION_PREVIEW_LIMIT
-      )
+      beforePreview: correctionDiff.beforePreview,
+      afterPreview: correctionDiff.afterPreview,
+      beforeSegments: correctionDiff.beforeSegments,
+      afterSegments: correctionDiff.afterSegments
     })
   })
 
