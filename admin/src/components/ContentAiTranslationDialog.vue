@@ -64,6 +64,16 @@
                 :message="officialTermSearchUnavailableReason"
               />
             </el-form-item>
+            <el-form-item label="校验译文">
+              <el-switch
+                v-model="aiVerificationEnabled"
+                :disabled="isBusy"
+                active-text="AI 参与校验"
+              />
+              <AiFeatureHintTip
+                message="开启后，校验 AI 会在后台任务翻译完成后对全部译文进行全局校验与修正；实时翻译不参与校验。"
+              />
+            </el-form-item>
           </el-form>
 
           <div class="translation-json-toolbar">
@@ -223,6 +233,7 @@ import { ElMessage } from 'element-plus'
 import store from '@/store'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import AiFeatureHintTip from '@/components/AiFeatureHintTip.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
 import {
@@ -300,6 +311,7 @@ export default {
   name: 'ContentAiTranslationDialog',
   components: {
     AiFeatureUnavailableTip,
+    AiFeatureHintTip,
     TranslationEntryMeta,
     TranslationEntrySelectableGroups
   },
@@ -326,6 +338,7 @@ export default {
     const selectedEntryIds = ref([])
     const prompt = ref('')
     const searchOfficialTermTranslations = ref(false)
+    const aiVerificationEnabled = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
     const preview = ref(null)
@@ -815,7 +828,8 @@ export default {
             baseMode: baseMode.value,
             options: {
               searchOfficialTermTranslations:
-                shouldSearchOfficialTermTranslations()
+                shouldSearchOfficialTermTranslations(),
+              aiVerificationEnabled: aiVerificationEnabled.value === true
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)

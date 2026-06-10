@@ -732,6 +732,140 @@
               "
               description="暂无结果"
             />
+
+            <div v-if="tab.validation" class="translation-validation-card">
+              <div class="translation-validation-header">
+                <div class="translation-json-group-title">AI 校验报告</div>
+                <div class="translation-validation-tags">
+                  <el-tag
+                    size="small"
+                    :type="
+                      tab.validation.status === 'completed' ? 'success' : 'info'
+                    "
+                    effect="plain"
+                  >
+                    {{
+                      tab.validation.status === 'completed'
+                        ? '已校验'
+                        : '已跳过'
+                    }}
+                  </el-tag>
+                  <el-tag
+                    v-if="tab.validation.provider"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ tab.validation.provider }}
+                  </el-tag>
+                  <el-tag
+                    v-if="tab.validation.model"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ tab.validation.model }}
+                  </el-tag>
+                </div>
+              </div>
+              <div
+                v-if="tab.validation.summary"
+                class="translation-validation-summary"
+              >
+                {{ tab.validation.summary }}
+              </div>
+              <div class="translation-validation-stats">
+                <span
+                  >校验条目：{{ tab.validation.stats?.totalEntries || 0 }}</span
+                >
+                <span
+                  >修正条目：{{
+                    tab.validation.stats?.changedEntries || 0
+                  }}</span
+                >
+                <span
+                  >统一术语：{{ tab.validation.stats?.termCount || 0 }}</span
+                >
+                <span
+                  >疑似问题：{{
+                    tab.validation.stats?.suspectedIssueCount || 0
+                  }}</span
+                >
+              </div>
+              <div
+                v-if="(tab.validation.corrections || []).length > 0"
+                class="translation-validation-section"
+              >
+                <div class="translation-validation-section-title">修正明细</div>
+                <div
+                  v-for="(item, index) in tab.validation.corrections"
+                  :key="`correction-${item.id}-${index}`"
+                  class="translation-validation-correction"
+                >
+                  <div class="translation-validation-correction-label">
+                    {{ item.label }}
+                  </div>
+                  <div class="translation-validation-correction-diff">
+                    <span class="translation-validation-before">
+                      修正前：{{ item.beforePreview || '-' }}
+                    </span>
+                    <span class="translation-validation-after">
+                      修正后：{{ item.afterPreview || '-' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div
+                v-else-if="tab.validation.status === 'completed'"
+                class="translation-validation-empty-text"
+              >
+                校验未发现需要修正的内容。
+              </div>
+              <div
+                v-if="(tab.validation.guideline?.termGlossary || []).length > 0"
+                class="translation-validation-section"
+              >
+                <div class="translation-validation-section-title">
+                  术语统一表
+                </div>
+                <div
+                  v-for="(term, index) in tab.validation.guideline.termGlossary"
+                  :key="`term-${index}`"
+                  class="translation-validation-term"
+                >
+                  {{ term.source }} =&gt; {{ term.target }}
+                  <span
+                    v-if="term.note"
+                    class="translation-validation-term-note"
+                  >
+                    （{{ term.note }}）
+                  </span>
+                </div>
+              </div>
+              <div
+                v-if="
+                  (tab.validation.guideline?.suspectedIssues || []).length > 0
+                "
+                class="translation-validation-section"
+              >
+                <div class="translation-validation-section-title">疑似问题</div>
+                <div
+                  v-for="(issue, index) in tab.validation.guideline
+                    .suspectedIssues"
+                  :key="`issue-${index}`"
+                  class="translation-validation-issue"
+                >
+                  [{{ issue.issueType || 'issue' }}] {{ issue.note }}
+                </div>
+              </div>
+              <div
+                v-if="tab.validation.guideline?.styleNotes"
+                class="translation-validation-section"
+              >
+                <div class="translation-validation-section-title">风格基调</div>
+                <div class="translation-validation-style-notes">
+                  {{ tab.validation.guideline.styleNotes }}
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
         </el-tabs>
 
@@ -1085,6 +1219,10 @@ const EXACT_AI_JSON_FIELD_META_MAP = {
   '$.result.model': ['翻译模型', '正文翻译阶段使用的模型。'],
   '$.result.requestId': ['请求ID', '正文翻译阶段 provider 返回的请求 ID。'],
   '$.result.sourceSnapshotId': ['源快照ID', '当前任务使用的源内容快照 ID。'],
+  '$.result.validation': [
+    '校验报告',
+    '校验 AI 对全部译文进行全局校验与修正的结果，包含术语统一表、风格说明、疑似问题与修正条目。'
+  ],
   '$.result.completedAt': ['完成时间', '任务进入等待审核时的完成时间。']
 }
 
@@ -2175,6 +2313,25 @@ export default {
       })
     }
 
+    const resolveTabValidation = languageCode => {
+      const validation = currentJob.value?.result?.validation
+      if (!validation || validation.enabled !== true) {
+        return null
+      }
+      if (Array.isArray(validation.languageValidations)) {
+        const matched = validation.languageValidations.find(item => {
+          return item.languageCode === languageCode
+        })
+        return matched ? matched.validation : null
+      }
+      const jobLanguageCode =
+        currentJob.value?.target?.languageCode || '__default'
+      if (languageCode === jobLanguageCode || languageCode === '__default') {
+        return validation
+      }
+      return null
+    }
+
     const reviewLanguageTabs = computed(() => {
       const tabMap = new Map()
       const ensureTab = languageCode => {
@@ -2218,7 +2375,8 @@ export default {
             .concat(selectableCoverImageEntries.map(entry => entry.id)),
           reviewEntries: tab.entries.concat(tab.coverImageEntries || []),
           groups: buildReviewEntryGroups(tab.entries),
-          coverImageEntries: tab.coverImageEntries || []
+          coverImageEntries: tab.coverImageEntries || [],
+          validation: resolveTabValidation(tab.languageCode)
         }
       })
     })
@@ -3613,6 +3771,124 @@ html.dark .job-state-panel-meta {
 
 .cover-image-review-section {
   margin-bottom: 18px;
+}
+
+.translation-validation-card {
+  margin-top: 18px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--el-color-primary-light-9);
+}
+
+.translation-validation-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.translation-validation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.translation-validation-summary {
+  margin-top: 10px;
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.translation-validation-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.translation-validation-section {
+  margin-top: 14px;
+}
+
+.translation-validation-section-title {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.translation-validation-correction {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.translation-validation-correction-label {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.translation-validation-correction-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.translation-validation-before {
+  color: var(--el-color-danger);
+}
+
+.translation-validation-after {
+  color: var(--el-color-success);
+}
+
+.translation-validation-empty-text,
+.translation-validation-style-notes {
+  margin-top: 10px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.translation-validation-term,
+.translation-validation-issue {
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.translation-validation-term-note {
+  color: var(--el-text-color-secondary);
+}
+
+html.dark .translation-validation-card {
+  background: var(--el-fill-color-darker);
+  border-color: var(--el-color-primary-light-3);
+}
+
+html.dark .translation-validation-correction {
+  background: var(--el-fill-color-blank);
 }
 
 .cover-image-review-item {

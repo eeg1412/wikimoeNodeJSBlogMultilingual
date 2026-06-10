@@ -469,6 +469,10 @@ function shouldCreateRelatedChildJobsForWorkflow(job) {
   return !isSourcePostImportChildWorkflowJob(job)
 }
 
+function shouldRunAiValidationForWorkflow(job) {
+  return getWorkflowRequestOptions(job).aiVerificationEnabled === true
+}
+
 function shouldOrganizeRelatedPostsForWorkflow(job) {
   const options = getWorkflowRequestOptions(job)
   if (options.syncRelatedPosts === true) {
@@ -522,10 +526,7 @@ function getCoverImageTranslationModeForWorkflow(job, defaultMode = 'never') {
     }
     return 'never'
   }
-  return normalizeCoverImageTranslationModeForWorkflow(
-    defaultMode,
-    'never'
-  )
+  return normalizeCoverImageTranslationModeForWorkflow(defaultMode, 'never')
 }
 
 function shouldTranslateCoverImageForWorkflow(job, defaultValue) {
@@ -689,6 +690,30 @@ function buildPostAiTranslationPlannedSteps(job) {
       dynamicDetailText: '批次数量需要等条目构建和分块完成后才能确定。'
     })
   }
+  if (shouldRunAiValidationForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'post.validate-overview',
+      majorKey: 'validation.overview',
+      title: '全局校验速览',
+      description:
+        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。',
+      stage: 'ValidateTranslation',
+      stageKeys: ['ValidateTranslation'],
+      stepKeys: ['validation.overview'],
+      targetLanguageCodes
+    })
+    appendPlannedWorkflowStep(steps, {
+      key: 'post.validate',
+      majorKey: 'validation.chunk',
+      title: '校验并修正译文',
+      description: '校验 AI 依据全局校验指南分批复核并修正全部译文。',
+      stage: 'ValidateTranslation',
+      stageKeys: ['ValidateTranslation'],
+      stepKeys: ['validation.chunk'],
+      targetLanguageCodes,
+      dynamicDetailText: '校验批次数量需要等译文产出后才能确定。'
+    })
+  }
   if (shouldTranslateCoverImageForWorkflow(job, false)) {
     appendPlannedWorkflowStep(steps, {
       key: 'post.cover-image',
@@ -738,6 +763,30 @@ function buildContentAiTranslationPlannedSteps(job) {
     targetLanguageCodes,
     dynamicDetailText: '批次数量需要等条目分块完成后才能确定。'
   })
+  if (shouldRunAiValidationForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'content.validate-overview',
+      majorKey: 'validation.overview',
+      title: '全局校验速览',
+      description:
+        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。',
+      stage: 'ValidateTranslation',
+      stageKeys: ['ValidateTranslation'],
+      stepKeys: ['validation.overview'],
+      targetLanguageCodes
+    })
+    appendPlannedWorkflowStep(steps, {
+      key: 'content.validate',
+      majorKey: 'validation.chunk',
+      title: '校验并修正译文',
+      description: '校验 AI 依据全局校验指南分批复核并修正全部译文。',
+      stage: 'ValidateTranslation',
+      stageKeys: ['ValidateTranslation'],
+      stepKeys: ['validation.chunk'],
+      targetLanguageCodes,
+      dynamicDetailText: '校验批次数量需要等译文产出后才能确定。'
+    })
+  }
   appendPlannedWorkflowStep(steps, {
     key: 'content.review-preview',
     majorKey: 'translation.review-preview',
@@ -785,6 +834,7 @@ function buildSourcePostAiImportPlannedSteps(job) {
     stageKeys: ['BuildEntries'],
     targetLanguageCodes
   })
+  const runSourceImportValidation = shouldRunAiValidationForWorkflow(job)
   targetLanguageCodes.forEach(languageCode => {
     appendPlannedWorkflowStep(steps, {
       key: `source-import.translate.${languageCode}`,
@@ -795,8 +845,32 @@ function buildSourcePostAiImportPlannedSteps(job) {
       stageKeys: [`TranslatePost:${languageCode}`],
       stepKeys: ['translation.chunk', 'translation.post'],
       targetLanguageCodes: [languageCode],
-      dynamicDetailText: '批次数量和跳过条目需要等当前语言条目准备完成后才能确定。'
+      dynamicDetailText:
+        '批次数量和跳过条目需要等当前语言条目准备完成后才能确定。'
     })
+    if (runSourceImportValidation) {
+      appendPlannedWorkflowStep(steps, {
+        key: `source-import.validate-overview.${languageCode}`,
+        majorKey: 'validation.overview',
+        title: `${formatLanguage(languageCode)}全局校验速览`,
+        description: '校验 AI 纵观当前语言全部译文，产出全局校验指南。',
+        stage: `ValidateTranslation:${languageCode}`,
+        stageKeys: [`ValidateTranslation:${languageCode}`],
+        stepKeys: ['validation.overview'],
+        targetLanguageCodes: [languageCode]
+      })
+      appendPlannedWorkflowStep(steps, {
+        key: `source-import.validate.${languageCode}`,
+        majorKey: 'validation.chunk',
+        title: `校验${formatLanguage(languageCode)}译文`,
+        description: '校验 AI 依据全局校验指南分批复核并修正当前语言译文。',
+        stage: `ValidateTranslation:${languageCode}`,
+        stageKeys: [`ValidateTranslation:${languageCode}`],
+        stepKeys: ['validation.chunk'],
+        targetLanguageCodes: [languageCode],
+        dynamicDetailText: '校验批次数量需要等当前语言译文产出后才能确定。'
+      })
+    }
   })
   if (shouldTranslateCoverImageForWorkflow(job, true)) {
     appendPlannedWorkflowStep(steps, {
@@ -808,7 +882,8 @@ function buildSourcePostAiImportPlannedSteps(job) {
       stageKeys: ['TranslateCoverImage'],
       stepKeys: ['cover-image.recognition', 'cover-image.generation'],
       targetLanguageCodes,
-      dynamicDetailText: '封面图任务数量需要等各语言预览上下文准备完成后才能确定。'
+      dynamicDetailText:
+        '封面图任务数量需要等各语言预览上下文准备完成后才能确定。'
     })
   }
   appendPlannedWorkflowStep(steps, {
@@ -927,6 +1002,12 @@ function normalizeWorkflowMajorKey(value) {
   }
   if (stepKey === 'translation.post' || stepKey === 'translation.content') {
     return 'translation.chunk'
+  }
+  if (/^validation\.chunk\.\d+$/.test(stepKey)) {
+    return 'validation.chunk'
+  }
+  if (/^validation\.overview\.block\.\d+$/.test(stepKey)) {
+    return 'validation.overview'
   }
   return stepKey
 }
@@ -2756,6 +2837,23 @@ function getOperationDisplay(log) {
       title: '翻译通用内容',
       description: 'AI 翻译弹窗或通用内容请求里的文本。'
     },
+    'validation.overview': {
+      title: '全局翻译校验速览',
+      description:
+        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。'
+    },
+    'validation.overview.merge': {
+      title: '合并全局校验指南',
+      description: '校验 AI 把分块产出的局部校验指南合并成一份全局指南。'
+    },
+    'validation.chunk': {
+      title: '校验并修正译文批次',
+      description: '校验 AI 按批次复核并修正当前语言的译文。'
+    },
+    'translation.verification': {
+      title: '校验并修正译文批次',
+      description: '校验 AI 按批次复核并修正当前语言的译文。'
+    },
     'cover-image.recognition': {
       title: '识别封面图文字与主题',
       description: 'AI 分析源封面，为后续生成目标语言封面提供依据。'
@@ -2843,6 +2941,9 @@ function getLogMajorKey(log) {
   }
   if (operation === 'translation.post' || operation === 'translation.content') {
     return 'translation.chunk'
+  }
+  if (operation === 'translation.verification') {
+    return 'validation.chunk'
   }
   return normalizeWorkflowMajorKey(operation)
 }
@@ -3619,7 +3720,10 @@ function doWorkflowStagesMatch(step, plannedStep) {
 
 function doesWorkflowStepMatchPlannedStep(step, plannedStep) {
   const plannedStepKey = normalizeText(plannedStep?.plannedStepKey)
-  if (plannedStepKey && normalizeText(step?.plannedStepKey) === plannedStepKey) {
+  if (
+    plannedStepKey &&
+    normalizeText(step?.plannedStepKey) === plannedStepKey
+  ) {
     return true
   }
   const plannedMajorKey = normalizeText(plannedStep?.majorKey)

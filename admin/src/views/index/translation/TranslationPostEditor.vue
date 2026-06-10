@@ -1030,6 +1030,16 @@
                   :message="officialTermSearchUnavailableReason"
                 />
               </el-form-item>
+              <el-form-item label="校验译文">
+                <el-switch
+                  v-model="aiVerificationEnabled"
+                  :disabled="isAiBusy"
+                  active-text="AI 参与校验"
+                />
+                <AiFeatureHintTip
+                  message="开启后，校验 AI 会在后台任务翻译完成后对全部译文进行全局校验与修正；实时翻译不参与校验。"
+                />
+              </el-form-item>
               <el-form-item label="此次提示词">
                 <el-input
                   v-model="aiPrompt"
@@ -1488,6 +1498,7 @@ import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSn
 import TranslationPostSourceLinkRewriteDialog from '@/components/TranslationPostSourceLinkRewriteDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import AiFeatureHintTip from '@/components/AiFeatureHintTip.vue'
 import { multilingualApi } from '@/api'
 import store from '@/store'
 import {
@@ -1781,6 +1792,7 @@ export default {
   name: 'TranslationPostEditor',
   components: {
     AiFeatureUnavailableTip,
+    AiFeatureHintTip,
     Document,
     EditPen,
     Picture,
@@ -1913,6 +1925,7 @@ export default {
     const aiSourceLanguageCode = ref('')
     const aiTranslateCoverImage = ref(false)
     const aiSearchOfficialTermTranslations = ref(false)
+    const aiVerificationEnabled = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
     const aiImportPreview = ref(null)
@@ -3854,7 +3867,8 @@ export default {
             options: {
               translateCoverImage: shouldTranslateAiCoverImage(),
               searchOfficialTermTranslations:
-                shouldSearchOfficialTermTranslations()
+                shouldSearchOfficialTermTranslations(),
+              aiVerificationEnabled: aiVerificationEnabled.value === true
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)

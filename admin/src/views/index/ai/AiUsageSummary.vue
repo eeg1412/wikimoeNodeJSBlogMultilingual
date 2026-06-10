@@ -251,6 +251,7 @@ const PROVIDER_OPTIONS = [
 const OPERATION_TEXT_MAP = {
   'translation.content': '内容 AI 翻译',
   'translation.post': '文章 AI 翻译',
+  'translation.verification': '校验 AI',
   'cover.image.recognition': '封面图识别',
   'cover.image.generation': '封面图生成',
   'proper-noun.keyword.extract': '专有名词抽取',

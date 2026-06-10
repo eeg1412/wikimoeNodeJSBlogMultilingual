@@ -160,7 +160,8 @@ function buildLocalLanguagePromptMap() {
 const TEXT_WORKFLOW_CONFIGS = [
   { key: 'mainTranslation' },
   { key: 'properNounPreprocess' },
-  { key: 'properNounKnowledge' }
+  { key: 'properNounKnowledge' },
+  { key: 'verification' }
 ]
 
 const TEXT_WORKFLOW_GROUP_LABEL_MAP = TEXT_WORKFLOW_CONFIGS.reduce(
@@ -345,6 +346,8 @@ const FIELD_GROUP_LABEL_MAP = {
   properNounPreprocessPrompt: '提示词',
   properNounKnowledgeWorkflow: '选择 Provider',
   properNounKnowledgePrompt: '提示词',
+  verificationWorkflow: '选择 Provider',
+  verificationPrompt: '提示词',
   internetSearchProvider: '选择 Provider',
   internetSearchPrompt: '提示词',
   geminiInternetSearch: 'Gemini 连接',
@@ -399,6 +402,20 @@ const AI_GATEWAY_FIELD_LIST = [
 ]
 
 const WORKFLOW_PROMPT_FIELD_LIST = [
+  {
+    name: 'verificationDefaultPrompt',
+    label: '默认提示词',
+    type: 'textarea',
+    group: 'verificationPrompt',
+    defaultValue: ''
+  },
+  {
+    name: 'verificationLanguagePrompts',
+    label: '按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'verificationPrompt',
+    defaultValue: buildLocalLanguagePromptMap()
+  },
   {
     name: 'properNounPreprocessDefaultPrompt',
     label: '默认提示词',
@@ -673,6 +690,14 @@ const TEXT_WORKFLOW_PROVIDER_GROUP_MAP = {
       'properNounKnowledgeGeminiText',
       'properNounKnowledgeGeminiTextRequest'
     ]
+  },
+  verification: {
+    deepseek: [
+      'verificationDeepseek',
+      'verificationDeepseekModel',
+      'verificationDeepseekRequest'
+    ],
+    gemini: ['verificationGeminiText', 'verificationGeminiTextRequest']
   }
 }
 
@@ -719,6 +744,10 @@ export default {
 
     function getSelectedProperNounKnowledgeProvider() {
       return normalizeTextProvider(settingsForm.properNounKnowledgeProvider)
+    }
+
+    function getSelectedVerificationProvider() {
+      return normalizeTextProvider(settingsForm.verificationProvider)
     }
 
     function getSelectedImageRecognitionProvider() {
@@ -812,6 +841,20 @@ export default {
               getSelectedMainTranslationProvider()
             ),
             'mainTranslationPrompt'
+          ])
+        },
+        {
+          key: 'verification',
+          title: '校验 AI',
+          description:
+            '用于在翻译完成后对全部译文进行全局校验与修正，需在翻译入口开启“AI 参与校验”开关后生效。建议选用比主翻译更强的模型复核。',
+          groups: buildSectionGroups([
+            'verificationWorkflow',
+            ...getTextWorkflowProviderGroups(
+              'verification',
+              getSelectedVerificationProvider()
+            ),
+            'verificationPrompt'
           ])
         },
         {

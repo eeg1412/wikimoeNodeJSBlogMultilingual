@@ -2292,6 +2292,7 @@ async function completeRunningTranslationJobForReview(options = {}) {
     ),
     'result.aiUsage': resultData.aiUsage || {},
     'result.model': resultData.model || '',
+    'result.validation': resultData.validation || null,
     'result.completedAt': now,
     'progress.currentStep': finalProgressStep,
     'progress.currentStage': finalProgressStage,

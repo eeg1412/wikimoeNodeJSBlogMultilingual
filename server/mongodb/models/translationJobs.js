@@ -560,6 +560,10 @@ const translationJobs = new Schema(
       completedAt: {
         type: Date,
         default: null
+      },
+      validation: {
+        type: Schema.Types.Mixed,
+        default: null
       }
     },
     adoption: {

@@ -467,6 +467,16 @@
                 active-text="同步翻译相关文章"
               />
             </el-form-item>
+            <el-form-item label="校验译文">
+              <el-switch
+                v-model="aiForm.aiVerificationEnabled"
+                :disabled="isAiImportBusy"
+                active-text="AI 参与校验"
+              />
+              <AiFeatureHintTip
+                message="开启后，校验 AI 会在翻译完成后对全部译文进行全局校验与修正。"
+              />
+            </el-form-item>
             <el-form-item
               v-if="showAiCoverImageTranslationOption"
               label="翻译封面图"
@@ -1172,6 +1182,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi, authApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import AiFeatureHintTip from '@/components/AiFeatureHintTip.vue'
 import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import RelatedPostFeatureScopeSelector from '@/components/RelatedPostFeatureScopeSelector.vue'
@@ -1248,6 +1259,7 @@ const AI_COVER_IMAGE_TRANSLATION_MODE_OPTIONS = [
 export default {
   components: {
     AiFeatureUnavailableTip,
+    AiFeatureHintTip,
     OfficialTermGlossaryOptions,
     PostRelationSummary,
     RelatedPostFeatureScopeSelector,
@@ -1314,6 +1326,7 @@ export default {
       searchOfficialTermTranslations: false,
       allowAiKeepOriginalJudgement: false,
       syncRelatedPosts: true,
+      aiVerificationEnabled: false,
       recursionMaxDepth: 3
     })
     const params = reactive({
@@ -1588,6 +1601,7 @@ export default {
       aiForm.searchOfficialTermTranslations = false
       aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
+      aiForm.aiVerificationEnabled = false
       aiForm.recursionMaxDepth = 3
       relatedPostScopeLoading.value = false
       relatedPostScopeRequestId += 1
@@ -1786,6 +1800,7 @@ export default {
       aiForm.searchOfficialTermTranslations = false
       aiForm.allowAiKeepOriginalJudgement = false
       aiForm.syncRelatedPosts = true
+      aiForm.aiVerificationEnabled = false
       aiForm.recursionMaxDepth = 3
       relatedPostScopeLoading.value = false
       relatedPostScopeRequestId += 1
@@ -3878,6 +3893,7 @@ export default {
               syncRelatedPosts:
                 showSyncRelatedPostsOption.value &&
                 aiForm.syncRelatedPosts === true,
+              aiVerificationEnabled: aiForm.aiVerificationEnabled === true,
               relatedSourceFeatureScopes: buildRelatedSourceFeatureScopes()
             },
             targetLanguageCodes: aiForm.targetLanguageCodes,

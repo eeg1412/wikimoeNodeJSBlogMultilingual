@@ -791,6 +791,9 @@ function buildSkipPolicyPrompt(input) {
 }
 
 function buildCurrentValuePolicyPrompt(input) {
+  if (input.verificationMode === true) {
+    return ''
+  }
   if (!hasCurrentValueEntries(input)) {
     return ''
   }
@@ -801,6 +804,22 @@ function buildCurrentValuePolicyPrompt(input) {
     '不要把 c 的任何状态当作 v 已是目标语言的证据。',
     '如果 v 等于 c，这只表示已有值和输入值相同，不表示可以跳过翻译。',
     '不要把当前、已有、未变化的内容当作已经翻译。只要 v 中可读文本不完整属于目标语言，就必须翻译。'
+  ])
+}
+
+function buildVerificationModePrompt(input) {
+  if (input.verificationMode !== true) {
+    return ''
+  }
+
+  return buildPromptLayer('翻译校验层', [
+    '本次为翻译质检校验任务。v 是源语言原文，c 是已有的目标语言译文。',
+    '你必须逐条审查 c 是否准确、完整地翻译了 v，并保持术语一致、语气恰当、表达通顺。',
+    '当 c 存在翻译错误、漏译、多译、术语不一致、语义偏差、语气不当或不通顺时，必须输出修正后的目标语言译文作为该条目的 v 翻译结果。',
+    '当 c 已经是准确且高质量的译文时，保持其表达不变，直接输出与 c 相同的译文。',
+    '不要因为这是校验任务就保留源语言原文；输出必须是目标语言译文。',
+    '不要增删事实，不要解释，不要输出译文以外的注释。',
+    'richTextDocument 仍然遵守 indexedRichText 规则：只修改 text，保持每个 index 与结构不变。'
   ])
 }
 
@@ -975,7 +994,10 @@ function buildRequestDataPrompt(input) {
           promptEntry.k = true
         }
         const currentValue = getAiPromptCurrentValue(entry)
-        if (entry.skipAllowed === true && typeof currentValue !== 'undefined') {
+        if (
+          typeof currentValue !== 'undefined' &&
+          (entry.skipAllowed === true || input.verificationMode === true)
+        ) {
           promptEntry.c = currentValue
         }
         return promptEntry
@@ -3539,6 +3561,7 @@ function buildTranslationMessages(settings, input) {
     buildNonLanguagePrompt(input),
     buildSkipPolicyPrompt(input),
     buildCurrentValuePolicyPrompt(input),
+    buildVerificationModePrompt(input),
     buildRichTextPolicyPrompt(input),
     buildSitePrompt(settings),
     buildTargetLanguageDefaultPrompt(settings, input),
@@ -4917,8 +4940,14 @@ async function translateStreamChunkWithRetry({
       }
     },
     {
-      stepKey: `translation.chunk.${chunkIndex + 1}`,
-      stepLabel: `翻译第 ${chunkIndex + 1}/${chunkTotal} 批`,
+      stepKey:
+        input.verificationMode === true
+          ? `validation.chunk.${chunkIndex + 1}`
+          : `translation.chunk.${chunkIndex + 1}`,
+      stepLabel:
+        input.verificationMode === true
+          ? `校验第 ${chunkIndex + 1}/${chunkTotal} 批`
+          : `翻译第 ${chunkIndex + 1}/${chunkTotal} 批`,
       sourceLanguageCode: input.sourceLanguageCode,
       targetLanguageCode: input.targetLanguageCode,
       field: getProviderFieldBySettings(settings),
@@ -4928,8 +4957,26 @@ async function translateStreamChunkWithRetry({
   )
 }
 
+function applyWorkflowOverrides(input, options = {}) {
+  if (!input || !options) {
+    return input
+  }
+  if (options.runtimeSettings && typeof options.runtimeSettings === 'object') {
+    input.runtimeSettings = options.runtimeSettings
+  }
+  if (options.verificationMode === true) {
+    input.verificationMode = true
+  }
+  if (typeof options.operation === 'string' && options.operation.trim()) {
+    input.operation = options.operation.trim()
+  }
+  return input
+}
+
 async function translatePreparedEntriesStream(input, post, handlers = {}) {
-  const settings = await aiSettingsService.getMainTranslationRuntimeSettings()
+  const settings =
+    input.runtimeSettings ||
+    (await aiSettingsService.getMainTranslationRuntimeSettings())
   const officialTermGlossaryTaskCache = getOfficialTermGlossaryTaskCache(input)
   const splitOptions = {
     maxRequestTextLength: getTranslationChunkTextLimit(settings),
@@ -5068,8 +5115,13 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
   }
 }
 
-async function translatePostEntriesStream(body = {}, handlers = {}) {
+async function translatePostEntriesStream(
+  body = {},
+  handlers = {},
+  options = {}
+) {
   const input = parseInput(body)
+  applyWorkflowOverrides(input, options)
   const post = await getTranslationPost(input)
   if (post.sourceId && mongoose.Types.ObjectId.isValid(String(post.sourceId))) {
     input.properNounScopeKey = `sourcePostImport:${String(post.sourceId)}`
@@ -5131,11 +5183,16 @@ async function translatePostEntriesStream(body = {}, handlers = {}) {
   return data
 }
 
-async function translateContentEntriesStream(body = {}, handlers = {}) {
+async function translateContentEntriesStream(
+  body = {},
+  handlers = {},
+  options = {}
+) {
   const input = {
     ...parseGenericInput(body),
     operation: 'translation.content'
   }
+  applyWorkflowOverrides(input, options)
   const data = await translatePreparedEntriesStream(input, null, handlers)
   if (handlers.onResult) {
     handlers.onResult(data)
@@ -5170,5 +5227,6 @@ module.exports = {
   organizeProperNounTerms,
   translatePostEntries,
   translatePostEntriesStream,
-  translateContentEntriesStream
+  translateContentEntriesStream,
+  parseAiContentText
 }

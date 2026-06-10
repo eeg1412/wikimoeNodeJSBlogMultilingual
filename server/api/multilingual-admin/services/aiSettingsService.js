@@ -205,6 +205,11 @@ const TEXT_WORKFLOW_CONFIGS = [
     key: 'properNounKnowledge',
     label: '专有名词本地知识库查询',
     defaultProvider: 'gemini'
+  },
+  {
+    key: 'verification',
+    label: '校验AI',
+    defaultProvider: 'deepseek'
   }
 ]
 
@@ -467,6 +472,31 @@ const AI_SETTING_FIELDS = [
     label: '专有名词本地知识库查询按目标语言提示词',
     type: 'languagePromptMap',
     group: 'properNounKnowledgePrompt',
+    defaultValue: buildDefaultLanguagePromptMap()
+  },
+  {
+    name: 'verificationProvider',
+    label: '校验AI provider',
+    type: 'select',
+    group: 'verificationWorkflow',
+    defaultValue: 'deepseek',
+    options: TEXT_PROVIDER_OPTIONS,
+    helpText:
+      '选择对整篇翻译产物进行全局校验与修正的文本 AI Provider，建议使用比主翻译更强的模型复核。'
+  },
+  {
+    name: 'verificationDefaultPrompt',
+    label: '校验AI默认提示词',
+    type: 'textarea',
+    group: 'verificationPrompt',
+    defaultValue:
+      '你是严格的翻译质检员。请基于原文逐条校验译文，修正错误、术语不一致、漏译、语义不准确与语气偏差。只输出修正后的译文，不要增删事实，不要解释，不要改写 HTML 结构字段。'
+  },
+  {
+    name: 'verificationLanguagePrompts',
+    label: '校验AI按目标语言提示词',
+    type: 'languagePromptMap',
+    group: 'verificationPrompt',
     defaultValue: buildDefaultLanguagePromptMap()
   },
   ...TEXT_WORKFLOW_PROVIDER_FIELDS,
@@ -1618,6 +1648,22 @@ async function getProperNounKnowledgeRuntimeSettings() {
   )
 }
 
+async function getVerificationRuntimeSettings() {
+  const settings = await getAiSettings()
+  const values = settings.values
+  return attachWorkflowPromptSettings(
+    buildTextRuntimeSettingsForProvider(
+      values,
+      values.verificationProvider,
+      'verificationProvider',
+      'verification'
+    ),
+    values,
+    'verificationDefaultPrompt',
+    'verificationLanguagePrompts'
+  )
+}
+
 function buildGeminiImageRuntimeSettings(values) {
   if (!normalizeTrimmedString(values.geminiImageApiKey)) {
     throw new ApiError(
@@ -1814,6 +1860,7 @@ module.exports = {
   getMainTranslationRuntimeSettings,
   getProperNounPreprocessRuntimeSettings,
   getProperNounKnowledgeRuntimeSettings,
+  getVerificationRuntimeSettings,
   getImageGenerationRuntimeSettings,
   getImageRecognitionRuntimeSettings,
   getInternetSearchRuntimeSettings,

@@ -16,6 +16,7 @@ const coverImageTranslationService = require('./coverImageTranslationService')
 const importPostSourceService = require('./importPostSourceService')
 const sourcePostProperNounRelationService = require('./sourcePostProperNounRelationService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const translationValidationService = require('./translationValidationService')
 const {
   STRUCTURED_RICH_TEXT_VALUE_TYPE,
   renderRichTextDocumentNode
@@ -167,10 +168,9 @@ function getRelatedSourceFeatureScopes(job) {
     return null
   }
   return {
-    autoOrganizeOfficialTermGlossary:
-      normalizeRelatedSourceFeatureScopeList(
-        scopes.autoOrganizeOfficialTermGlossary
-      ),
+    autoOrganizeOfficialTermGlossary: normalizeRelatedSourceFeatureScopeList(
+      scopes.autoOrganizeOfficialTermGlossary
+    ),
     searchOfficialTermTranslations: normalizeRelatedSourceFeatureScopeList(
       scopes.searchOfficialTermTranslations
     ),
@@ -1100,6 +1100,72 @@ async function buildResult(job, data) {
   }
 }
 
+function shouldRunAiValidation(job) {
+  return job?.request?.options?.aiVerificationEnabled === true
+}
+
+// 在翻译产物生成后、进入等待审核前，调用校验 AI 对全部译文进行全局校验与修正。
+async function applyTranslationValidation({
+  job,
+  result,
+  sourceEntries,
+  context,
+  target
+}) {
+  if (!shouldRunAiValidation(job)) {
+    return result
+  }
+  if (!result || !result.payload || !Array.isArray(result.payload.entries)) {
+    return result
+  }
+
+  await context.updateProgress({
+    currentStage: translationValidationService.VALIDATION_STAGE,
+    currentStep: '正在启动翻译校验',
+    percent: 86
+  })
+
+  const handlers = createHandlers(
+    context,
+    translationValidationService.VALIDATION_STAGE,
+    { start: 86, end: 96 }
+  )
+
+  const validationResult =
+    await translationValidationService.validateTranslationPayload({
+      job,
+      handlers,
+      sourceEntries,
+      payload: result.payload,
+      target
+    })
+
+  result.payload = validationResult.payload
+  result.previewEntries =
+    await translationPayloadApplyService.buildTranslationJobReviewSnapshot(
+      job,
+      validationResult.payload
+    )
+  result.aiSkipList = validationResult.payload.entries.filter(entry =>
+    Boolean(entry.aiSkipReason)
+  )
+  result.aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    result.aiJsonLogs,
+    validationResult.aiJsonLogs
+  )
+  result.validation = validationResult.validation
+
+  await context.saveCheckpoint({
+    stage: translationValidationService.VALIDATION_STAGE,
+    stateSummary: {
+      changedEntries: validationResult.validation?.stats?.changedEntries || 0,
+      totalEntries: validationResult.validation?.stats?.totalEntries || 0
+    }
+  })
+
+  return result
+}
+
 async function executePostAiTranslation(job, context) {
   const entries = await resolvePostTranslationEntries(job, context)
   let data = null
@@ -1149,11 +1215,20 @@ async function executePostAiTranslation(job, context) {
     data = createEmptyPostTranslationData()
   }
 
-  const result = await appendPostTranslationCoverImageResult(
+  let result = await buildResult(job, data)
+  result = await applyTranslationValidation({
     job,
-    await buildResult(job, data),
-    context
-  )
+    result,
+    sourceEntries: entries,
+    context,
+    target: {
+      mode: 'post',
+      postId: String(job.target.postId),
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: job.target.languageCode
+    }
+  })
+  result = await appendPostTranslationCoverImageResult(job, result, context)
   await appendTranslationMemoForLanguage({
     job,
     languageCode: job.target.languageCode,
@@ -1201,6 +1276,19 @@ async function executeContentAiTranslation(job, context) {
   )
 
   const result = await buildResult(job, data)
+  await applyTranslationValidation({
+    job,
+    result,
+    sourceEntries: entries,
+    context,
+    target: {
+      mode: 'content',
+      contentId: String(contentId || ''),
+      contentType,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: job.target.languageCode
+    }
+  })
   await appendTranslationMemoForLanguage({
     job,
     languageCode: job.target.languageCode,
@@ -1761,6 +1849,44 @@ async function translateSourcePostForLanguage({
     )
   }
   const payload = data.payload || { entries: [] }
+  let nodeValidation = null
+  if (
+    shouldRunAiValidation(job) &&
+    Array.isArray(payload.entries) &&
+    payload.entries.length > 0
+  ) {
+    await context.updateProgress({
+      currentStage: translationValidationService.VALIDATION_STAGE,
+      currentStep: `正在校验 ${getLanguageText(languageCode)} AI 翻译`,
+      percent: getRangePercent(progressRange, 0.85, 0.9)
+    })
+    const validationHandlers = createHandlers(
+      context,
+      `${translationValidationService.VALIDATION_STAGE}:${languageCode}`,
+      progressRange
+    )
+    const nodeValidationResult =
+      await translationValidationService.validateTranslationPayload({
+        job,
+        handlers: validationHandlers,
+        sourceEntries: entries,
+        payload,
+        target: {
+          mode: 'content',
+          contentId: String(previewContext.targetPost._id),
+          contentType: 'sourcePostImport',
+          cacheScopeKey: `validation:${languageCode}:${sourcePostId}`,
+          sourceLanguageCode: job.source.languageCode,
+          targetLanguageCode: languageCode
+        }
+      })
+    payload.entries = nodeValidationResult.payload.entries
+    nodeValidation = nodeValidationResult.validation
+    data.aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+      data.aiJsonLogs,
+      nodeValidationResult.aiJsonLogs
+    )
+  }
   const translatedPreviewEntries = buildSourcePostPreviewEntries({
     payload,
     requestEntries: entries,
@@ -1791,7 +1917,8 @@ async function translateSourcePostForLanguage({
     aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(data.aiJsonLogs),
     aiUsage: data.usage || {},
     model: data.model || '',
-    requestId: data.requestId || null
+    requestId: data.requestId || null,
+    validation: nodeValidation
   }
   if (shouldTranslateCoverImage(job, true) && Array.isArray(coverImageTasks)) {
     coverImageTasks.push({
@@ -2665,6 +2792,35 @@ async function executeSourcePostAiImport(job, context) {
   const warningList = languageResults.flatMap(item => {
     return item.result.warningList || []
   })
+  const validationNodes = languageResults.filter(item =>
+    Boolean(item.result.validation)
+  )
+  let aggregateValidation = null
+  if (validationNodes.length > 0) {
+    aggregateValidation = {
+      enabled: true,
+      status: 'completed',
+      stats: {
+        totalEntries: validationNodes.reduce(
+          (sum, item) =>
+            sum + (item.result.validation.stats?.totalEntries || 0),
+          0
+        ),
+        changedEntries: validationNodes.reduce(
+          (sum, item) =>
+            sum + (item.result.validation.stats?.changedEntries || 0),
+          0
+        ),
+        nodeCount: validationNodes.length
+      },
+      languageValidations: validationNodes.map(item => ({
+        languageCode: item.languageCode,
+        sourceId: item.sourceId,
+        validation: item.result.validation
+      })),
+      completedAt: new Date().toISOString()
+    }
+  }
   return {
     payload: {
       schema: 'wikimoe.ai.translation.aggregate',
@@ -2687,6 +2843,7 @@ async function executeSourcePostAiImport(job, context) {
     languageResults,
     translationPostMap: {},
     aiJsonLogs,
+    validation: aggregateValidation,
     coverImageArtifacts: coverImageSnapshot.coverImageArtifacts,
     coverImageGenerationMap: coverImageSnapshot.coverImageGenerationMap,
     coverImageRecognitionMap: coverImageSnapshot.coverImageRecognitionMap,

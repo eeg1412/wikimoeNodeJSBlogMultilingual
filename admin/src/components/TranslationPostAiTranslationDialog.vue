@@ -157,9 +157,7 @@
                 class="translation-json-entry"
               >
                 <div class="ai-cover-translation-entry-body">
-                  <div class="ai-cover-translation-entry-title">
-                    封面图标题
-                  </div>
+                  <div class="ai-cover-translation-entry-title">封面图标题</div>
                   <div class="translation-entry-preview-rows">
                     <div class="translation-entry-preview-row">
                       <div class="translation-entry-preview-label">
@@ -333,6 +331,16 @@
                 sourceProperNounTermCountLoading
               "
             />
+            <el-form-item label="校验译文">
+              <el-switch
+                v-model="aiVerificationEnabled"
+                :disabled="isAiBusy"
+                active-text="AI 参与校验"
+              />
+              <AiFeatureHintTip
+                message="开启后，校验 AI 会在后台任务翻译完成后对全部译文进行全局校验与修正；实时翻译不参与校验。"
+              />
+            </el-form-item>
             <el-form-item label="此次提示词">
               <el-input
                 v-model="aiPrompt"
@@ -616,6 +624,7 @@ import { Document, VideoPlay } from '@element-plus/icons-vue'
 import store from '@/store'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import AiFeatureHintTip from '@/components/AiFeatureHintTip.vue'
 import OfficialTermGlossaryOptions from '@/components/OfficialTermGlossaryOptions.vue'
 import TranslationEntryMeta from '@/components/TranslationEntryMeta.vue'
 import TranslationEntrySelectableGroups from '@/components/TranslationEntrySelectableGroups.vue'
@@ -883,6 +892,7 @@ export default {
   name: 'TranslationPostAiTranslationDialog',
   components: {
     AiFeatureUnavailableTip,
+    AiFeatureHintTip,
     Document,
     OfficialTermGlossaryOptions,
     TranslationEntryMeta,
@@ -916,6 +926,7 @@ export default {
     const aiTranslateCoverImage = ref(false)
     const aiAutoOrganizeOfficialTermGlossary = ref(true)
     const aiSearchOfficialTermTranslations = ref(false)
+    const aiVerificationEnabled = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
     const officialTermSearchDefaultLoading = ref(false)
     const sourceProperNounTermCount = ref(0)
@@ -2144,7 +2155,8 @@ export default {
               autoOrganizeOfficialTermGlossary:
                 shouldAutoOrganizeOfficialTermGlossary(),
               searchOfficialTermTranslations:
-                shouldSearchOfficialTermTranslations()
+                shouldSearchOfficialTermTranslations(),
+              aiVerificationEnabled: aiVerificationEnabled.value === true
             },
             entries: selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
