@@ -8,6 +8,7 @@ const textTranslationWorkflowService = require('./textTranslationWorkflowService
 const aiUsageService = require('./aiUsageService')
 const { runAiStepWithRetry } = require('./aiStepRetryService')
 const translationAiJsonLogService = require('./translationAiJsonLogService')
+const translationOfficialTermGlossaryService = require('./translationOfficialTermGlossaryService')
 
 const VALIDATION_WORKFLOW = 'verification'
 const VALIDATION_STAGE = 'ValidateTranslation'
@@ -180,6 +181,7 @@ function buildGuidelineSystemPrompt() {
     `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结本次译文的整体质量、主要问题与需要重点修正的方向", "termGlossary": [{ "source": "原文术语", "target": "建议统一译法", "note": "可选说明" }], "styleNotes": "整体风格与语气基调说明", "suspectedIssues": [{ "entryId": "条目id", "issueType": "inconsistent|inaccurate|missing|tone|other", "note": "问题简述" }] }`,
     'summary 用一段简洁中文总结整体翻译质量与主要发现，供人工审核快速了解；不要在 summary 里描述因预览截断导致的“内容不完整”。',
     'termGlossary 只收录需要在全文统一的术语、专有名词或反复出现的关键表达。',
+    '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名；只有数据库未收录的术语才允许你给出新的建议译法。',
     'suspectedIssues 只列出术语前后不一致、风格语气偏差、明显语义错误或矛盾等问题，entryId 必须来自速览中出现的 entryId；不要包含由预览截断引起的内容缺失类误判。',
     '如果某一项没有内容，返回空数组或空字符串。'
   ].join('\n')
@@ -189,17 +191,27 @@ function buildGuidelineUserPrompt(
   sourceLanguageCode,
   targetLanguageCode,
   overviewText,
-  partial
+  partial,
+  officialTermGlossaryMarkdown
 ) {
   const header = partial
     ? '以下是该文章部分翻译产物的速览（全文已分块，这是其中一块）。请基于这一块产出局部校验指南。'
     : '以下是该文章全部翻译产物的速览。请基于全局产出校验指南。'
-  return [
+  const lines = [
     header,
     buildLanguageLine(sourceLanguageCode, targetLanguageCode),
-    '',
-    overviewText
-  ].join('\n')
+    ''
+  ]
+  const glossaryMarkdown = (officialTermGlossaryMarkdown || '').trim()
+  if (glossaryMarkdown) {
+    lines.push(
+      '以下是该文章的专有名词翻译数据库（官方统一译法，必须以此为准，不得臆造或推翻其中译名）：'
+    )
+    lines.push(glossaryMarkdown)
+    lines.push('')
+  }
+  lines.push(overviewText)
+  return lines.join('\n')
 }
 
 function buildGuidelineMergeSystemPrompt() {
@@ -207,10 +219,34 @@ function buildGuidelineMergeSystemPrompt() {
     '你是多语言博客的翻译质检负责人。',
     '你会收到同一篇文章按块产出的多份局部校验指南，需要合并成一份覆盖全局的校验指南。',
     '合并时要消除重复术语、统一冲突译法（保留更准确的一项并在 note 中说明），整合风格基调与疑似问题。',
+    '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：合并后的 termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名。',
     '各块指南来自被截断的速览片段，禁止保留或新增任何“译文截断、缺失后半段、漏译大段内容”等因预览截断而产生的完整性误判。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。',
     `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结整体翻译质量与主要发现", "termGlossary": [{ "source": "", "target": "", "note": "" }], "styleNotes": "", "suspectedIssues": [{ "entryId": "", "issueType": "", "note": "" }] }`
   ].join('\n')
+}
+
+function buildGuidelineMergeUserPrompt(
+  sourceLanguageCode,
+  targetLanguageCode,
+  partialGuidelines,
+  officialTermGlossaryMarkdown
+) {
+  const lines = [
+    '以下是同一篇文章按块产出的多份局部校验指南，请合并成一份全局校验指南。',
+    buildLanguageLine(sourceLanguageCode, targetLanguageCode),
+    ''
+  ]
+  const glossaryMarkdown = (officialTermGlossaryMarkdown || '').trim()
+  if (glossaryMarkdown) {
+    lines.push(
+      '以下是该文章的专有名词翻译数据库（官方统一译法，必须以此为准，不得臆造或推翻其中译名）：'
+    )
+    lines.push(glossaryMarkdown)
+    lines.push('')
+  }
+  lines.push(JSON.stringify(partialGuidelines))
+  return lines.join('\n')
 }
 
 function normalizeGuideline(parsed) {
@@ -385,7 +421,8 @@ async function buildGlobalGuideline({
   settings,
   handlers,
   sourceLanguageCode,
-  targetLanguageCode
+  targetLanguageCode,
+  officialTermGlossaryMarkdown
 }) {
   const blocks = buildOverviewBlocks(pairs)
   const cancellation = handlers?.cancellation
@@ -407,7 +444,8 @@ async function buildGlobalGuideline({
             sourceLanguageCode,
             targetLanguageCode,
             blocks[0],
-            false
+            false,
+            officialTermGlossaryMarkdown
           )
         }
       ],
@@ -443,7 +481,8 @@ async function buildGlobalGuideline({
             sourceLanguageCode,
             targetLanguageCode,
             blocks[index],
-            true
+            true,
+            officialTermGlossaryMarkdown
           )
         }
       ],
@@ -470,12 +509,12 @@ async function buildGlobalGuideline({
       { role: 'system', content: buildGuidelineMergeSystemPrompt() },
       {
         role: 'user',
-        content: [
-          '以下是同一篇文章按块产出的多份局部校验指南，请合并成一份全局校验指南。',
-          buildLanguageLine(sourceLanguageCode, targetLanguageCode),
-          '',
-          JSON.stringify(partialGuidelines)
-        ].join('\n')
+        content: buildGuidelineMergeUserPrompt(
+          sourceLanguageCode,
+          targetLanguageCode,
+          partialGuidelines,
+          officialTermGlossaryMarkdown
+        )
       }
     ],
     stepKey: 'validation.overview.merge',
@@ -977,6 +1016,46 @@ function buildSkippedValidation(reason) {
 // 把精校 handlers 直接传给翻译内核。校验阶段的 AI 调用会通过内核的
 // runAiStepWithRetry 步骤事件自动进入“查看 AI 工作流”视图。
 
+// 取出与该文章关联的专有名词翻译数据库 markdown，供全局速览参照（仅文章模式）。
+async function resolveValidationOfficialTermGlossaryMarkdown({
+  job,
+  target,
+  sourceLanguageCode,
+  targetLanguageCode
+}) {
+  if (target && target.mode === 'content') {
+    return ''
+  }
+  const normalizedTargetLanguageCode = String(targetLanguageCode || '').trim()
+  if (!normalizedTargetLanguageCode) {
+    return ''
+  }
+  const sourcePostId = String(
+    job?.source?.postId || job?.target?.postId || ''
+  ).trim()
+  if (!sourcePostId) {
+    return ''
+  }
+  try {
+    const glossaryData =
+      await translationOfficialTermGlossaryService.resolveLinkedOfficialTermGlossaryData(
+        {
+          sourcePostId,
+          sourceLanguageCode: sourceLanguageCode || '',
+          targetLanguageCodes: [normalizedTargetLanguageCode],
+          handlers: {}
+        }
+      )
+    const glossaryMarkdownMap =
+      glossaryData.officialTermGlossaryMarkdownMap || {}
+    return glossaryMarkdownMap[normalizedTargetLanguageCode] || ''
+  } catch (error) {
+    // 词库读取失败不应阻断校验主流程，但要保留错误用于排查。
+    console.error('读取校验阶段专有名词词库失败：', error && error.message)
+    return ''
+  }
+}
+
 /**
  * 校验并修正一份翻译产物。
  * @param {Object} params
@@ -1016,6 +1095,15 @@ async function validateTranslationPayload({
   const targetLanguageCode =
     target?.targetLanguageCode || job?.target?.languageCode
 
+  // 取出该文章的专有名词翻译数据库（官方统一译法），让全局速览也能参照，避免臆造词汇。
+  const officialTermGlossaryMarkdown =
+    await resolveValidationOfficialTermGlossaryMarkdown({
+      job,
+      target,
+      sourceLanguageCode,
+      targetLanguageCode
+    })
+
   // 阶段 A：全局速览，产出全局校验指南。
   const guidelineResult = await buildGlobalGuideline({
     job,
@@ -1023,7 +1111,8 @@ async function validateTranslationPayload({
     settings: verificationSettings,
     handlers,
     sourceLanguageCode,
-    targetLanguageCode
+    targetLanguageCode,
+    officialTermGlossaryMarkdown
   })
   const guideline = guidelineResult.guideline
   const guidelineAiJsonLogs = Array.isArray(guidelineResult.aiJsonLogs)

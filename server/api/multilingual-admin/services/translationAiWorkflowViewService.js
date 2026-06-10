@@ -1955,7 +1955,10 @@ function buildSystemPromptSummarySection(label, text) {
 
 function buildInputSections(log) {
   const input = log?.input || {}
-  const requestBody = input.requestBody || input.request || null
+  let requestBody = input.requestBody || input.request || null
+  if (!requestBody && Array.isArray(input.messages)) {
+    requestBody = { messages: input.messages }
+  }
   const sections = buildMessageInputSections(requestBody)
   if (sections.length > 0) {
     return sections
@@ -2680,11 +2683,109 @@ function shouldShowRawTermSection(operation, normalizedTerms) {
   return true
 }
 
+function buildValidationTermGlossaryItem(term, index) {
+  if (!isPlainObject(term)) {
+    return createItem(`术语 ${index + 1}`, term, { tone: 'output' })
+  }
+  const source = normalizeText(term.source)
+  const target = normalizeText(term.target)
+  const note = normalizeText(term.note)
+  const label = source || `术语 ${index + 1}`
+  const valueParts = []
+  if (target) {
+    valueParts.push(target)
+  }
+  if (note) {
+    valueParts.push(`（${note}）`)
+  }
+  return createItem(label, valueParts.join(' ') || '-', { tone: 'output' })
+}
+
+function buildValidationSuspectedIssueItem(issue, index) {
+  if (!isPlainObject(issue)) {
+    return createItem(`疑似问题 ${index + 1}`, issue, { tone: 'warning' })
+  }
+  const entryId = normalizeText(issue.entryId)
+  const issueType = normalizeText(issue.issueType)
+  const note = normalizeText(issue.note)
+  const labelParts = []
+  if (entryId) {
+    labelParts.push(`条目 ${entryId}`)
+  }
+  if (issueType) {
+    labelParts.push(`[${issueType}]`)
+  }
+  const label = labelParts.join(' ') || `疑似问题 ${index + 1}`
+  return createItem(label, note || '-', { tone: 'warning' })
+}
+
+function buildValidationGuidelineOutputSections(root) {
+  const sections = []
+  if (!isPlainObject(root)) {
+    return sections
+  }
+
+  const textBlocks = []
+  const summary = normalizeText(root.summary)
+  if (summary) {
+    textBlocks.push(createTextBlock('整体质量总结', summary))
+  }
+  const styleNotes = normalizeText(root.styleNotes)
+  if (styleNotes) {
+    textBlocks.push(createTextBlock('风格与语气基调', styleNotes))
+  }
+  if (textBlocks.length > 0) {
+    const summarySection = createSection({
+      title: '全局校验指南总结',
+      description: '校验 AI 速览全文后对整体质量与风格基调的判断。',
+      kind: 'text',
+      tone: 'output',
+      textBlocks,
+      total: textBlocks.length
+    })
+    if (summarySection) {
+      sections.push(summarySection)
+    }
+  }
+
+  const termSection = buildArraySection(
+    '建议统一的术语表',
+    '校验 AI 建议在全文统一的术语译法（已结合专有名词翻译数据库）。',
+    getFirstArray(root.termGlossary),
+    buildValidationTermGlossaryItem,
+    'output'
+  )
+  if (termSection) {
+    sections.push(termSection)
+  }
+
+  const issueSection = buildArraySection(
+    '疑似问题清单',
+    '校验 AI 标记的可能问题，会作为重点核查项传给精校阶段。',
+    getFirstArray(root.suspectedIssues),
+    buildValidationSuspectedIssueItem,
+    'warning'
+  )
+  if (issueSection) {
+    sections.push(issueSection)
+  }
+
+  return sections
+}
+
 function buildOutputSections(log) {
   const root = getOutputRoot(log)
   const result = isPlainObject(root.result) ? root.result : {}
   const operation = normalizeText(log?.operation)
+  const stage = normalizeText(log?.stage)
   const sections = []
+
+  if (stage === 'ValidationOverview') {
+    buildValidationGuidelineOutputSections(root).forEach(section => {
+      sections.push(section)
+    })
+  }
+
   const entries = getFirstArray(
     root.entries,
     result.entries,
