@@ -86,21 +86,12 @@ function buildCoverSourceIdentityCandidates(artifact, previewEntry) {
     sourceSnapshotIdCandidates,
     previewEntry?.sourceSnapshotId
   )
-  addObjectIdCandidate(sourceSnapshotIdCandidates, artifact?.sourcePostId)
-  addObjectIdCandidate(sourceSnapshotIdCandidates, previewEntry?.sourcePostId)
 
   addObjectIdCandidate(translationGroupIdCandidates, artifact?.translationGroupId)
   addObjectIdCandidate(
     translationGroupIdCandidates,
     previewEntry?.translationGroupId
   )
-  addObjectIdCandidate(translationGroupIdCandidates, artifact?.sourceSnapshotId)
-  addObjectIdCandidate(
-    translationGroupIdCandidates,
-    previewEntry?.sourceSnapshotId
-  )
-  addObjectIdCandidate(translationGroupIdCandidates, artifact?.sourcePostId)
-  addObjectIdCandidate(translationGroupIdCandidates, previewEntry?.sourcePostId)
 
   return {
     sourceIdCandidates,

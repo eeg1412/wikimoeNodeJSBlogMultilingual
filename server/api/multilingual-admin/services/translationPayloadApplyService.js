@@ -994,43 +994,18 @@ async function applySourcePostTranslationJob({
   }
 }
 
-function getSourcePostImportCoverSourceSnapshotId(job, entry) {
+function getSourcePostImportCoverSourceSnapshotId(entry) {
   const entrySourceSnapshotId = toOptionalObjectId(entry?.sourceSnapshotId)
   if (entrySourceSnapshotId) {
     return String(entrySourceSnapshotId)
   }
 
-  const rootSourceSnapshotId = toOptionalObjectId(
-    job.source?.snapshotId || job.result?.sourceSnapshotId
+  throw new ApiError(
+    ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+    '封面图条目缺少源快照 ID，不能创建目标翻译文章',
+    'entry.sourceSnapshotId',
+    400
   )
-  if (!rootSourceSnapshotId) {
-    return ''
-  }
-
-  const rootSourceId = toOptionalObjectId(job.source?.postId)
-  const entrySourceId = toOptionalObjectId(entry?.sourceId)
-  const entrySourcePostId = toOptionalObjectId(entry?.sourcePostId)
-  const entrySourceCandidates = [entrySourceId, entrySourcePostId].filter(
-    Boolean
-  )
-  if (entrySourceCandidates.length === 0) {
-    return String(rootSourceSnapshotId)
-  }
-
-  const rootIdentitySet = new Set()
-  if (rootSourceId) {
-    rootIdentitySet.add(String(rootSourceId))
-  }
-  rootIdentitySet.add(String(rootSourceSnapshotId))
-
-  const matchesRootSource = entrySourceCandidates.some(candidate => {
-    return rootIdentitySet.has(String(candidate))
-  })
-  if (matchesRootSource) {
-    return String(rootSourceSnapshotId)
-  }
-
-  return ''
 }
 
 async function createOrGetSourcePostImportCoverTargetPost(job, entry) {
@@ -1051,7 +1026,7 @@ async function createOrGetSourcePostImportCoverTargetPost(job, entry) {
     )
   }
 
-  const sourceSnapshotId = getSourcePostImportCoverSourceSnapshotId(job, entry)
+  const sourceSnapshotId = getSourcePostImportCoverSourceSnapshotId(entry)
   if (!sourceSnapshotId) {
     return ''
   }
