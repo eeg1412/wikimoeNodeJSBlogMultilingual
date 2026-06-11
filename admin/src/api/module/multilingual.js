@@ -278,6 +278,13 @@ export default function (api) {
         noLoading
       })
     },
+    getSourcePostRelatedScope(data, noLoading = false) {
+      return api.get('/translation/post/related-scope', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     deferTranslationJob(data, noLoading = false) {
       return api.put('/translation/job/defer', data, {
         shouldAdminJWT: true,

@@ -376,7 +376,14 @@
               采纳所选
             </el-button>
             <el-button
-              v-if="canApplyCurrentFamily"
+              v-if="canApplyCurrentJob && isParentReview"
+              type="primary"
+              @click="applyParentAll"
+            >
+              采纳全部
+            </el-button>
+            <el-button
+              v-if="isRootOverview"
               type="primary"
               @click="applyFamilyAll"
             >
@@ -579,8 +586,35 @@
           />
         </div>
 
+        <div v-if="isRootOverview" class="family-parent-card-list">
+          <div class="family-parent-card-list-title">
+            包含 {{ familyParentCards.length }} 篇文章，点击查看各文章的翻译结果
+          </div>
+          <div
+            v-for="parent in familyParentCards"
+            :key="parent._id"
+            class="family-parent-card"
+            @click="openDetail(parent)"
+          >
+            <div class="family-parent-card-main">
+              <div class="family-parent-card-title">
+                {{ parent.source?.title || parent.target?.title || parent._id }}
+              </div>
+              <div class="family-parent-card-meta">
+                {{ getTaskRelationText(parent.taskRelation) }}
+              </div>
+            </div>
+            <div class="family-parent-card-status">
+              <el-tag :type="getStatusTagType(parent.status)" effect="plain">
+                {{ parent.status }}
+              </el-tag>
+              <el-icon class="family-parent-card-arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </div>
+
         <el-tabs
-          v-if="reviewLanguageTabs.length > 0"
+          v-if="reviewLanguageTabs.length > 0 && !isRootOverview"
           v-model="activeReviewLanguageCode"
           class="ai-preview-tabs translation-job-review-tabs"
         >
@@ -916,7 +950,10 @@
           </el-tab-pane>
         </el-tabs>
 
-        <el-empty v-if="previewEntries.length === 0" description="暂无结果" />
+        <el-empty
+          v-if="previewEntries.length === 0 && !isRootOverview"
+          description="暂无结果"
+        />
       </template>
     </el-drawer>
 
@@ -936,7 +973,7 @@
 <script>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AiTranslationWorkflowViewer from '@/components/AiTranslationWorkflowViewer.vue'
 import ResponsiveTable from '@/components/ResponsiveTable.vue'
@@ -1845,6 +1882,7 @@ export default {
   components: {
     AiTranslationWorkflowViewer,
     Refresh,
+    ArrowRight,
     ResponsiveTable,
     ResponsiveTableColumn,
     TranslationEntrySelectableGroups,
@@ -2429,9 +2467,10 @@ export default {
       if (!currentJob.value) {
         return false
       }
-      // 编排节点（root/parent）不直接采纳单条目，走家族「采纳全部」。
+      // 根任务（root）不做条目级审核，展示文章父任务卡片下钻；父任务（parent）聚合各语言
+      // 子任务结果，允许勾选采纳。
       const role = currentJob.value.taskRelation?.role
-      if (role === 'root' || role === 'parent') {
+      if (role === 'root') {
         return false
       }
       if (currentJob.value.jobType === sourcePostProperNounOrganizeJobType) {
@@ -2440,13 +2479,23 @@ export default {
       return applyStatusSet.has(currentJob.value.status)
     })
 
-    // 是否可对当前家族（root/parent）执行「采纳全部」。
-    const canApplyCurrentFamily = computed(() => {
-      if (!currentJob.value) {
-        return false
+    // 当前抽屉是否为根任务总览（展示各文章父任务卡片）。
+    const isRootOverview = computed(() => {
+      return currentJob.value?.taskRelation?.role === 'root'
+    })
+
+    // 当前抽屉是否为文章父任务（聚合各语言子任务审核）。
+    const isParentReview = computed(() => {
+      return currentJob.value?.taskRelation?.role === 'parent'
+    })
+
+    // 根任务下的文章父任务卡片列表。
+    const familyParentCards = computed(() => {
+      const parents = currentJob.value?.familyParents
+      if (!Array.isArray(parents)) {
+        return []
       }
-      const role = currentJob.value.taskRelation?.role
-      return role === 'root' || role === 'parent'
+      return parents
     })
 
     const jobStorageTables = computed(() => {
@@ -2739,6 +2788,11 @@ export default {
       if (!currentJob.value?._id || selectedEntryKeys.value.length === 0) {
         return
       }
+      // 父任务聚合审核：所选条目按所属子任务（childJobId）分组，回到各子任务执行采纳。
+      if (isParentReview.value) {
+        applyParentSelections(selectedEntryKeys.value)
+        return
+      }
       conflictList.value = []
       multilingualApi
         .applyTranslationJobResult({
@@ -2766,13 +2820,113 @@ export default {
         })
     }
 
-    // 家族「采纳全部」：对父任务聚合下所有可采纳子任务统一采纳，程序上逐子任务依次 apply。
-    const applyFamilyAll = () => {
-      if (!currentJob.value?._id || !canApplyCurrentFamily.value) {
+    // 把父任务聚合视图里的所选条目按 childJobId 分组，调用 apply-family 逐子任务采纳。
+    const buildChildSelectionsFromEntryKeys = entryKeys => {
+      const entryKeySet = new Set(entryKeys)
+      const selectionMap = new Map()
+      const previewEntryList = Array.isArray(
+        currentJob.value?.result?.previewEntries
+      )
+        ? currentJob.value.result.previewEntries
+        : []
+      previewEntryList.forEach(entry => {
+        const entryKey = entry?.entryKey || entry?.id
+        if (!entryKey || !entryKeySet.has(entryKey)) {
+          return
+        }
+        const childJobId = entry?.childJobId
+        if (!childJobId) {
+          return
+        }
+        if (!selectionMap.has(childJobId)) {
+          selectionMap.set(childJobId, [])
+        }
+        selectionMap.get(childJobId).push(entryKey)
+      })
+      return Array.from(selectionMap.entries()).map(([jobId, keys]) => ({
+        jobId,
+        selectedEntryKeys: keys
+      }))
+    }
+
+    const applyParentSelections = entryKeys => {
+      const childSelections = buildChildSelectionsFromEntryKeys(entryKeys)
+      if (childSelections.length === 0) {
+        ElMessage.warning('所选条目无法定位到对应子任务')
+        return
+      }
+      conflictList.value = []
+      multilingualApi
+        .applyTranslationFamilyResult({
+          id: currentJob.value._id,
+          childSelections,
+          force: applyForm.force,
+          publish: applyForm.publish
+        })
+        .then(response => {
+          const responseData = response.data.data || {}
+          const failCount = Number(responseData.failCount || 0)
+          const successCount = Number(responseData.successCount || 0)
+          if (failCount > 0) {
+            ElMessage.warning(
+              `已采纳 ${successCount} 个子任务，${failCount} 个失败，可重试`
+            )
+          } else {
+            ElMessage.success('已采纳')
+          }
+          selectedEntryKeys.value = []
+          refreshDetail()
+          preserveTableScrollForNextRefresh()
+          getJobList(false)
+        })
+        .catch(error => {
+          console.log(error)
+        })
+    }
+
+    // 父任务「采纳全部」：采纳该父任务下所有可采纳条目。
+    const applyParentAll = () => {
+      if (!isParentReview.value) {
+        return
+      }
+      const allEntryKeys = reviewLanguageTabs.value.flatMap(tab => {
+        const keys = Array.isArray(tab.entryKeys) ? tab.entryKeys : []
+        const coverKeys = (tab.coverImageEntries || [])
+          .filter(item => canSelectCoverImage(item))
+          .map(item => item.id)
+        return keys.concat(coverKeys)
+      })
+      if (allEntryKeys.length === 0) {
+        ElMessage.warning('没有可采纳的条目')
         return
       }
       ElMessageBox.confirm(
-        '将采纳该任务下所有子任务的可用译文与封面图，确认继续？',
+        '将采纳该文章下所有语言的可用译文与封面图，确认继续？',
+        '采纳全部',
+        {
+          confirmButtonText: '采纳全部',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+        .then(() => {
+          applyParentSelections(allEntryKeys)
+        })
+        .catch(error => {
+          if (error === 'cancel') {
+            return
+          }
+          console.log(error)
+        })
+    }
+
+    // 根任务「采纳全部」：对整个家族下所有可采纳子任务统一采纳。
+    const applyFamilyAll = () => {
+      if (!currentJob.value?._id || !isRootOverview.value) {
+        return
+      }
+      ElMessageBox.confirm(
+        '将采纳该任务下所有文章、所有语言的可用译文与封面图，确认继续？',
         '采纳全部',
         {
           confirmButtonText: '采纳全部',
@@ -2794,7 +2948,7 @@ export default {
           const failCount = Number(responseData.failCount || 0)
           if (failCount > 0) {
             ElMessage.warning(
-              `已采纳 ${successCount} 个子任务，${failCount} 个失败，可在对应子任务中单独重试采纳`
+              `已采纳 ${successCount} 个子任务，${failCount} 个失败，可在对应文章中单独重试采纳`
             )
           } else {
             ElMessage.success(`已采纳全部 ${successCount} 个子任务`)
@@ -3272,7 +3426,10 @@ export default {
       activeReviewLanguageCode,
       batchDeleting,
       canApplyCurrentJob,
-      canApplyCurrentFamily,
+      isRootOverview,
+      isParentReview,
+      familyParentCards,
+      applyParentAll,
       applyFamilyAll,
       getJobRowClassName,
       canCleanupCoverImages,
@@ -3497,6 +3654,59 @@ html.dark .translation-job-storage-panel {
   line-height: 1.5;
   margin-top: 4px;
   overflow-wrap: anywhere;
+}
+
+/* 根任务总览：文章父任务卡片列表，点击下钻到父任务抽屉。 */
+.family-parent-card-list {
+  margin-bottom: 16px;
+}
+.family-parent-card-list-title {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 10px;
+}
+.family-parent-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background-color: var(--el-bg-color);
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.family-parent-card:hover {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.family-parent-card-main {
+  min-width: 0;
+  flex: 1;
+}
+.family-parent-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
+}
+.family-parent-card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.family-parent-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.family-parent-card-arrow {
+  color: var(--el-text-color-secondary);
 }
 
 /* 平铺列表中仅用最左侧色块体现家族层级深度（根/文章父任务/子任务），不改行底色。 */

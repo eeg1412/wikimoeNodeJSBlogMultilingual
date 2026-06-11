@@ -3262,6 +3262,74 @@ function shouldCreateProperNounChild(job) {
   return true
 }
 
+// 该文章是否启用名词整理（综合全局 autoOrganizeOfficialTermGlossary 与逐文章特性范围）。
+// 根文章始终只看全局开关；相关文章额外受 relatedSourceFeatureScopes 过滤（与旧逻辑一致）。
+function isProperNounOrganizeEnabledForArticle(
+  job,
+  articleSourceId,
+  isRootArticle
+) {
+  if (!shouldCreateProperNounChild(job)) {
+    return false
+  }
+  const options = job?.request?.options || {}
+  const globalAutoOrganize = options.autoOrganizeOfficialTermGlossary !== false
+  if (!globalAutoOrganize) {
+    return false
+  }
+  if (isRootArticle === true) {
+    return true
+  }
+  const scopes = getRelatedSourceFeatureScopes(job)
+  return isRelatedSourceFeatureSelected(
+    scopes,
+    'autoOrganizeOfficialTermGlossary',
+    normalizeString(articleSourceId)
+  )
+}
+
+// 该文章是否启用官方译名联网搜索（综合全局开关、名词整理开关与逐文章特性范围）。
+function isSearchOfficialTermEnabledForArticle(
+  job,
+  articleSourceId,
+  isRootArticle
+) {
+  if (
+    !isProperNounOrganizeEnabledForArticle(job, articleSourceId, isRootArticle)
+  ) {
+    return false
+  }
+  const options = job?.request?.options || {}
+  if (options.searchOfficialTermTranslations !== true) {
+    return false
+  }
+  if (isRootArticle === true) {
+    return true
+  }
+  const scopes = getRelatedSourceFeatureScopes(job)
+  return isRelatedSourceFeatureSelected(
+    scopes,
+    'searchOfficialTermTranslations',
+    normalizeString(articleSourceId)
+  )
+}
+
+// 该文章是否启用封面图翻译（综合全局封面图模式与逐文章特性范围）。
+function isCoverImageEnabledForArticle(job, articleSourceId, isRootArticle) {
+  if (!shouldTranslateCoverImage(job, true)) {
+    return false
+  }
+  if (isRootArticle === true) {
+    return true
+  }
+  const scopes = getRelatedSourceFeatureScopes(job)
+  return isRelatedSourceFeatureSelected(
+    scopes,
+    'coverImageTranslation',
+    normalizeString(articleSourceId)
+  )
+}
+
 // 构建某篇文章的子任务请求体（关闭翻译流内联名词整理，名词整理改由独立子任务负责）。
 function buildFamilyChildRequest(
   job,
@@ -3355,6 +3423,22 @@ async function createFamilyParentWithChildren({
 
   const childJobIds = []
   let childOrderIndex = 0
+  // 逐文章特性开关：根据 relatedSourceFeatureScopes 决定该文章是否做名词整理 / 封面图。
+  const properNounEnabled = isProperNounOrganizeEnabledForArticle(
+    job,
+    articleSourceId,
+    isRootArticle
+  )
+  const searchOfficialTermEnabled = isSearchOfficialTermEnabledForArticle(
+    job,
+    articleSourceId,
+    isRootArticle
+  )
+  const coverImageEnabled = isCoverImageEnabledForArticle(
+    job,
+    articleSourceId,
+    isRootArticle
+  )
 
   function buildChildSourceBlock() {
     return {
@@ -3425,8 +3509,8 @@ async function createFamilyParentWithChildren({
     return childJob
   }
 
-  // 2) 名词整理子任务（全语言一次性，执行即生效）。
-  if (shouldCreateProperNounChild(job)) {
+  // 2) 名词整理子任务（全语言一次性，执行即生效）。仅当该文章启用名词整理时创建。
+  if (properNounEnabled) {
     await createChild({
       jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
       childKind: TRANSLATION_JOB_CHILD_KINDS.PROPER_NOUN_ORGANIZE,
@@ -3440,6 +3524,8 @@ async function createFamilyParentWithChildren({
         entries: [],
         options: {
           ...(job.request?.options || {}),
+          autoOrganizeOfficialTermGlossary: true,
+          searchOfficialTermTranslations: searchOfficialTermEnabled,
           syncRelatedPosts: false,
           organizeRelatedPosts: false
         }
@@ -3453,7 +3539,7 @@ async function createFamilyParentWithChildren({
     const languageCode = languageCodes[i]
     const request = buildFamilyChildRequest(job, {
       languageCodes,
-      disableInlineProperNoun: shouldCreateProperNounChild(job)
+      disableInlineProperNoun: properNounEnabled
     })
     // 逐语言子任务不处理封面图，封面图统一放最后的封面图整理子任务。
     request.options = {
@@ -3470,8 +3556,8 @@ async function createFamilyParentWithChildren({
     })
   }
 
-  // 4) 封面图整理子任务（最后一步，跨该文章各语言按标题去重）。
-  if (shouldTranslateCoverImage(job, true)) {
+  // 4) 封面图整理子任务（最后一步，跨该文章各语言按标题去重）。仅当该文章启用封面图时创建。
+  if (coverImageEnabled) {
     await createChild({
       jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
       childKind: TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE,
@@ -3997,6 +4083,109 @@ function isFamilyOrchestratorPlanningResult(result) {
   return Boolean(result && result[FAMILY_ORCHESTRATOR_PLANNING_MARKER] === true)
 }
 
+// 服务端一次性遍历源文章的关联文章图，返回"相关文章特性范围"选项树。供创建"生成并 AI 翻译"
+// 任务的弹窗使用，替代浏览器逐文章逐语言调用预览上下文接口的 N+1 加载方式。
+async function buildSourcePostRelatedScopeOptions({
+  sourceId,
+  sourceLanguageCode,
+  targetLanguageCodes,
+  maxDepth
+}) {
+  const rootSourceId = normalizeString(sourceId)
+  if (!isValidObjectId(rootSourceId)) {
+    return []
+  }
+  const languageCodes = Array.isArray(targetLanguageCodes)
+    ? targetLanguageCodes.map(item => normalizeString(item)).filter(Boolean)
+    : []
+  if (languageCodes.length === 0) {
+    return []
+  }
+  let depthLimit = Number(maxDepth || 3)
+  if (!Number.isInteger(depthLimit) || depthLimit < 1) {
+    depthLimit = 3
+  }
+
+  const optionMap = new Map()
+  for (const languageCode of languageCodes) {
+    const queue = [{ sourceId: rootSourceId, parentSourceId: '', depth: 1 }]
+    const visited = new Set()
+    while (queue.length > 0) {
+      const task = queue.shift()
+      const currentId = normalizeString(task.sourceId)
+      if (!currentId || visited.has(currentId)) {
+        continue
+      }
+      visited.add(currentId)
+      let previewContext
+      try {
+        previewContext =
+          await translationPostService.getSourcePostAiImportPreviewContext({
+            sourceId: currentId,
+            sourceLanguageCode,
+            targetLanguageCode: languageCode
+          })
+      } catch (error) {
+        continue
+      }
+      const sourcePost = previewContext.sourcePost
+      const normalizedId = getSourcePostId(sourcePost) || currentId
+      if (normalizedId !== rootSourceId) {
+        const relatedDepth = Math.max(Number(task.depth || 1) - 1, 1)
+        const existing = optionMap.get(normalizedId)
+        if (existing) {
+          if (relatedDepth < existing.relatedDepth) {
+            existing.relatedDepth = relatedDepth
+            existing.depth = task.depth
+          }
+          if (
+            task.parentSourceId &&
+            !existing.parentSourceIds.includes(task.parentSourceId)
+          ) {
+            existing.parentSourceIds.push(task.parentSourceId)
+          }
+        } else {
+          optionMap.set(normalizedId, {
+            sourceId: normalizedId,
+            title: getSourcePostDisplayTitle(sourcePost) || normalizedId,
+            type: Number(sourcePost?.type || 0),
+            depth: task.depth,
+            relatedDepth,
+            parentSourceIds: task.parentSourceId ? [task.parentSourceId] : []
+          })
+        }
+      }
+      if (task.depth >= depthLimit) {
+        continue
+      }
+      const relatedIds = collectRelatedSourceIds(
+        previewContext.sourcePost,
+        previewContext.targetPost
+      )
+      relatedIds.forEach(relatedSourceId => {
+        const relatedId = normalizeString(relatedSourceId)
+        if (!relatedId || relatedId === rootSourceId) {
+          return
+        }
+        if (!visited.has(relatedId)) {
+          queue.push({
+            sourceId: relatedId,
+            parentSourceId: normalizedId,
+            depth: task.depth + 1
+          })
+        }
+      })
+    }
+  }
+
+  return Array.from(optionMap.values()).sort((leftItem, rightItem) => {
+    if (leftItem.relatedDepth !== rightItem.relatedDepth) {
+      return leftItem.relatedDepth - rightItem.relatedDepth
+    }
+    return String(leftItem.title).localeCompare(String(rightItem.title))
+  })
+}
+
 async function executeTranslationJob(job, context) {
   if (!job || !job.jobType) {
     throw new ApiError(
@@ -4056,5 +4245,6 @@ async function executeTranslationJob(job, context) {
 
 module.exports = {
   executeTranslationJob,
-  isFamilyOrchestratorPlanningResult
+  isFamilyOrchestratorPlanningResult,
+  buildSourcePostRelatedScopeOptions
 }

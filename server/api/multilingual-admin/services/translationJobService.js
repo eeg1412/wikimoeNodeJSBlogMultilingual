@@ -750,8 +750,10 @@ async function createTranslationJob(body = {}, options = {}) {
   const taskRelation = normalizeTaskRelation(body.taskRelation, source)
   validateExecutableRequest(jobType, request)
 
-  // 多语言"生成并 AI 翻译"任务作为家族 root：执行规划阶段把全部语言/相关文章拆成
-  // 按顺序执行的子任务，规避单文档 16MB 限制。子任务由规划器内部创建（role=child）。
+  // "生成并 AI 翻译"任务统一作为家族 root：规划阶段把全部语言 / 相关文章拆成按顺序执行的
+  // 子任务，规避单文档 16MB 限制。子任务由规划器内部创建（role=child）。
+  // 无论单语言还是多语言、是否带相关文章，都走家族系统，避免与旧的 parent/child 机制冲突
+  // 导致任务在列表中消失。
   const isTopLevelJob =
     taskRelation.role === TRANSLATION_JOB_TASK_ROLES.STANDALONE &&
     !taskRelation.parentId
@@ -759,7 +761,7 @@ async function createTranslationJob(body = {}, options = {}) {
     isTopLevelJob &&
     jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT &&
     Array.isArray(target.languageCodes) &&
-    target.languageCodes.length > 1
+    target.languageCodes.length >= 1
   if (shouldUseFamilyOrchestration) {
     taskRelation.role = TRANSLATION_JOB_TASK_ROLES.ROOT
     taskRelation.articleSourceId = source.postId || null
@@ -1279,7 +1281,149 @@ async function getTranslationJobDetail(query = {}) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
+  const role = job.taskRelation && job.taskRelation.role
+  // 家族编排节点详情：父任务聚合其下各语言子任务的译文供统一审核采纳；根任务返回各文章
+  // 父任务卡片供下钻。
+  if (role === TRANSLATION_JOB_TASK_ROLES.PARENT) {
+    return await buildParentReviewResponse(job)
+  }
+  if (role === TRANSLATION_JOB_TASK_ROLES.ROOT) {
+    return await buildRootOverviewResponse(job)
+  }
+
   return attachRuntimeDisplay(await buildTranslationJobDetailResponse(job), {})
+}
+
+// 父任务详情：聚合其下"可采纳"子任务（单语言翻译 + 封面图整理）的 previewEntries 与采纳记录，
+// 复用前端按语言分 Tab 的审核 UI；每个条目带上 childJobId 以便采纳时回到对应子任务执行。
+async function buildParentReviewResponse(parent) {
+  const JobModel = getTranslationJobModel()
+  const children = await JobModel.find({
+    'taskRelation.parentId': parent._id,
+    'taskRelation.childKind': { $in: TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS }
+  })
+    .sort({ 'taskRelation.orderIndex': 1 })
+    .lean()
+
+  const previewEntries = []
+  const adoptionEntries = []
+  const warningList = []
+  const aiSkipList = []
+  const languageValidations = []
+  const childReviewMeta = []
+  children.forEach(child => {
+    const childId = String(child._id)
+    const childKind = child.taskRelation && child.taskRelation.childKind
+    const childPreview = Array.isArray(child.result?.previewEntries)
+      ? child.result.previewEntries
+      : []
+    childPreview.forEach(entry => {
+      previewEntries.push({ ...entry, childJobId: childId, childKind })
+    })
+    const childAdoption = Array.isArray(child.adoption?.entries)
+      ? child.adoption.entries
+      : []
+    childAdoption.forEach(entry => {
+      adoptionEntries.push({ ...entry, childJobId: childId })
+    })
+    if (Array.isArray(child.result?.warningList)) {
+      warningList.push(...child.result.warningList)
+    }
+    if (Array.isArray(child.result?.aiSkipList)) {
+      aiSkipList.push(...child.result.aiSkipList)
+    }
+    const childLanguageCode =
+      (child.taskRelation && child.taskRelation.childLanguageCode) || ''
+    if (child.result?.validation && childLanguageCode) {
+      languageValidations.push({
+        languageCode: childLanguageCode,
+        sourceId: child.taskRelation?.articleSourceId || null,
+        validation: child.result.validation
+      })
+    }
+    childReviewMeta.push({
+      childJobId: childId,
+      childKind,
+      languageCode: childLanguageCode,
+      status: child.status,
+      entryCount: childPreview.length
+    })
+  })
+
+  let validation = null
+  if (languageValidations.length > 0) {
+    validation = {
+      enabled: true,
+      status: 'completed',
+      languageValidations
+    }
+  }
+
+  return attachRuntimeDisplay(
+    {
+      ...parent,
+      failure: normalizeFailureForResponse(parent.failure),
+      result: {
+        ...(parent.result || {}),
+        payload: null,
+        payloadSummary: { entryCount: previewEntries.length, fieldCount: 0 },
+        previewEntries,
+        warningList,
+        aiSkipList,
+        aiJsonLogs: [],
+        aiJsonLogCount: 0,
+        languageResults: [],
+        relatedResults: [],
+        translationPostMap: {},
+        coverImageGenerationMap: {},
+        coverImageRecognitionMap: {},
+        validation
+      },
+      adoption: {
+        ...(parent.adoption || {}),
+        entries: adoptionEntries
+      },
+      familyChildReview: childReviewMeta
+    },
+    {}
+  )
+}
+
+// 根任务详情：返回其下各文章父任务的摘要卡片，供前端下钻打开父任务抽屉。
+async function buildRootOverviewResponse(root) {
+  const JobModel = getTranslationJobModel()
+  const parents = await JobModel.find(
+    {
+      'taskRelation.rootId': root._id,
+      'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.PARENT
+    },
+    getListProjection()
+  )
+    .sort({ 'taskRelation.orderIndex': 1 })
+    .lean()
+  const familyParents = parents.map(parent => buildListItemSummary(parent, {}))
+
+  return attachRuntimeDisplay(
+    {
+      ...root,
+      failure: normalizeFailureForResponse(root.failure),
+      result: {
+        ...(root.result || {}),
+        payload: null,
+        payloadSummary: { entryCount: 0, fieldCount: 0 },
+        previewEntries: [],
+        aiJsonLogs: [],
+        aiJsonLogCount: 0,
+        languageResults: [],
+        relatedResults: [],
+        translationPostMap: {},
+        coverImageGenerationMap: {},
+        coverImageRecognitionMap: {}
+      },
+      familyParents
+    },
+    {}
+  )
 }
 
 // 获取整个家族树（root + parents + children 摘要）。仅返回轻量摘要，不含 previewEntries/

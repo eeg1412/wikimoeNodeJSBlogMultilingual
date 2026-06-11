@@ -2984,76 +2984,6 @@ export default {
       return String(aiRow.value?.sourceId || aiRow.value?._id || '').trim()
     }
 
-    function getRelatedPostScopeTitle(sourcePost, sourceId) {
-      const title = getPostDisplayTitle(sourcePost)
-      if (title && title !== '-') {
-        return title
-      }
-      if (sourceId) {
-        return sourceId
-      }
-      return '未命名内容'
-    }
-
-    function getRelatedPostScopeTypeLabel(sourcePost) {
-      const typeText = getPostTypeText(sourcePost?.type)
-      if (typeText && typeText !== '-') {
-        return typeText
-      }
-      return getRelatedPostTypeLabel(sourcePost)
-    }
-
-    function upsertRelatedPostScopeOption({
-      optionMap,
-      sourcePost,
-      sourceId,
-      depth,
-      parentSourceId
-    }) {
-      const normalizedSourceId = String(sourceId || '').trim()
-      if (!normalizedSourceId) {
-        return
-      }
-      const relatedDepth = Math.max(Number(depth || 1) - 1, 1)
-      const existing = optionMap.get(normalizedSourceId)
-      if (existing) {
-        if (relatedDepth < existing.relatedDepth) {
-          existing.relatedDepth = relatedDepth
-          existing.depth = depth
-        }
-        if (
-          parentSourceId &&
-          !existing.parentSourceIds.includes(parentSourceId)
-        ) {
-          existing.parentSourceIds.push(parentSourceId)
-        }
-        if (!existing.title || existing.title === normalizedSourceId) {
-          existing.title = getRelatedPostScopeTitle(
-            sourcePost,
-            normalizedSourceId
-          )
-        }
-        if (!existing.type && sourcePost?.type) {
-          existing.type = Number(sourcePost.type || 0)
-          existing.typeLabel = getRelatedPostScopeTypeLabel(sourcePost)
-        }
-        return
-      }
-      const parentSourceIds = []
-      if (parentSourceId) {
-        parentSourceIds.push(parentSourceId)
-      }
-      optionMap.set(normalizedSourceId, {
-        sourceId: normalizedSourceId,
-        title: getRelatedPostScopeTitle(sourcePost, normalizedSourceId),
-        type: Number(sourcePost?.type || 0),
-        typeLabel: getRelatedPostScopeTypeLabel(sourcePost),
-        depth,
-        relatedDepth,
-        parentSourceIds
-      })
-    }
-
     function resetRelatedPostScopeSelections(options) {
       const allSourceIds = options.map(item => {
         return item.sourceId
@@ -3094,82 +3024,40 @@ export default {
 
       relatedPostScopeLoading.value = true
       try {
-        const optionMap = new Map()
         const maxDepth = getAiRelatedPostMaxDepth()
-        for (const languageCode of aiForm.targetLanguageCodes) {
-          const queue = [
-            {
-              sourceId: rootSourceId,
-              parentSourceId: '',
-              depth: 1
-            }
-          ]
-          const visited = new Set()
-
-          while (queue.length > 0) {
-            if (requestId !== relatedPostScopeRequestId) {
-              return
-            }
-            const task = queue.shift()
-            const sourceId = String(task?.sourceId || '').trim()
-            if (!sourceId || visited.has(sourceId)) {
-              continue
-            }
-            visited.add(sourceId)
-
-            const previewContext = await loadAiImportPreviewContext({
-              sourcePost: { sourceId },
-              languageCode
-            })
-            const sourcePost = previewContext.sourcePost
-            const normalizedSourceId = String(
-              sourcePost?.sourceId || sourcePost?._id || sourceId
-            ).trim()
-            if (normalizedSourceId && normalizedSourceId !== rootSourceId) {
-              upsertRelatedPostScopeOption({
-                optionMap,
-                sourcePost,
-                sourceId: normalizedSourceId,
-                depth: task.depth,
-                parentSourceId: task.parentSourceId
-              })
-            }
-
-            if (task.depth >= maxDepth) {
-              continue
-            }
-
-            const relatedSourceIds = collectRelatedPostSourceIds(
-              sourcePost,
-              previewContext.targetPost
-            )
-            relatedSourceIds.forEach(relatedSourceId => {
-              const relatedId = String(relatedSourceId || '').trim()
-              if (!relatedId || relatedId === rootSourceId) {
-                return
-              }
-              if (!visited.has(relatedId)) {
-                queue.push({
-                  sourceId: relatedId,
-                  parentSourceId: normalizedSourceId,
-                  depth: task.depth + 1
-                })
-              }
-            })
-          }
-        }
-
+        // 由后端一次性遍历关联文章图返回选项树，避免浏览器逐文章逐语言调用预览上下文接口。
+        const response = await multilingualApi.getSourcePostRelatedScope(
+          {
+            sourceId: rootSourceId,
+            sourceLanguageCode: aiForm.sourceLanguageCode,
+            targetLanguageCodes: aiForm.targetLanguageCodes,
+            maxDepth
+          },
+          true
+        )
         if (requestId !== relatedPostScopeRequestId) {
           return
         }
-        const options = Array.from(optionMap.values()).sort(
-          (leftItem, rightItem) => {
-            if (leftItem.relatedDepth !== rightItem.relatedDepth) {
-              return leftItem.relatedDepth - rightItem.relatedDepth
-            }
-            return leftItem.title.localeCompare(rightItem.title)
+        const responseData = response.data.data || {}
+        const rawOptions = Array.isArray(responseData.options)
+          ? responseData.options
+          : []
+        const options = rawOptions.map(item => {
+          const typeValue = Number(item.type || 0)
+          return {
+            sourceId: item.sourceId,
+            title: item.title || item.sourceId,
+            type: typeValue,
+            typeLabel:
+              getPostTypeText(typeValue) ||
+              getRelatedPostTypeLabel({ type: typeValue }),
+            depth: item.depth,
+            relatedDepth: item.relatedDepth,
+            parentSourceIds: Array.isArray(item.parentSourceIds)
+              ? item.parentSourceIds
+              : []
           }
-        )
+        })
         relatedPostScopeOptions.value = options
         resetRelatedPostScopeSelections(options)
       } catch (error) {
