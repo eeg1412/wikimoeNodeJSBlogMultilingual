@@ -1878,6 +1878,8 @@ async function translateSourcePostForLanguage({
           contentId: String(previewContext.targetPost._id),
           contentType: 'sourcePostImport',
           cacheScopeKey: `validation:${languageCode}:${sourcePostId}`,
+          // 让校验精校阶段也按源文章绑定的专有名词数据库加载术语，避免推翻按名词库翻译的专有名词。
+          properNounScopeKey: `sourcePostImport:${sourcePostId}`,
           sourceLanguageCode: job.source.languageCode,
           targetLanguageCode: languageCode
         }
@@ -3484,7 +3486,10 @@ async function createFamilyParentWithChildren({
       source: buildChildSourceBlock(),
       target: {
         languageCode: childLanguageCode || '',
-        languageCodes,
+        // 单语言翻译子任务只负责一种语言，target.languageCodes 仅含该语言，避免工作流视图
+        // 误把整个家族的语言都渲染成该子任务的步骤；名词整理 / 封面图整理子任务需要覆盖全部
+        // 语言，保留完整家族语言列表。
+        languageCodes: childLanguageCode ? [childLanguageCode] : languageCodes,
         title
       },
       request,
@@ -3541,6 +3546,8 @@ async function createFamilyParentWithChildren({
       languageCodes,
       disableInlineProperNoun: properNounEnabled
     })
+    // 单语言子任务只负责一种语言：request 的目标语言也只含该语言。
+    request.targetLanguageCodes = [languageCode]
     // 逐语言子任务不处理封面图，封面图统一放最后的封面图整理子任务。
     request.options = {
       ...request.options,
@@ -3611,7 +3618,7 @@ async function executeFamilyRootPlanning(job, context) {
   await context.updateProgress({
     currentStage: 'PlanFamily',
     currentStep: '正在覆盖源文章快照并规划子任务',
-    percent: 2
+    percent: 0
   })
   // 覆盖根文章源快照（与原一次性导入一致）。
   await overwriteSourceSnapshotForAiImportJob(job, context)
@@ -3638,7 +3645,7 @@ async function executeFamilyRootPlanning(job, context) {
     await context.updateProgress({
       currentStage: 'PlanFamily',
       currentStep: '正在分析相关文章',
-      percent: 6
+      percent: 0
     })
     const relatedPlan = await buildSourcePostImportChildPlan({
       job,
@@ -3662,7 +3669,7 @@ async function executeFamilyRootPlanning(job, context) {
   await context.updateProgress({
     currentStage: 'PlanFamily',
     currentStep: `正在创建 ${articles.length} 篇文章的子任务家族`,
-    percent: 10
+    percent: 0
   })
 
   const JobModel = getTranslationJobModel()

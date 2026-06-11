@@ -84,7 +84,7 @@
                 :key="badge.key"
                 size="small"
                 effect="plain"
-                :type="badge.type || ''"
+                :type="badge.type || 'info'"
               >
                 {{ badge.label }}：{{ badge.value }}
               </el-tag>

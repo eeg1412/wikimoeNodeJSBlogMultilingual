@@ -11,7 +11,7 @@ const {
 
 const WORKFLOW_SCHEMA = 'wikimoe.ai.translation.workflow'
 const WORKFLOW_VERSION = 1
-const MAX_TEXT_LENGTH = 8000
+const MAX_TEXT_LENGTH = 1000000
 const MAX_SECTION_ITEMS = 80
 const MAX_META_ITEMS = 8
 const MAX_RECURSIVE_DEPTH = 6
@@ -1006,7 +1006,12 @@ function normalizeWorkflowMajorKey(value) {
   if (/^validation\.chunk\.\d+$/.test(stepKey)) {
     return 'validation.chunk'
   }
+  // 全局校验速览在内容较大时会拆成多块速览（block.N）并汇总（merge），它们都属于同一个
+  // “全局校验速览”父步骤，必须一并归并，确保每一次 AI 调用都在工作流中如实呈现。
   if (/^validation\.overview\.block\.\d+$/.test(stepKey)) {
+    return 'validation.overview'
+  }
+  if (stepKey === 'validation.overview.merge') {
     return 'validation.overview'
   }
   return stepKey
@@ -1559,40 +1564,6 @@ function getPromptDataListFromRequestBody(requestBody) {
   return dataList
 }
 
-function extractOfficialTermGlossaryMarkdown(text) {
-  const normalizedText = normalizeText(text)
-  if (!normalizedText) {
-    return ''
-  }
-  const glossaryIndex = normalizedText.indexOf('## 专有名词翻译数据库')
-  if (glossaryIndex < 0) {
-    return ''
-  }
-  return normalizedText.slice(glossaryIndex).trim()
-}
-
-function buildOfficialTermGlossaryPromptSection(requestBody) {
-  const textBlocks = []
-  getMessageListFromRequestBody(requestBody).forEach(message => {
-    const glossaryMarkdown = extractOfficialTermGlossaryMarkdown(message.text)
-    if (!glossaryMarkdown) {
-      return
-    }
-    textBlocks.push(
-      createTextBlock(`词库 ${textBlocks.length + 1}`, glossaryMarkdown)
-    )
-  })
-  return createSection({
-    title: '实际投喂给 AI 的专有名词词库',
-    description:
-      '这些 Markdown 表格来自本次请求体的名词数据库层，AI 翻译正文时会直接看到。',
-    kind: 'text',
-    tone: 'input',
-    textBlocks,
-    total: textBlocks.length
-  })
-}
-
 function buildPromptDataOverviewSection(data) {
   if (!isPlainObject(data)) {
     return null
@@ -1861,10 +1832,8 @@ function buildMessageInputSections(requestBody) {
   if (overviewSection) {
     sections.push(overviewSection)
   }
-  const glossarySection = buildOfficialTermGlossaryPromptSection(requestBody)
-  if (glossarySection) {
-    sections.push(glossarySection)
-  }
+  // 不再单独抽取“专有名词词库”卡片：词库已经真实包含在下方“用户输入”原文消息里，
+  // 单独再展示一份会让人误以为词库被投喂了两次。工作流只如实呈现真实输入消息。
   const messages = getMessageListFromRequestBody(requestBody)
   messages.forEach((message, index) => {
     const label = getRoleLabel(message.role, index)

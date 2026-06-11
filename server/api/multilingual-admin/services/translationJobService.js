@@ -3437,7 +3437,10 @@ function buildOrchestratorProgress(derivedStatus, childStats) {
     Number(childStats.blocked || 0)
   let percent = 0
   if (total > 0) {
-    percent = Math.min(Math.round((settled / total) * 100), 100)
+    // 单调进度：把"规划完成"算作 1 个已完成单元（settled+1）/（total+1），保证规划完成后是
+    // 一个小的正值，并随子任务完成单调上升，避免出现"规划 10% → 子任务开始 0%"的进度倒退；
+    // 进行中阶段封顶 99%，全部进入终态时由下方分支显式置 100%。
+    percent = Math.min(Math.round(((settled + 1) / (total + 1)) * 100), 99)
   }
   let currentStage = 'Orchestrating'
   let currentStep = '正在按顺序执行子任务'

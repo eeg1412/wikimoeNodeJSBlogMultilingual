@@ -3289,7 +3289,21 @@ export default {
       if (role === 'parent' || role === 'child') {
         return false
       }
-      return deleteStatusSet.has(row.status)
+      if (!deleteStatusSet.has(row.status)) {
+        return false
+      }
+      // 家族根任务：当其下子任务仍在执行（running）或排队待执行（pending）时，不允许删除，
+      // 避免在子任务执行过程中误删整个家族。
+      if (role === 'root') {
+        const childStats = row.taskRelation?.childStats || {}
+        if (
+          Number(childStats.running || 0) > 0 ||
+          Number(childStats.pending || 0) > 0
+        ) {
+          return false
+        }
+      }
+      return true
     }
 
     const selectAllReviewEntries = async tab => {

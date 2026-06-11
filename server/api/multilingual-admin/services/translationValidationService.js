@@ -127,17 +127,70 @@ function buildValidationPairs(sourceEntries, targetEntries) {
   return pairs
 }
 
-// 把配对条目渲染成可分块的速览行，超大文本按上限截断（速览只需把握全局，不需要全文）。
+// 把文本按指定段数等分（按比例切片）。源文与译文用相同段数切分，使同一段大致对应同一位置的
+// 内容，避免因源文与译文长度不同而出现“某段只有译文、原文为空”的错位。
+function splitTextIntoEqualParts(text, partCount) {
+  const normalized = String(text == null ? '' : text)
+  const chars = Array.from(normalized)
+  if (partCount <= 1 || chars.length === 0) {
+    return [normalized]
+  }
+  const parts = []
+  const partSize = Math.ceil(chars.length / partCount)
+  for (let index = 0; index < chars.length; index += partSize) {
+    parts.push(chars.slice(index, index + partSize).join(''))
+  }
+  if (parts.length === 0) {
+    parts.push('')
+  }
+  return parts
+}
+
+// 把配对条目渲染成可分块的速览行。长条目按比例切分为多段（源文与译文段数一致、逐段对应），
+// 配合下方的分块 + 合并（map-reduce），让速览覆盖正文全文（而不是只截取开头），从而能发现
+// 正文后段的术语不一致与翻译问题。
 function buildOverviewBlocks(pairs) {
-  const lines = pairs.map(pair => {
-    const sourceText = truncateText(pair.sourceText, OVERVIEW_ENTRY_TEXT_LIMIT)
-    const targetText = truncateText(pair.targetText, OVERVIEW_ENTRY_TEXT_LIMIT)
-    return [
-      `# entryId: ${pair.id}`,
-      `字段: ${pair.label}（${pair.fieldName || pair.scope || 'field'}）`,
-      `原文: ${sourceText}`,
-      `译文: ${targetText}`
-    ].join('\n')
+  const lines = []
+  pairs.forEach(pair => {
+    const sourceChars = Array.from(String(pair.sourceText || ''))
+    const targetChars = Array.from(String(pair.targetText || ''))
+    const maxLength = Math.max(sourceChars.length, targetChars.length)
+    const segmentCount = Math.max(
+      1,
+      Math.ceil(maxLength / OVERVIEW_ENTRY_TEXT_LIMIT)
+    )
+    const sourceSegments = splitTextIntoEqualParts(
+      pair.sourceText,
+      segmentCount
+    )
+    const targetSegments = splitTextIntoEqualParts(
+      pair.targetText,
+      segmentCount
+    )
+    const renderSegmentCount = Math.max(
+      sourceSegments.length,
+      targetSegments.length
+    )
+    for (
+      let segmentIndex = 0;
+      segmentIndex < renderSegmentCount;
+      segmentIndex += 1
+    ) {
+      const sourceText = sourceSegments[segmentIndex] || ''
+      const targetText = targetSegments[segmentIndex] || ''
+      const segmentLabel =
+        renderSegmentCount > 1
+          ? `（第 ${segmentIndex + 1}/${renderSegmentCount} 段）`
+          : ''
+      lines.push(
+        [
+          `# entryId: ${pair.id}${segmentLabel}`,
+          `字段: ${pair.label}（${pair.fieldName || pair.scope || 'field'}）`,
+          `原文: ${sourceText}`,
+          `译文: ${targetText}`
+        ].join('\n')
+      )
+    }
   })
 
   const blocks = []
@@ -175,13 +228,16 @@ function buildGuidelineSystemPrompt() {
   return [
     '你是多语言博客的翻译质检负责人。',
     '你会先纵观一篇文章全部翻译产物的速览，找出需要全局统一的术语、整体风格基调，以及疑似存在的翻译问题。',
-    '重要：速览里每一条的原文与译文都可能为了压缩上下文而被截断（以 … 结尾），这只是预览片段，不代表实际内容不完整或被裁断。',
-    '禁止依据速览的截断判断译文存在“截断、缺失后半段、漏译大段内容”等完整性问题；逐条完整内容的精确校验会在后续阶段基于完整文本进行。',
+    '重要：超长正文会被切分成多段速览（标注“第 X/Y 段”），并可能分布在不同的速览块中；这些段落合起来覆盖全文，每一段都是该位置的真实完整片段，不是被裁断的残缺内容。',
+    '禁止依据“看到的是其中一段”就判断译文存在“截断、缺失后半段、漏译大段内容”等完整性问题；逐条完整内容的精确校验会在后续阶段基于完整文本进行。',
+    '判断术语前后是否一致、风格是否统一时，要综合同一 entryId 的所有段落（包括后段），不要只看开头段。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。',
     `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结本次译文的整体质量、主要问题与需要重点修正的方向", "termGlossary": [{ "source": "原文术语", "target": "建议统一译法", "note": "可选说明" }], "styleNotes": "整体风格与语气基调说明", "suspectedIssues": [{ "entryId": "条目id", "issueType": "inconsistent|inaccurate|missing|tone|other", "note": "问题简述" }] }`,
     'summary 用一段简洁中文总结整体翻译质量与主要发现，供人工审核快速了解；不要在 summary 里描述因预览截断导致的“内容不完整”。',
     'termGlossary 只收录需要在全文统一的术语、专有名词或反复出现的关键表达。',
     '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名；只有数据库未收录的术语才允许你给出新的建议译法。',
+    '强约束（专有名词）：译文中凡是按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止把它们列入 suspectedIssues，禁止要求改回原文、改成音译/直译/意译或任何其它写法；即使你个人认为另有更好译名，也必须服从数据库。',
+    '唯一例外：当“专有名词翻译数据库”自身存在内部冲突时——即同一原文或含义高度相似的多个原文条目，给出了互相矛盾或不统一的译法（译名彼此打架、含义冲突或同义却不同译）——你才可以在 suspectedIssues 指出该冲突，并在 termGlossary 给出统一后的建议译法。除此之外，不得以任何理由质疑或修正数据库中的专有名词。',
     'suspectedIssues 只列出术语前后不一致、风格语气偏差、明显语义错误或矛盾等问题，entryId 必须来自速览中出现的 entryId；不要包含由预览截断引起的内容缺失类误判。',
     '如果某一项没有内容，返回空数组或空字符串。'
   ].join('\n')
@@ -202,15 +258,17 @@ function buildGuidelineUserPrompt(
     buildLanguageLine(sourceLanguageCode, targetLanguageCode),
     ''
   ]
+  lines.push(overviewText)
   const glossaryMarkdown = (officialTermGlossaryMarkdown || '').trim()
   if (glossaryMarkdown) {
+    // 名词库放在用户提示末尾：一方面作为权威参照紧随待校验内容，另一方面让 AI 工作流视图
+    // 按“数据库标题到消息末尾”提取词库时只取到词库本身，不会把上方的正文速览一起算进词库卡片。
+    lines.push('')
     lines.push(
       '以下是该文章的专有名词翻译数据库（官方统一译法，必须以此为准，不得臆造或推翻其中译名）：'
     )
     lines.push(glossaryMarkdown)
-    lines.push('')
   }
-  lines.push(overviewText)
   return lines.join('\n')
 }
 
@@ -220,6 +278,7 @@ function buildGuidelineMergeSystemPrompt() {
     '你会收到同一篇文章按块产出的多份局部校验指南，需要合并成一份覆盖全局的校验指南。',
     '合并时要消除重复术语、统一冲突译法（保留更准确的一项并在 note 中说明），整合风格基调与疑似问题。',
     '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：合并后的 termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名。',
+    '强约束（专有名词）：按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止保留或新增任何“质疑/推翻数据库专有名词”的 suspectedIssues；仅当数据库自身存在相似名词译法互相矛盾或不统一的内部冲突时，才允许在 suspectedIssues 指出冲突并在 termGlossary 给出统一建议。',
     '各块指南来自被截断的速览片段，禁止保留或新增任何“译文截断、缺失后半段、漏译大段内容”等因预览截断而产生的完整性误判。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。',
     `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结整体翻译质量与主要发现", "termGlossary": [{ "source": "", "target": "", "note": "" }], "styleNotes": "", "suspectedIssues": [{ "entryId": "", "issueType": "", "note": "" }] }`
@@ -237,15 +296,16 @@ function buildGuidelineMergeUserPrompt(
     buildLanguageLine(sourceLanguageCode, targetLanguageCode),
     ''
   ]
+  lines.push(JSON.stringify(partialGuidelines))
   const glossaryMarkdown = (officialTermGlossaryMarkdown || '').trim()
   if (glossaryMarkdown) {
+    // 名词库放末尾：让 AI 工作流视图按“数据库标题到消息末尾”提取词库时只取到词库本身。
+    lines.push('')
     lines.push(
       '以下是该文章的专有名词翻译数据库（官方统一译法，必须以此为准，不得臆造或推翻其中译名）：'
     )
     lines.push(glossaryMarkdown)
-    lines.push('')
   }
-  lines.push(JSON.stringify(partialGuidelines))
   return lines.join('\n')
 }
 
@@ -334,7 +394,8 @@ async function requestGuidelineFromAi({
   cancellation,
   onStatus,
   sourceLanguageCode,
-  targetLanguageCode
+  targetLanguageCode,
+  officialTermGlossaryProvided
 }) {
   const { requestBody, requestUrl } =
     textAiProviderRequestService.buildJsonRequestBody(settings, messages, {})
@@ -405,7 +466,8 @@ async function requestGuidelineFromAi({
     meta: {
       jobId: getJobId(job),
       stepKey,
-      stepLabel
+      stepLabel,
+      officialTermGlossaryProvided: officialTermGlossaryProvided === true
     },
     input: { messages },
     json: stepResult.parsed
@@ -426,11 +488,17 @@ async function buildGlobalGuideline({
 }) {
   const blocks = buildOverviewBlocks(pairs)
   const cancellation = handlers?.cancellation
+  const officialTermGlossaryProvided = Boolean(
+    (officialTermGlossaryMarkdown || '').trim()
+  )
+  const glossaryStatusSuffix = officialTermGlossaryProvided
+    ? '（已加载专有名词数据库）'
+    : ''
 
   if (blocks.length === 1) {
     if (handlers?.onStatus) {
       handlers.onStatus({
-        message: '正在进行全局翻译校验速览'
+        message: `正在进行全局翻译校验速览${glossaryStatusSuffix}`
       })
     }
     const singleResult = await requestGuidelineFromAi({
@@ -454,7 +522,8 @@ async function buildGlobalGuideline({
       cancellation,
       onStatus: handlers?.onStatus,
       sourceLanguageCode,
-      targetLanguageCode
+      targetLanguageCode,
+      officialTermGlossaryProvided
     })
     return {
       guideline: singleResult.guideline,
@@ -467,7 +536,7 @@ async function buildGlobalGuideline({
   for (let index = 0; index < blocks.length; index += 1) {
     if (handlers?.onStatus) {
       handlers.onStatus({
-        message: `正在进行全局翻译校验速览（第 ${index + 1}/${blocks.length} 块）`
+        message: `正在进行全局翻译校验速览（第 ${index + 1}/${blocks.length} 块）${glossaryStatusSuffix}`
       })
     }
     const partialResult = await requestGuidelineFromAi({
@@ -491,7 +560,8 @@ async function buildGlobalGuideline({
       cancellation,
       onStatus: handlers?.onStatus,
       sourceLanguageCode,
-      targetLanguageCode
+      targetLanguageCode,
+      officialTermGlossaryProvided
     })
     partialGuidelines.push(partialResult.guideline)
     aiJsonLogs.push(partialResult.aiJsonLog)
@@ -522,7 +592,8 @@ async function buildGlobalGuideline({
     cancellation,
     onStatus: handlers?.onStatus,
     sourceLanguageCode,
-    targetLanguageCode
+    targetLanguageCode,
+    officialTermGlossaryProvided
   })
   aiJsonLogs.push(mergeResult.aiJsonLog)
   return { guideline: mergeResult.guideline, aiJsonLogs }
@@ -1023,7 +1094,14 @@ async function resolveValidationOfficialTermGlossaryMarkdown({
   sourceLanguageCode,
   targetLanguageCode
 }) {
-  if (target && target.mode === 'content') {
+  // 通用内容翻译（非源文导入）没有绑定到源文章的专有名词数据库，跳过；
+  // 但"源文生成并 AI 翻译"虽然以 content 模式校验，却有绑定到源文章的名词库，必须加载，
+  // 否则校验 AI 看不到名词库会臆造译名、推翻已按名词库翻译的专有名词。
+  if (
+    target &&
+    target.mode === 'content' &&
+    target.contentType !== 'sourcePostImport'
+  ) {
     return ''
   }
   const normalizedTargetLanguageCode = String(targetLanguageCode || '').trim()
@@ -1151,6 +1229,8 @@ async function validateTranslationPayload({
     translationJobId: getJobId(job),
     cacheKey: getJobId(job),
     cacheScopeKey: target?.cacheScopeKey || 'validation',
+    // 透传源文章专有名词数据库范围键，让精校内核加载已绑定术语，禁止推翻按名词库翻译的专有名词。
+    properNounScopeKey: target?.properNounScopeKey || '',
     autoOrganizeOfficialTermGlossary: false,
     searchOfficialTermTranslations: false
   }

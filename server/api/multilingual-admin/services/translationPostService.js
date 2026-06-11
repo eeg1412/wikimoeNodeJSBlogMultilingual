@@ -5113,7 +5113,9 @@ async function applySourcePostAiImport(body = {}, options = {}) {
   }
 
   for (const languageCode of refreshLanguageSet) {
-    await contentRefreshUtils.refreshArticlePublishing(languageCode)
+    if (options.skipContentRefresh !== true) {
+      await contentRefreshUtils.refreshArticlePublishing(languageCode)
+    }
   }
 
   return {

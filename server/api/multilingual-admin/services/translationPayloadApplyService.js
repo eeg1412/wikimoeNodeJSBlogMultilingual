@@ -941,7 +941,8 @@ async function applySourcePostTranslationJob({
   adminSnapshot,
   admin,
   applyBatchId,
-  publish
+  publish,
+  skipContentRefresh
 }) {
   const results = buildSourcePostApplyPayload(job, selectedEntries).map(
     item => {
@@ -976,7 +977,8 @@ async function applySourcePostTranslationJob({
       results
     },
     {
-      admin
+      admin,
+      skipContentRefresh: skipContentRefresh === true
     }
   )
   const statusResult = await updateSourcePostJobAdoption({
@@ -992,6 +994,9 @@ async function applySourcePostTranslationJob({
     appliedEntryKeys: selectedEntries.map(entry => entry.entryKey),
     appliedCount: selectedEntries.length,
     sourcePostApplyResult: applyResult,
+    refreshedLanguages: Array.isArray(applyResult?.refreshedLanguages)
+      ? applyResult.refreshedLanguages
+      : [],
     ...statusResult
   }
 }
@@ -1453,6 +1458,9 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   const forceOverwriteApplied = body.forceOverwriteApplied === true || force
   const forceReason = normalizeIdentityValue(body.forceReason)
   const publish = body.publish === true
+  // 家族级"采纳全部"会逐子任务调用本函数，为避免每个子任务都重复刷新缓存/RSS/Sitemap，
+  // 调用方可置 skipContentRefresh=true，由家族层在最后按去重语言统一刷新一次。
+  const skipContentRefresh = body.skipContentRefresh === true
   const applyBatchId =
     normalizeIdentityValue(body.applyBatchId) || crypto.randomUUID()
   const adminSnapshot = normalizeAdminSnapshot(options.admin)
@@ -1497,6 +1505,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
 
   if (job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT) {
     const appliedEntries = []
+    let contentRefreshedLanguages = []
     if (selectedContentEntries.length > 0) {
       const contentApplyResult = await applySourcePostTranslationJob({
         job,
@@ -1504,8 +1513,12 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
         adminSnapshot,
         admin: options.admin,
         applyBatchId,
-        publish
+        publish,
+        skipContentRefresh
       })
+      if (Array.isArray(contentApplyResult?.refreshedLanguages)) {
+        contentRefreshedLanguages = contentApplyResult.refreshedLanguages
+      }
       appliedEntries.push(
         ...selectedContentEntries.map(entry => {
           return {
@@ -1557,6 +1570,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
       applyBatchId,
       appliedEntryKeys: appliedEntries.map(entry => entry.entryKey),
       appliedCount: appliedEntries.length,
+      refreshedLanguages: contentRefreshedLanguages,
       ...statusResult
     }
   }
@@ -1642,7 +1656,9 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   }
 
   for (const languageCode of refreshedLanguageCodeSet) {
-    await contentRefreshUtils.refreshArticlePublishing(languageCode)
+    if (!skipContentRefresh) {
+      await contentRefreshUtils.refreshArticlePublishing(languageCode)
+    }
   }
 
   const statusResult = await updateJobStatusAfterApply(job._id)
@@ -1652,6 +1668,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
     applyBatchId,
     appliedEntryKeys: appliedEntries.map(entry => entry.entryKey),
     appliedCount: appliedEntries.length,
+    refreshedLanguages: Array.from(refreshedLanguageCodeSet),
     ...statusResult
   }
 }
@@ -1700,6 +1717,9 @@ async function applyTranslationFamilyPayload(body = {}, options = {}) {
   let successCount = 0
   let failCount = 0
   let skippedCount = 0
+  // 收集所有子任务采纳过程中受影响的语言，最后统一按去重语言刷新一次缓存/RSS/Sitemap，
+  // 避免逐子任务重复重置（尤其源语言会被反复刷新）。
+  const refreshedLanguageSet = new Set()
   for (const child of adoptableChildren) {
     let selectedEntryKeys = selectionMap.get(String(child._id))
     if (applyAll && (!selectedEntryKeys || selectedEntryKeys.length === 0)) {
@@ -1730,11 +1750,20 @@ async function applyTranslationFamilyPayload(body = {}, options = {}) {
           selectedEntryKeys,
           force: body.force === true,
           publish: body.publish === true,
-          applyBatchId
+          applyBatchId,
+          skipContentRefresh: true
         },
         options
       )
       childResults.push({ jobId: String(child._id), ...result })
+      if (Array.isArray(result.refreshedLanguages)) {
+        result.refreshedLanguages.forEach(languageCode => {
+          const normalized = String(languageCode || '').trim()
+          if (normalized) {
+            refreshedLanguageSet.add(normalized)
+          }
+        })
+      }
       if (result.applied) {
         successCount += 1
       } else {
@@ -1756,13 +1785,28 @@ async function applyTranslationFamilyPayload(body = {}, options = {}) {
   // 重算 parent/root 聚合状态（全部成功=完全采纳，部分=部分采纳）。
   await translationJobService.recomputeFamilyAggregateStatus(String(rootId))
 
+  // 统一按去重语言刷新一次缓存/RSS/Sitemap（每种语言只刷一次，源语言也只刷一次）。
+  const contentRefreshUtils = require('../../../utils/contentRefresh')
+  for (const languageCode of refreshedLanguageSet) {
+    try {
+      await contentRefreshUtils.refreshArticlePublishing(languageCode)
+    } catch (error) {
+      console.error(
+        '家族采纳后刷新内容失败：',
+        languageCode,
+        error && error.message ? error.message : error
+      )
+    }
+  }
+
   return {
     familyId: String(rootId),
     applyBatchId,
     childResults,
     successCount,
     failCount,
-    skippedCount
+    skippedCount,
+    refreshedLanguages: Array.from(refreshedLanguageSet)
   }
 }
 
