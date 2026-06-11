@@ -271,6 +271,13 @@ export default function (api) {
         noLoading
       })
     },
+    getTranslationJobFamily(data, noLoading = false) {
+      return api.get('/translation/job/family', {
+        params: data,
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     deferTranslationJob(data, noLoading = false) {
       return api.put('/translation/job/defer', data, {
         shouldAdminJWT: true,
@@ -316,6 +323,12 @@ export default function (api) {
     },
     applyTranslationJobResult(data, noLoading = false) {
       return api.post('/translation/job/apply', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    applyTranslationFamilyResult(data, noLoading = false) {
+      return api.post('/translation/job/apply-family', data, {
         shouldAdminJWT: true,
         noLoading
       })

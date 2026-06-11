@@ -7,7 +7,9 @@ const {
 } = require('../../../utils/multilingualAdminResponse')
 const {
   TRANSLATION_JOB_STATUS,
-  TRANSLATION_JOB_TYPES
+  TRANSLATION_JOB_TYPES,
+  TRANSLATION_JOB_TASK_ROLES,
+  TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS
 } = require('../../../utils/translationJobConstants')
 const relationService = require('./relationService')
 const translationPostService = require('./translationPostService')
@@ -1654,8 +1656,119 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   }
 }
 
+// 家族级"采纳全部"：UI 上对父任务聚合统一采纳，程序上逐个可采纳子任务依次 apply。
+// 部分子任务失败时已成功的保留，失败项可在前端单独重试采纳；最后重算家族聚合状态。
+async function applyTranslationFamilyPayload(body = {}, options = {}) {
+  const translationJobService = require('./translationJobService')
+  const familyAnchorId = toObjectId(body.id || body.jobId, 'id', true)
+  const JobModel = getTranslationJobModel()
+  const anchorJob = await JobModel.findOne({ _id: familyAnchorId }).lean()
+  if (!anchorJob) {
+    throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
+  }
+  const rootId =
+    anchorJob.taskRelation && anchorJob.taskRelation.rootId
+      ? anchorJob.taskRelation.rootId
+      : anchorJob._id
+
+  // 仅采纳"可人工采纳"的子任务（单语言翻译 + 封面图整理），名词整理执行即生效不参与。
+  const adoptableChildren = await JobModel.find({
+    'taskRelation.rootId': toObjectId(rootId),
+    'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.CHILD,
+    'taskRelation.childKind': { $in: TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS }
+  })
+    .sort({ 'taskRelation.orderIndex': 1 })
+    .lean()
+
+  const selectionMap = new Map()
+  if (Array.isArray(body.childSelections)) {
+    body.childSelections.forEach(selection => {
+      if (!selection || !selection.jobId) {
+        return
+      }
+      selectionMap.set(
+        String(selection.jobId),
+        normalizeSelectedEntryKeys(selection.selectedEntryKeys)
+      )
+    })
+  }
+  const applyAll = body.applyAll === true
+  const applyBatchId =
+    normalizeIdentityValue(body.applyBatchId) || crypto.randomUUID()
+
+  const childResults = []
+  let successCount = 0
+  let failCount = 0
+  let skippedCount = 0
+  for (const child of adoptableChildren) {
+    let selectedEntryKeys = selectionMap.get(String(child._id))
+    if (applyAll && (!selectedEntryKeys || selectedEntryKeys.length === 0)) {
+      const previewEntries = Array.isArray(child.result?.previewEntries)
+        ? child.result.previewEntries
+        : []
+      selectedEntryKeys = previewEntries
+        .filter(entry => entry && entry.entryKey && !entry.aiSkipReason)
+        .map(entry => entry.entryKey)
+    }
+    if (!selectedEntryKeys || selectedEntryKeys.length === 0) {
+      continue
+    }
+    if (!APPLY_ALLOWED_STATUSES.has(child.status)) {
+      skippedCount += 1
+      childResults.push({
+        jobId: String(child._id),
+        applied: false,
+        skipped: true,
+        reason: `当前状态不允许采纳：${child.status}`
+      })
+      continue
+    }
+    try {
+      const result = await applyTranslationJobPayload(
+        {
+          id: child._id,
+          selectedEntryKeys,
+          force: body.force === true,
+          publish: body.publish === true,
+          applyBatchId
+        },
+        options
+      )
+      childResults.push({ jobId: String(child._id), ...result })
+      if (result.applied) {
+        successCount += 1
+      } else {
+        failCount += 1
+      }
+    } catch (error) {
+      failCount += 1
+      childResults.push({
+        jobId: String(child._id),
+        applied: false,
+        error: {
+          code: error && error.code ? error.code : ERROR_CODES.INTERNAL_ERROR,
+          message: error && error.message ? error.message : String(error)
+        }
+      })
+    }
+  }
+
+  // 重算 parent/root 聚合状态（全部成功=完全采纳，部分=部分采纳）。
+  await translationJobService.recomputeFamilyAggregateStatus(String(rootId))
+
+  return {
+    familyId: String(rootId),
+    applyBatchId,
+    childResults,
+    successCount,
+    failCount,
+    skippedCount
+  }
+}
+
 module.exports = {
   applyTranslationJobPayload,
+  applyTranslationFamilyPayload,
   buildTranslationJobReviewSnapshot,
   buildEntryKey,
   createValueHash

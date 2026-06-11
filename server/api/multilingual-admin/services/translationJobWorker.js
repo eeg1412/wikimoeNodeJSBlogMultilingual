@@ -238,13 +238,25 @@ async function executeClaimedJob(job, state) {
     if (cancellation.isCancelled) {
       throw createCancelledError(cancellation)
     }
-    await translationJobService.completeRunningTranslationJobForReview({
-      id: job._id,
-      jobType: job.jobType,
-      workerId: state.workerId,
-      attemptNo: getAttemptNo(job),
-      result
-    })
+    if (
+      translationExecutionService.isFamilyOrchestratorPlanningResult(result)
+    ) {
+      // root 规划阶段完成：转编排态并放行第一个子任务（不进入等待审核）。
+      await translationJobService.finalizeOrchestratorPlanning({
+        id: job._id,
+        workerId: state.workerId,
+        attemptNo: getAttemptNo(job),
+        childStats: result.childStats
+      })
+    } else {
+      await translationJobService.completeRunningTranslationJobForReview({
+        id: job._id,
+        jobType: job.jobType,
+        workerId: state.workerId,
+        attemptNo: getAttemptNo(job),
+        result
+      })
+    }
   } catch (error) {
     await translationJobService.failRunningTranslationJob({
       id: job._id,

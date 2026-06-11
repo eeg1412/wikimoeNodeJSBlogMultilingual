@@ -17,7 +17,13 @@ const {
   TRANSLATION_JOB_STATUS,
   TRANSLATION_JOB_STATUS_VALUES,
   TRANSLATION_JOB_FINAL_STATUS_VALUES,
-  TRANSLATION_JOB_DELETE_ALLOWED_STATUS_VALUES
+  TRANSLATION_JOB_DELETE_ALLOWED_STATUS_VALUES,
+  TRANSLATION_JOB_TASK_ROLES,
+  TRANSLATION_JOB_TASK_ROLE_VALUES,
+  TRANSLATION_JOB_ORCHESTRATOR_ROLE_VALUES,
+  TRANSLATION_JOB_CHILD_KINDS,
+  TRANSLATION_JOB_CHILD_KIND_VALUES,
+  TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS
 } = require('../../../utils/translationJobConstants')
 
 const MAX_LIST_LIMIT = 100
@@ -611,14 +617,33 @@ function normalizeRequest(requestInput, target) {
 
 function normalizeTaskRelation(taskRelationInput, source) {
   const taskRelation = normalizeObject(taskRelationInput, 'taskRelation')
-  let role = toTrimmedString(taskRelation.role) || 'root'
-  if (!['root', 'parent', 'child'].includes(role)) {
+  let role =
+    toTrimmedString(taskRelation.role) || TRANSLATION_JOB_TASK_ROLES.STANDALONE
+  if (!TRANSLATION_JOB_TASK_ROLE_VALUES.includes(role)) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
       'taskRelation.role 不支持',
       'taskRelation.role',
       400
     )
+  }
+
+  let childKind = toTrimmedString(taskRelation.childKind)
+  if (childKind && !TRANSLATION_JOB_CHILD_KIND_VALUES.includes(childKind)) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      'taskRelation.childKind 不支持',
+      'taskRelation.childKind',
+      400
+    )
+  }
+  if (role !== TRANSLATION_JOB_TASK_ROLES.CHILD) {
+    childKind = ''
+  }
+
+  let orderIndex = Number(taskRelation.orderIndex || 0)
+  if (!Number.isInteger(orderIndex) || orderIndex < 0) {
+    orderIndex = 0
   }
 
   let depth = Number(taskRelation.depth || 1)
@@ -643,11 +668,31 @@ function normalizeTaskRelation(taskRelationInput, source) {
 
   return {
     role,
+    childKind,
+    orderIndex,
     rootId: toObjectId(taskRelation.rootId, 'taskRelation.rootId'),
     parentId: toObjectId(taskRelation.parentId, 'taskRelation.parentId'),
     depth,
     sourcePostId,
+    articleSourceId: toObjectId(
+      taskRelation.articleSourceId,
+      'taskRelation.articleSourceId'
+    ),
+    childLanguageCode: normalizeOptionalLanguage(
+      taskRelation.childLanguageCode,
+      'taskRelation.childLanguageCode'
+    ),
     childJobIds,
+    blockedByJobId: toObjectId(
+      taskRelation.blockedByJobId,
+      'taskRelation.blockedByJobId'
+    ),
+    blockedReason: toTrimmedString(taskRelation.blockedReason),
+    blockedAt: null,
+    childStats: normalizeObject(
+      taskRelation.childStats,
+      'taskRelation.childStats'
+    ),
     plannedRelatedSourceIdsByLanguage: normalizeObject(
       taskRelation.plannedRelatedSourceIdsByLanguage,
       'taskRelation.plannedRelatedSourceIdsByLanguage'
@@ -704,6 +749,23 @@ async function createTranslationJob(body = {}, options = {}) {
   const request = normalizeRequest(body.request, target)
   const taskRelation = normalizeTaskRelation(body.taskRelation, source)
   validateExecutableRequest(jobType, request)
+
+  // 多语言"生成并 AI 翻译"任务作为家族 root：执行规划阶段把全部语言/相关文章拆成
+  // 按顺序执行的子任务，规避单文档 16MB 限制。子任务由规划器内部创建（role=child）。
+  const isTopLevelJob =
+    taskRelation.role === TRANSLATION_JOB_TASK_ROLES.STANDALONE &&
+    !taskRelation.parentId
+  const shouldUseFamilyOrchestration =
+    isTopLevelJob &&
+    jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT &&
+    Array.isArray(target.languageCodes) &&
+    target.languageCodes.length > 1
+  if (shouldUseFamilyOrchestration) {
+    taskRelation.role = TRANSLATION_JOB_TASK_ROLES.ROOT
+    taskRelation.articleSourceId = source.postId || null
+    taskRelation.sourcePostId = source.postId || null
+  }
+
   const priority = Number(body.priority || 0)
   if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
     throw new ApiError(
@@ -811,6 +873,31 @@ function buildListParams(query = {}) {
     params['target.postId'] = toObjectId(query.targetPostId, 'targetPostId')
   }
 
+  if (query.rootId) {
+    params['taskRelation.rootId'] = toObjectId(query.rootId, 'rootId')
+  }
+
+  if (query.role) {
+    params['taskRelation.role'] = toTrimmedString(query.role)
+  }
+
+  // 列表默认只展示顶层任务（独立任务 + 家族 root），子任务（parent/child）通过家族详情展开，
+  // 避免父子任务混在一级列表里。前端可显式传 topLevel=false 查看全部。
+  if (
+    parseBooleanFilter(query.topLevel) !== false &&
+    !query.rootId &&
+    !query.role
+  ) {
+    appendAndCondition(params, {
+      $or: [
+        { 'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.STANDALONE },
+        { 'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.ROOT },
+        { 'taskRelation.role': { $exists: false } },
+        { taskRelation: { $exists: false } }
+      ]
+    })
+  }
+
   if (query.targetLanguageCode) {
     const languageCode = normalizeRequiredLanguage(
       query.targetLanguageCode,
@@ -857,7 +944,11 @@ function getListProjection() {
     'taskRelation.rootId': 1,
     'taskRelation.parentId': 1,
     'taskRelation.depth': 1,
+    'taskRelation.childKind': 1,
+    'taskRelation.orderIndex': 1,
+    'taskRelation.childLanguageCode': 1,
     'taskRelation.childJobIds': 1,
+    'taskRelation.childStats': 1,
     'queueControl.active': 1,
     'queueControl.deferred': 1,
     'queueControl.priority': 1,
@@ -990,13 +1081,18 @@ function buildListItemSummary(item, queuePositionMap) {
       languageCodes: targetLanguageCodes
     },
     taskRelation: {
-      role: taskRelation.role || 'root',
+      role: taskRelation.role || 'standalone',
+      childKind: taskRelation.childKind || '',
+      orderIndex: Number(taskRelation.orderIndex || 0),
+      childLanguageCode: taskRelation.childLanguageCode || '',
       rootId: taskRelation.rootId || null,
       parentId: taskRelation.parentId || null,
       depth: Number(taskRelation.depth || 1),
-      childJobCount
+      childJobCount,
+      childStats: taskRelation.childStats || {}
     },
     queueControl: {
+      active: queueControl.active === true,
       deferred: queueControl.deferred === true
     },
     progress: {
@@ -1027,13 +1123,93 @@ async function listTranslationJobs(query = {}) {
     .limit(limit)
     .lean()
   const queuePositionMap = await getQueuePositionMap(list)
+  const topLevelSummaries = list.map(item =>
+    buildListItemSummary(item, queuePositionMap)
+  )
+
+  // 在接口层一次性把家族子任务（parent/child）平铺附加到对应 root 之后，避免前端为每个
+  // root 单独请求 family 接口造成几十次接口调用。只用一次批量查询拿全部家族成员（轻量摘要，
+  // 不含 previewEntries），在内存里按顺序平铺。
+  const flatList = await attachFamilyMembersToList(topLevelSummaries)
 
   return {
-    list: list.map(item => buildListItemSummary(item, queuePositionMap)),
+    list: flatList,
     total,
     page,
     limit
   }
+}
+
+// 按家族关系把 parent/child 子任务平铺插入到列表中对应 root 之后（一次批量查询完成）。
+async function attachFamilyMembersToList(topLevelSummaries) {
+  const rootIds = topLevelSummaries
+    .filter(
+      item =>
+        item.taskRelation &&
+        item.taskRelation.role === TRANSLATION_JOB_TASK_ROLES.ROOT
+    )
+    .map(item => item._id)
+  if (rootIds.length === 0) {
+    return topLevelSummaries
+  }
+  const JobModel = getTranslationJobModel()
+  const familyMembers = await JobModel.find(
+    {
+      'taskRelation.rootId': { $in: rootIds },
+      'taskRelation.role': {
+        $in: [
+          TRANSLATION_JOB_TASK_ROLES.PARENT,
+          TRANSLATION_JOB_TASK_ROLES.CHILD
+        ]
+      }
+    },
+    getListProjection()
+  ).lean()
+
+  // 按 rootId 分组：parents 列表 + parentId→children 列表。
+  const parentsByRoot = new Map()
+  const childrenByParent = new Map()
+  familyMembers.forEach(member => {
+    const relation = member.taskRelation || {}
+    const rootIdText = relation.rootId ? String(relation.rootId) : ''
+    const summary = buildListItemSummary(member, {})
+    if (relation.role === TRANSLATION_JOB_TASK_ROLES.PARENT) {
+      if (!parentsByRoot.has(rootIdText)) {
+        parentsByRoot.set(rootIdText, [])
+      }
+      parentsByRoot.get(rootIdText).push(summary)
+      return
+    }
+    const parentIdText = relation.parentId ? String(relation.parentId) : ''
+    if (!childrenByParent.has(parentIdText)) {
+      childrenByParent.set(parentIdText, [])
+    }
+    childrenByParent.get(parentIdText).push(summary)
+  })
+
+  const flatList = []
+  topLevelSummaries.forEach(item => {
+    flatList.push(item)
+    if (
+      !item.taskRelation ||
+      item.taskRelation.role !== TRANSLATION_JOB_TASK_ROLES.ROOT
+    ) {
+      return
+    }
+    const parents = (parentsByRoot.get(String(item._id)) || [])
+      .slice()
+      .sort((a, b) => a.taskRelation.orderIndex - b.taskRelation.orderIndex)
+    parents.forEach(parent => {
+      flatList.push(parent)
+      const children = (childrenByParent.get(String(parent._id)) || [])
+        .slice()
+        .sort((a, b) => a.taskRelation.orderIndex - b.taskRelation.orderIndex)
+      children.forEach(child => {
+        flatList.push(child)
+      })
+    })
+  })
+  return flatList
 }
 
 async function buildTranslationJobCollectionStorageSummary() {
@@ -1104,6 +1280,82 @@ async function getTranslationJobDetail(query = {}) {
   }
 
   return attachRuntimeDisplay(await buildTranslationJobDetailResponse(job), {})
+}
+
+// 获取整个家族树（root + parents + children 摘要）。仅返回轻量摘要，不含 previewEntries/
+// payload/aiJsonLogs 等重字段，避免把单文档 16MB 风险转移到聚合响应体上；审核时各子任务
+// 的 previewEntries 由前端按需调用 detail 接口懒加载。
+async function getTranslationJobFamily(query = {}) {
+  const anchorId = toObjectId(query.rootId || query.id, 'id', true)
+  const JobModel = getTranslationJobModel()
+  const anchorJob = await JobModel.findOne(
+    { _id: anchorId },
+    { 'taskRelation.role': 1, 'taskRelation.rootId': 1 }
+  ).lean()
+  if (!anchorJob) {
+    throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
+  }
+  let rootId = anchorId
+  if (
+    anchorJob.taskRelation &&
+    anchorJob.taskRelation.rootId &&
+    String(anchorJob.taskRelation.rootId) !== String(anchorId)
+  ) {
+    rootId = anchorJob.taskRelation.rootId
+  }
+
+  const familyJobs = await JobModel.find(
+    {
+      $or: [
+        { _id: toObjectId(rootId) },
+        { 'taskRelation.rootId': toObjectId(rootId) }
+      ]
+    },
+    getListProjection()
+  ).lean()
+
+  let root = null
+  const parents = []
+  const childrenByParent = new Map()
+  familyJobs.forEach(job => {
+    const role = job.taskRelation && job.taskRelation.role
+    const summary = buildListItemSummary(job, {})
+    if (String(job._id) === String(rootId)) {
+      root = summary
+      return
+    }
+    if (role === TRANSLATION_JOB_TASK_ROLES.PARENT) {
+      parents.push(summary)
+      return
+    }
+    if (role === TRANSLATION_JOB_TASK_ROLES.CHILD) {
+      const parentIdText = summary.taskRelation.parentId
+        ? String(summary.taskRelation.parentId)
+        : ''
+      if (!childrenByParent.has(parentIdText)) {
+        childrenByParent.set(parentIdText, [])
+      }
+      childrenByParent.get(parentIdText).push(summary)
+    }
+  })
+
+  parents.sort((a, b) => a.taskRelation.orderIndex - b.taskRelation.orderIndex)
+  const parentTree = parents.map(parent => {
+    const children = (childrenByParent.get(String(parent._id)) || []).slice()
+    children.sort(
+      (a, b) => a.taskRelation.orderIndex - b.taskRelation.orderIndex
+    )
+    return {
+      ...parent,
+      children
+    }
+  })
+
+  return {
+    rootId: String(rootId),
+    root,
+    parents: parentTree
+  }
 }
 
 function buildPayloadSummary(payload) {
@@ -1409,6 +1661,16 @@ async function resumeTranslationJob(body = {}, options = {}) {
 async function deleteTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertCanDeleteTranslationJob(job)
+
+  // 删除家族编排节点（root/parent）时级联删除其全部子孙任务，避免留下孤儿子任务。
+  const role = job.taskRelation && job.taskRelation.role
+  if (
+    role === TRANSLATION_JOB_TASK_ROLES.ROOT ||
+    role === TRANSLATION_JOB_TASK_ROLES.PARENT
+  ) {
+    return await deleteTranslationFamilyNode(job)
+  }
+
   const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
   const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
   const aiLogCleanupResult = await cleanupJobAiLogDirectoryBeforeDelete(job)
@@ -1427,6 +1689,55 @@ async function deleteTranslationJob(body = {}, options = {}) {
     cleanupStatus: cleanupResult.cleanupStatus,
     aiChunkCacheCleanup: aiChunkCacheCleanupResult,
     aiLogCleanup: aiLogCleanupResult
+  }
+}
+
+// 级联删除家族节点：删除 root 时清除整个家族；删除 parent 时清除该父任务及其子任务。
+async function deleteTranslationFamilyNode(orchestratorJob) {
+  const JobModel = getTranslationJobModel()
+  const role = orchestratorJob.taskRelation.role
+  let nodesToDelete = []
+  if (role === TRANSLATION_JOB_TASK_ROLES.ROOT) {
+    const rootId = orchestratorJob._id
+    nodesToDelete = await JobModel.find({
+      $or: [{ _id: rootId }, { 'taskRelation.rootId': rootId }]
+    })
+  } else {
+    const parentId = orchestratorJob._id
+    const children = await JobModel.find({
+      'taskRelation.parentId': parentId
+    })
+    nodesToDelete = [orchestratorJob, ...children]
+  }
+
+  // 任意运行中的子任务都不允许删除，避免破坏正在执行的任务。
+  const runningNode = nodesToDelete.find(
+    node => node.status === TRANSLATION_JOB_STATUS.RUNNING
+  )
+  if (runningNode) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
+      '家族中存在执行中的子任务，不能删除',
+      'status',
+      400
+    )
+  }
+
+  const deletedIds = []
+  for (const node of nodesToDelete) {
+    await cleanupJobCoverImageCacheBeforeDelete(node)
+    await cleanupJobAiChunkCache(node)
+    await cleanupJobAiLogDirectoryBeforeDelete(node)
+    await JobModel.deleteOne({ _id: node._id })
+    deletedIds.push(String(node._id))
+  }
+
+  return {
+    id: orchestratorJob._id,
+    deleted: true,
+    cascade: true,
+    deletedCount: deletedIds.length,
+    deletedIds
   }
 }
 
@@ -1508,8 +1819,46 @@ async function getBatchDeleteJobs(ids) {
 async function batchDeleteTranslationJobs(body = {}, options = {}) {
   const ids = normalizeBatchDeleteIds(body)
   const jobs = await getBatchDeleteJobs(ids)
-  const items = []
+  const JobModel = getTranslationJobModel()
+
+  // 展开家族：批量删除中包含家族 root/parent 时，连同其下全部子任务一起删除，避免孤儿。
+  const deletionMap = new Map()
   for (const job of jobs) {
+    deletionMap.set(String(job._id), job)
+    const role = job.taskRelation && job.taskRelation.role
+    if (role === TRANSLATION_JOB_TASK_ROLES.ROOT) {
+      const familyMembers = await JobModel.find({
+        'taskRelation.rootId': job._id
+      }).lean()
+      familyMembers.forEach(member => {
+        deletionMap.set(String(member._id), member)
+      })
+    } else if (role === TRANSLATION_JOB_TASK_ROLES.PARENT) {
+      const childMembers = await JobModel.find({
+        'taskRelation.parentId': job._id
+      }).lean()
+      childMembers.forEach(member => {
+        deletionMap.set(String(member._id), member)
+      })
+    }
+  }
+  const deletionTargets = Array.from(deletionMap.values())
+
+  // 家族中存在执行中的子任务时，整批拒绝删除，避免破坏正在执行的任务。
+  const runningTarget = deletionTargets.find(
+    target => target.status === TRANSLATION_JOB_STATUS.RUNNING
+  )
+  if (runningTarget) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_ACTION_FORBIDDEN,
+      '所选任务的家族中存在执行中的子任务，不能删除',
+      'ids',
+      400
+    )
+  }
+
+  const items = []
+  for (const job of deletionTargets) {
     const cleanupResult = await cleanupJobCoverImageCacheBeforeDelete(job)
     const aiChunkCacheCleanupResult = await cleanupJobAiChunkCache(job)
     const aiLogCleanupResult = await cleanupJobAiLogDirectoryBeforeDelete(job)
@@ -1522,11 +1871,10 @@ async function batchDeleteTranslationJobs(body = {}, options = {}) {
     })
   }
 
-  const JobModel = getTranslationJobModel()
   const deleteResult = await JobModel.deleteMany({
-    _id: { $in: jobs.map(job => job._id) }
+    _id: { $in: deletionTargets.map(job => job._id) }
   })
-  if (!deleteResult || deleteResult.deletedCount !== jobs.length) {
+  if (!deleteResult || deleteResult.deletedCount !== deletionTargets.length) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
   }
 
@@ -1630,6 +1978,14 @@ async function retryTranslationJob(body = {}, options = {}) {
   job.updatedBy = adminSnapshot
   appendLog(job, '用户已请求重试，任务重新进入队列', 'info', 'retry')
   await job.save()
+  // 若重试的是家族中的子任务，重算 parent/root 聚合状态（被阻塞子任务会在该子任务
+  // 成功完成后由 activateNextFamilyChild 自动放行）。
+  if (isFamilyChildJob(job)) {
+    const rootId = getJobFamilyRootId(job)
+    if (rootId) {
+      await recomputeFamilyAggregateStatus(rootId)
+    }
+  }
   return job.toObject()
 }
 
@@ -2350,6 +2706,30 @@ async function completeRunningTranslationJobForReview(options = {}) {
   if (!shouldKeepAiChunkCache) {
     await tryClearTranslationJobAiChunkCacheById(String(options.id || ''))
   }
+
+  // 家族编排：若本任务是子任务，成功完成后放行下一个子任务，并重算家族聚合状态。
+  await advanceFamilyAfterChildSettled(String(options.id || ''), {
+    activateNext: true
+  })
+}
+
+// 子任务进入终态（成功/失败/阻塞）后推进家族：放行下一个、并重算 parent/root 聚合状态。
+async function advanceFamilyAfterChildSettled(jobId, options = {}) {
+  const JobModel = getTranslationJobModel()
+  const job = await JobModel.findById(toObjectId(jobId, 'id', true))
+    .select('taskRelation')
+    .lean()
+  if (!isFamilyChildJob(job)) {
+    return
+  }
+  const rootId = getJobFamilyRootId(job)
+  if (!rootId) {
+    return
+  }
+  if (options.activateNext === true) {
+    await activateNextFamilyChild(rootId)
+  }
+  await recomputeFamilyAggregateStatus(rootId)
 }
 
 async function failRunningTranslationJob(options = {}) {
@@ -2436,6 +2816,25 @@ async function failRunningTranslationJob(options = {}) {
       ]
     }
   )
+
+  // 家族编排：若本任务是子任务且已进入终态失败（非自动重试），把其后未开始的子任务
+  // 标记为 BLOCKED，并重算 parent/root 聚合状态。
+  if (!autoRetry) {
+    const job = await JobModel.findById(toObjectId(options.id, 'id', true))
+      .select('taskRelation')
+      .lean()
+    if (isFamilyChildJob(job)) {
+      const rootId = getJobFamilyRootId(job)
+      if (rootId) {
+        await blockPendingFamilyChildren(
+          rootId,
+          options.id,
+          errorSummary.message
+        )
+        await recomputeFamilyAggregateStatus(rootId)
+      }
+    }
+  }
 }
 
 async function markExpiredRunningTranslationJobsRecovering(options = {}) {
@@ -2584,11 +2983,516 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
   )
 }
 
+// ===========================================================================
+// 家族（root/parent/child）编排原语
+// ---------------------------------------------------------------------------
+// 设计要点：
+// - 编排节点（root/parent）本身不执行 AI，永不进入 RUNNING 状态，因此不会被
+//   markExpiredRunningTranslationJobsRecovering 误判失败，也不会被 worker 领取
+//   （claim 仅领取 queueControl.active=true 的任务）。
+// - root 在“规划阶段”是一个普通可执行任务（PENDING→RUNNING），规划完成后调用
+//   finalizeOrchestratorPlanning 转为编排态（active=false，状态由子任务聚合派生）。
+// - child 严格按全家族顺序执行：仅最靠前、尚未开始的 child 处于 active=true。
+//   某 child 成功后通过 activateNextFamilyChild 放行下一个；某 child 终态失败后
+//   通过 blockPendingFamilyChildren 把其后未开始的 child 标记 BLOCKED。
+// ===========================================================================
+
+function getJobFamilyRootId(job) {
+  const rootId =
+    job &&
+    job.taskRelation &&
+    job.taskRelation.rootId &&
+    job.taskRelation.rootId.toString
+      ? job.taskRelation.rootId.toString()
+      : ''
+  if (rootId) {
+    return rootId
+  }
+  return String(job && job._id ? job._id : '')
+}
+
+function isOrchestratorRole(role) {
+  return TRANSLATION_JOB_ORCHESTRATOR_ROLE_VALUES.includes(role)
+}
+
+function isChildRole(role) {
+  return role === TRANSLATION_JOB_TASK_ROLES.CHILD
+}
+
+// 仅"带 childKind 的家族子任务"才参与新的顺序编排；旧的相关文章 child（无 childKind）
+// 仍按各自独立的方式执行与审核，不走家族放行/阻塞/聚合逻辑。
+function isFamilyChildJob(job) {
+  const relation = job && job.taskRelation
+  if (!relation || relation.role !== TRANSLATION_JOB_TASK_ROLES.CHILD) {
+    return false
+  }
+  return Boolean(relation.childKind)
+}
+
+// 子任务在“全家族顺序”中的排序键：先按所属 parent 的 orderIndex，再按自身 orderIndex。
+function buildFamilyChildOrderKey(child, parentOrderMap) {
+  const parentIdText =
+    child.taskRelation && child.taskRelation.parentId
+      ? String(child.taskRelation.parentId)
+      : ''
+  const parentOrder = Number(parentOrderMap.get(parentIdText) || 0)
+  const childOrder = Number(
+    (child.taskRelation && child.taskRelation.orderIndex) || 0
+  )
+  return parentOrder * 100000 + childOrder
+}
+
+async function loadFamilyJobs(rootId) {
+  const JobModel = getTranslationJobModel()
+  const rootObjectId = toObjectId(rootId, 'rootId')
+  if (!rootObjectId) {
+    return []
+  }
+  return await JobModel.find({
+    $or: [{ _id: rootObjectId }, { 'taskRelation.rootId': rootObjectId }]
+  }).lean()
+}
+
+function splitFamilyJobs(familyJobs, rootId) {
+  const rootIdText = String(rootId || '')
+  let root = null
+  const parents = []
+  const children = []
+  familyJobs.forEach(job => {
+    const role = job.taskRelation && job.taskRelation.role
+    if (String(job._id) === rootIdText) {
+      root = job
+      return
+    }
+    if (role === TRANSLATION_JOB_TASK_ROLES.PARENT) {
+      parents.push(job)
+      return
+    }
+    if (role === TRANSLATION_JOB_TASK_ROLES.CHILD) {
+      children.push(job)
+    }
+  })
+  return { root, parents, children }
+}
+
+function buildParentOrderMap(parents) {
+  const map = new Map()
+  parents.forEach(parent => {
+    map.set(
+      String(parent._id),
+      Number((parent.taskRelation && parent.taskRelation.orderIndex) || 0)
+    )
+  })
+  return map
+}
+
+// 放行下一个待执行子任务：在全家族顺序中找到第一个尚未开始（PENDING 或 BLOCKED 且
+// 未激活）的子任务并激活它（active=true、清除阻塞标记）。每次只放行一个，保证严格顺序。
+async function activateNextFamilyChild(rootId) {
+  const familyJobs = await loadFamilyJobs(rootId)
+  const { parents, children } = splitFamilyJobs(familyJobs, rootId)
+  const parentOrderMap = buildParentOrderMap(parents)
+  const sortedChildren = children.slice().sort((a, b) => {
+    return (
+      buildFamilyChildOrderKey(a, parentOrderMap) -
+      buildFamilyChildOrderKey(b, parentOrderMap)
+    )
+  })
+  const nextChild = sortedChildren.find(child => {
+    const active = Boolean(
+      child.queueControl && child.queueControl.active === true
+    )
+    const status = child.status
+    const notStarted =
+      status === TRANSLATION_JOB_STATUS.PENDING ||
+      status === TRANSLATION_JOB_STATUS.BLOCKED
+    return notStarted && !active
+  })
+  if (!nextChild) {
+    return { activated: false }
+  }
+  const now = new Date()
+  const JobModel = getTranslationJobModel()
+  await JobModel.updateOne(
+    { _id: nextChild._id },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.PENDING,
+        'queueControl.active': true,
+        'queueControl.deferred': false,
+        'taskRelation.blockedByJobId': null,
+        'taskRelation.blockedReason': '',
+        'taskRelation.blockedAt': null,
+        'progress.currentStep': '前序子任务已完成，等待后台 worker 领取',
+        'progress.currentStage': 'pending'
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              '前序子任务完成，本子任务已放行进入队列',
+              'info',
+              'family'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    }
+  )
+  return { activated: true, childId: String(nextChild._id) }
+}
+
+// 某子任务终态失败：把同家族中所有尚未开始的子任务标记为 BLOCKED（已阻塞），不删除。
+async function blockPendingFamilyChildren(rootId, blockedByJobId, reason) {
+  const JobModel = getTranslationJobModel()
+  const rootObjectId = toObjectId(rootId, 'rootId')
+  if (!rootObjectId) {
+    return { blockedCount: 0 }
+  }
+  const now = new Date()
+  const result = await JobModel.updateMany(
+    {
+      'taskRelation.rootId': rootObjectId,
+      'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.CHILD,
+      status: TRANSLATION_JOB_STATUS.PENDING
+    },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.BLOCKED,
+        'queueControl.active': false,
+        'taskRelation.blockedByJobId': toObjectId(
+          blockedByJobId,
+          'blockedByJobId'
+        ),
+        'taskRelation.blockedReason': toTrimmedString(reason),
+        'taskRelation.blockedAt': now,
+        'progress.currentStep': '前序子任务失败，本子任务已被阻塞',
+        'progress.currentStage': 'Blocked'
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              `前序子任务失败，本子任务已被阻塞：${toTrimmedString(reason)}`,
+              'warn',
+              'family'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    }
+  )
+  return { blockedCount: result.modifiedCount || 0 }
+}
+
+// 由一组“子任务状态”派生编排节点（parent/root）的聚合状态。
+function deriveOrchestratorStatus(childStates) {
+  if (!Array.isArray(childStates) || childStates.length === 0) {
+    return TRANSLATION_JOB_STATUS.PENDING
+  }
+  const statuses = childStates.map(item => item.status)
+  if (statuses.includes(TRANSLATION_JOB_STATUS.FAILED)) {
+    return TRANSLATION_JOB_STATUS.FAILED
+  }
+  // 只要还有子任务在进行中（待领取/执行中），家族整体视为进行中，
+  // 优先于 BLOCKED（重试失败子任务后，被阻塞子任务会随之被放行）。
+  if (
+    statuses.includes(TRANSLATION_JOB_STATUS.PENDING) ||
+    statuses.includes(TRANSLATION_JOB_STATUS.RUNNING)
+  ) {
+    return TRANSLATION_JOB_STATUS.PENDING
+  }
+  if (statuses.includes(TRANSLATION_JOB_STATUS.BLOCKED)) {
+    return TRANSLATION_JOB_STATUS.BLOCKED
+  }
+  // 至此所有子任务都处于审核/采纳/不采纳等终态。
+  const adoptableStates = childStates.filter(item => item.adoptable === true)
+  if (adoptableStates.length === 0) {
+    return TRANSLATION_JOB_STATUS.FULLY_ADOPTED
+  }
+  const adoptableStatuses = adoptableStates.map(item => item.status)
+  if (adoptableStatuses.includes(TRANSLATION_JOB_STATUS.WAITING_REVIEW)) {
+    return TRANSLATION_JOB_STATUS.WAITING_REVIEW
+  }
+  const allFullyAdopted = adoptableStatuses.every(
+    status => status === TRANSLATION_JOB_STATUS.FULLY_ADOPTED
+  )
+  if (allFullyAdopted) {
+    return TRANSLATION_JOB_STATUS.FULLY_ADOPTED
+  }
+  const allRejected = adoptableStatuses.every(
+    status => status === TRANSLATION_JOB_STATUS.REJECTED
+  )
+  if (allRejected) {
+    return TRANSLATION_JOB_STATUS.REJECTED
+  }
+  return TRANSLATION_JOB_STATUS.PARTIAL_ADOPTED
+}
+
+function isAdoptableChildJob(job) {
+  const childKind = job.taskRelation && job.taskRelation.childKind
+  return TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS.includes(childKind)
+}
+
+function buildChildStatsSummary(childJobs) {
+  const summary = {
+    total: childJobs.length,
+    pending: 0,
+    running: 0,
+    waitingReview: 0,
+    failed: 0,
+    blocked: 0,
+    rejected: 0,
+    partialAdopted: 0,
+    fullyAdopted: 0
+  }
+  childJobs.forEach(child => {
+    switch (child.status) {
+      case TRANSLATION_JOB_STATUS.PENDING:
+        summary.pending += 1
+        break
+      case TRANSLATION_JOB_STATUS.RUNNING:
+        summary.running += 1
+        break
+      case TRANSLATION_JOB_STATUS.WAITING_REVIEW:
+        summary.waitingReview += 1
+        break
+      case TRANSLATION_JOB_STATUS.FAILED:
+        summary.failed += 1
+        break
+      case TRANSLATION_JOB_STATUS.BLOCKED:
+        summary.blocked += 1
+        break
+      case TRANSLATION_JOB_STATUS.REJECTED:
+        summary.rejected += 1
+        break
+      case TRANSLATION_JOB_STATUS.PARTIAL_ADOPTED:
+        summary.partialAdopted += 1
+        break
+      case TRANSLATION_JOB_STATUS.FULLY_ADOPTED:
+        summary.fullyAdopted += 1
+        break
+      default:
+        break
+    }
+  })
+  return summary
+}
+
+// 由聚合状态与子任务统计，构建编排节点（root/parent）的进度展示文案与百分比。
+function buildOrchestratorProgress(derivedStatus, childStats) {
+  const total = Number(childStats.total || 0)
+  const settled =
+    Number(childStats.waitingReview || 0) +
+    Number(childStats.rejected || 0) +
+    Number(childStats.partialAdopted || 0) +
+    Number(childStats.fullyAdopted || 0) +
+    Number(childStats.failed || 0) +
+    Number(childStats.blocked || 0)
+  let percent = 0
+  if (total > 0) {
+    percent = Math.min(Math.round((settled / total) * 100), 100)
+  }
+  let currentStage = 'Orchestrating'
+  let currentStep = '正在按顺序执行子任务'
+  switch (derivedStatus) {
+    case TRANSLATION_JOB_STATUS.WAITING_REVIEW:
+      currentStage = 'FinalizeReview'
+      currentStep = `全部子任务已完成，等待人工审核（共 ${total} 个子任务）`
+      percent = 100
+      break
+    case TRANSLATION_JOB_STATUS.FAILED:
+      currentStage = 'Failure'
+      currentStep = `存在执行失败的子任务（失败 ${Number(
+        childStats.failed || 0
+      )} 个，阻塞 ${Number(childStats.blocked || 0)} 个），请重试失败子任务`
+      break
+    case TRANSLATION_JOB_STATUS.BLOCKED:
+      currentStage = 'Blocked'
+      currentStep = `存在被阻塞的子任务（${Number(
+        childStats.blocked || 0
+      )} 个），请先处理失败子任务`
+      break
+    case TRANSLATION_JOB_STATUS.FULLY_ADOPTED:
+      currentStage = 'FinalizeReview'
+      currentStep = `全部子任务已采纳（共 ${total} 个子任务）`
+      percent = 100
+      break
+    case TRANSLATION_JOB_STATUS.PARTIAL_ADOPTED:
+      currentStage = 'FinalizeReview'
+      currentStep = `部分子任务已采纳（已采纳 ${Number(
+        childStats.fullyAdopted || 0
+      )} 个，待审核 ${Number(childStats.waitingReview || 0)} 个）`
+      percent = 100
+      break
+    case TRANSLATION_JOB_STATUS.REJECTED:
+      currentStage = 'FinalizeReview'
+      currentStep = '全部子任务已标记不采纳'
+      percent = 100
+      break
+    default:
+      currentStage = 'Orchestrating'
+      currentStep = `正在按顺序执行子任务（已完成 ${settled}/${total}）`
+      break
+  }
+  return { currentStage, currentStep, percent }
+}
+
+// 重算整个家族的聚合状态：先由各 child 派生其 parent 状态，再由各 parent 派生 root 状态。
+async function recomputeFamilyAggregateStatus(rootId) {
+  const familyJobs = await loadFamilyJobs(rootId)
+  const { root, parents, children } = splitFamilyJobs(familyJobs, rootId)
+  if (!root && parents.length === 0) {
+    return { updated: false }
+  }
+  const JobModel = getTranslationJobModel()
+  const now = new Date()
+  const childrenByParent = new Map()
+  children.forEach(child => {
+    const parentIdText =
+      child.taskRelation && child.taskRelation.parentId
+        ? String(child.taskRelation.parentId)
+        : ''
+    if (!childrenByParent.has(parentIdText)) {
+      childrenByParent.set(parentIdText, [])
+    }
+    childrenByParent.get(parentIdText).push(child)
+  })
+
+  const parentDerivedStates = []
+  for (const parent of parents) {
+    const parentChildren = childrenByParent.get(String(parent._id)) || []
+    const childStates = parentChildren.map(child => ({
+      status: child.status,
+      adoptable: isAdoptableChildJob(child)
+    }))
+    const derivedStatus = deriveOrchestratorStatus(childStates)
+    const childStats = buildChildStatsSummary(parentChildren)
+    const progress = buildOrchestratorProgress(derivedStatus, childStats)
+    await JobModel.updateOne(
+      { _id: parent._id },
+      {
+        $set: {
+          status: derivedStatus,
+          'queueControl.active': false,
+          'taskRelation.childStats': childStats,
+          'progress.currentStage': progress.currentStage,
+          'progress.currentStep': progress.currentStep,
+          'progress.percent': progress.percent
+        }
+      }
+    )
+    parentDerivedStates.push({ status: derivedStatus, adoptable: true })
+  }
+
+  if (root) {
+    let rootChildStates = parentDerivedStates
+    if (parents.length === 0) {
+      // 没有 parent 层时（理论上不会发生），直接用 child 聚合 root。
+      rootChildStates = children.map(child => ({
+        status: child.status,
+        adoptable: isAdoptableChildJob(child)
+      }))
+    }
+    const rootStatus = deriveOrchestratorStatus(rootChildStates)
+    const rootStats = buildChildStatsSummary(children)
+    const rootProgress = buildOrchestratorProgress(rootStatus, rootStats)
+    await JobModel.updateOne(
+      { _id: root._id },
+      {
+        $set: {
+          status: rootStatus,
+          'queueControl.active': false,
+          'runtime.finishedAt':
+            rootStatus === TRANSLATION_JOB_STATUS.PENDING ? null : now,
+          'taskRelation.childStats': rootStats,
+          'progress.currentStage': rootProgress.currentStage,
+          'progress.currentStep': rootProgress.currentStep,
+          'progress.percent': rootProgress.percent
+        }
+      }
+    )
+  }
+  return { updated: true }
+}
+
+// root 规划阶段完成：把 root 从 RUNNING 转为编排态（active=false），子任务已创建完毕，
+// 后续状态由 recomputeFamilyAggregateStatus 派生。
+async function finalizeOrchestratorPlanning(options = {}) {
+  const JobModel = getTranslationJobModel()
+  const now = new Date()
+  const result = await JobModel.updateOne(
+    {
+      _id: toObjectId(options.id, 'id', true),
+      status: TRANSLATION_JOB_STATUS.RUNNING,
+      'runtime.workerId': options.workerId,
+      'runtime.attempts': Number(options.attemptNo)
+    },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.PENDING,
+        'queueControl.active': false,
+        'runtime.lockedBy': '',
+        'runtime.workerId': '',
+        'runtime.finishedAt': null,
+        'runtime.heartbeatAt': now,
+        'runtime.leaseExpiresAt': null,
+        'runtime.recovering': false,
+        'taskRelation.childStats': normalizeObject(
+          options.childStats,
+          'childStats'
+        ),
+        'progress.currentStep': '子任务规划完成，正在按顺序执行子任务',
+        'progress.currentStage': 'Orchestrating',
+        'progress.percent': 0,
+        'attempts.$[attempt].status': 'success',
+        'attempts.$[attempt].finishedAt': now,
+        'attempts.$[attempt].stage': 'Orchestrating'
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              '子任务规划完成，开始按顺序执行子任务',
+              'info',
+              'family'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    },
+    {
+      arrayFilters: [
+        {
+          'attempt.attemptNo': Number(options.attemptNo),
+          'attempt.workerId': options.workerId,
+          'attempt.status': 'running'
+        }
+      ]
+    }
+  )
+  if (result.matchedCount !== 1) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_CANCELLED,
+      '规划完成写入失败，当前 worker 已失去任务所有权',
+      'translationJob',
+      499
+    )
+  }
+  // 放行家族中第一个子任务（其余子任务保持排队，按顺序依次放行）。
+  await activateNextFamilyChild(String(options.id || ''))
+  await recomputeFamilyAggregateStatus(String(options.id || ''))
+}
+
 module.exports = {
   createTranslationJob,
   listTranslationJobs,
   getTranslationJobStorageSummary,
   getTranslationJobDetail,
+  getTranslationJobFamily,
   deferTranslationJob,
   requestStopRunningTranslationJob,
   resumeTranslationJob,
@@ -2604,5 +3508,12 @@ module.exports = {
   saveRunningTranslationJobAiChunkCache,
   completeRunningTranslationJobForReview,
   failRunningTranslationJob,
-  markExpiredRunningTranslationJobsRecovering
+  markExpiredRunningTranslationJobsRecovering,
+  getJobFamilyRootId,
+  isOrchestratorRole,
+  isChildRole,
+  activateNextFamilyChild,
+  blockPendingFamilyChildren,
+  recomputeFamilyAggregateStatus,
+  finalizeOrchestratorPlanning
 }

@@ -16,7 +16,11 @@ export const progressStageTextMap = {
   ValidateTranslation: '校验译文',
   ValidationOverview: '全局校验速览',
   FinalizeProperNounOrganize: '完成名词整理',
-  FinalizeReview: '整理审核结果'
+  FinalizeReview: '整理审核结果',
+  PlanFamily: '规划子任务',
+  Orchestrating: '编排子任务',
+  Blocked: '已阻塞',
+  Failure: '执行失败'
 }
 
 function normalizeStageText(value) {

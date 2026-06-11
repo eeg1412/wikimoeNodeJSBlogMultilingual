@@ -3,7 +3,10 @@ var Schema = mongoose.Schema
 const {
   TRANSLATION_JOB_TYPE_VALUES,
   TRANSLATION_JOB_STATUS,
-  TRANSLATION_JOB_STATUS_VALUES
+  TRANSLATION_JOB_STATUS_VALUES,
+  TRANSLATION_JOB_TASK_ROLES,
+  TRANSLATION_JOB_TASK_ROLE_VALUES,
+  TRANSLATION_JOB_CHILD_KIND_VALUES
 } = require('../../utils/translationJobConstants')
 
 const adminSnapshotSchema = new Schema(
@@ -354,8 +357,21 @@ const translationJobs = new Schema(
     taskRelation: {
       role: {
         type: String,
-        enum: ['root', 'parent', 'child'],
-        default: 'root',
+        enum: TRANSLATION_JOB_TASK_ROLE_VALUES,
+        default: TRANSLATION_JOB_TASK_ROLES.STANDALONE,
+        index: true
+      },
+      // 子任务步骤种类（仅 role=child 有效）。
+      childKind: {
+        type: String,
+        enum: ['', ...TRANSLATION_JOB_CHILD_KIND_VALUES],
+        default: '',
+        index: true
+      },
+      // 子任务在父任务内的执行顺序索引（从 0 开始，严格按序执行）。
+      orderIndex: {
+        type: Number,
+        default: 0,
         index: true
       },
       rootId: {
@@ -378,9 +394,40 @@ const translationJobs = new Schema(
         default: null,
         index: true
       },
+      // 该 parent 所代表的文章源 id（root 文章或某个相关文章）。
+      articleSourceId: {
+        type: Schema.Types.ObjectId,
+        default: null,
+        index: true
+      },
+      // 该 child 负责的单个目标语言（仅单语言翻译子任务有效）。
+      childLanguageCode: {
+        type: String,
+        default: '',
+        index: true
+      },
       childJobIds: {
         type: [Schema.Types.ObjectId],
         default: []
+      },
+      // 触发本次阻塞的失败子任务 id（向其后子任务传播 BLOCKED 用）。
+      blockedByJobId: {
+        type: Schema.Types.ObjectId,
+        default: null,
+        index: true
+      },
+      blockedReason: {
+        type: String,
+        default: ''
+      },
+      blockedAt: {
+        type: Date,
+        default: null
+      },
+      // 编排型任务（root/parent）聚合子任务状态的统计快照。
+      childStats: {
+        type: Schema.Types.Mixed,
+        default: {}
       },
       plannedRelatedSourceIdsByLanguage: {
         type: Schema.Types.Mixed,
@@ -674,6 +721,21 @@ translationJobs.index({
   'taskRelation.parentId': 1,
   'source.postId': 1,
   jobType: 1
+})
+// 按家族顺序领取/聚合：parent 内按 orderIndex 取下一个可执行 child。
+translationJobs.index({
+  'taskRelation.parentId': 1,
+  'taskRelation.orderIndex': 1
+})
+translationJobs.index({
+  'taskRelation.rootId': 1,
+  status: 1,
+  'taskRelation.orderIndex': 1
+})
+translationJobs.index({
+  'taskRelation.role': 1,
+  'taskRelation.childKind': 1,
+  status: 1
 })
 
 module.exports = require('../modelFactory/defaultModel')(

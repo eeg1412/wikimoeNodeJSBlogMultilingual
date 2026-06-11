@@ -652,6 +652,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/job/detail')
   },
   {
+    path: '/translation/job/family',
+    method: 'get',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/family')
+  },
+  {
     path: '/translation/job/defer',
     method: 'put',
     middleware: [checkAuth],
@@ -692,6 +698,12 @@ const multilingualAdminRouteSetting = [
     method: 'post',
     middleware: [checkAuth],
     controller: require('../api/multilingual-admin/translation/job/apply')
+  },
+  {
+    path: '/translation/job/apply-family',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/applyFamily')
   },
   {
     path: '/translation/job/cover-image/adopt',

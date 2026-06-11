@@ -7,7 +7,9 @@ const {
 } = require('../../../utils/multilingualAdminResponse')
 const {
   TRANSLATION_JOB_STATUS,
-  TRANSLATION_JOB_TYPES
+  TRANSLATION_JOB_TYPES,
+  TRANSLATION_JOB_TASK_ROLES,
+  TRANSLATION_JOB_CHILD_KINDS
 } = require('../../../utils/translationJobConstants')
 const translationPayloadApplyService = require('./translationPayloadApplyService')
 const translationEntryBuildService = require('./translationEntryBuildService')
@@ -3214,6 +3216,787 @@ async function executeSourcePostProperNounOrganize(job, context) {
   }
 }
 
+// ===========================================================================
+// 家族（root/parent/child）编排执行
+// ---------------------------------------------------------------------------
+// 把"一次性翻译全部语言"的大任务拆成按顺序执行的子任务，规避 MongoDB 单文档 16MB
+// 限制。家族结构（方案A，三层）：
+//   root（编排器，本函数规划阶段执行）
+//     └─ parent（每篇文章一个：根文章 + 每个相关文章）
+//          ├─ child[0]  名词整理（该文章全部语言一次性，执行即生效）
+//          ├─ child[1..N] 单语言翻译校验（每种目标语言一个）
+//          └─ child[N+1] 封面图整理（最后一步，跨该文章各语言按标题去重）
+// 子执行器均复用现有的逐语言 / 单源 / 封面批处理函数，且都设计成"既可独立运行、
+// 也可被父任务编排调用"。
+// ===========================================================================
+
+const FAMILY_ORCHESTRATOR_PLANNING_MARKER = '__orchestratorPlanning'
+
+function getFamilyArticleSourceId(job) {
+  const relation = getJobTaskRelation(job)
+  return (
+    normalizeString(relation.articleSourceId) ||
+    normalizeString(job.source.postId)
+  )
+}
+
+function getFamilyLanguageCodes(job) {
+  if (
+    Array.isArray(job.target?.languageCodes) &&
+    job.target.languageCodes.length
+  ) {
+    return job.target.languageCodes
+  }
+  if (Array.isArray(job.request?.targetLanguageCodes)) {
+    return job.request.targetLanguageCodes
+  }
+  return []
+}
+
+// 是否需要为该家族创建名词整理子任务（默认创建；可由 options.organizeProperNouns=false 关闭）。
+function shouldCreateProperNounChild(job) {
+  const options = job?.request?.options || {}
+  if (options.organizeProperNouns === false) {
+    return false
+  }
+  return true
+}
+
+// 构建某篇文章的子任务请求体（关闭翻译流内联名词整理，名词整理改由独立子任务负责）。
+function buildFamilyChildRequest(
+  job,
+  { languageCodes, disableInlineProperNoun }
+) {
+  const request = job.request || {}
+  const options = {
+    ...(request.options || {})
+  }
+  if (disableInlineProperNoun === true) {
+    // 名词整理已由独立子任务完成并入库，逐语言翻译不再内联整理，仅复用已绑定术语。
+    options.autoOrganizeOfficialTermGlossary = false
+    options.searchOfficialTermTranslations = false
+  }
+  return {
+    selectedEntryKeys: Array.isArray(request.selectedEntryKeys)
+      ? request.selectedEntryKeys
+      : [],
+    prompt: request.prompt || '',
+    baseMode: request.baseMode || '',
+    targetLanguageCodes: languageCodes,
+    recursion: { maxDepth: 1 },
+    entries: [],
+    options
+  }
+}
+
+// 创建一篇文章对应的 parent 及其有序 child 子任务序列。
+async function createFamilyParentWithChildren({
+  job,
+  rootId,
+  articleSourceId,
+  articleTitle,
+  isRootArticle,
+  parentOrderIndex,
+  languageCodes,
+  snapshotId
+}) {
+  const JobModel = getTranslationJobModel()
+  const sourcePostObjectId = toObjectId(articleSourceId)
+  const snapshotObjectId = snapshotId ? toObjectId(snapshotId) : null
+  const priority = job.queueControl?.priority || 0
+  const title = articleTitle || `源文章 ${articleSourceId}`
+
+  // 1) 创建 parent（编排型，不执行 AI，永不进入 RUNNING）。
+  const parentJob = await JobModel.create({
+    jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
+    status: TRANSLATION_JOB_STATUS.PENDING,
+    queueControl: { active: false, deferred: false, priority },
+    source: {
+      postId: sourcePostObjectId,
+      languageCode: job.source.languageCode,
+      snapshotId: isRootArticle ? snapshotObjectId : null,
+      overwriteSnapshot: false,
+      title
+    },
+    target: { languageCodes, title },
+    request: buildFamilyChildRequest(job, {
+      languageCodes,
+      disableInlineProperNoun: false
+    }),
+    taskRelation: {
+      role: TRANSLATION_JOB_TASK_ROLES.PARENT,
+      childKind: '',
+      orderIndex: parentOrderIndex,
+      rootId: toObjectId(rootId),
+      parentId: toObjectId(rootId),
+      depth: 2,
+      sourcePostId: sourcePostObjectId,
+      articleSourceId: sourcePostObjectId,
+      childJobIds: [],
+      childStats: {}
+    },
+    progress: {
+      currentStep: '等待子任务按顺序执行',
+      currentStage: 'Orchestrating',
+      totalSteps: 0,
+      completedSteps: 0,
+      percent: 0,
+      recentLogs: [
+        buildExecutionLog(
+          `文章「${title}」的翻译父任务已创建`,
+          'info',
+          'family'
+        )
+      ]
+    },
+    createdBy: job.createdBy || null,
+    updatedBy: job.updatedBy || job.createdBy || null
+  })
+
+  const childJobIds = []
+  let childOrderIndex = 0
+
+  function buildChildSourceBlock() {
+    return {
+      postId: sourcePostObjectId,
+      languageCode: job.source.languageCode,
+      snapshotId: isRootArticle ? snapshotObjectId : null,
+      overwriteSnapshot: false,
+      title
+    }
+  }
+
+  function buildChildBaseTaskRelation(
+    childKind,
+    orderIndex,
+    childLanguageCode
+  ) {
+    return {
+      role: TRANSLATION_JOB_TASK_ROLES.CHILD,
+      childKind,
+      orderIndex,
+      rootId: toObjectId(rootId),
+      parentId: parentJob._id,
+      depth: 3,
+      sourcePostId: sourcePostObjectId,
+      articleSourceId: sourcePostObjectId,
+      childLanguageCode: childLanguageCode || '',
+      childJobIds: [],
+      childStats: {}
+    }
+  }
+
+  async function createChild({
+    jobType,
+    childKind,
+    childLanguageCode,
+    request,
+    label
+  }) {
+    const childJob = await JobModel.create({
+      jobType,
+      status: TRANSLATION_JOB_STATUS.PENDING,
+      queueControl: { active: false, deferred: false, priority },
+      source: buildChildSourceBlock(),
+      target: {
+        languageCode: childLanguageCode || '',
+        languageCodes,
+        title
+      },
+      request,
+      taskRelation: buildChildBaseTaskRelation(
+        childKind,
+        childOrderIndex,
+        childLanguageCode
+      ),
+      progress: {
+        currentStep: '排队中，等待前序子任务完成',
+        currentStage: 'pending',
+        totalSteps: 0,
+        completedSteps: 0,
+        percent: 0,
+        recentLogs: [buildExecutionLog(label, 'info', 'family')]
+      },
+      createdBy: job.createdBy || null,
+      updatedBy: job.updatedBy || job.createdBy || null
+    })
+    childOrderIndex += 1
+    childJobIds.push(childJob._id)
+    return childJob
+  }
+
+  // 2) 名词整理子任务（全语言一次性，执行即生效）。
+  if (shouldCreateProperNounChild(job)) {
+    await createChild({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
+      childKind: TRANSLATION_JOB_CHILD_KINDS.PROPER_NOUN_ORGANIZE,
+      childLanguageCode: '',
+      request: {
+        selectedEntryKeys: [],
+        prompt: '',
+        baseMode: '',
+        targetLanguageCodes: languageCodes,
+        recursion: { maxDepth: 1 },
+        entries: [],
+        options: {
+          ...(job.request?.options || {}),
+          syncRelatedPosts: false,
+          organizeRelatedPosts: false
+        }
+      },
+      label: `名词整理子任务（${languageCodes.length} 种语言）已创建`
+    })
+  }
+
+  // 3) 逐语言翻译校验子任务（关闭内联名词整理、关闭封面图）。
+  for (let i = 0; i < languageCodes.length; i += 1) {
+    const languageCode = languageCodes[i]
+    const request = buildFamilyChildRequest(job, {
+      languageCodes,
+      disableInlineProperNoun: shouldCreateProperNounChild(job)
+    })
+    // 逐语言子任务不处理封面图，封面图统一放最后的封面图整理子任务。
+    request.options = {
+      ...request.options,
+      coverImageTranslationMode: 'never',
+      translateCoverImage: false
+    }
+    await createChild({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
+      childKind: TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION,
+      childLanguageCode: languageCode,
+      request,
+      label: `${getLanguageText(languageCode)} 翻译子任务已创建`
+    })
+  }
+
+  // 4) 封面图整理子任务（最后一步，跨该文章各语言按标题去重）。
+  if (shouldTranslateCoverImage(job, true)) {
+    await createChild({
+      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
+      childKind: TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE,
+      childLanguageCode: '',
+      request: buildFamilyChildRequest(job, {
+        languageCodes,
+        disableInlineProperNoun: false
+      }),
+      label: '封面图整理子任务已创建'
+    })
+  }
+
+  await JobModel.updateOne(
+    { _id: parentJob._id },
+    { $set: { 'taskRelation.childJobIds': childJobIds } }
+  )
+
+  return {
+    parentId: parentJob._id,
+    childJobIds,
+    childCount: childJobIds.length,
+    articleSourceId,
+    title,
+    languageCodes
+  }
+}
+
+// root 规划阶段：发现文章 → 创建 parent/child 家族 → 返回编排标记（由 worker 转编排态）。
+async function executeFamilyRootPlanning(job, context) {
+  const languageCodes = getFamilyLanguageCodes(job)
+  if (languageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '家族翻译任务缺少 target.languageCodes',
+      'target.languageCodes',
+      400,
+      { retryable: false }
+    )
+  }
+  const rootSourceId = normalizeString(job.source.postId)
+  if (!isValidObjectId(rootSourceId)) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '家族翻译任务缺少 source.postId',
+      'source.postId',
+      400,
+      { retryable: false }
+    )
+  }
+
+  await context.updateProgress({
+    currentStage: 'PlanFamily',
+    currentStep: '正在覆盖源文章快照并规划子任务',
+    percent: 2
+  })
+  // 覆盖根文章源快照（与原一次性导入一致）。
+  await overwriteSourceSnapshotForAiImportJob(job, context)
+  const rootSnapshotId = normalizeString(job.source.snapshotId)
+
+  // 发现根文章 + 相关文章（复用现有 DAG 规划）。
+  const maxDepth = Number(job.request?.recursion?.maxDepth || 3) || 3
+  const rootPreviewContext =
+    await translationPostService.getSourcePostAiImportPreviewContext({
+      sourceId: rootSourceId,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: languageCodes[0],
+      sourceSnapshotId: rootSnapshotId
+    })
+  const articles = [
+    {
+      sourceId: getSourcePostId(rootPreviewContext.sourcePost) || rootSourceId,
+      title: getSourcePostDisplayTitle(rootPreviewContext.sourcePost),
+      isRootArticle: true,
+      languageCodes
+    }
+  ]
+  if (shouldSyncRelatedPosts(job) && maxDepth > 1) {
+    await context.updateProgress({
+      currentStage: 'PlanFamily',
+      currentStep: '正在分析相关文章',
+      percent: 6
+    })
+    const relatedPlan = await buildSourcePostImportChildPlan({
+      job,
+      languageCodes,
+      maxDepth,
+      context
+    })
+    relatedPlan.forEach(planItem => {
+      articles.push({
+        sourceId: planItem.sourceId,
+        title: planItem.title || '',
+        isRootArticle: false,
+        languageCodes:
+          Array.isArray(planItem.languageCodes) && planItem.languageCodes.length
+            ? planItem.languageCodes
+            : languageCodes
+      })
+    })
+  }
+
+  await context.updateProgress({
+    currentStage: 'PlanFamily',
+    currentStep: `正在创建 ${articles.length} 篇文章的子任务家族`,
+    percent: 10
+  })
+
+  const JobModel = getTranslationJobModel()
+  const parentResults = []
+  let totalChildCount = 0
+  for (let i = 0; i < articles.length; i += 1) {
+    const article = articles[i]
+    const parentResult = await createFamilyParentWithChildren({
+      job,
+      rootId: job._id,
+      articleSourceId: article.sourceId,
+      articleTitle: article.title,
+      isRootArticle: article.isRootArticle,
+      parentOrderIndex: i,
+      languageCodes: article.languageCodes,
+      snapshotId: article.isRootArticle ? rootSnapshotId : ''
+    })
+    parentResults.push(parentResult)
+    totalChildCount += parentResult.childCount
+  }
+
+  const parentJobIds = parentResults.map(item => item.parentId)
+  await JobModel.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.ROOT,
+        'taskRelation.rootId': job._id,
+        'taskRelation.articleSourceId': toObjectId(rootSourceId),
+        'taskRelation.sourcePostId': toObjectId(rootSourceId),
+        'taskRelation.childJobIds': parentJobIds,
+        'taskRelation.plan': {
+          schema: 'wikimoe.ai.translation.family.plan',
+          version: 1,
+          articleCount: articles.length,
+          parentCount: parentJobIds.length,
+          childCount: totalChildCount,
+          languageCount: languageCodes.length,
+          maxDepth,
+          generatedAt: new Date()
+        }
+      }
+    }
+  )
+
+  await context.saveCheckpoint({
+    stage: 'PlanFamily',
+    stateSummary: {
+      articleCount: articles.length,
+      parentCount: parentJobIds.length,
+      childCount: totalChildCount,
+      languageCount: languageCodes.length
+    }
+  })
+
+  return {
+    [FAMILY_ORCHESTRATOR_PLANNING_MARKER]: true,
+    childStats: {
+      articleCount: articles.length,
+      parentCount: parentJobIds.length,
+      childCount: totalChildCount,
+      languageCount: languageCodes.length
+    }
+  }
+}
+
+// 名词整理子任务执行器：针对该文章全部目标语言一次性整理并绑定术语（执行即生效）。
+async function executeProperNounOrganizeChild(job, context) {
+  const languageCodes = getFamilyLanguageCodes(job)
+  if (languageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '名词整理子任务缺少 target.languageCodes',
+      'target.languageCodes',
+      400,
+      { retryable: false }
+    )
+  }
+  const articleSourceId = getFamilyArticleSourceId(job)
+  const officialTermGlossaryTaskCache = new Map()
+  const rootSourceResult = await organizeOneSourcePostProperNouns({
+    job,
+    context,
+    sourceId: articleSourceId,
+    languageCodes,
+    isRoot: true,
+    depth: 1,
+    allowEmptyEntries: true,
+    officialTermGlossaryTaskCache
+  })
+  const sourceResults = [rootSourceResult]
+  const stats = mergeProperNounOrganizeStats(sourceResults)
+  const payload = buildProperNounOrganizePayload({
+    sourceResults,
+    sourceId: rootSourceResult.sourceId,
+    sourceLanguageCode: job.source.languageCode,
+    targetLanguageCodes: languageCodes,
+    searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(job),
+    organizeRelatedPosts: false,
+    stats
+  })
+  return {
+    payload,
+    previewEntries: [],
+    warningList: [],
+    aiSkipList: [],
+    relatedResults: [
+      {
+        sourceId: rootSourceResult.sourceId,
+        title: rootSourceResult.title,
+        languageCode: job.source.languageCode,
+        isRoot: true,
+        depth: 1,
+        termCount: rootSourceResult.relationCount,
+        extractedTermCount: rootSourceResult.extractedTerms.length,
+        matchedTermCount: rootSourceResult.matchedTermIds.length
+      }
+    ],
+    childTaskResults: [],
+    languageResults: [],
+    translationPostMap: {},
+    aiJsonLogs: translationAiJsonLogService.mergeAiJsonLogs(
+      rootSourceResult.aiJsonLogs || []
+    ),
+    coverImageArtifacts: [],
+    coverImageGenerationMap: {},
+    coverImageRecognitionMap: {},
+    sourceSnapshotId: normalizeString(job.source?.snapshotId) || null,
+    aiUsage: { officialTermStats: stats },
+    model: ''
+  }
+}
+
+// 单语言翻译校验子任务执行器：翻译该文章的一种目标语言（不处理封面图）。
+async function executeSingleLanguageTranslationChild(job, context) {
+  const languageCode = normalizeString(
+    getJobTaskRelation(job).childLanguageCode || job.target.languageCode
+  )
+  if (!languageCode) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '单语言翻译子任务缺少目标语言',
+      'taskRelation.childLanguageCode',
+      400,
+      { retryable: false }
+    )
+  }
+  const familyLanguageCodes = getFamilyLanguageCodes(job)
+  const targetLanguageCodes = familyLanguageCodes.length
+    ? familyLanguageCodes
+    : [languageCode]
+  const officialTermGlossaryTaskCache = new Map()
+  const languageResults = await executeSourcePostLanguageDag({
+    job,
+    context,
+    languageCode,
+    targetLanguageCodes,
+    officialTermGlossaryTaskCache,
+    progressRange: { start: 10, end: 96 },
+    maxDepth: 1,
+    coverImageTasks: [],
+    enqueueRelatedPosts: false
+  })
+  const primary =
+    languageResults.find(item => item.isRoot) || languageResults[0]
+  if (!primary) {
+    throw new ApiError(
+      ERROR_CODES.AI_TRANSLATION_FAILED,
+      '单语言翻译子任务没有产出结果',
+      'result',
+      502
+    )
+  }
+  const innerResult = primary.result || {}
+  const previewEntries = languageResults.flatMap(item => {
+    return item.result?.previewEntries || []
+  })
+  const warningList = languageResults.flatMap(item => {
+    return item.result?.warningList || []
+  })
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    ...languageResults.map(item => item.result?.aiJsonLogs || [])
+  )
+  let validation = null
+  if (innerResult.validation) {
+    validation = {
+      enabled: true,
+      status: 'completed',
+      stats: {
+        totalEntries: innerResult.validation.stats?.totalEntries || 0,
+        changedEntries: innerResult.validation.stats?.changedEntries || 0,
+        nodeCount: 1
+      },
+      languageValidations: [
+        {
+          languageCode,
+          sourceId: primary.sourceId,
+          validation: innerResult.validation
+        }
+      ],
+      completedAt: new Date().toISOString()
+    }
+  }
+  return {
+    payload: {
+      schema: 'wikimoe.ai.translation.aggregate',
+      version: 1,
+      entries: previewEntries
+    },
+    previewEntries,
+    warningList,
+    aiSkipList: previewEntries.filter(entry => Boolean(entry.aiSkipReason)),
+    relatedResults: languageResults.map(item => ({
+      languageCode,
+      isRoot: item.isRoot,
+      sourceId: item.sourceId,
+      depth: item.depth,
+      entryCount: (item.result?.previewEntries || []).length,
+      requestId: item.result?.requestId,
+      model: item.result?.model
+    })),
+    childTaskResults: [],
+    // 单语言子任务的采纳依赖 result.languageResults[].result.payload，必须保留（单语言数据量小，无 16MB 风险）。
+    languageResults,
+    translationPostMap: {},
+    aiJsonLogs,
+    validation,
+    coverImageArtifacts: [],
+    coverImageGenerationMap: {},
+    coverImageRecognitionMap: {},
+    sourceSnapshotId: normalizeString(job.source?.snapshotId) || null,
+    aiUsage: {
+      languageResults: languageResults.map(item => ({
+        languageCode,
+        usage: item.result?.aiUsage || {}
+      }))
+    },
+    model: innerResult.model || ''
+  }
+}
+
+// 封面图整理子任务执行器：读取同父任务下各单语言翻译子任务译文，跨语言按标题去重统一处理封面图。
+async function executeCoverImageOrganizeChild(job, context) {
+  const parentId = getJobTaskRelation(job).parentId
+  if (!parentId) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '封面图整理子任务缺少 parentId',
+      'taskRelation.parentId',
+      400,
+      { retryable: false }
+    )
+  }
+  const articleSourceId = getFamilyArticleSourceId(job)
+  const sourceSnapshotId = normalizeString(job.source?.snapshotId)
+  const JobModel = getTranslationJobModel()
+  const siblingChildren = await JobModel.find({
+    'taskRelation.parentId': toObjectId(parentId),
+    'taskRelation.childKind':
+      TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION
+  })
+    .sort({ 'taskRelation.orderIndex': 1 })
+    .lean()
+
+  const coverImageTasks = []
+  for (const sibling of siblingChildren) {
+    const languageCode = normalizeString(
+      sibling.taskRelation?.childLanguageCode
+    )
+    if (!languageCode) {
+      continue
+    }
+    const previewEntries = Array.isArray(sibling.result?.previewEntries)
+      ? sibling.result.previewEntries
+      : []
+    await context.updateProgress({
+      currentStage: 'TranslateCoverImage',
+      currentStep: `正在准备 ${getLanguageText(languageCode)} 封面图上下文`,
+      percent: 10
+    })
+    const previewContext =
+      await translationPostService.getSourcePostAiImportPreviewContext({
+        sourceId: articleSourceId,
+        sourceLanguageCode: job.source.languageCode,
+        targetLanguageCode: languageCode,
+        sourceSnapshotId
+      })
+    coverImageTasks.push({
+      job,
+      sourcePost: previewContext.sourcePost,
+      targetPost: previewContext.targetPost,
+      previewEntries,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: languageCode,
+      skipRecognition: shouldSkipCoverImageRecognition(job),
+      result: {
+        previewEntries: [],
+        warningList: [],
+        coverImageArtifacts: [],
+        coverImageGenerationMap: {},
+        coverImageRecognitionMap: {},
+        aiJsonLogs: [],
+        requestId: null
+      }
+    })
+  }
+
+  const registry = coverImageTranslationService.createCoverImageRegistry()
+  const aggregatedPreviewEntries = []
+  const aggregatedWarnings = []
+  if (coverImageTasks.length > 0) {
+    const coverImageHandlers = createHandlers(context, 'TranslateCoverImage', {
+      start: 20,
+      end: 95
+    })
+    await context.updateProgress({
+      currentStage: 'TranslateCoverImage',
+      currentStep: '正在按标题去重处理各语言封面图 AI 翻译',
+      percent: 20
+    })
+    const coverBatchResult =
+      await coverImageTranslationService.processCoverImageTranslationBatch({
+        registry,
+        tasks: coverImageTasks,
+        cancellation: context.cancellation,
+        onStatus: coverImageHandlers.onStatus,
+        onTaskStart: async ({ task, taskIndex, taskCount }) => {
+          await context.updateProgress({
+            currentStage: 'TranslateCoverImage',
+            currentStep: `正在处理 ${getLanguageText(
+              task.targetLanguageCode
+            )} 封面图 AI 翻译（${taskIndex + 1}/${taskCount}）`,
+            percent: getRangePercent(
+              { start: 20, end: 95 },
+              0,
+              1,
+              taskIndex / Math.max(taskCount, 1)
+            )
+          })
+        }
+      })
+    coverBatchResult.results.forEach(item => {
+      appendCoverImageResult(item.task.result, item.coverResult, registry, {
+        appendAiJsonLogs: false
+      })
+      ;(item.task.result.previewEntries || []).forEach(entry => {
+        aggregatedPreviewEntries.push(entry)
+      })
+      ;(item.task.result.warningList || []).forEach(warning => {
+        aggregatedWarnings.push(warning)
+      })
+    })
+    await context.saveCheckpoint({
+      stage: 'TranslateCoverImage',
+      stateSummary: {
+        taskCount: coverBatchResult.taskCount,
+        dedupeGroupCount: coverBatchResult.groupCount,
+        duplicateTitleCount: coverBatchResult.duplicateTitleCount,
+        artifactCount: registry.artifacts.size
+      }
+    })
+  }
+
+  const snapshot = coverImageTranslationService.buildRegistrySnapshot(registry)
+  const aiJsonLogs = translationAiJsonLogService.mergeAiJsonLogs(
+    translationAiJsonLogService.buildCoverImageAiJsonLogs({
+      snapshot,
+      sourceLanguageCode: job.source.languageCode,
+      targetLanguageCode: '',
+      meta: { jobId: getJobId(job), recursive: false }
+    })
+  )
+  return {
+    payload: {
+      schema: 'wikimoe.ai.translation.cover-image',
+      version: 1,
+      entries: aggregatedPreviewEntries
+    },
+    previewEntries: aggregatedPreviewEntries,
+    warningList: aggregatedWarnings,
+    aiSkipList: [],
+    relatedResults: [],
+    childTaskResults: [],
+    languageResults: [],
+    translationPostMap: {},
+    aiJsonLogs,
+    coverImageArtifacts: snapshot.coverImageArtifacts,
+    coverImageGenerationMap: snapshot.coverImageGenerationMap,
+    coverImageRecognitionMap: snapshot.coverImageRecognitionMap,
+    sourceSnapshotId: sourceSnapshotId || null,
+    aiUsage: {},
+    model: ''
+  }
+}
+
+// 子任务分发：按 childKind 调用对应执行器。
+async function executeFamilyChild(job, context) {
+  const childKind = getJobTaskRelation(job).childKind
+  if (childKind === TRANSLATION_JOB_CHILD_KINDS.PROPER_NOUN_ORGANIZE) {
+    return await executeProperNounOrganizeChild(job, context)
+  }
+  if (childKind === TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION) {
+    return await executeSingleLanguageTranslationChild(job, context)
+  }
+  if (childKind === TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE) {
+    return await executeCoverImageOrganizeChild(job, context)
+  }
+  throw new ApiError(
+    ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+    `子任务种类不支持：${childKind}`,
+    'taskRelation.childKind',
+    400,
+    { retryable: false }
+  )
+}
+
+function isFamilyOrchestratorPlanningResult(result) {
+  return Boolean(result && result[FAMILY_ORCHESTRATOR_PLANNING_MARKER] === true)
+}
+
 async function executeTranslationJob(job, context) {
   if (!job || !job.jobType) {
     throw new ApiError(
@@ -3232,6 +4015,19 @@ async function executeTranslationJob(job, context) {
       jobType: job.jobType
     }
   })
+
+  // 家族编排：root 走规划阶段；带 childKind 的家族 child 按 childKind 分发；
+  // 其余（独立任务、以及旧的相关文章 child——无 childKind）走原有 jobType 分发。
+  const relation = getJobTaskRelation(job)
+  if (relation.role === TRANSLATION_JOB_TASK_ROLES.ROOT) {
+    return await executeFamilyRootPlanning(job, context)
+  }
+  if (
+    relation.role === TRANSLATION_JOB_TASK_ROLES.CHILD &&
+    normalizeString(relation.childKind)
+  ) {
+    return await executeFamilyChild(job, context)
+  }
 
   if (job.jobType === TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION) {
     return await executePostAiTranslation(job, context)
@@ -3259,5 +4055,6 @@ async function executeTranslationJob(job, context) {
 }
 
 module.exports = {
-  executeTranslationJob
+  executeTranslationJob,
+  isFamilyOrchestratorPlanningResult
 }

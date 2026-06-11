@@ -166,6 +166,7 @@
         row-key="_id"
         height="100%"
         border
+        :row-class-name="getJobRowClassName"
         @selection-change="handleJobSelectionChange"
       >
         <ResponsiveTableColumn
@@ -268,14 +269,14 @@
                 详情
               </el-button>
               <el-button
-                v-if="row.status === '未开始' && !row.queueControl?.deferred"
+                v-if="canDeferJob(row)"
                 size="small"
                 @click="deferJob(row)"
               >
                 暂缓
               </el-button>
               <el-button
-                v-if="row.status === '未开始' && row.queueControl?.deferred"
+                v-if="canResumeJob(row)"
                 size="small"
                 type="primary"
                 @click="resumeJob(row)"
@@ -373,6 +374,13 @@
               @click="applySelectedEntries"
             >
               采纳所选
+            </el-button>
+            <el-button
+              v-if="canApplyCurrentFamily"
+              type="primary"
+              @click="applyFamilyAll"
+            >
+              采纳全部
             </el-button>
           </div>
         </div>
@@ -960,11 +968,19 @@ const statusOptions = [
   { label: '未开始', value: '未开始' },
   { label: '执行中', value: '执行中' },
   { label: '执行失败', value: '执行失败' },
+  { label: '已阻塞', value: '已阻塞' },
   { label: '等待审核', value: '等待审核' },
   { label: '不采纳', value: '不采纳' },
   { label: '部分采纳', value: '部分采纳' },
   { label: '完全采纳', value: '完全采纳' }
 ]
+
+// 子任务种类文案。
+const childKindLabelMap = {
+  'proper-noun-organize': '名词整理',
+  'single-language-translation': '单语言翻译',
+  'cover-image-organize': '封面图整理'
+}
 
 const applyStatusSet = new Set(['等待审核', '不采纳', '部分采纳', '完全采纳'])
 const deleteStatusSet = new Set([
@@ -2413,10 +2429,24 @@ export default {
       if (!currentJob.value) {
         return false
       }
+      // 编排节点（root/parent）不直接采纳单条目，走家族「采纳全部」。
+      const role = currentJob.value.taskRelation?.role
+      if (role === 'root' || role === 'parent') {
+        return false
+      }
       if (currentJob.value.jobType === sourcePostProperNounOrganizeJobType) {
         return false
       }
       return applyStatusSet.has(currentJob.value.status)
+    })
+
+    // 是否可对当前家族（root/parent）执行「采纳全部」。
+    const canApplyCurrentFamily = computed(() => {
+      if (!currentJob.value) {
+        return false
+      }
+      const role = currentJob.value.taskRelation?.role
+      return role === 'root' || role === 'parent'
     })
 
     const jobStorageTables = computed(() => {
@@ -2475,6 +2505,7 @@ export default {
         .getTranslationJobList(getRequestParams())
         .then(response => {
           const responseData = response.data.data || {}
+          // 列表接口已在后端把家族子任务平铺返回，前端无需再为每个 root 单独请求。
           jobList.value = responseData.list || []
           total.value = responseData.total || 0
           saveListSessionParams(route, params)
@@ -2482,6 +2513,21 @@ export default {
         .catch(error => {
           console.log(error)
         })
+    }
+
+    // 按家族角色返回行样式类，用行底色 + 左色条体现层级深度。
+    const getJobRowClassName = ({ row }) => {
+      const role = row?.taskRelation?.role
+      if (role === 'root') {
+        return 'translation-job-row--root'
+      }
+      if (role === 'parent') {
+        return 'translation-job-row--parent'
+      }
+      if (role === 'child') {
+        return 'translation-job-row--child'
+      }
+      return ''
     }
 
     const getJobStorageSummary = () => {
@@ -2635,6 +2681,12 @@ export default {
     }
 
     const isJobSelectable = row => {
+      // 仅顶层任务（独立任务 / 家族根任务）可勾选删除；家族 parent/child 子任务不单独勾选，
+      // 删除根任务时会自动级联清理其下全部子任务。
+      const role = row?.taskRelation?.role
+      if (role === 'parent' || role === 'child') {
+        return false
+      }
       return canDelete(row)
     }
 
@@ -2710,6 +2762,51 @@ export default {
           getJobList(false)
         })
         .catch(error => {
+          console.log(error)
+        })
+    }
+
+    // 家族「采纳全部」：对父任务聚合下所有可采纳子任务统一采纳，程序上逐子任务依次 apply。
+    const applyFamilyAll = () => {
+      if (!currentJob.value?._id || !canApplyCurrentFamily.value) {
+        return
+      }
+      ElMessageBox.confirm(
+        '将采纳该任务下所有子任务的可用译文与封面图，确认继续？',
+        '采纳全部',
+        {
+          confirmButtonText: '采纳全部',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+        .then(() => {
+          return multilingualApi.applyTranslationFamilyResult({
+            id: currentJob.value._id,
+            applyAll: true,
+            force: applyForm.force,
+            publish: applyForm.publish
+          })
+        })
+        .then(response => {
+          const responseData = response.data.data || {}
+          const successCount = Number(responseData.successCount || 0)
+          const failCount = Number(responseData.failCount || 0)
+          if (failCount > 0) {
+            ElMessage.warning(
+              `已采纳 ${successCount} 个子任务，${failCount} 个失败，可在对应子任务中单独重试采纳`
+            )
+          } else {
+            ElMessage.success(`已采纳全部 ${successCount} 个子任务`)
+          }
+          refreshDetail()
+          preserveTableScrollForNextRefresh()
+          getJobList(false)
+        })
+        .catch(error => {
+          if (error === 'cancel') {
+            return
+          }
           console.log(error)
         })
     }
@@ -2809,15 +2906,28 @@ export default {
     }
 
     const getTaskRelationText = taskRelation => {
-      if (!taskRelation || taskRelation.role === 'root') {
+      if (!taskRelation) {
         return ''
+      }
+      if (taskRelation.role === 'root') {
+        const count = Number(taskRelation.childJobCount || 0)
+        return `总任务，包含 ${count} 篇文章`
       }
       if (taskRelation.role === 'parent') {
         const count = Number(taskRelation.childJobCount || 0)
-        return `父任务，已拆解 ${count} 个子任务`
+        return `文章父任务，${count} 个子任务`
       }
       if (taskRelation.role === 'child') {
-        return `子任务，深度 ${Number(taskRelation.depth || 1)}`
+        const kindLabel = childKindLabelMap[taskRelation.childKind] || '子任务'
+        if (
+          taskRelation.childKind === 'single-language-translation' &&
+          taskRelation.childLanguageCode
+        ) {
+          return `${kindLabel}：${getLanguageText(
+            taskRelation.childLanguageCode
+          )}`
+        }
+        return kindLabel
       }
       return ''
     }
@@ -2885,6 +2995,9 @@ export default {
       }
       if (status === '执行失败') {
         return 'danger'
+      }
+      if (status === '已阻塞') {
+        return 'info'
       }
       if (status === '等待审核') {
         return 'primary'
@@ -2970,10 +3083,39 @@ export default {
     }
 
     const canRetry = row => {
-      if (row.status === '执行中') {
+      // 仅"执行失败"的任务可重试；未失败任务不显示重试。编排节点（root/parent）本身不执行，
+      // 不直接重试——用户应重试其下具体失败的子任务（在平铺列表中可见）。
+      if (row.status !== '执行失败') {
+        return false
+      }
+      const role = row?.taskRelation?.role
+      if (role === 'root' || role === 'parent') {
         return false
       }
       return row.failure?.retryable === true
+    }
+
+    // 暂缓 / 恢复 仅对顶层任务（独立任务、家族根任务）开放；家族 parent/child 子任务由家族
+    // 按顺序自动调度，不单独暂缓。
+    const canDeferJob = row => {
+      const role = row?.taskRelation?.role
+      if (role === 'parent' || role === 'child') {
+        return false
+      }
+      // 仅真正在可领取队列中（active=true，如规划前的根/独立任务）才可暂缓；编排中的根
+      // （active=false）不可暂缓。
+      if (row.queueControl?.active !== true) {
+        return false
+      }
+      return row.status === '未开始' && !row.queueControl?.deferred
+    }
+
+    const canResumeJob = row => {
+      const role = row?.taskRelation?.role
+      if (role === 'parent' || role === 'child') {
+        return false
+      }
+      return row.status === '未开始' && row.queueControl?.deferred === true
     }
 
     const canStop = row => {
@@ -2988,6 +3130,11 @@ export default {
     }
 
     const canDelete = row => {
+      // 家族 parent/child 子任务不单独删除；删除根任务会级联清理其下全部子任务。
+      const role = row?.taskRelation?.role
+      if (role === 'parent' || role === 'child') {
+        return false
+      }
       return deleteStatusSet.has(row.status)
     }
 
@@ -3125,11 +3272,16 @@ export default {
       activeReviewLanguageCode,
       batchDeleting,
       canApplyCurrentJob,
+      canApplyCurrentFamily,
+      applyFamilyAll,
+      getJobRowClassName,
       canCleanupCoverImages,
       canSelectCoverImage,
       canDelete,
       canReject,
       canRetry,
+      canDeferJob,
+      canResumeJob,
       canStop,
       beforeReviewEntrySelect,
       beforeReviewGroupSelect,
@@ -3345,6 +3497,31 @@ html.dark .translation-job-storage-panel {
   line-height: 1.5;
   margin-top: 4px;
   overflow-wrap: anywhere;
+}
+
+/* 平铺列表中仅用最左侧色块体现家族层级深度（根/文章父任务/子任务），不改行底色。 */
+/* 同一色系（primary）：根任务最深 → 文章父任务 → 子任务最浅。 */
+/* 注意：色块用 box-shadow（不占用点击区域），缩进只作用在第二列（任务列），
+   绝不给第一列（选择框列）加 padding，否则会挤掉子任务的勾选框点击区。 */
+:deep(.el-table__row.translation-job-row--root > td:first-child) {
+  box-shadow: inset 4px 0 0 0 var(--el-color-primary);
+}
+:deep(.el-table__row.translation-job-row--parent > td:first-child) {
+  box-shadow: inset 4px 0 0 0 var(--el-color-primary-light-3);
+}
+:deep(.el-table__row.translation-job-row--parent > td:nth-child(2)) {
+  padding-left: 24px;
+}
+:deep(.el-table__row.translation-job-row--child > td:first-child) {
+  box-shadow: inset 4px 0 0 0 var(--el-color-primary-light-7);
+}
+:deep(.el-table__row.translation-job-row--child > td:nth-child(2)) {
+  padding-left: 44px;
+}
+/* 家族 parent/child 子任务不参与勾选删除，隐藏其选择框（仅顶层任务可勾选）。 */
+:deep(.el-table__row.translation-job-row--parent > td:first-child .el-checkbox),
+:deep(.el-table__row.translation-job-row--child > td:first-child .el-checkbox) {
+  display: none;
 }
 
 .job-progress-step {
