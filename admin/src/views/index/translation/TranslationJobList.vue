@@ -3119,8 +3119,18 @@ export default {
       return validationIssueTypeTextMap[normalized] || issueType
     }
 
+    // 全局校验速览会把长字段拆段展示，AI 返回的 suspectedIssue.entryId 可能带有"（第 N/M 段）"
+    // 后缀；而逐条修正明细以基础 entryId（如 post.content）为准。比对疑似问题与修正条目是否对应时，
+    // 需要去掉段落后缀，否则会把"已修正"误判为"未改动"。
+    const normalizeSuspectedIssueEntryId = value => {
+      return normalizePreviewText(value).replace(
+        /（第\s*\d+\s*\/\s*\d+\s*段）\s*$/,
+        ''
+      )
+    }
+
     const getSuspectedIssueStatus = (issue, validation) => {
-      const entryId = normalizePreviewText(issue?.entryId)
+      const entryId = normalizeSuspectedIssueEntryId(issue?.entryId)
       if (!entryId) {
         return { text: '无对应条目', type: 'info' }
       }
@@ -3128,7 +3138,7 @@ export default {
         ? validation.corrections
         : []
       const matched = corrections.some(item => {
-        return String(item?.id || '') === entryId
+        return normalizeSuspectedIssueEntryId(item?.id) === entryId
       })
       if (matched) {
         return { text: '对应条目已修正', type: 'success' }

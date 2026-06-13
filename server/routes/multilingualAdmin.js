@@ -640,6 +640,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/translation/job/create')
   },
   {
+    path: '/translation/job/batch-create',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/translation/job/batchCreate')
+  },
+  {
     path: '/translation/job/list',
     method: 'get',
     middleware: [checkAuth],

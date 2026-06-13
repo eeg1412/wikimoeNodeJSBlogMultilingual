@@ -720,13 +720,17 @@ function validateExecutableRequest(jobType, request) {
 
   const shouldTranslateCoverImage =
     request.options && request.options.translateCoverImage === true
-  if (
-    (!Array.isArray(request.entries) || request.entries.length === 0) &&
-    !shouldTranslateCoverImage
-  ) {
+  const hasEntries =
+    Array.isArray(request.entries) && request.entries.length > 0
+  // 批量翻译入口只下发 selectedEntryKeys（跨语言稳定匹配键），具体翻译条目在执行时由服务端
+  // 依据源/目标内容重建，因此允许"只有 selectedEntryKeys、没有 entries"的可执行任务。
+  const hasSelectedEntryKeys =
+    Array.isArray(request.selectedEntryKeys) &&
+    request.selectedEntryKeys.length > 0
+  if (!hasEntries && !hasSelectedEntryKeys && !shouldTranslateCoverImage) {
     throw new ApiError(
       ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
-      '文章翻译后台任务必须提供 request.entries，或启用 request.options.translateCoverImage',
+      '文章翻译后台任务必须提供 request.entries 或 request.selectedEntryKeys，或启用 request.options.translateCoverImage',
       'request.entries',
       400
     )
@@ -805,6 +809,76 @@ async function createTranslationJob(body = {}, options = {}) {
   })
 
   return job.toObject()
+}
+
+// 批量启动文章 AI 翻译：一次请求为多个目标语言版本各创建一个 post-ai-translation 任务。
+// 各任务只携带共享的 selectedEntryKeys（跨语言稳定匹配键）与翻译选项，具体翻译条目在执行时
+// 由服务端按源/目标内容重建，避免前端逐个语言版本调用建任务接口。
+async function createTranslationJobBatch(body = {}, options = {}) {
+  const source = body.source || {}
+  const request = body.request || {}
+  const targets = Array.isArray(body.targets) ? body.targets : []
+  if (targets.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '批量文章翻译任务必须提供至少一个目标语言版本',
+      'targets',
+      400
+    )
+  }
+
+  const results = []
+  let createdCount = 0
+  let failedCount = 0
+  for (const target of targets) {
+    const targetPostId = target && (target.postId || target.targetPostId)
+    try {
+      const job = await createTranslationJob(
+        {
+          jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
+          priority: body.priority,
+          source,
+          target: {
+            postId: targetPostId,
+            languageCode: target.languageCode,
+            title: target.title
+          },
+          request: {
+            prompt: request.prompt,
+            baseMode: request.baseMode,
+            options: request.options,
+            selectedEntryKeys: request.selectedEntryKeys
+          }
+        },
+        options
+      )
+      createdCount += 1
+      results.push({
+        targetPostId: String(targetPostId || ''),
+        languageCode: target.languageCode || '',
+        jobId: String(job._id),
+        status: 'created'
+      })
+    } catch (error) {
+      failedCount += 1
+      results.push({
+        targetPostId: String(targetPostId || ''),
+        languageCode: target.languageCode || '',
+        jobId: '',
+        status: 'failed',
+        errorMessage:
+          (error && (error.clientMessage || error.message)) ||
+          '创建后台任务失败'
+      })
+    }
+  }
+
+  return {
+    createdCount,
+    failedCount,
+    totalCount: targets.length,
+    results
+  }
 }
 
 function parsePage(value) {
@@ -1294,6 +1368,31 @@ async function getTranslationJobDetail(query = {}) {
   return attachRuntimeDisplay(await buildTranslationJobDetailResponse(job), {})
 }
 
+// 单语言翻译子任务会把 result.validation 存成带 languageValidations 的包装对象（供子任务详情按语言匹配），
+// 父任务聚合时必须解包出对应语言的内层完整 validation，否则前端只会拿到包装层（只有统计、缺少修正明细与
+// 校验报告正文），导致父抽屉的 AI 校验报告内容缺失。
+function unwrapChildValidationForLanguage(validation, languageCode) {
+  if (!validation || typeof validation !== 'object') {
+    return null
+  }
+  if (!Array.isArray(validation.languageValidations)) {
+    return validation
+  }
+  const matched = validation.languageValidations.find(item => {
+    return item && item.languageCode === languageCode
+  })
+  if (matched && matched.validation) {
+    return matched.validation
+  }
+  const firstWithValidation = validation.languageValidations.find(item => {
+    return item && item.validation
+  })
+  if (firstWithValidation) {
+    return firstWithValidation.validation
+  }
+  return null
+}
+
 // 父任务详情：聚合其下"可采纳"子任务（单语言翻译 + 封面图整理）的 previewEntries 与采纳记录，
 // 复用前端按语言分 Tab 的审核 UI；每个条目带上 childJobId 以便采纳时回到对应子任务执行。
 async function buildParentReviewResponse(parent) {
@@ -1335,11 +1434,17 @@ async function buildParentReviewResponse(parent) {
     const childLanguageCode =
       (child.taskRelation && child.taskRelation.childLanguageCode) || ''
     if (child.result?.validation && childLanguageCode) {
-      languageValidations.push({
-        languageCode: childLanguageCode,
-        sourceId: child.taskRelation?.articleSourceId || null,
-        validation: child.result.validation
-      })
+      const childValidation = unwrapChildValidationForLanguage(
+        child.result.validation,
+        childLanguageCode
+      )
+      if (childValidation) {
+        languageValidations.push({
+          languageCode: childLanguageCode,
+          sourceId: child.taskRelation?.articleSourceId || null,
+          validation: childValidation
+        })
+      }
     }
     childReviewMeta.push({
       childJobId: childId,
@@ -3636,6 +3741,7 @@ async function finalizeOrchestratorPlanning(options = {}) {
 
 module.exports = {
   createTranslationJob,
+  createTranslationJobBatch,
   listTranslationJobs,
   getTranslationJobStorageSummary,
   getTranslationJobDetail,

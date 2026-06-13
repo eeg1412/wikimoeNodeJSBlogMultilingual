@@ -250,6 +250,12 @@ export default function (api) {
         noLoading
       })
     },
+    batchCreateTranslationJob(data, noLoading = false) {
+      return api.post('/translation/job/batch-create', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getTranslationJobList(data, noLoading = false) {
       return api.get('/translation/job/list', {
         params: data,

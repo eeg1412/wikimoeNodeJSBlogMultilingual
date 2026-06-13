@@ -2208,7 +2208,7 @@ function buildRelationEntryMatchKey(entry, sourceId) {
   return ''
 }
 
-function buildTranslationEntryMatchKeys(entry) {
+export function buildTranslationEntryMatchKeys(entry) {
   if (entry.scope === 'post') {
     return [`post:${entry.fieldName}`]
   }

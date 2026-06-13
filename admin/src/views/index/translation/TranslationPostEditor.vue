@@ -1695,6 +1695,17 @@ const ALL_RELATION_FIELDS = [
   ...DETAIL_RELATION_FIELDS
 ]
 
+// 详情页"相关博文/相关推文"由各自文章独立维护，关联条目的内容无法在翻译时稳妥控制，
+// 因此多语言（已导入）AI 翻译从根本不纳入这两类字段，避免误翻或污染关联内容。
+const AI_TRANSLATION_EXCLUDED_RELATION_FIELD_SET = new Set([
+  'postList',
+  'tweetList'
+])
+
+const AI_TRANSLATABLE_RELATION_FIELDS = ALL_RELATION_FIELDS.filter(field => {
+  return !AI_TRANSLATION_EXCLUDED_RELATION_FIELD_SET.has(field.field)
+})
+
 function createRelationRecords() {
   const records = {}
   ALL_RELATION_FIELDS.forEach(field => {
@@ -2159,7 +2170,7 @@ export default {
     function buildTranslationEntries(options = {}) {
       return buildTranslationExportEntries({
         form,
-        relationFields: ALL_RELATION_FIELDS,
+        relationFields: AI_TRANSLATABLE_RELATION_FIELDS,
         relationRecords,
         includeEmpty: Boolean(options.includeEmpty)
       })
@@ -2190,7 +2201,7 @@ export default {
       }
       return buildTranslationExportEntries({
         form: sourceForm,
-        relationFields: ALL_RELATION_FIELDS,
+        relationFields: AI_TRANSLATABLE_RELATION_FIELDS,
         relationRecords: buildRelationRecordsFromPost(sourcePost)
       })
     }

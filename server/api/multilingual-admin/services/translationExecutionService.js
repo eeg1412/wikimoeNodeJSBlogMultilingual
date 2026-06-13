@@ -883,6 +883,15 @@ async function resolveEntries(job, context) {
 
 async function resolvePostTranslationEntries(job, context) {
   const entries = job && job.request && job.request.entries
+  if (Array.isArray(entries) && entries.length > 0) {
+    return entries
+  }
+  // 批量翻译入口只下发 selectedEntryKeys（跨语言稳定匹配键），未携带具体 entries，
+  // 此时按源/目标内容在执行阶段重建正文条目；若两者都为空则视为"仅封面图"，返回空条目。
+  const selectedEntryKeys = job && job.request && job.request.selectedEntryKeys
+  if (Array.isArray(selectedEntryKeys) && selectedEntryKeys.length > 0) {
+    return await resolveEntries(job, context)
+  }
   if (Array.isArray(entries)) {
     return entries
   }

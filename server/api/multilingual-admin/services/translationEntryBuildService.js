@@ -862,8 +862,7 @@ function buildTranslationEntryMatchKeys(entry) {
 
 function normalizeMappedEntryOptions(options = {}) {
   return {
-    allowAiKeepOriginalJudgement:
-      options.allowAiKeepOriginalJudgement === true
+    allowAiKeepOriginalJudgement: options.allowAiKeepOriginalJudgement === true
   }
 }
 
@@ -980,6 +979,50 @@ async function getTranslationRecord(collectionName, id, expectedRecordKind) {
   return record
 }
 
+// 以当前文章内容为翻译基底：用目标语言版本的当前条目作为待翻译值，并附带源条目作为参考。
+// 用于"翻译用文章 = 当前文章"模式，与单篇 AI 翻译弹窗的当前模式语义一致。
+function buildCurrentBaseEntries(sourceEntries, currentEntries, options = {}) {
+  const normalizedOptions = normalizeMappedEntryOptions(options)
+  const sourceEntryMap = new Map()
+  sourceEntries.forEach(entry => {
+    buildTranslationEntryMatchKeys(entry).forEach(key => {
+      sourceEntryMap.set(key, entry)
+    })
+  })
+
+  const entries = []
+  currentEntries.forEach(currentEntry => {
+    const keyList = buildTranslationEntryMatchKeys(currentEntry)
+    const sourceEntry = keyList
+      .map(key => sourceEntryMap.get(key))
+      .find(Boolean)
+    const value = cloneSerializableValue(currentEntry.value)
+    const entry = {
+      ...currentEntry,
+      currentValue: value,
+      value,
+      previewText: currentEntry.previewText,
+      previewRawValue: currentEntry.previewRawValue,
+      currentPreviewText: currentEntry.previewText,
+      currentPreviewRawValue: currentEntry.previewRawValue,
+      currentPreviewHtml: currentEntry.previewHtml || '',
+      sourcePreviewText: sourceEntry ? sourceEntry.previewText : '',
+      sourcePreviewRawValue: sourceEntry ? sourceEntry.previewRawValue : '',
+      sourcePreviewHtml: sourceEntry ? sourceEntry.previewHtml || '' : ''
+    }
+    if (
+      normalizedOptions.allowAiKeepOriginalJudgement &&
+      currentEntry.scope !== 'post' &&
+      currentEntry.valueType !== 'richTextDocument'
+    ) {
+      entry.skipAllowed = true
+    }
+    entries.push(entry)
+  })
+
+  return { entries, skippedEntries: [] }
+}
+
 async function buildPostJobEntries(job) {
   let sourceDetail = null
   if (job.source.snapshotId) {
@@ -996,10 +1039,22 @@ async function buildPostJobEntries(job) {
     job.target.postId
   )
   const sourceEntries = buildPostTranslationEntries(sourceDetail)
-  const targetEntries = buildPostTranslationEntries(targetDetail, true)
-  const mappedResult = buildMappedEntries(sourceEntries, targetEntries, {
-    allowAiKeepOriginalJudgement: true
-  })
+  const baseMode = normalizeString(job.request?.baseMode) || 'source'
+  let mappedResult = null
+  let targetEntryCount = 0
+  if (baseMode === 'current') {
+    const currentEntries = buildPostTranslationEntries(targetDetail, false)
+    targetEntryCount = currentEntries.length
+    mappedResult = buildCurrentBaseEntries(sourceEntries, currentEntries, {
+      allowAiKeepOriginalJudgement: true
+    })
+  } else {
+    const targetEntries = buildPostTranslationEntries(targetDetail, true)
+    targetEntryCount = targetEntries.length
+    mappedResult = buildMappedEntries(sourceEntries, targetEntries, {
+      allowAiKeepOriginalJudgement: true
+    })
+  }
   const sourcePostId = normalizeString(sourceDetail.post?.sourceId)
   const entries = filterRequestedEntries(
     mappedResult.entries,
@@ -1011,7 +1066,7 @@ async function buildPostJobEntries(job) {
     entries,
     skippedEntries: mappedResult.skippedEntries,
     sourceEntryCount: sourceEntries.length,
-    targetEntryCount: targetEntries.length
+    targetEntryCount
   }
 }
 

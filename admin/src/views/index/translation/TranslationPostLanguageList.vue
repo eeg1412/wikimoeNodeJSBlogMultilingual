@@ -26,13 +26,36 @@
         </el-descriptions-item>
       </el-descriptions>
 
+      <div class="mb20 translation-language-toolbar">
+        <el-button
+          type="primary"
+          :disabled="selectedTranslationRows.length === 0"
+          @click="openBatchAiTranslationDialog"
+        >
+          批量 AI 翻译{{
+            selectedTranslationRows.length > 0
+              ? `（${selectedTranslationRows.length}）`
+              : ''
+          }}
+        </el-button>
+        <span class="translation-language-toolbar-hint">
+          勾选已创建的语言版本后，可一次性对多个语言版本批量发起 AI 翻译。
+        </span>
+      </div>
+
       <div class="mb20 list-table-body">
         <ResponsiveTable
           ref="tableRef"
           :data="translationRows"
           row-key="languageCode"
           border
+          @selection-change="handleSelectionChange"
         >
+          <ResponsiveTableColumn
+            type="selection"
+            width="50"
+            :selectable="isRowSelectable"
+          />
           <ResponsiveTableColumn label="语言" width="150">
             <template #default="{ row }">
               {{ getLanguageText(row.languageCode) }}
@@ -223,6 +246,13 @@
       :post-id="aiTranslationPostId"
       @saved="handleAiTranslationSaved"
     />
+    <TranslationPostBatchAiTranslationDialog
+      v-model="batchAiTranslationDialogVisible"
+      :source-post="sourcePost"
+      :source-snapshot-id="route.params.sourceSnapshotId"
+      :targets="batchAiTranslationTargets"
+      @submitted="handleBatchAiTranslationSubmitted"
+    />
     <TranslationPostSnapshotRestoreDialog
       v-model="snapshotRestoreDialogVisible"
       :post-id="snapshotRestorePost?._id || ''"
@@ -247,6 +277,7 @@ import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
 import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
+import TranslationPostBatchAiTranslationDialog from '@/components/TranslationPostBatchAiTranslationDialog.vue'
 import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
 import TranslationPostSourceLinkRewriteDialog from '@/components/TranslationPostSourceLinkRewriteDialog.vue'
 import {
@@ -262,6 +293,7 @@ export default {
     PostRelationSummary,
     TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog,
+    TranslationPostBatchAiTranslationDialog,
     TranslationPostSnapshotRestoreDialog,
     TranslationPostSourceLinkRewriteDialog
   },
@@ -273,6 +305,8 @@ export default {
     const sourceGroup = ref(null)
     const aiTranslationDialogVisible = ref(false)
     const aiTranslationPostId = ref('')
+    const batchAiTranslationDialogVisible = ref(false)
+    const selectedTranslationRows = ref([])
     const snapshotRestoreDialogVisible = ref(false)
     const snapshotRestorePost = ref(null)
     const sourceLinkRewriteDialogVisible = ref(false)
@@ -528,6 +562,46 @@ export default {
       aiTranslationDialogVisible.value = true
     }
 
+    /**
+     * el-table 选择列的可选判定：仅已创建的语言版本行可勾选。
+     * @param {Object} row 表格行
+     * @returns {boolean} 是否可勾选
+     */
+    function isRowSelectable(row) {
+      return Boolean(row && row.translation && row.translation._id)
+    }
+
+    function handleSelectionChange(rows) {
+      selectedTranslationRows.value = Array.isArray(rows)
+        ? rows.filter(isRowSelectable)
+        : []
+    }
+
+    const batchAiTranslationTargets = computed(() => {
+      return selectedTranslationRows.value.filter(isRowSelectable).map(row => {
+        const translation = row.translation
+        return {
+          id: translation._id,
+          languageCode: translation.languageCode || row.languageCode,
+          title: getPostDisplayTitle(translation),
+          sourceLanguageCode: translation.sourceLanguageCode || ''
+        }
+      })
+    })
+
+    function openBatchAiTranslationDialog() {
+      if (batchAiTranslationTargets.value.length === 0) {
+        ElMessage.warning('请先勾选要批量翻译的语言版本')
+        return
+      }
+      batchAiTranslationDialogVisible.value = true
+    }
+
+    function handleBatchAiTranslationSubmitted() {
+      preserveTableScrollForNextRefresh()
+      getLanguageList()
+    }
+
     function handleAiTranslationSaved() {
       preserveTableScrollForNextRefresh()
       getLanguageList()
@@ -551,6 +625,9 @@ export default {
       loading,
       aiTranslationDialogVisible,
       aiTranslationPostId,
+      batchAiTranslationDialogVisible,
+      selectedTranslationRows,
+      batchAiTranslationTargets,
       snapshotRestoreDialogVisible,
       snapshotRestorePost,
       sourceLinkRewriteDialogVisible,
@@ -573,6 +650,10 @@ export default {
       getPostStatusText,
       goTranslationEditor,
       openAiTranslationDialog,
+      isRowSelectable,
+      handleSelectionChange,
+      openBatchAiTranslationDialog,
+      handleBatchAiTranslationSubmitted,
       handleAiTranslationSaved,
       handleSnapshotRestored,
       handleSourceLinkRewriteApplied,
@@ -586,6 +667,18 @@ export default {
 <style scoped>
 .translation-post-language-page {
   min-width: 0;
+}
+
+.translation-language-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.translation-language-toolbar-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .source-title {
