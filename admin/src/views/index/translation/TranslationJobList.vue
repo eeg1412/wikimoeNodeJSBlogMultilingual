@@ -3140,10 +3140,12 @@ export default {
       const matched = corrections.some(item => {
         return normalizeSuspectedIssueEntryId(item?.id) === entryId
       })
+      // 状态为条目级：仅表示该疑似问题所属的条目是否有修正，不代表这一条疑似问题本身已被处理
+      //（精确判定单条疑似问题是否被修复无法可靠实现）。
       if (matched) {
-        return { text: '对应条目已修正', type: 'success' }
+        return { text: '所属条目有修正', type: 'success' }
       }
-      return { text: '对应条目未改动', type: 'info' }
+      return { text: '所属条目未改动', type: 'info' }
     }
 
     const getSelectedEntryCount = entryKeys => {
