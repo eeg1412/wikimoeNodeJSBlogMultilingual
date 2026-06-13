@@ -27,8 +27,10 @@ const CORRECTION_DIFF_CONTEXT = 36
 const CORRECTION_DIFF_CHANGED_LIMIT = 600
 // 单侧（修正前 / 修正后）分段文本的总字符上限。
 const CORRECTION_DIFF_SIDE_LIMIT = 2400
-// 去除公共前后缀后，仍参与字符级 LCS 比对的中间文本上限，超出则整体视为变化。
+// 去除公共前后缀后，仍参与字符级 LCS 比对的中间文本上限，超出则改用按词（token）级 LCS。
 const CORRECTION_DIFF_MIDDLE_LIMIT = 2000
+// 按词级 LCS 比对时的 token 数上限，超出则整体视为变化（极端长文本的兜底）。
+const CORRECTION_DIFF_TOKEN_LIMIT = 4000
 
 function getJobId(job) {
   if (!job) {
@@ -129,16 +131,36 @@ function buildValidationPairs(sourceEntries, targetEntries) {
 
 // 把文本按指定段数等分（按比例切片）。源文与译文用相同段数切分，使同一段大致对应同一位置的
 // 内容，避免因源文与译文长度不同而出现“某段只有译文、原文为空”的错位。
+// 切点会尽量回退到最近的空白边界（块标签提取为可读文本后块之间会留有空白），避免把单词切成两半。
 function splitTextIntoEqualParts(text, partCount) {
   const normalized = String(text == null ? '' : text)
   const chars = Array.from(normalized)
   if (partCount <= 1 || chars.length === 0) {
     return [normalized]
   }
+  const targetSize = Math.ceil(chars.length / partCount)
+  // 允许为了凑到空白边界而向前回退的最大字符数，避免回退过多产生过小分段。
+  const maxBacktrack = Math.max(20, Math.floor(targetSize / 2))
   const parts = []
-  const partSize = Math.ceil(chars.length / partCount)
-  for (let index = 0; index < chars.length; index += partSize) {
-    parts.push(chars.slice(index, index + partSize).join(''))
+  let start = 0
+  while (start < chars.length) {
+    let end = Math.min(start + targetSize, chars.length)
+    if (end < chars.length) {
+      let adjusted = end
+      const minEnd = end - maxBacktrack
+      while (adjusted > start + 1 && adjusted > minEnd) {
+        if (/\s/.test(chars[adjusted - 1])) {
+          break
+        }
+        adjusted -= 1
+      }
+      // 仅当确实回退到了空白边界时才采用，否则保持原切点（避免极端长词导致分段过碎）。
+      if (adjusted > start + 1 && /\s/.test(chars[adjusted - 1])) {
+        end = adjusted
+      }
+    }
+    parts.push(chars.slice(start, end).join(''))
+    start = end
   }
   if (parts.length === 0) {
     parts.push('')
@@ -770,6 +792,71 @@ function computeCommonSuffixLength(beforeChars, afterChars, prefixLength) {
   return index
 }
 
+// 把文本切成"词 + 空白"的 token 序列（空白单独成段），保证可无损还原。
+function tokenizeReadableTextForDiff(text) {
+  return String(text == null ? '' : text).match(/\s+|[^\s]+/g) || []
+}
+
+// 对中间差异文本做按词（token）级 LCS 比对：用于较长文本，避免字符级 LCS 的 O(n²) 成本，
+// 同时只标注真正变化的词，而不是把整段都标成变化。
+function diffMiddleByTokens(beforeChars, afterChars) {
+  const beforeTokens = tokenizeReadableTextForDiff(beforeChars.join(''))
+  const afterTokens = tokenizeReadableTextForDiff(afterChars.join(''))
+  if (
+    beforeTokens.length > CORRECTION_DIFF_TOKEN_LIMIT ||
+    afterTokens.length > CORRECTION_DIFF_TOKEN_LIMIT
+  ) {
+    return {
+      before: [{ text: beforeChars.join(''), changed: true }],
+      after: [{ text: afterChars.join(''), changed: true }]
+    }
+  }
+
+  const beforeLength = beforeTokens.length
+  const afterLength = afterTokens.length
+  const lcsTable = []
+  for (let i = 0; i <= beforeLength; i++) {
+    lcsTable.push(new Array(afterLength + 1).fill(0))
+  }
+  for (let i = beforeLength - 1; i >= 0; i--) {
+    for (let j = afterLength - 1; j >= 0; j--) {
+      if (beforeTokens[i] === afterTokens[j]) {
+        lcsTable[i][j] = lcsTable[i + 1][j + 1] + 1
+      } else {
+        lcsTable[i][j] = Math.max(lcsTable[i + 1][j], lcsTable[i][j + 1])
+      }
+    }
+  }
+
+  const before = []
+  const after = []
+  let i = 0
+  let j = 0
+  while (i < beforeLength && j < afterLength) {
+    if (beforeTokens[i] === afterTokens[j]) {
+      before.push({ text: beforeTokens[i], changed: false })
+      after.push({ text: afterTokens[j], changed: false })
+      i++
+      j++
+    } else if (lcsTable[i + 1][j] >= lcsTable[i][j + 1]) {
+      before.push({ text: beforeTokens[i], changed: true })
+      i++
+    } else {
+      after.push({ text: afterTokens[j], changed: true })
+      j++
+    }
+  }
+  while (i < beforeLength) {
+    before.push({ text: beforeTokens[i], changed: true })
+    i++
+  }
+  while (j < afterLength) {
+    after.push({ text: afterTokens[j], changed: true })
+    j++
+  }
+  return { before: mergeDiffSegments(before), after: mergeDiffSegments(after) }
+}
+
 // 对去除公共前后缀后的中间差异文本做字符级 LCS 比对。
 function diffMiddleSegments(beforeChars, afterChars) {
   if (beforeChars.length === 0 && afterChars.length === 0) {
@@ -791,10 +878,8 @@ function diffMiddleSegments(beforeChars, afterChars) {
     beforeChars.length > CORRECTION_DIFF_MIDDLE_LIMIT ||
     afterChars.length > CORRECTION_DIFF_MIDDLE_LIMIT
   ) {
-    return {
-      before: [{ text: beforeChars.join(''), changed: true }],
-      after: [{ text: afterChars.join(''), changed: true }]
-    }
+    // 中间文本较长，改用按词级 LCS，避免把"只改了一两个词"的长段落整段标成变化。
+    return diffMiddleByTokens(beforeChars, afterChars)
   }
 
   const beforeLength = beforeChars.length
