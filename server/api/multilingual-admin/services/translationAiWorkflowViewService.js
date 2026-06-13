@@ -2281,7 +2281,7 @@ function buildTermOutputItem(term, index) {
     meta.push(`备注：${term.note}`)
   }
   if (term.shouldUpdateTermNote === true) {
-    meta.push('备注已由 Gemini 修订')
+    meta.push('备注已由 AI 修订')
   }
   return createItem(
     label,
@@ -2904,11 +2904,11 @@ function getOperationDisplay(log) {
     'proper-noun.official-translation.knowledge': {
       title: '名词搜索翻译 AI 知识确认',
       description:
-        'Gemini 不联网，先判断哪些译名可以直接确认，哪些需要交给联网检索。'
+        'AI 不联网，先判断哪些译名可以直接确认，哪些需要交给联网检索。'
     },
     'proper-noun.official-translation.search': {
       title: '名词搜索翻译 AI 联网检索',
-      description: 'Gemini 使用搜索结果确认缺失语言的正式译名或通行译名。'
+      description: 'AI 使用搜索结果确认缺失语言的正式译名或通行译名。'
     },
     'proper-noun.official-translation.resolve': {
       title: '整理专有名词译名结果',
