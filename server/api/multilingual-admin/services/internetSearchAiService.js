@@ -357,7 +357,10 @@ function normalizeResultTranslationNotes(termItem, targetLanguageCodes) {
   return translationNotes
 }
 
-function normalizeResultTranslationConfidenceScores(termItem, targetLanguageCodes) {
+function normalizeResultTranslationConfidenceScores(
+  termItem,
+  targetLanguageCodes
+) {
   const confidenceScores = {}
   const sourceConfidenceScores = termItem?.translationConfidenceScores
   if (
@@ -635,7 +638,7 @@ function buildOfficialTermSearchPrompt({
   if (allowSameSourceTranslationWithNote === true) {
     promptLines.push(
       '如果检索结果能够证明目标语言没有官方译名、正式译名、权威通行译名或稳定通用译名，translations 中必须填写原文表面形式，不要给出非官方普通译名。',
-      '如果检索证据不足以确认对象身份或译名状态，必须保留原文表面形式，不要直译、音译、意译、本地化或改写。',
+      '如果检索后仍无法确定某个目标语言的译名，就不要为该语言写入 translations，保持该语言译名缺失。',
       '特别重要：只要某个 translations[languageCode] 与 sourceText 文本完全一致，就必须同时写 translationNotes[languageCode]，用中文说明检索证据为何支持保留原名。',
       '再次强调：译名和原名完全一致但没有 translationNotes[languageCode]，后台会跳过该语言译名，按没有翻译处理。'
     )
@@ -1751,7 +1754,8 @@ async function searchOfficialTermTranslationsWithInternet({
   onStatus,
   skipUsageLog,
   includeTermNoteRevision = true,
-  allowSameSourceTranslationWithNote = false
+  allowSameSourceTranslationWithNote = false,
+  allowMissingTranslations = false
 }) {
   const targetLanguageCodes = getTermRequestTargetLanguageCodes(termRequests)
 
@@ -1853,7 +1857,11 @@ async function searchOfficialTermTranslationsWithInternet({
         }
 
         const finalMissingParts = buildMissingTermParts(missingTermRequests)
-        throwMissingSearchTranslationsError(finalMissingParts)
+        // allowMissingTranslations=true 时（如名词管理里的实时联网检索），即使检索后仍有
+        // 名词无法确定译名，也不报错，而是保持缺失，交由人工在名词管理里校验补充。
+        if (allowMissingTranslations !== true) {
+          throwMissingSearchTranslationsError(finalMissingParts)
+        }
 
         const terms = Array.from(aggregateTermMap.values())
         const rawResponse = buildSearchRawResponse(primaryResult, repairResults)
@@ -1971,6 +1979,7 @@ async function searchOfficialTermTranslations(options = {}) {
   const includeTermNoteRevision = options.includeTermNoteRevision !== false
   const allowSameSourceTranslationWithNote =
     options.allowSameSourceTranslationWithNote === true
+  const allowMissingTranslations = options.allowMissingTranslations === true
   const skipKnowledgeBase = options.skipKnowledgeBase === true
   const skipInternetSearch = options.skipInternetSearch === true
 
@@ -2011,10 +2020,7 @@ async function searchOfficialTermTranslations(options = {}) {
   let searchSettings = null
   let internetSearchRequestedTermCount = 0
   let internetSearchTargetLanguageCodes = []
-  if (
-    !skipInternetSearch &&
-    knowledgeResult.missingTermRequests.length > 0
-  ) {
+  if (!skipInternetSearch && knowledgeResult.missingTermRequests.length > 0) {
     internetSearchRequestedTermCount =
       knowledgeResult.missingTermRequests.length
     internetSearchTargetLanguageCodes = getTermRequestTargetLanguageCodes(
@@ -2042,7 +2048,8 @@ async function searchOfficialTermTranslations(options = {}) {
       onStatus: options.onStatus,
       skipUsageLog: options.skipUsageLog,
       includeTermNoteRevision,
-      allowSameSourceTranslationWithNote
+      allowSameSourceTranslationWithNote,
+      allowMissingTranslations
     })
   }
 

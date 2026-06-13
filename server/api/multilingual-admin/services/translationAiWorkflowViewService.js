@@ -1928,7 +1928,23 @@ function buildInputSections(log) {
   if (!requestBody && Array.isArray(input.messages)) {
     requestBody = { messages: input.messages }
   }
+  // 名词搜索翻译 AI 联网检索步骤把请求体嵌套在 input.primary / input.repairs 下，
+  // 需要逐个取出对应的 requestBody（含真实提示词），否则工作流视图看不到传给 AI 的提示词。
+  if (!requestBody && isPlainObject(input.primary)) {
+    requestBody = input.primary.requestBody || input.primary.request || null
+  }
   const sections = buildMessageInputSections(requestBody)
+  if (Array.isArray(input.repairs)) {
+    input.repairs.forEach(repair => {
+      if (!isPlainObject(repair)) {
+        return
+      }
+      const repairRequestBody = repair.requestBody || repair.request || null
+      buildMessageInputSections(repairRequestBody).forEach(section => {
+        sections.push(section)
+      })
+    })
+  }
   if (sections.length > 0) {
     return sections
   }
@@ -2070,7 +2086,15 @@ function buildDatabaseCandidateItem(candidate, index) {
 
 function getRequestBodyFromLog(log) {
   const input = log?.input || {}
-  return input.requestBody || input.request || null
+  const requestBody = input.requestBody || input.request || null
+  if (requestBody) {
+    return requestBody
+  }
+  // 名词搜索翻译 AI 联网检索步骤的请求体嵌套在 input.primary 下。
+  if (isPlainObject(input.primary)) {
+    return input.primary.requestBody || input.primary.request || null
+  }
+  return null
 }
 
 function getDatabaseCandidatesFromLog(log) {

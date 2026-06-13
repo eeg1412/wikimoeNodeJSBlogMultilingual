@@ -269,7 +269,8 @@ function normalizeTermTranslationFields(term) {
 }
 
 function normalizePreviewTerm(term) {
-  const { translations, translationNotes } = normalizeTermTranslationFields(term)
+  const { translations, translationNotes } =
+    normalizeTermTranslationFields(term)
   let searchMetadata = {}
   if (isPlainObject(term?.searchMetadata)) {
     searchMetadata = term.searchMetadata
@@ -350,7 +351,11 @@ async function searchInternetTranslations(body = {}, options = {}) {
       }),
       skipKnowledgeBase: true,
       includeTermNoteRevision: false,
+      // 允许 AI 写入“确认就是原样使用”的同源译名（如品牌名 Sony→Sony，附 note 说明）；
+      // 但若联网检索后仍无法确定某语言译名，由 AI 自行留空，保持缺失供人工补充。
       allowSameSourceTranslationWithNote: true,
+      // 缺失译名不视为错误：保持缺失结果，不抛错，交由人工补齐。
+      allowMissingTranslations: true,
       timeoutSeconds: REALTIME_INTERNET_SEARCH_TIMEOUT_SECONDS,
       onStatus: options.onStatus,
       cancellation: options.cancellation
@@ -382,9 +387,11 @@ function normalizeApplyTerms(terms) {
   if (!Array.isArray(terms)) {
     return []
   }
-  return terms.map(term => normalizeApplyTerm(term)).filter(term => {
-    return term.sourceText && Object.keys(term.translations).length > 0
-  })
+  return terms
+    .map(term => normalizeApplyTerm(term))
+    .filter(term => {
+      return term.sourceText && Object.keys(term.translations).length > 0
+    })
 }
 
 async function applyInternetTranslations(body = {}) {
@@ -402,6 +409,7 @@ async function applyInternetTranslations(body = {}) {
       terms,
       provider: normalizeString(body.provider, 80) || 'gemini',
       model: normalizeString(body.model, 120),
+      // 允许写入 AI 确认的同源译名（带 note）；无法确定的语言由 AI 留空，保持缺失。
       allowSameSourceTranslationWithNote: true
     })
   return {

@@ -1809,15 +1809,18 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
       normalizeOptionalExtractedSourceLanguageCode(term.sourceLanguageCode)
     const updateData = {}
     let shouldUpdateNote = false
-    if (note && !currentNote) {
-      shouldUpdateNote = true
-    }
-    if (
-      note &&
-      termItem?.shouldUpdateTermNote === true &&
-      currentNote !== note
-    ) {
-      shouldUpdateNote = true
+    // 标星名词：禁止 AI 修改其备注（note）。仅未标星的名词才允许 AI 补充/修订备注。
+    if (term.isStarred !== true) {
+      if (note && !currentNote) {
+        shouldUpdateNote = true
+      }
+      if (
+        note &&
+        termItem?.shouldUpdateTermNote === true &&
+        currentNote !== note
+      ) {
+        shouldUpdateNote = true
+      }
     }
     if (shouldUpdateNote) {
       updateData.note = note
@@ -2008,7 +2011,27 @@ async function upsertAiSearchTerms({
       term = await resolveTermForAiSearchTerm(termItem, sourceText)
       resolvedTermMap.set(termCacheKey, term)
     }
+    // 标星名词：禁止 AI 修改已有译名，只允许补充尚无译名的语言。
+    // 先取出该名词已有译名的语言集合，逐条写入时跳过已存在的语言。
+    let starredExistingLanguageSet = null
+    if (term && term.isStarred === true) {
+      const existingTranslations = await TranslationModel.find(
+        { termId: term._id },
+        { languageCode: 1 }
+      ).lean()
+      starredExistingLanguageSet = new Set(
+        existingTranslations
+          .map(item => normalizeLanguageCode(item.languageCode))
+          .filter(Boolean)
+      )
+    }
     for (const translationEntry of translationEntries) {
+      if (
+        starredExistingLanguageSet &&
+        starredExistingLanguageSet.has(translationEntry.languageCode)
+      ) {
+        continue
+      }
       const payload = buildAiSearchTranslationPayload({
         term,
         sourceText,
