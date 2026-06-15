@@ -499,6 +499,17 @@ const AI_SETTING_FIELDS = [
     group: 'verificationPrompt',
     defaultValue: buildDefaultLanguagePromptMap()
   },
+  {
+    name: 'translationChunkMaxChars',
+    label: '单批最大裁切字符数',
+    type: 'number',
+    group: 'translationChunking',
+    defaultValue: 24000,
+    min: 600,
+    max: 200000,
+    helpText:
+      '把文章内容提交给 AI 时单批允许的最大字符数（裁切天花板）。实际单批量仍会按所选模型的“最大输出 Token”动态收缩，这里只设上限：调大可减少批次数（更少分批，但单批失败重试代价更大、超时风险更高），调小则更稳。主翻译与全局校验速览共用该上限。'
+  },
   ...TEXT_WORKFLOW_PROVIDER_FIELDS,
   {
     name: 'deepSeekEnabled',
@@ -1603,7 +1614,7 @@ function buildTextRuntimeSettingsForProvider(
 async function getMainTranslationRuntimeSettings() {
   const settings = await getAiSettings()
   const values = settings.values
-  return attachWorkflowPromptSettings(
+  const runtimeSettings = attachWorkflowPromptSettings(
     buildTextRuntimeSettingsForProvider(
       values,
       values.mainTranslationProvider,
@@ -1614,6 +1625,9 @@ async function getMainTranslationRuntimeSettings() {
     'mainTranslationDefaultPrompt',
     'mainTranslationLanguagePrompts'
   )
+  // 单批裁切天花板是全局配置（与 provider 无关），透传给裁切算法统一使用。
+  runtimeSettings.translationChunkMaxChars = values.translationChunkMaxChars
+  return runtimeSettings
 }
 
 async function getProperNounPreprocessRuntimeSettings() {
@@ -1651,7 +1665,7 @@ async function getProperNounKnowledgeRuntimeSettings() {
 async function getVerificationRuntimeSettings() {
   const settings = await getAiSettings()
   const values = settings.values
-  return attachWorkflowPromptSettings(
+  const runtimeSettings = attachWorkflowPromptSettings(
     buildTextRuntimeSettingsForProvider(
       values,
       values.verificationProvider,
@@ -1662,6 +1676,9 @@ async function getVerificationRuntimeSettings() {
     'verificationDefaultPrompt',
     'verificationLanguagePrompts'
   )
+  // 全局校验速览的裁切与主翻译共用同一套单批裁切天花板配置。
+  runtimeSettings.translationChunkMaxChars = values.translationChunkMaxChars
+  return runtimeSettings
 }
 
 function buildGeminiImageRuntimeSettings(values) {

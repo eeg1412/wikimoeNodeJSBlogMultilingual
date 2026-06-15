@@ -3324,6 +3324,11 @@ function buildSyntheticWorkflowParentStep(log, order, extraWarnings = []) {
     displayLevel: 0,
     operation: majorKey,
     stage: normalizeText(log?.stage),
+    // 合成父步骤必须携带运行时 stepKey 与目标语言，否则 mergePlannedWorkflowSteps 在没有
+    // runtime events 的已完成任务里无法把它匹配回计划步骤，plannedOrder 缺失会导致工作流
+    // 步骤排序错乱（校验/翻译顺序颠倒）。这里从日志补齐这些匹配所需字段。
+    stepKeys: [getLogRuntimeStepKey(log)].filter(Boolean),
+    targetLanguageCodes: parseLanguageCodeList(log?.targetLanguageCode),
     provider: '',
     model: '',
     requestId: '',
@@ -4233,7 +4238,12 @@ function buildTranslationJobWorkflow(job) {
     reviewStep.serviceStepCount = 0
     steps.push(reviewStep)
   }
-  mergePlannedWorkflowSteps(job, steps)
+  // 计划大纲只是“执行中/未执行”的预告，不是真实工作流。已完成的任务只能由真实记录还原、
+  // 按真实记录顺序展示，绝不和计划大纲归并——否则真实流程会被强行掰成大纲顺序，从而掩盖
+  // 真实步骤与流程的问题。只有任务还在执行/排队时，才用大纲补出“后面还没跑的步骤”作为预览。
+  if (!isWorkflowFinishedJob(job)) {
+    mergePlannedWorkflowSteps(job, steps)
+  }
   sortWorkflowStepsByTime(steps)
   steps.forEach((step, index) => {
     step.order = index + 1
@@ -4286,15 +4296,20 @@ function getWorkflowStepSortPlanOrder(step) {
 
 function sortWorkflowStepsByTime(steps) {
   steps.sort((left, right) => {
-    const leftPlanOrder = getWorkflowStepSortPlanOrder(left)
-    const rightPlanOrder = getWorkflowStepSortPlanOrder(right)
-    if (leftPlanOrder !== rightPlanOrder) {
-      return leftPlanOrder - rightPlanOrder
-    }
+    // 工作流必须如实反映真实执行顺序：以真实记录时间（自身或子步骤里最早的 createdAt）为第一排序键。
+    // 真实时间是“先翻译、再全局校验、再分批校验、最后生成审核预览”这一真实流程的唯一可靠依据，
+    // 不能依赖 plannedOrder——某些任务类型不会生成“翻译”计划步骤，会导致已执行的翻译步骤拿不到
+    // plannedOrder 而被错误地排到最后，造成“先校验后翻译”的假象。
     const leftTime = getWorkflowStepSortTime(left)
     const rightTime = getWorkflowStepSortTime(right)
     if (leftTime !== rightTime) {
       return leftTime - rightTime
+    }
+    // 仅当两个步骤都没有真实时间（尚未执行的计划步骤）时，才用计划顺序兜底，保证流水线逻辑顺序。
+    const leftPlanOrder = getWorkflowStepSortPlanOrder(left)
+    const rightPlanOrder = getWorkflowStepSortPlanOrder(right)
+    if (leftPlanOrder !== rightPlanOrder) {
+      return leftPlanOrder - rightPlanOrder
     }
     return Number(left.order || 0) - Number(right.order || 0)
   })

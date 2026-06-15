@@ -2134,20 +2134,98 @@ async function batchDeleteTranslationJobs(body = {}, options = {}) {
   }
 }
 
+// 家族级不采纳：把编排父级（root/parent）名下所有“可人工采纳且仍在等待审核”的子任务一并标记为
+// 不采纳。root 作用于其下全部子任务；parent 仅作用于自己名下的子任务。名词整理等不可采纳子任务
+// 执行即生效，不参与采纳/不采纳。
+async function rejectFamilyAdoptableChildren(
+  orchestratorJob,
+  adminSnapshot,
+  reason
+) {
+  const JobModel = getTranslationJobModel()
+  const rootObjectId = toObjectId(getJobFamilyRootId(orchestratorJob), 'rootId')
+  if (!rootObjectId) {
+    return
+  }
+  const now = new Date()
+  const query = {
+    'taskRelation.rootId': rootObjectId,
+    'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.CHILD,
+    'taskRelation.childKind': { $in: TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS },
+    status: TRANSLATION_JOB_STATUS.WAITING_REVIEW
+  }
+  if (
+    orchestratorJob.taskRelation &&
+    orchestratorJob.taskRelation.role === TRANSLATION_JOB_TASK_ROLES.PARENT
+  ) {
+    query['taskRelation.parentId'] = toObjectId(orchestratorJob._id)
+  }
+  await JobModel.updateMany(query, {
+    $set: {
+      status: TRANSLATION_JOB_STATUS.REJECTED,
+      'adoption.rejectedBy': adminSnapshot,
+      'adoption.rejectedAt': now,
+      'adoption.rejectReason': reason,
+      updatedBy: adminSnapshot
+    },
+    $push: {
+      'progress.recentLogs': {
+        $each: [
+          buildRecentLog(
+            '父级任务被标记不采纳，子任务随之标记为不采纳',
+            'info',
+            'reject'
+          )
+        ],
+        $slice: -MAX_RECENT_LOGS
+      }
+    }
+  })
+}
+
 async function rejectTranslationJob(body = {}, options = {}) {
   const job = await getMutableJob(body.id)
   assertStatus(job, [TRANSLATION_JOB_STATUS.WAITING_REVIEW], '不采纳任务')
 
   const adminSnapshot = normalizeAdminSnapshot(options.admin)
+  const reason = toTrimmedString(body.reason)
+  const now = new Date()
+  const role = job.taskRelation && job.taskRelation.role
+
+  // 家族编排父级（root/parent）不采纳：必须级联把其下子任务一并标记为不采纳，再重算家族聚合状态。
+  // 否则子任务仍停留在等待审核，家族会被重新派生回等待审核，父级的不采纳形同虚设。
+  if (isOrchestratorRole(role)) {
+    await rejectFamilyAdoptableChildren(job, adminSnapshot, reason)
+    job.adoption.rejectedBy = adminSnapshot
+    job.adoption.rejectedAt = now
+    job.adoption.rejectReason = reason
+    job.updatedBy = adminSnapshot
+    appendLog(
+      job,
+      '用户已标记家族任务结果为不采纳，已级联标记其下子任务',
+      'info',
+      'reject'
+    )
+    await job.save()
+    // 父级/根状态由子任务派生，级联后重算让父级正确派生为“不采纳”。
+    await recomputeFamilyAggregateStatus(getJobFamilyRootId(job))
+    const refreshedJob = await getMutableJob(body.id)
+    return refreshedJob.toObject()
+  }
+
   job.status = TRANSLATION_JOB_STATUS.REJECTED
   job.adoption.rejectedBy = adminSnapshot
-  job.adoption.rejectedAt = new Date()
-  job.adoption.rejectReason = toTrimmedString(body.reason)
+  job.adoption.rejectedAt = now
+  job.adoption.rejectReason = reason
   job.updatedBy = adminSnapshot
-  job.runtime.finishedAt = job.runtime.finishedAt || new Date()
+  job.runtime.finishedAt = job.runtime.finishedAt || now
   job.progress.percent = 100
   appendLog(job, '用户已标记任务结果为不采纳', 'info', 'reject')
   await job.save()
+  // 不采纳的若是家族子任务，重算 parent/root 聚合状态，让父级/根状态随之更新。
+  if (isFamilyChildJob(job)) {
+    await recomputeFamilyAggregateStatus(getJobFamilyRootId(job))
+  }
   return job.toObject()
 }
 

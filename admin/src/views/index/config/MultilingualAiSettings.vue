@@ -342,6 +342,7 @@ const FIELD_GROUP_LABEL_MAP = {
   ...TEXT_WORKFLOW_GROUP_LABEL_MAP,
   mainTranslationWorkflow: '选择 Provider',
   mainTranslationPrompt: '提示词',
+  translationChunking: '单批裁切上限',
   properNounPreprocessWorkflow: '选择 Provider',
   properNounPreprocessPrompt: '提示词',
   properNounKnowledgeWorkflow: '选择 Provider',
@@ -856,6 +857,13 @@ export default {
             ),
             'verificationPrompt'
           ])
+        },
+        {
+          key: 'translationChunking',
+          title: '内容裁切',
+          description:
+            '全局通用配置：控制把文章内容提交给 AI 时单批的最大字符数（裁切天花板），不绑定任何具体翻译步骤。实际单批量仍会按所选模型的“最大输出 Token”动态收缩，这里只设上限。主翻译与全局校验速览共用该上限。',
+          groups: buildSectionGroups(['translationChunking'])
         },
         {
           key: 'properNounPreprocess',

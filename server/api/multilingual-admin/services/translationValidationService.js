@@ -15,9 +15,11 @@ const VALIDATION_STAGE = 'ValidateTranslation'
 const VALIDATION_OPERATION = 'translation.verification'
 const VALIDATION_GUIDELINE_SCHEMA = 'wikimoe.translation.validation.guideline'
 
-// 单条原文/译文在全局速览中的文本摘要上限（字符）。
+// 单条原文/译文在全局速览中的分段文本量缺省值（字符）。实际由“最大输出 Token 预算”动态推导，
+// 仅当调用方未传入时回退到该缺省值。
 const OVERVIEW_ENTRY_TEXT_LIMIT = 600
-// 单次全局速览请求允许的总览文本上限（字符）。超出则按块 map-reduce 折叠。
+// 单次全局速览请求允许的总览文本缺省上限（字符）。实际由“最大输出 Token 预算”动态推导，
+// 仅当调用方未传入时回退到该缺省值；超出则按块 map-reduce 折叠。
 const OVERVIEW_BLOCK_CHAR_LIMIT = 18000
 // 校验报告中单条修正前后预览文本上限（字符）。
 const CORRECTION_PREVIEW_LIMIT = 160
@@ -122,6 +124,8 @@ function buildValidationPairs(sourceEntries, targetEntries) {
       scope: entry.scope || '',
       fieldName: entry.fieldName || '',
       valueType: entry.valueType || 'plainText',
+      sourceValue: entry.value,
+      targetValue: targetEntry.value,
       sourceText: extractReadableText(entry.value, entry.valueType),
       targetText: extractReadableText(targetEntry.value, targetEntry.valueType)
     })
@@ -129,77 +133,140 @@ function buildValidationPairs(sourceEntries, targetEntries) {
   return pairs
 }
 
-// 把文本按指定段数等分（按比例切片）。源文与译文用相同段数切分，使同一段大致对应同一位置的
-// 内容，避免因源文与译文长度不同而出现“某段只有译文、原文为空”的错位。
-// 切点会尽量回退到最近的空白边界（块标签提取为可读文本后块之间会留有空白），避免把单词切成两半。
-function splitTextIntoEqualParts(text, partCount) {
-  const normalized = String(text == null ? '' : text)
-  const chars = Array.from(normalized)
-  if (partCount <= 1 || chars.length === 0) {
-    return [normalized]
+// 并行遍历“源”与“译文”两棵富文本树，逐个可翻译文本节点（含 translatableAttrs）一一配对。
+// 翻译只替换文本、不改变结构，因此两棵树同构，按位置配对即可得到逐节点严格对齐的原文/译文对，
+// 从根本上避免“按字符比例切片”在不同语言长度差异下产生的段落错位（导致 AI 误判译文多句/漏句）。
+function collectAlignedRichTextNodeTexts(sourceNode, targetNode, pairs) {
+  if (!sourceNode || typeof sourceNode !== 'object') {
+    return
   }
-  const targetSize = Math.ceil(chars.length / partCount)
-  // 允许为了凑到空白边界而向前回退的最大字符数，避免回退过多产生过小分段。
-  const maxBacktrack = Math.max(20, Math.floor(targetSize / 2))
-  const parts = []
-  let start = 0
-  while (start < chars.length) {
-    let end = Math.min(start + targetSize, chars.length)
-    if (end < chars.length) {
-      let adjusted = end
-      const minEnd = end - maxBacktrack
-      while (adjusted > start + 1 && adjusted > minEnd) {
-        if (/\s/.test(chars[adjusted - 1])) {
-          break
-        }
-        adjusted -= 1
+  const safeTarget =
+    targetNode && typeof targetNode === 'object' ? targetNode : {}
+  if (typeof sourceNode.text === 'string' && sourceNode.text.trim()) {
+    pairs.push({
+      source: sourceNode.text,
+      target: typeof safeTarget.text === 'string' ? safeTarget.text : ''
+    })
+  }
+  if (
+    sourceNode.translatableAttrs &&
+    typeof sourceNode.translatableAttrs === 'object' &&
+    !Array.isArray(sourceNode.translatableAttrs)
+  ) {
+    const targetAttrs =
+      safeTarget.translatableAttrs &&
+      typeof safeTarget.translatableAttrs === 'object' &&
+      !Array.isArray(safeTarget.translatableAttrs)
+        ? safeTarget.translatableAttrs
+        : {}
+    Object.keys(sourceNode.translatableAttrs).forEach(attrName => {
+      const sourceAttr = sourceNode.translatableAttrs[attrName]
+      if (typeof sourceAttr === 'string' && sourceAttr.trim()) {
+        const targetAttr = targetAttrs[attrName]
+        pairs.push({
+          source: sourceAttr,
+          target: typeof targetAttr === 'string' ? targetAttr : ''
+        })
       }
-      // 仅当确实回退到了空白边界时才采用，否则保持原切点（避免极端长词导致分段过碎）。
-      if (adjusted > start + 1 && /\s/.test(chars[adjusted - 1])) {
-        end = adjusted
-      }
-    }
-    parts.push(chars.slice(start, end).join(''))
-    start = end
+    })
   }
-  if (parts.length === 0) {
-    parts.push('')
+  if (Array.isArray(sourceNode.children)) {
+    const targetChildren = Array.isArray(safeTarget.children)
+      ? safeTarget.children
+      : []
+    sourceNode.children.forEach((childNode, index) => {
+      collectAlignedRichTextNodeTexts(childNode, targetChildren[index], pairs)
+    })
   }
-  return parts
 }
 
-// 把配对条目渲染成可分块的速览行。长条目按比例切分为多段（源文与译文段数一致、逐段对应），
+// 把一个配对条目切成若干“原文/译文严格对齐”的速览分段。
+// - 富文本：按节点对齐配对，再把相邻节点对累加到接近 segmentTextLimit 的体量为一段，
+//   源文与译文在“同一批节点”上断开，保证同段内原文与译文承载的是同一段内容。
+// - 纯文本/轻富文本：字段短，整体作为一段（其原文/译文本身即一一对应）。
+function buildAlignedOverviewSegments(pair, segmentTextLimit) {
+  const limit = Math.max(
+    1,
+    Number(segmentTextLimit) || OVERVIEW_ENTRY_TEXT_LIMIT
+  )
+  if (pair.valueType !== 'richTextDocument') {
+    return [
+      {
+        source: String(pair.sourceText || ''),
+        target: String(pair.targetText || '')
+      }
+    ]
+  }
+
+  const nodePairs = []
+  collectAlignedRichTextNodeTexts(pair.sourceValue, pair.targetValue, nodePairs)
+  if (nodePairs.length === 0) {
+    return [
+      {
+        source: String(pair.sourceText || ''),
+        target: String(pair.targetText || '')
+      }
+    ]
+  }
+
+  const segments = []
+  let currentSource = []
+  let currentTarget = []
+  let currentLength = 0
+
+  function flushCurrentSegment() {
+    if (currentSource.length === 0 && currentTarget.length === 0) {
+      return
+    }
+    segments.push({
+      source: currentSource.join(''),
+      target: currentTarget.join('')
+    })
+    currentSource = []
+    currentTarget = []
+    currentLength = 0
+  }
+
+  nodePairs.forEach(nodePair => {
+    const pairLength = Math.max(nodePair.source.length, nodePair.target.length)
+    if (currentLength > 0 && currentLength + pairLength > limit) {
+      flushCurrentSegment()
+    }
+    currentSource.push(nodePair.source)
+    currentTarget.push(nodePair.target)
+    currentLength += pairLength
+  })
+  flushCurrentSegment()
+
+  if (segments.length === 0) {
+    return [
+      {
+        source: String(pair.sourceText || ''),
+        target: String(pair.targetText || '')
+      }
+    ]
+  }
+  return segments
+}
+
+// 把配对条目渲染成可分块的速览行。长条目按“逐节点对齐”切分为多段（源文与译文逐段严格对应），
 // 配合下方的分块 + 合并（map-reduce），让速览覆盖正文全文（而不是只截取开头），从而能发现
-// 正文后段的术语不一致与翻译问题。
-function buildOverviewBlocks(pairs) {
+// 正文后段的术语不一致与翻译问题。分段体量与分块体量由调用方按“最大输出 Token 预算”动态传入，
+// 缺省时回退到固定常量。
+function buildOverviewBlocks(pairs, options = {}) {
+  const segmentTextLimit = Math.max(
+    1,
+    Number(options.segmentTextLimit) || OVERVIEW_ENTRY_TEXT_LIMIT
+  )
+  const blockCharLimit = Math.max(
+    segmentTextLimit,
+    Number(options.blockCharLimit) || OVERVIEW_BLOCK_CHAR_LIMIT
+  )
   const lines = []
   pairs.forEach(pair => {
-    const sourceChars = Array.from(String(pair.sourceText || ''))
-    const targetChars = Array.from(String(pair.targetText || ''))
-    const maxLength = Math.max(sourceChars.length, targetChars.length)
-    const segmentCount = Math.max(
-      1,
-      Math.ceil(maxLength / OVERVIEW_ENTRY_TEXT_LIMIT)
-    )
-    const sourceSegments = splitTextIntoEqualParts(
-      pair.sourceText,
-      segmentCount
-    )
-    const targetSegments = splitTextIntoEqualParts(
-      pair.targetText,
-      segmentCount
-    )
-    const renderSegmentCount = Math.max(
-      sourceSegments.length,
-      targetSegments.length
-    )
-    for (
-      let segmentIndex = 0;
-      segmentIndex < renderSegmentCount;
-      segmentIndex += 1
-    ) {
-      const sourceText = sourceSegments[segmentIndex] || ''
-      const targetText = targetSegments[segmentIndex] || ''
+    const segments = buildAlignedOverviewSegments(pair, segmentTextLimit)
+    const renderSegmentCount = segments.length
+    segments.forEach((segment, segmentIndex) => {
       const segmentLabel =
         renderSegmentCount > 1
           ? `（第 ${segmentIndex + 1}/${renderSegmentCount} 段）`
@@ -208,11 +275,11 @@ function buildOverviewBlocks(pairs) {
         [
           `# entryId: ${pair.id}${segmentLabel}`,
           `字段: ${pair.label}（${pair.fieldName || pair.scope || 'field'}）`,
-          `原文: ${sourceText}`,
-          `译文: ${targetText}`
+          `原文: ${segment.source}`,
+          `译文: ${segment.target}`
         ].join('\n')
       )
-    }
+    })
   })
 
   const blocks = []
@@ -220,10 +287,7 @@ function buildOverviewBlocks(pairs) {
   let currentLength = 0
   lines.forEach(line => {
     const lineLength = line.length + 2
-    if (
-      current.length > 0 &&
-      currentLength + lineLength > OVERVIEW_BLOCK_CHAR_LIMIT
-    ) {
+    if (current.length > 0 && currentLength + lineLength > blockCharLimit) {
       blocks.push(current.join('\n\n'))
       current = []
       currentLength = 0
@@ -569,7 +633,15 @@ async function buildGlobalGuideline({
   targetLanguageCode,
   officialTermGlossaryMarkdown
 }) {
-  const blocks = buildOverviewBlocks(pairs)
+  // 速览的分段体量与分块体量与正文翻译共用同一套“最大输出 Token 动态裁切”算法：
+  // 输出能力大的模型用更大的段/块，输出能力小或未提供最大输出 Token 的模型自动收缩，
+  // 内容足够大时速览会如实拆成多块（block.N）并合并（merge），在工作流中呈现为多步。
+  const blocks = buildOverviewBlocks(pairs, {
+    segmentTextLimit:
+      textTranslationWorkflowService.getRichTextSegmentTextLimit(settings),
+    blockCharLimit:
+      textTranslationWorkflowService.getTranslationChunkTextLimit(settings)
+  })
   const cancellation = handlers?.cancellation
   const officialTermGlossaryProvided = Boolean(
     (officialTermGlossaryMarkdown || '').trim()

@@ -40,11 +40,19 @@ const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
 ])
 const RICH_TEXT_INDEXED_VALUE_TYPE = 'indexedRichText'
 const AI_TRANSLATION_ERROR_FIELD = 'aiTranslation'
-const MAX_AI_REQUEST_TEXT_LENGTH = 6000
-const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 3000
+// 单批请求文本量的绝对安全天花板（字符）。真实裁切量由“最大输出 Token 预算”动态推导，
+// 这个常量只是为了防止个别模型上报极大的输出预算时把单批撑得过大导致输出截断，
+// 因此设得足够宽松，让大输出能力的模型（如 81920 token）也能用上更大的批次。
+const MAX_AI_REQUEST_TEXT_LENGTH = 24000
+// 单个富文本条目切片的绝对安全天花板（字符），与 MAX_AI_REQUEST_TEXT_LENGTH 同比例放宽。
+const MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH = 18000
 const MIN_AI_REQUEST_TEXT_LENGTH = 600
 const MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH = 400
 const AI_RESPONSE_JSON_TOKEN_RESERVE = 1024
+// 模型未提供“最大输出 Token”时无法换算 token 预算，使用下面这套与 token 无关的保守字符保底，
+// 既能正常裁切，又能避免对未知能力模型一次性塞入过多内容造成输出截断。
+const AI_FALLBACK_MAX_OUTPUT_TOKENS = 4096
+const AI_FALLBACK_REQUEST_TEXT_LENGTH = 2400
 const AI_THINKING_TOKEN_RESERVE_RATIO = 0.35
 const AI_THINKING_MAX_EFFORT_TOKEN_RESERVE_RATIO = 0.5
 const AI_THINKING_TOKEN_RESERVE_MIN = 2048
@@ -1047,6 +1055,15 @@ function splitLongText(text, maxLength) {
   return parts
 }
 
+// 模型/连接配置是否显式提供了正整数“最大输出 Token”。未提供时一律走字符保底裁切方案，
+// 不再凭空假设一个 token 预算去做 token 换算。
+function hasConfiguredMaxOutputTokens(settings = {}) {
+  const maxTokens = Number(
+    settings.maxTokens || settings.deepSeekMaxTokens || 0
+  )
+  return Number.isFinite(maxTokens) && maxTokens > 0
+}
+
 function getConfiguredMaxTokens(settings = {}) {
   const maxTokens = Number(
     settings.maxTokens || settings.deepSeekMaxTokens || 0
@@ -1054,7 +1071,7 @@ function getConfiguredMaxTokens(settings = {}) {
   if (Number.isFinite(maxTokens) && maxTokens > 0) {
     return maxTokens
   }
-  return 8192
+  return AI_FALLBACK_MAX_OUTPUT_TOKENS
 }
 
 function isAiThinkingModeEnabled(settings = {}) {
@@ -1097,7 +1114,31 @@ function getAiThinkingTokenReserve(settings = {}) {
   return Math.min(reservedTokens, maxReasonableReserve)
 }
 
+// 单批裁切的“绝对天花板（字符）”：优先用 AI 设置里可调的 translationChunkMaxChars（独立全局配置，
+// 不绑定任何翻译步骤模块）；未配置或非法时回退到内置默认天花板 MAX_AI_REQUEST_TEXT_LENGTH。
+function getConfiguredChunkCharCeiling(settings = {}) {
+  const ceiling = Number(settings.translationChunkMaxChars)
+  if (Number.isFinite(ceiling) && ceiling >= MIN_AI_REQUEST_TEXT_LENGTH) {
+    return Math.floor(ceiling)
+  }
+  return MAX_AI_REQUEST_TEXT_LENGTH
+}
+
+// 动态推导单批可裁切的文本量：
+// 1) 模型提供最大输出 Token 时，扣除 JSON 结构预留与思考模式预留，得到可用于译文输出的 token，
+//    再按 token→字符的经验比折算成字符预算，最后落在 [MIN, 可调天花板] 安全区间内。这样大输出
+//    能力的模型自然得到更大的批次，小输出能力的模型自动收缩批次。
+// 2) 模型未提供最大输出 Token 时，无法做 token 换算，使用与 token 无关的保守字符保底量（仍不超过
+//    可调天花板）。
+// 天花板由 AI 设置里的 translationChunkMaxChars 决定，调大=更少分批，调小=更稳。
 function getTranslationChunkTextLimit(settings = {}) {
+  const ceiling = getConfiguredChunkCharCeiling(settings)
+  if (!hasConfiguredMaxOutputTokens(settings)) {
+    return Math.max(
+      MIN_AI_REQUEST_TEXT_LENGTH,
+      Math.min(ceiling, AI_FALLBACK_REQUEST_TEXT_LENGTH)
+    )
+  }
   const maxTokens = getConfiguredMaxTokens(settings)
   const reservedTokens =
     AI_RESPONSE_JSON_TOKEN_RESERVE + getAiThinkingTokenReserve(settings)
@@ -1110,19 +1151,18 @@ function getTranslationChunkTextLimit(settings = {}) {
   )
   return Math.max(
     MIN_AI_REQUEST_TEXT_LENGTH,
-    Math.min(MAX_AI_REQUEST_TEXT_LENGTH, outputTextLimit)
+    Math.min(ceiling, outputTextLimit)
   )
 }
 
+// 单个富文本条目切片上限随单批裁切量等比缩放（取其 RICH_TEXT_SEGMENT_TEXT_RATIO 比例），
+// 因此天花板调大时富文本切片也随之放宽，无需再单独受固定上限钳制。
 function getRichTextSegmentTextLimit(settings = {}) {
   const chunkTextLimit = getTranslationChunkTextLimit(settings)
   const segmentTextLimit = Math.floor(
     chunkTextLimit * RICH_TEXT_SEGMENT_TEXT_RATIO
   )
-  return Math.max(
-    MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH,
-    Math.min(MAX_RICH_TEXT_SEGMENT_TEXT_LENGTH, segmentTextLimit)
-  )
+  return Math.max(MIN_RICH_TEXT_SEGMENT_TEXT_LENGTH, segmentTextLimit)
 }
 
 function pushRichTextSegments(segments, path, text, maxTextLength) {
@@ -5228,5 +5268,8 @@ module.exports = {
   translatePostEntries,
   translatePostEntriesStream,
   translateContentEntriesStream,
-  parseAiContentText
+  parseAiContentText,
+  hasConfiguredMaxOutputTokens,
+  getTranslationChunkTextLimit,
+  getRichTextSegmentTextLimit
 }

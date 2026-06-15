@@ -2653,6 +2653,9 @@ export default {
       action({ id: row._id })
         .then(() => {
           ElMessage.success(successText)
+          if (options.removeRowFromSelection === true) {
+            removeJobFromSelection(row)
+          }
           if (options.preserveScroll !== false) {
             preserveTableScrollForNextRefresh()
           }
@@ -2702,7 +2705,12 @@ export default {
     }
 
     const rejectJob = row => {
-      ElMessageBox.confirm('确认不采纳该任务结果？', '确认操作', {
+      const role = row?.taskRelation?.role
+      const isFamilyOrchestrator = role === 'root' || role === 'parent'
+      const confirmMessage = isFamilyOrchestrator
+        ? '确认不采纳该任务？其下所有等待审核的子任务也会一并标记为不采纳。'
+        : '确认不采纳该任务结果？'
+      ElMessageBox.confirm(confirmMessage, '确认操作', {
         type: 'warning'
       }).then(() => {
         runJobAction(row, multilingualApi.rejectTranslationJob, '已标记不采纳')
@@ -2715,7 +2723,8 @@ export default {
       }).then(() => {
         runJobAction(row, multilingualApi.deleteTranslationJob, '已删除', {
           preserveScroll: false,
-          closeCurrentDetail: true
+          closeCurrentDetail: true,
+          removeRowFromSelection: true
         })
       })
     }
@@ -2742,6 +2751,20 @@ export default {
     const clearJobSelection = () => {
       selectedJobRows.value = []
       tableRef.value?.clearSelection()
+    }
+
+    // 单条删除某个任务后，必须把它从选中集合里移除：表格开启了 reserve-selection，会按
+    // row-key 跨刷新保留勾选，删除后若不显式取消该行勾选，被删任务的 id 会一直滞留，
+    // 导致永远显示“已选中 1 条”。
+    const removeJobFromSelection = row => {
+      if (!row) {
+        return
+      }
+      const rowId = String(row._id)
+      selectedJobRows.value = selectedJobRows.value.filter(item => {
+        return String(item._id) !== rowId
+      })
+      tableRef.value?.toggleRowSelection(row, false)
     }
 
     const deleteSelectedJobs = async () => {
