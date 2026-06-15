@@ -1297,6 +1297,7 @@ function buildValidationReport({
       scope: afterEntry.scope || beforeEntry.scope || '',
       fieldName: afterEntry.fieldName || beforeEntry.fieldName || '',
       label: afterEntry.label || beforeEntry.label || id,
+      reason: normalizeText(afterEntry.correctionReason).trim(),
       sourcePreview: truncateText(
         extractReadableText(sourceEntry ? sourceEntry.value : '', valueType),
         CORRECTION_PREVIEW_LIMIT

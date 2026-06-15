@@ -686,16 +686,26 @@ function buildSystemPrompt() {
   ])
 }
 
-function buildOutputContractPrompt() {
-  return buildPromptLayer('输出契约层', [
+function buildOutputContractPrompt(input = {}) {
+  const lines = [
     `必须只返回 JSON 对象，schema 必须为 ${AI_RESULT_SCHEMA}，version 必须为 1。`,
     '顶层 JSON 对象必须包含 schema、version 和 entries。',
     '输入中的每个条目 i，都必须在顶层 entries 中返回且只返回一个结果。',
     '每个 i 必须保持不变，禁止遗漏、合并、拆分或新增条目。',
-    'plainText 和 richTextLite 的 v 必须是字符串。',
-    '翻译了条目时不要包含 r。',
+    'plainText 和 richTextLite 的 v 必须是字符串。'
+  ]
+  if (input.verificationMode === true) {
+    // 校验任务：每条都要输出 r 作为校验结论/修改理由，供人工在报告里看懂“为什么这样改”。
+    lines.push(
+      '本次为校验任务：每个条目都必须包含 r，用一句面向用户的简体中文说明本条校验结论——若修改了译文，简述改了什么、为什么；若保持不变，简述为何无需修改。'
+    )
+  } else {
+    lines.push('翻译了条目时不要包含 r。')
+  }
+  lines.push(
     '不要返回请求对象、提示词、解释、注释、Markdown 或规定字段之外的额外内容。'
-  ])
+  )
+  return buildPromptLayer('输出契约层', lines)
 }
 
 function buildTranslationTaskPrompt(input) {
@@ -827,6 +837,7 @@ function buildVerificationModePrompt(input) {
     '当 c 已经是准确且高质量的译文时，保持其表达不变，直接输出与 c 相同的译文。',
     '不要因为这是校验任务就保留源语言原文；输出必须是目标语言译文。',
     '不要增删事实，不要解释，不要输出译文以外的注释。',
+    '无论是否修改，都要在该条目的 r 中用一句面向用户的简体中文说明本条校验结论（改了什么、为什么；或为何保持不变）；r 是校验说明，不是译文内容。',
     'richTextDocument 仍然遵守 indexedRichText 规则：只修改 text，保持每个 index 与结构不变。'
   ])
 }
@@ -979,7 +990,10 @@ function buildRequestDataPrompt(input) {
           {
             i: '复制输入条目的 i',
             v: '翻译后的值；plainText/richTextLite 返回字符串，richTextDocument 返回 indexedRichText 对象',
-            r: '仅当 k=true 且 v 被合法保留原值时才需要'
+            r:
+              input.verificationMode === true
+                ? '本条校验结论：用一句面向用户的简体中文说明改了什么、为什么；未改动则说明为何保持不变'
+                : '仅当 k=true 且 v 被合法保留原值时才需要'
           }
         ]
       },
@@ -3592,7 +3606,7 @@ async function prepareOfficialTermGlossaryForAiInput({
 function buildTranslationMessages(settings, input) {
   const systemPromptList = [
     buildSystemPrompt(),
-    buildOutputContractPrompt(),
+    buildOutputContractPrompt(input),
     buildTranslationTaskPrompt(input),
     buildTranslationQualityPrompt(),
     buildLanguageJudgementPrompt(input),
@@ -4274,6 +4288,10 @@ function buildTranslatedEntries(preparedInput, resultData) {
     }
     if (keptOriginal) {
       outputEntry.aiSkipReason = skipReason
+    }
+    // 校验任务：把 AI 返回的 r 作为本条“校验/修改理由”透传，供校验报告展示“为什么这样改”。
+    if (preparedInput.verificationMode === true && skipReason) {
+      outputEntry.correctionReason = skipReason
     }
     if (entry.collectionName) {
       outputEntry.collectionName = entry.collectionName

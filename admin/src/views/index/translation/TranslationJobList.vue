@@ -845,6 +845,15 @@
                   <div class="translation-validation-correction-label">
                     {{ item.label }}
                   </div>
+                  <div
+                    v-if="item.reason"
+                    class="translation-validation-correction-reason"
+                  >
+                    <span
+                      class="translation-validation-correction-reason-prefix"
+                      >修改理由：</span
+                    >{{ item.reason }}
+                  </div>
                   <div class="translation-validation-correction-diff">
                     <span class="translation-validation-before">
                       <span class="translation-validation-diff-prefix"
@@ -4331,6 +4340,19 @@ html.dark .job-state-panel-meta {
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
+}
+
+.translation-validation-correction-reason {
+  margin-top: 4px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.translation-validation-correction-reason-prefix {
+  font-weight: 600;
+  color: var(--el-color-primary);
 }
 
 .translation-validation-correction-diff {
