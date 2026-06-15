@@ -827,8 +827,8 @@
                   >统一术语：{{ tab.validation.stats?.termCount || 0 }}</span
                 >
                 <span
-                  >疑似问题：{{
-                    tab.validation.stats?.suspectedIssueCount || 0
+                  >问题：{{
+                    tab.validation.stats?.confirmedIssueCount || 0
                   }}</span
                 >
               </div>
@@ -912,24 +912,24 @@
               </div>
               <div
                 v-if="
-                  (tab.validation.guideline?.suspectedIssues || []).length > 0
+                  (tab.validation.guideline?.confirmedIssues || []).length > 0
                 "
                 class="translation-validation-section"
               >
-                <div class="translation-validation-section-title">疑似问题</div>
+                <div class="translation-validation-section-title">问题清单</div>
                 <div
                   v-for="(issue, index) in tab.validation.guideline
-                    .suspectedIssues"
+                    .confirmedIssues"
                   :key="`issue-${index}`"
                   class="translation-validation-issue"
                 >
                   <el-tag
                     size="small"
                     effect="light"
-                    :type="getSuspectedIssueStatus(issue, tab.validation).type"
+                    :type="getConfirmedIssueStatus(issue, tab.validation).type"
                     class="translation-validation-issue-status"
                   >
-                    {{ getSuspectedIssueStatus(issue, tab.validation).text }}
+                    {{ getConfirmedIssueStatus(issue, tab.validation).text }}
                   </el-tag>
                   <span class="translation-validation-issue-type">
                     [{{ getValidationIssueTypeText(issue.issueType) }}]
@@ -1298,7 +1298,7 @@ const EXACT_AI_JSON_FIELD_META_MAP = {
   '$.result.sourceSnapshotId': ['源快照ID', '当前任务使用的源内容快照 ID。'],
   '$.result.validation': [
     '校验报告',
-    '校验 AI 对全部译文进行全局校验与修正的结果，包含术语统一表、风格说明、疑似问题与修正条目。'
+    '校验 AI 对全部译文进行全局校验与修正的结果，包含术语统一表、风格说明、问题清单与修正条目。'
   ],
   '$.result.completedAt': ['完成时间', '任务进入等待审核时的完成时间。']
 }
@@ -1396,7 +1396,7 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   byteLength: ['字节长度', '被省略二进制内容的字节数。'],
   webSearchQueries: [
     '搜索查询',
-    'AI grounding 实际使用或建议的 Google 搜索查询。'
+    'AI grounding 实际使用或输出的 Google 搜索查询。'
   ],
   groundingChunks: ['网页依据', 'AI grounding 返回的网页标题和链接依据。'],
   title: ['标题', '文章、网页依据或媒体内容标题。'],
@@ -1423,7 +1423,7 @@ const COMMON_AI_JSON_FIELD_META_MAP = {
   valueType: ['值类型', '字段值的结构类型，例如文本、富文本或媒体文件。'],
   sourceValue: ['源值', '翻译前的源语言字段值。'],
   currentValue: ['当前值', '目标语言当前已保存的字段值。'],
-  nextValue: ['AI翻译后', 'AI 建议写入的新字段值。'],
+  nextValue: ['AI翻译后', 'AI 输出并准备写入的新字段值。'],
   finalValue: ['最终写入值', '确认采纳后准备写入数据库的最终值。'],
   oldValue: ['旧值', '变更前的字段值。'],
   newValue: ['新值', '变更后的字段值。'],
@@ -1621,7 +1621,7 @@ function getArrayItemMeta(path) {
     ]
   }
   if (parentPath.endsWith('webSearchQueries')) {
-    return ['搜索查询 ' + itemNumber, 'AI grounding 使用或建议的一条搜索查询。']
+    return ['搜索查询 ' + itemNumber, 'AI grounding 使用或输出的一条搜索查询。']
   }
   if (parentPath.endsWith('targetLanguageCodes')) {
     return ['目标语言 ' + itemNumber, '本次任务覆盖的一个目标语言 code。']
@@ -3106,7 +3106,7 @@ export default {
     const validationIssueTypeTextMap = {
       inconsistent: '术语/译法不一致',
       inaccurate: '语义不准确',
-      missing: '疑似漏译',
+      missing: '漏译',
       tone: '语气偏差',
       other: '其他问题'
     }
@@ -3114,23 +3114,23 @@ export default {
     const getValidationIssueTypeText = issueType => {
       const normalized = normalizePreviewText(issueType).toLowerCase()
       if (!normalized) {
-        return '疑似问题'
+        return '问题'
       }
       return validationIssueTypeTextMap[normalized] || issueType
     }
 
-    // 全局校验速览会把长字段拆段展示，AI 返回的 suspectedIssue.entryId 可能带有"（第 N/M 段）"
-    // 后缀；而逐条修正明细以基础 entryId（如 post.content）为准。比对疑似问题与修正条目是否对应时，
+    // 全局校验速览会把长字段拆段展示，AI 返回的 confirmedIssue.entryId 可能带有"（第 N/M 段）"
+    // 后缀；而逐条修正明细以基础 entryId（如 post.content）为准。比对问题清单与修正条目是否对应时，
     // 需要去掉段落后缀，否则会把"已修正"误判为"未改动"。
-    const normalizeSuspectedIssueEntryId = value => {
+    const normalizeConfirmedIssueEntryId = value => {
       return normalizePreviewText(value).replace(
         /（第\s*\d+\s*\/\s*\d+\s*段）\s*$/,
         ''
       )
     }
 
-    const getSuspectedIssueStatus = (issue, validation) => {
-      const entryId = normalizeSuspectedIssueEntryId(issue?.entryId)
+    const getConfirmedIssueStatus = (issue, validation) => {
+      const entryId = normalizeConfirmedIssueEntryId(issue?.entryId)
       if (!entryId) {
         return { text: '无对应条目', type: 'info' }
       }
@@ -3138,10 +3138,10 @@ export default {
         ? validation.corrections
         : []
       const matched = corrections.some(item => {
-        return normalizeSuspectedIssueEntryId(item?.id) === entryId
+        return normalizeConfirmedIssueEntryId(item?.id) === entryId
       })
-      // 状态为条目级：仅表示该疑似问题所属的条目是否有修正，不代表这一条疑似问题本身已被处理
-      //（精确判定单条疑似问题是否被修复无法可靠实现）。
+      // 状态为条目级：仅表示该问题所属的条目是否有修正，不代表这一条问题本身已被处理
+      //（精确判定单条问题是否被修复无法可靠实现）。
       if (matched) {
         return { text: '所属条目有修正', type: 'success' }
       }
@@ -3496,7 +3496,7 @@ export default {
       getProgressStageText,
       getCorrectionDiff,
       getValidationIssueTypeText,
-      getSuspectedIssueStatus,
+      getConfirmedIssueStatus,
       getSelectedEntryCount,
       getStatusTagType,
       getTaskRelationText,

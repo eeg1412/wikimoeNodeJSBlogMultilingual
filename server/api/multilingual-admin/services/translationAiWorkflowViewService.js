@@ -696,7 +696,7 @@ function buildPostAiTranslationPlannedSteps(job) {
       majorKey: 'validation.overview',
       title: '全局校验速览',
       description:
-        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。',
+        '校验 AI 纵观全部译文，产出统一术语、风格与问题清单的全局校验指南。',
       stage: 'ValidateTranslation',
       stageKeys: ['ValidateTranslation'],
       stepKeys: ['validation.overview'],
@@ -769,7 +769,7 @@ function buildContentAiTranslationPlannedSteps(job) {
       majorKey: 'validation.overview',
       title: '全局校验速览',
       description:
-        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。',
+        '校验 AI 纵观全部译文，产出统一术语、风格与问题清单的全局校验指南。',
       stage: 'ValidateTranslation',
       stageKeys: ['ValidateTranslation'],
       stepKeys: ['validation.overview'],
@@ -2699,7 +2699,7 @@ function getValidationIssueTypeLabel(issueType) {
   const labelMap = {
     inconsistent: '术语/译法不一致',
     inaccurate: '语义不准确',
-    missing: '疑似漏译',
+    missing: '漏译',
     tone: '语气偏差',
     other: '其他问题'
   }
@@ -2709,9 +2709,11 @@ function getValidationIssueTypeLabel(issueType) {
   return labelMap[normalized] || issueType
 }
 
-function buildValidationSuspectedIssueItem(issue, index) {
+function buildValidationIssueItem(issue, index, labelPrefix) {
   if (!isPlainObject(issue)) {
-    return createItem(`疑似问题 ${index + 1}`, issue, { tone: 'warning' })
+    return createItem(`${labelPrefix} ${index + 1}`, issue, {
+      tone: 'warning'
+    })
   }
   const entryId = normalizeText(issue.entryId)
   const issueType = normalizeText(issue.issueType)
@@ -2723,8 +2725,16 @@ function buildValidationSuspectedIssueItem(issue, index) {
   if (issueType) {
     labelParts.push(`[${getValidationIssueTypeLabel(issueType)}]`)
   }
-  const label = labelParts.join(' ') || `疑似问题 ${index + 1}`
+  const label = labelParts.join(' ') || `${labelPrefix} ${index + 1}`
   return createItem(label, note || '-', { tone: 'warning' })
+}
+
+function buildValidationConfirmedIssueItem(issue, index) {
+  return buildValidationIssueItem(issue, index, '问题')
+}
+
+function buildValidationIssueCandidateItem(issue, index) {
+  return buildValidationIssueItem(issue, index, '线索')
 }
 
 function buildValidationGuidelineOutputSections(root) {
@@ -2757,8 +2767,8 @@ function buildValidationGuidelineOutputSections(root) {
   }
 
   const termSection = buildArraySection(
-    '建议统一的术语表',
-    '校验 AI 建议在全文统一的术语译法（已结合专有名词翻译数据库）。',
+    '术语统一表',
+    '校验 AI 指定全文统一的术语译法（已结合专有名词翻译数据库）。',
     getFirstArray(root.termGlossary),
     buildValidationTermGlossaryItem,
     'output'
@@ -2767,11 +2777,22 @@ function buildValidationGuidelineOutputSections(root) {
     sections.push(termSection)
   }
 
+  const candidateSection = buildArraySection(
+    '问题线索',
+    '分块速览阶段记录的待确认线索，只用于后续全局合并。',
+    getFirstArray(root.issueCandidates),
+    buildValidationIssueCandidateItem,
+    'warning'
+  )
+  if (candidateSection) {
+    sections.push(candidateSection)
+  }
+
   const issueSection = buildArraySection(
-    '疑似问题清单',
-    '校验 AI 标记的可能问题，会作为重点核查项传给精校阶段。',
-    getFirstArray(root.suspectedIssues),
-    buildValidationSuspectedIssueItem,
+    '问题清单',
+    '校验 AI 确认的问题，会作为明确修正要求传给精校阶段。',
+    getFirstArray(root.confirmedIssues),
+    buildValidationConfirmedIssueItem,
     'warning'
   )
   if (issueSection) {
@@ -2949,7 +2970,7 @@ function getOperationDisplay(log) {
     'validation.overview': {
       title: '全局翻译校验速览',
       description:
-        '校验 AI 纵观全部译文，产出统一术语、风格与疑似问题的全局校验指南。'
+        '校验 AI 纵观全部译文，产出统一术语、风格与问题清单的全局校验指南。'
     },
     'validation.overview.merge': {
       title: '合并全局校验指南',

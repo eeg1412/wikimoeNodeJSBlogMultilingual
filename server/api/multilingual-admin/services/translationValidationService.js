@@ -246,23 +246,59 @@ function buildLanguageLine(sourceLanguageCode, targetLanguageCode) {
   return `源语言: ${source}，目标语言: ${target}`
 }
 
-function buildGuidelineSystemPrompt() {
-  return [
+// 分块速览只产出工作笔记，允许保留后续块继续确认的线索。
+function appendPartialGuidelineNoteRules(lines) {
+  lines.push('issueCandidates 可保留疑问、冲突或候选线索。')
+}
+
+// 最终指南会进入精校 prompt，必须压成唯一可执行结论。
+function appendFinalGuidelineDecisionRules(lines) {
+  lines.push(
+    'confirmedIssues 只保留同时满足这些条件的问题：当前译文相对原文或统一译法存在明确错误；存在唯一可执行修正结果；错误原因、当前错误译法、目标修正结果三者一致；修正要求不依赖猜测、反推或改写原文事实。'
+  )
+  lines.push(
+    'termGlossary.target 必须是唯一译法；termGlossary.note 只写依据或适用范围，不写备选方案。'
+  )
+  lines.push(
+    'confirmedIssues.note 必须是确定的修正指令，不写建议口吻、模糊表述、开放选项或无需修改的判断。'
+  )
+  lines.push('无法形成定论的局部线索不要输出。')
+}
+
+function buildGuidelineSystemPrompt(options = {}) {
+  const issueFieldName = options.partial ? 'issueCandidates' : 'confirmedIssues'
+  let issueDiscoveryRule =
+    '你会先纵观一篇文章全部翻译产物的速览，找出需要全局统一的术语、整体风格基调，以及需要确认的翻译问题线索。'
+  let issueNoteDescription = '问题简述或待确认线索'
+  if (!options.partial) {
+    issueDiscoveryRule =
+      '你会先纵观一篇文章全部翻译产物的速览，找出需要全局统一的术语、整体风格基调，以及需要修正的翻译问题。'
+    issueNoteDescription = '问题结论与修正方向'
+  }
+  const lines = [
     '你是多语言博客的翻译质检负责人。',
-    '你会先纵观一篇文章全部翻译产物的速览，找出需要全局统一的术语、整体风格基调，以及疑似存在的翻译问题。',
+    issueDiscoveryRule,
     '重要：超长正文会被切分成多段速览（标注“第 X/Y 段”），并可能分布在不同的速览块中；这些段落合起来覆盖全文，每一段都是该位置的真实完整片段，不是被裁断的残缺内容。',
     '禁止依据“看到的是其中一段”就判断译文存在“截断、缺失后半段、漏译大段内容”等完整性问题；逐条完整内容的精确校验会在后续阶段基于完整文本进行。',
     '判断术语前后是否一致、风格是否统一时，要综合同一 entryId 的所有段落（包括后段），不要只看开头段。',
     '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。',
-    `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结本次译文的整体质量、主要问题与需要重点修正的方向", "termGlossary": [{ "source": "原文术语", "target": "建议统一译法", "note": "可选说明" }], "styleNotes": "整体风格与语气基调说明", "suspectedIssues": [{ "entryId": "条目id", "issueType": "inconsistent|inaccurate|missing|tone|other", "note": "问题简述" }] }`,
+    `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结本次译文的整体质量、主要问题与需要重点修正的方向", "termGlossary": [{ "source": "原文术语", "target": "统一译法", "note": "可选说明" }], "styleNotes": "整体风格与语气基调说明", "${issueFieldName}": [{ "entryId": "条目id", "issueType": "inconsistent|inaccurate|missing|tone|other", "note": "${issueNoteDescription}" }] }`,
     'summary 用一段简洁中文总结整体翻译质量与主要发现，供人工审核快速了解；不要在 summary 里描述因预览截断导致的“内容不完整”。',
     'termGlossary 只收录需要在全文统一的术语、专有名词或反复出现的关键表达。',
-    '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名；只有数据库未收录的术语才允许你给出新的建议译法。',
-    '强约束（专有名词）：译文中凡是按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止把它们列入 suspectedIssues，禁止要求改回原文、改成音译/直译/意译或任何其它写法；即使你个人认为另有更好译名，也必须服从数据库。',
-    '唯一例外：当“专有名词翻译数据库”自身存在内部冲突时——即同一原文或含义高度相似的多个原文条目，给出了互相矛盾或不统一的译法（译名彼此打架、含义冲突或同义却不同译）——你才可以在 suspectedIssues 指出该冲突，并在 termGlossary 给出统一后的建议译法。除此之外，不得以任何理由质疑或修正数据库中的专有名词。',
-    'suspectedIssues 只列出术语前后不一致、风格语气偏差、明显语义错误或矛盾等问题，entryId 必须来自速览中出现的 entryId；不要包含由预览截断引起的内容缺失类误判。',
-    '如果某一项没有内容，返回空数组或空字符串。'
-  ].join('\n')
+    '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名；只有数据库未收录的术语才允许你给出新的统一译法。',
+    `强约束（专有名词）：译文中凡是按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止把它们列入 ${issueFieldName}，禁止要求改回原文、改成音译/直译/意译或任何其它写法；即使你个人认为另有更好译名，也必须服从数据库。`,
+    `唯一例外：当“专有名词翻译数据库”自身存在内部冲突时——即同一原文或含义高度相似的多个原文条目，给出了互相矛盾或不统一的译法（译名彼此打架、含义冲突或同义却不同译）——你才可以在 ${issueFieldName} 指出该冲突，并在 termGlossary 给出统一后的译法。除此之外，不得以任何理由质疑或修正数据库中的专有名词。`,
+    `${issueFieldName} 只列出术语前后不一致、风格语气偏差、明显语义错误或矛盾等问题，entryId 必须来自速览中出现的 entryId；不要包含由预览截断引起的内容缺失类误判。`
+  ]
+
+  if (options.partial) {
+    appendPartialGuidelineNoteRules(lines)
+  } else {
+    appendFinalGuidelineDecisionRules(lines)
+  }
+
+  lines.push('如果某一项没有内容，返回空数组或空字符串。')
+  return lines.join('\n')
 }
 
 function buildGuidelineUserPrompt(
@@ -270,7 +306,8 @@ function buildGuidelineUserPrompt(
   targetLanguageCode,
   overviewText,
   partial,
-  officialTermGlossaryMarkdown
+  officialTermGlossaryMarkdown,
+  previousPartialGuidelines = []
 ) {
   const header = partial
     ? '以下是该文章部分翻译产物的速览（全文已分块，这是其中一块）。请基于这一块产出局部校验指南。'
@@ -280,6 +317,17 @@ function buildGuidelineUserPrompt(
     buildLanguageLine(sourceLanguageCode, targetLanguageCode),
     ''
   ]
+  // 分块速览串联前序笔记，避免后续块重复提出已经出现的待定线索。
+  if (
+    partial &&
+    Array.isArray(previousPartialGuidelines) &&
+    previousPartialGuidelines.length > 0
+  ) {
+    lines.push('前序局部笔记：')
+    lines.push(JSON.stringify(previousPartialGuidelines))
+    lines.push('')
+    lines.push('当前速览块：')
+  }
   lines.push(overviewText)
   const glossaryMarkdown = (officialTermGlossaryMarkdown || '').trim()
   if (glossaryMarkdown) {
@@ -295,16 +343,20 @@ function buildGuidelineUserPrompt(
 }
 
 function buildGuidelineMergeSystemPrompt() {
-  return [
+  const lines = [
     '你是多语言博客的翻译质检负责人。',
     '你会收到同一篇文章按块产出的多份局部校验指南，需要合并成一份覆盖全局的校验指南。',
-    '合并时要消除重复术语、统一冲突译法（保留更准确的一项并在 note 中说明），整合风格基调与疑似问题。',
+    '合并时要消除重复术语、统一冲突译法（保留更准确的一项并在 note 中说明），整合风格基调与已确认问题。',
     '如果提供了“专有名词翻译数据库”，其中的官方统一译法必须作为权威依据：合并后的 termGlossary 必须与之保持一致，禁止臆造或推翻已收录的官方译名。',
-    '强约束（专有名词）：按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止保留或新增任何“质疑/推翻数据库专有名词”的 suspectedIssues；仅当数据库自身存在相似名词译法互相矛盾或不统一的内部冲突时，才允许在 suspectedIssues 指出冲突并在 termGlossary 给出统一建议。',
+    '强约束（专有名词）：按“专有名词翻译数据库”译法翻译的专有名词一律视为正确，禁止保留或新增任何“质疑/推翻数据库专有名词”的 confirmedIssues；仅当数据库自身存在相似名词译法互相矛盾或不统一的内部冲突时，才允许在 confirmedIssues 指出冲突并在 termGlossary 给出统一译法。',
     '各块指南来自被截断的速览片段，禁止保留或新增任何“译文截断、缺失后半段、漏译大段内容”等因预览截断而产生的完整性误判。',
-    '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。',
-    `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结整体翻译质量与主要发现", "termGlossary": [{ "source": "", "target": "", "note": "" }], "styleNotes": "", "suspectedIssues": [{ "entryId": "", "issueType": "", "note": "" }] }`
-  ].join('\n')
+    '你只能返回合法 JSON，不要使用 Markdown 包裹 JSON，不要输出解释。'
+  ]
+  appendFinalGuidelineDecisionRules(lines)
+  lines.push(
+    `返回 JSON 结构必须为：{ "schema": "${VALIDATION_GUIDELINE_SCHEMA}", "summary": "用一段简洁中文总结整体翻译质量与主要发现", "termGlossary": [{ "source": "", "target": "", "note": "" }], "styleNotes": "", "confirmedIssues": [{ "entryId": "", "issueType": "", "note": "" }] }`
+  )
+  return lines.join('\n')
 }
 
 function buildGuidelineMergeUserPrompt(
@@ -331,14 +383,30 @@ function buildGuidelineMergeUserPrompt(
   return lines.join('\n')
 }
 
-function normalizeGuideline(parsed) {
+function normalizeIssueItems(items) {
+  if (!Array.isArray(items)) {
+    return []
+  }
+  return items
+    .filter(item => item && typeof item === 'object')
+    .map(item => ({
+      entryId: truncateText(item.entryId, 120),
+      issueType: truncateText(item.issueType, 40),
+      note: truncateText(item.note, 400)
+    }))
+    .filter(item => item.entryId || item.note)
+}
+
+function normalizeGuideline(parsed, mode) {
+  const issueFieldName =
+    mode === 'partial' ? 'issueCandidates' : 'confirmedIssues'
   const guideline = {
     schema: VALIDATION_GUIDELINE_SCHEMA,
     summary: '',
     termGlossary: [],
-    styleNotes: '',
-    suspectedIssues: []
+    styleNotes: ''
   }
+  guideline[issueFieldName] = []
   if (!parsed || typeof parsed !== 'object') {
     return guideline
   }
@@ -358,16 +426,7 @@ function normalizeGuideline(parsed) {
   if (typeof parsed.styleNotes === 'string') {
     guideline.styleNotes = truncateText(parsed.styleNotes, 2000)
   }
-  if (Array.isArray(parsed.suspectedIssues)) {
-    guideline.suspectedIssues = parsed.suspectedIssues
-      .filter(item => item && typeof item === 'object')
-      .map(item => ({
-        entryId: truncateText(item.entryId, 120),
-        issueType: truncateText(item.issueType, 40),
-        note: truncateText(item.note, 400)
-      }))
-      .filter(item => item.entryId || item.note)
-  }
+  guideline[issueFieldName] = normalizeIssueItems(parsed[issueFieldName])
   return guideline
 }
 
@@ -417,7 +476,8 @@ async function requestGuidelineFromAi({
   onStatus,
   sourceLanguageCode,
   targetLanguageCode,
-  officialTermGlossaryProvided
+  officialTermGlossaryProvided,
+  guidelineMode
 }) {
   const { requestBody, requestUrl } =
     textAiProviderRequestService.buildJsonRequestBody(settings, messages, {})
@@ -472,7 +532,7 @@ async function requestGuidelineFromAi({
       onStatus
     }
   )
-  const guideline = normalizeGuideline(stepResult.parsed)
+  const guideline = normalizeGuideline(stepResult.parsed, guidelineMode)
   const aiJsonLog = translationAiJsonLogService.createAiJsonLog({
     operation: stepKey,
     stage: 'ValidationOverview',
@@ -489,6 +549,7 @@ async function requestGuidelineFromAi({
       jobId: getJobId(job),
       stepKey,
       stepLabel,
+      guidelineMode,
       officialTermGlossaryProvided: officialTermGlossaryProvided === true
     },
     input: { messages },
@@ -545,7 +606,8 @@ async function buildGlobalGuideline({
       onStatus: handlers?.onStatus,
       sourceLanguageCode,
       targetLanguageCode,
-      officialTermGlossaryProvided
+      officialTermGlossaryProvided,
+      guidelineMode: 'final'
     })
     return {
       guideline: singleResult.guideline,
@@ -565,7 +627,10 @@ async function buildGlobalGuideline({
       job,
       settings,
       messages: [
-        { role: 'system', content: buildGuidelineSystemPrompt() },
+        {
+          role: 'system',
+          content: buildGuidelineSystemPrompt({ partial: true })
+        },
         {
           role: 'user',
           content: buildGuidelineUserPrompt(
@@ -573,7 +638,8 @@ async function buildGlobalGuideline({
             targetLanguageCode,
             blocks[index],
             true,
-            officialTermGlossaryMarkdown
+            officialTermGlossaryMarkdown,
+            partialGuidelines
           )
         }
       ],
@@ -583,7 +649,8 @@ async function buildGlobalGuideline({
       onStatus: handlers?.onStatus,
       sourceLanguageCode,
       targetLanguageCode,
-      officialTermGlossaryProvided
+      officialTermGlossaryProvided,
+      guidelineMode: 'partial'
     })
     partialGuidelines.push(partialResult.guideline)
     aiJsonLogs.push(partialResult.aiJsonLog)
@@ -615,7 +682,8 @@ async function buildGlobalGuideline({
     onStatus: handlers?.onStatus,
     sourceLanguageCode,
     targetLanguageCode,
-    officialTermGlossaryProvided
+    officialTermGlossaryProvided,
+    guidelineMode: 'final'
   })
   aiJsonLogs.push(mergeResult.aiJsonLog)
   return { guideline: mergeResult.guideline, aiJsonLogs }
@@ -647,11 +715,11 @@ function renderGuidelinePrompt(guideline) {
     lines.push(`整体风格与语气基调：${guideline.styleNotes}`)
   }
   if (
-    Array.isArray(guideline.suspectedIssues) &&
-    guideline.suspectedIssues.length > 0
+    Array.isArray(guideline.confirmedIssues) &&
+    guideline.confirmedIssues.length > 0
   ) {
-    lines.push('疑似问题清单（请重点核查并修正对应条目）：')
-    guideline.suspectedIssues.forEach(item => {
+    lines.push('已确认问题清单（必须修正对应条目）：')
+    guideline.confirmedIssues.forEach(item => {
       lines.push(
         `- 条目 ${item.entryId} [${item.issueType || 'issue'}]：${item.note}`
       )
@@ -1133,13 +1201,13 @@ function buildValidationReport({
       summary: guideline.summary || '',
       termGlossary: guideline.termGlossary,
       styleNotes: guideline.styleNotes,
-      suspectedIssues: guideline.suspectedIssues
+      confirmedIssues: guideline.confirmedIssues
     },
     stats: {
       totalEntries: afterEntries.length,
       changedEntries: corrections.length,
       termCount: guideline.termGlossary.length,
-      suspectedIssueCount: guideline.suspectedIssues.length
+      confirmedIssueCount: guideline.confirmedIssues.length
     },
     corrections,
     completedAt: new Date().toISOString()
@@ -1156,13 +1224,13 @@ function buildSkippedValidation(reason) {
       summary: '',
       termGlossary: [],
       styleNotes: '',
-      suspectedIssues: []
+      confirmedIssues: []
     },
     stats: {
       totalEntries: 0,
       changedEntries: 0,
       termCount: 0,
-      suspectedIssueCount: 0
+      confirmedIssueCount: 0
     },
     corrections: [],
     completedAt: new Date().toISOString()
