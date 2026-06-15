@@ -23,8 +23,8 @@ const OVERVIEW_ENTRY_TEXT_LIMIT = 600
 const OVERVIEW_BLOCK_CHAR_LIMIT = 18000
 // 校验报告中单条修正前后预览文本上限（字符）。
 const CORRECTION_PREVIEW_LIMIT = 160
-// 差异分段中，未变化文本在变化点前后保留的上下文字符数。
-const CORRECTION_DIFF_CONTEXT = 36
+// 差异分段中，未变化文本在变化点前后保留的上下文字符数（让人能看清改动的上下文）。
+const CORRECTION_DIFF_CONTEXT = 60
 // 单个变化分段保留的最大字符数，超出则折叠尾部。
 const CORRECTION_DIFF_CHANGED_LIMIT = 600
 // 单侧（修正前 / 修正后）分段文本的总字符上限。
@@ -1121,36 +1121,81 @@ function clampChangedSegment(segment) {
   }
 }
 
-// 折叠较长的未变化文本：只在变化点附近保留上下文，远端用省略号代替。
+// 上下文截断边界字符：在自然边界处收尾/起始，避免把一个词从中间截断（如「ながら」被截成「がら」）。
+// 用 Unicode 属性类覆盖“所有空白 + 所有标点”，对各语言（中日韩、拉丁、阿拉伯、天城文等）通用，
+// 而不是穷举某几种标点。对无词边界的连写文字（如泰语）在取不到边界时由调用方按字符回退。
+const DIFF_CONTEXT_BOUNDARY_PATTERN = /[\p{White_Space}\p{P}]/u
+
+// 取未变化段“头部”的上下文（紧接上一处变化之后），尽量在自然边界处收尾，避免从词中间截断。
+function takeUnchangedContextHead(chars, context) {
+  if (chars.length <= context) {
+    return chars.join('')
+  }
+  let end = context
+  const slackStart = Math.max(1, end - Math.min(context, 24))
+  for (let k = end; k > slackStart; k -= 1) {
+    if (DIFF_CONTEXT_BOUNDARY_PATTERN.test(chars[k - 1])) {
+      end = k
+      break
+    }
+  }
+  return chars.slice(0, end).join('')
+}
+
+// 取未变化段“尾部”的上下文（紧接下一处变化之前），尽量从自然边界之后开始，避免从词中间截断。
+function takeUnchangedContextTail(chars, context) {
+  if (chars.length <= context) {
+    return chars.join('')
+  }
+  let start = chars.length - context
+  const slackEnd = Math.min(chars.length - 1, start + Math.min(context, 24))
+  for (let k = start; k < slackEnd; k += 1) {
+    if (DIFF_CONTEXT_BOUNDARY_PATTERN.test(chars[k])) {
+      start = k + 1
+      break
+    }
+  }
+  return chars.slice(start).join('')
+}
+
+// 折叠较长的未变化文本：只在变化点附近保留上下文，远端用省略号代替；截断尽量落在自然边界上。
 function collapseUnchangedSegment(segment, isFirst, isLast) {
   const chars = Array.from(segment.text)
   const context = CORRECTION_DIFF_CONTEXT
   const keepHead = !isFirst
   const keepTail = !isLast
-  const head = chars.slice(0, context).join('')
-  const tail = chars.slice(chars.length - context).join('')
 
   if (keepHead && keepTail) {
     if (chars.length <= context * 2 + 1) {
       return segment
     }
+    const head = takeUnchangedContextHead(chars, context)
+    const tail = takeUnchangedContextTail(chars, context)
     return { text: `${head}…${tail}`, changed: false }
   }
   if (keepHead) {
     if (chars.length <= context + 1) {
       return segment
     }
-    return { text: `${head}…`, changed: false }
+    return {
+      text: `${takeUnchangedContextHead(chars, context)}…`,
+      changed: false
+    }
   }
   if (keepTail) {
     if (chars.length <= context + 1) {
       return segment
     }
-    return { text: `…${tail}`, changed: false }
+    return {
+      text: `…${takeUnchangedContextTail(chars, context)}`,
+      changed: false
+    }
   }
   if (chars.length <= context * 2 + 1) {
     return segment
   }
+  const head = takeUnchangedContextHead(chars, context)
+  const tail = takeUnchangedContextTail(chars, context)
   return { text: `${head}…${tail}`, changed: false }
 }
 
