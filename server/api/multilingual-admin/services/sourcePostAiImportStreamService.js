@@ -7,6 +7,9 @@ const {
 const translationWorkflowAiService = require('./translationWorkflowAiService')
 const coverImageTranslationService = require('./coverImageTranslationService')
 const translationPostService = require('./translationPostService')
+const sourcePostProperNounRelationService = require(
+  './sourcePostProperNounRelationService'
+)
 
 function normalizePrompt(value) {
   return String(value || '')
@@ -25,6 +28,42 @@ function createRequestContext(input) {
       languageCode: input.targetLanguageCode
     }
   }
+}
+
+function getSourcePostId(sourcePost, fallbackSourceId) {
+  const sourceId = String(sourcePost?.sourceId || sourcePost?._id || '').trim()
+  if (sourceId) {
+    return sourceId
+  }
+  return String(fallbackSourceId || '').trim()
+}
+
+async function bindInlineOfficialTermGlossary({
+  input,
+  previewContext,
+  data,
+  handlers
+}) {
+  if (input.autoOrganizeOfficialTermGlossary === false) {
+    return
+  }
+  const bindingData = data?.officialTermGlossaryBindingData
+  if (!bindingData) {
+    return
+  }
+  if (handlers.onStatus) {
+    handlers.onStatus({ message: '正在关联文章专有名词词库' })
+  }
+  await sourcePostProperNounRelationService.bindOrganizedTermsToSourcePost({
+    sourceId: getSourcePostId(previewContext.sourcePost, input.sourceId),
+    sourceLanguageCode: input.sourceLanguageCode,
+    sourcePost: previewContext.sourcePost,
+    extractedTerms: bindingData.extractedTerms || [],
+    matchedTermIds: bindingData.matchedTermIds || [],
+    matchedTermLinks: bindingData.matchedTermLinks || [],
+    relationSource: 'translationWorkflow',
+    lastOrganizedAt: new Date()
+  })
 }
 
 function appendCoverImageResultToStreamData(data, coverResult, registry) {
@@ -237,6 +276,12 @@ async function translateSourcePostAiImportEntriesStream(
       },
       handlers
     )
+    await bindInlineOfficialTermGlossary({
+      input,
+      previewContext,
+      data,
+      handlers
+    })
   } else {
     if (handlers.onStatus) {
       handlers.onStatus({ message: '未选择正文条目，跳过正文直译阶段' })

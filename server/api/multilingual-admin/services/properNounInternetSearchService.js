@@ -410,7 +410,9 @@ async function applyInternetTranslations(body = {}) {
       provider: normalizeString(body.provider, 80) || 'gemini',
       model: normalizeString(body.model, 120),
       // 允许写入 AI 确认的同源译名（带 note）；无法确定的语言由 AI 留空，保持缺失。
-      allowSameSourceTranslationWithNote: true
+      allowSameSourceTranslationWithNote: true,
+      // 实时联网检索应用由用户人工校对后触发，不属于自动整理名词库的防覆盖限制。
+      allowExistingTranslationOverwrite: true
     })
   return {
     savedCount: savedTranslations.length,

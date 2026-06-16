@@ -1744,21 +1744,26 @@ async function findOrCreateTermForSourceText(sourceText, options = {}) {
       if (existing) {
         const note = normalizeString(options.note, 2000)
         const currentNote = normalizeString(existing.note, 2000)
+        const protectStarredNote =
+          options.protectStarredTermFieldsFromAi === true &&
+          existing.isStarred === true
         const currentSourceLanguageCode =
           normalizeOptionalExtractedSourceLanguageCode(
             existing.sourceLanguageCode
           )
         const updateData = {}
         let shouldUpdateNote = false
-        if (note && !currentNote) {
-          shouldUpdateNote = true
-        }
-        if (
-          note &&
-          options.shouldUpdateTermNote === true &&
-          currentNote !== note
-        ) {
-          shouldUpdateNote = true
+        if (!protectStarredNote) {
+          if (note && !currentNote) {
+            shouldUpdateNote = true
+          }
+          if (
+            note &&
+            options.shouldUpdateTermNote === true &&
+            currentNote !== note
+          ) {
+            shouldUpdateNote = true
+          }
         }
         if (shouldUpdateNote) {
           updateData.note = note
@@ -1845,7 +1850,8 @@ async function resolveTermForAiSearchTerm(termItem, sourceText) {
   return await findOrCreateTermForSourceText(sourceText, {
     note: termItem?.note,
     sourceLanguageCode,
-    shouldUpdateTermNote: termItem?.shouldUpdateTermNote === true
+    shouldUpdateTermNote: termItem?.shouldUpdateTermNote === true,
+    protectStarredTermFieldsFromAi: true
   })
 }
 
@@ -1970,15 +1976,92 @@ function buildAiSearchTranslationPayload({
   }
 }
 
+async function getExistingTranslationLanguageSet(TranslationModel, termId) {
+  const existingTranslations = await TranslationModel.find(
+    { termId },
+    { languageCode: 1 }
+  ).lean()
+  const languageSet = new Set()
+  existingTranslations.forEach(item => {
+    const languageCode = normalizeLanguageCode(item.languageCode)
+    if (languageCode) {
+      languageSet.add(languageCode)
+    }
+  })
+  return languageSet
+}
+
+function getUpsertedIdFromResult(updateResult) {
+  if (!updateResult) {
+    return null
+  }
+  if (updateResult.upsertedId) {
+    if (updateResult.upsertedId._id) {
+      return updateResult.upsertedId._id
+    }
+    return updateResult.upsertedId
+  }
+  if (
+    Array.isArray(updateResult.upserted) &&
+    updateResult.upserted.length > 0
+  ) {
+    const firstUpserted = updateResult.upserted[0]
+    if (firstUpserted && firstUpserted._id) {
+      return firstUpserted._id
+    }
+  }
+  return null
+}
+
+async function insertAiSearchTranslationIfMissing(TranslationModel, payload) {
+  const updateResult = await TranslationModel.updateOne(
+    {
+      termId: payload.termId,
+      languageCode: payload.languageCode
+    },
+    { $setOnInsert: payload },
+    { upsert: true, setDefaultsOnInsert: true }
+  )
+  const upsertedId = getUpsertedIdFromResult(updateResult)
+  if (upsertedId) {
+    return await TranslationModel.findOne({ _id: upsertedId }).lean()
+  }
+  if (Number(updateResult?.upsertedCount || 0) > 0) {
+    return await TranslationModel.findOne({
+      termId: payload.termId,
+      languageCode: payload.languageCode
+    }).lean()
+  }
+  return null
+}
+
+async function saveAiSearchTranslation({
+  TranslationModel,
+  payload,
+  allowExistingTranslationOverwrite = false
+}) {
+  if (allowExistingTranslationOverwrite === true) {
+    return await TranslationModel.findOneAndUpdate(
+      { termId: payload.termId, languageCode: payload.languageCode },
+      { $set: payload },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean()
+  }
+  return await insertAiSearchTranslationIfMissing(TranslationModel, payload)
+}
+
 async function upsertAiSearchTerms({
   terms = [],
   provider = '',
   model = '',
-  allowSameSourceTranslationWithNote = false
+  allowSameSourceTranslationWithNote = false,
+  allowExistingTranslationOverwrite = false
 }) {
   const TranslationModel = getTranslationModel()
   const savedTranslations = []
   const resolvedTermMap = new Map()
+  const canOverwriteExistingTranslation =
+    allowExistingTranslationOverwrite === true
 
   for (const termItem of terms) {
     const sourceText = normalizeSourceText(termItem?.sourceText)
@@ -2011,24 +2094,18 @@ async function upsertAiSearchTerms({
       term = await resolveTermForAiSearchTerm(termItem, sourceText)
       resolvedTermMap.set(termCacheKey, term)
     }
-    // 标星名词：禁止 AI 修改已有译名，只允许补充尚无译名的语言。
-    // 先取出该名词已有译名的语言集合，逐条写入时跳过已存在的语言。
-    let starredExistingLanguageSet = null
-    if (term && term.isStarred === true) {
-      const existingTranslations = await TranslationModel.find(
-        { termId: term._id },
-        { languageCode: 1 }
-      ).lean()
-      starredExistingLanguageSet = new Set(
-        existingTranslations
-          .map(item => normalizeLanguageCode(item.languageCode))
-          .filter(Boolean)
+    // 自动整理名词库时禁止覆盖任何已有译名，只允许补充缺失语言；人工校对后的应用入口会显式放开。
+    let existingLanguageSet = null
+    if (!canOverwriteExistingTranslation) {
+      existingLanguageSet = await getExistingTranslationLanguageSet(
+        TranslationModel,
+        term._id
       )
     }
     for (const translationEntry of translationEntries) {
       if (
-        starredExistingLanguageSet &&
-        starredExistingLanguageSet.has(translationEntry.languageCode)
+        existingLanguageSet &&
+        existingLanguageSet.has(translationEntry.languageCode)
       ) {
         continue
       }
@@ -2044,11 +2121,17 @@ async function upsertAiSearchTerms({
       if (!payload) {
         continue
       }
-      const record = await TranslationModel.findOneAndUpdate(
-        { termId: term._id, languageCode: translationEntry.languageCode },
-        { $set: payload },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      ).lean()
+      const record = await saveAiSearchTranslation({
+        TranslationModel,
+        payload,
+        allowExistingTranslationOverwrite: canOverwriteExistingTranslation
+      })
+      if (!record) {
+        continue
+      }
+      if (existingLanguageSet) {
+        existingLanguageSet.add(translationEntry.languageCode)
+      }
       savedTranslations.push({
         ...record,
         sourceText: term.sourceText,

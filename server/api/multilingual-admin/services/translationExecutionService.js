@@ -1858,6 +1858,26 @@ async function translateSourcePostForLanguage({
       },
       createHandlers(context, `TranslatePost:${languageCode}`, progressRange)
     )
+    if (shouldAutoOrganizeOfficialTermGlossary(job)) {
+      await context.updateProgress({
+        currentStage: 'BindProperNouns',
+        currentStep: `正在关联 ${getLanguageText(languageCode)} 专有名词词库`,
+        percent: getRangePercent(progressRange, 0.82, 0.84)
+      })
+      await sourcePostProperNounRelationService.bindOrganizedTermsToSourcePost({
+        sourceId: sourcePostId,
+        sourceLanguageCode: job.source.languageCode,
+        sourcePost: previewContext.sourcePost,
+        extractedTerms:
+          data.officialTermGlossaryBindingData?.extractedTerms || [],
+        matchedTermIds:
+          data.officialTermGlossaryBindingData?.matchedTermIds || [],
+        matchedTermLinks:
+          data.officialTermGlossaryBindingData?.matchedTermLinks || [],
+        relationSource: 'translationWorkflow',
+        lastOrganizedAt: new Date()
+      })
+    }
   }
   const payload = data.payload || { entries: [] }
   let nodeValidation = null
@@ -3078,27 +3098,23 @@ async function organizeOneSourcePostProperNouns({
   if (Array.isArray(organizeResult.matchedTermIds)) {
     matchedTermIds = organizeResult.matchedTermIds
   }
-  matchedTermIds =
-    await sourcePostProperNounRelationService.resolveOrganizedTermIds({
-      extractedTerms: organizeResult.extractedTerms || [],
-      matchedTermIds,
-      matchedTermLinks: organizeResult.matchedTermLinks || [],
-      sourceLanguageCode: job.source.languageCode
-    })
   await context.updateProgress({
     currentStage: 'BindProperNouns',
-    currentStep: `正在关联 ${matchedTermIds.length} 个文章专有名词：${title}`,
+    currentStep: `正在关联文章专有名词：${title}`,
     percent: 90
   })
   const bindResult =
-    await sourcePostProperNounRelationService.bindTermsToSourcePost({
+    await sourcePostProperNounRelationService.bindOrganizedTermsToSourcePost({
       sourceId: sourcePostStableId,
       sourceLanguageCode: job.source.languageCode,
-      termIds: matchedTermIds,
-      relationSource: 'aiOrganize',
       sourcePost,
+      extractedTerms: organizeResult.extractedTerms || [],
+      matchedTermIds,
+      matchedTermLinks: organizeResult.matchedTermLinks || [],
+      relationSource: 'aiOrganize',
       lastOrganizedAt: new Date()
     })
+  matchedTermIds = bindResult.matchedTermIds
 
   await context.saveCheckpoint({
     stage: 'BindProperNouns',

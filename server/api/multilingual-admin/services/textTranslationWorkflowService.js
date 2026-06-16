@@ -3559,6 +3559,20 @@ async function getOfficialTermGlossaryCacheData({
   return await setOfficialTermGlossaryCache(taskCache, cacheKey, promise)
 }
 
+function buildOfficialTermGlossaryBindingData(glossaryData = {}) {
+  return {
+    extractedTerms: Array.isArray(glossaryData.extractedTerms)
+      ? glossaryData.extractedTerms
+      : [],
+    matchedTermIds: Array.isArray(glossaryData.matchedTermIds)
+      ? glossaryData.matchedTermIds
+      : [],
+    matchedTermLinks: Array.isArray(glossaryData.matchedTermLinks)
+      ? glossaryData.matchedTermLinks
+      : []
+  }
+}
+
 async function prepareOfficialTermGlossaryForAiInput({
   input,
   handlers,
@@ -3599,6 +3613,8 @@ async function prepareOfficialTermGlossaryForAiInput({
     officialTermGlossaryMarkdown: glossaryMarkdown,
     officialTermGlossaryMarkdownMap:
       glossaryData.officialTermGlossaryMarkdownMap,
+    officialTermGlossaryBindingData:
+      buildOfficialTermGlossaryBindingData(glossaryData),
     officialTermStats: glossaryData.officialTermStats
   }
 }
@@ -5132,6 +5148,9 @@ async function translatePreparedEntriesStream(input, post, handlers = {}) {
       usage: state.combinedUsage,
       requestId: state.responseId || null,
       aiJsonLogs,
+      officialTermGlossaryBindingData:
+        aiInput.officialTermGlossaryBindingData || null,
+      officialTermStats: aiInput.officialTermStats || null,
       coverImagePreviewEntries: [],
       coverImageArtifacts: [],
       coverImageWarnings: []

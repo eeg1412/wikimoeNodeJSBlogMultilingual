@@ -678,6 +678,36 @@ async function bindTermsToSourcePost({
   }
 }
 
+async function bindOrganizedTermsToSourcePost({
+  sourceId,
+  sourceLanguageCode = '',
+  sourcePost = null,
+  extractedTerms = [],
+  matchedTermIds = [],
+  matchedTermLinks = [],
+  relationSource = 'translationWorkflow',
+  lastOrganizedAt = new Date()
+}) {
+  const resolvedTermIds = await resolveOrganizedTermIds({
+    extractedTerms,
+    matchedTermIds,
+    matchedTermLinks,
+    sourceLanguageCode
+  })
+  const bindResult = await bindTermsToSourcePost({
+    sourceId,
+    sourceLanguageCode,
+    termIds: resolvedTermIds,
+    relationSource,
+    sourcePost,
+    lastOrganizedAt
+  })
+  return {
+    ...bindResult,
+    matchedTermIds: resolvedTermIds
+  }
+}
+
 async function getSourcePostTermRelationMap({
   sourceId,
   termIds = [],
@@ -868,7 +898,8 @@ async function resolveOrganizedTermIds({
         sourceText,
         {
           sourceLanguageCode,
-          note: termItem?.note || ''
+          note: termItem?.note || '',
+          protectStarredTermFieldsFromAi: true
         }
       )
     appendUniqueTermId(termIdList, term._id)
@@ -1326,6 +1357,7 @@ async function mergeArticleLinkedCandidateCoverage({
 module.exports = {
   SOURCE_COLLECTION_POSTS,
   batchBindExistingTermsToSourcePost,
+  bindOrganizedTermsToSourcePost,
   bindTermsToSourcePost,
   createOrBindSourcePostTerm,
   deleteRelationsByTermIds,
