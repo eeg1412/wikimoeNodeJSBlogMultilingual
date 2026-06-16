@@ -222,7 +222,7 @@
             {{ $formatDate(row.sourcePost.sourceSnapshotAt) }}
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="130" fixed="right">
+        <ResponsiveTableColumn label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <div class="translation-row-actions">
               <el-button
@@ -232,6 +232,30 @@
               >
                 语言版本
               </el-button>
+              <el-dropdown
+                trigger="click"
+                @command="command => handleSourcePostAction(row, command)"
+              >
+                <el-button
+                  type="primary"
+                  size="small"
+                >
+                  文章操作
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="properNoun">
+                      <el-icon><Collection /></el-icon>
+                      <span>名词管理</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="organizeTerm">
+                      <el-icon><MagicStick /></el-icon>
+                      <span>整理名词</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </ResponsiveTableColumn>
@@ -348,6 +372,12 @@
         </div>
       </template>
     </el-dialog>
+
+    <SourcePostTermOrganizeDialog
+      v-model="organizeDialogVisible"
+      :source-post="organizeSourcePost"
+      @created="handleOrganizeCreated"
+    />
   </div>
 </template>
 
@@ -357,6 +387,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
+import SourcePostTermOrganizeDialog from '../source/SourcePostTermOrganizeDialog.vue'
 import {
   restoreListSessionParams,
   saveListSessionParams
@@ -376,7 +407,8 @@ import {
 
 export default {
   components: {
-    PostRelationSummary
+    PostRelationSummary,
+    SourcePostTermOrganizeDialog
   },
   setup() {
     const route = useRoute()
@@ -390,6 +422,8 @@ export default {
     const detailLoading = ref(false)
     const detailSaving = ref(false)
     const detailData = ref(null)
+    const organizeDialogVisible = ref(false)
+    const organizeSourcePost = ref(null)
     const rowActionLoadingMap = reactive({})
     const editForm = reactive({
       title: '',
@@ -601,6 +635,54 @@ export default {
       })
     }
 
+    const getSourcePostRouteSourceId = sourcePost => {
+      if (sourcePost?.sourceId) {
+        return sourcePost.sourceId
+      }
+      if (sourcePost?._id) {
+        return sourcePost._id
+      }
+      return ''
+    }
+
+    const goProperNounManager = row => {
+      const sourceId = getSourcePostRouteSourceId(row.sourcePost)
+      if (!sourceId) {
+        ElMessage.warning('源文章不存在')
+        return
+      }
+      router.push({
+        name: 'SourcePostProperNounList',
+        query: {
+          sourceId: String(sourceId)
+        }
+      })
+    }
+
+    const openOrganizeDialog = row => {
+      if (!row.sourcePost) {
+        ElMessage.warning('源文章不存在')
+        return
+      }
+      organizeSourcePost.value = row.sourcePost
+      organizeDialogVisible.value = true
+    }
+
+    const handleSourcePostAction = (row, command) => {
+      if (command === 'properNoun') {
+        goProperNounManager(row)
+        return
+      }
+      if (command === 'organizeTerm') {
+        openOrganizeDialog(row)
+      }
+    }
+
+    const handleOrganizeCreated = () => {
+      preserveTableScrollForNextRefresh()
+      getTranslationPostList(false)
+    }
+
     const syncEditForm = post => {
       editForm.title = post?.title || ''
       editForm.alias = post?.alias || ''
@@ -694,6 +776,8 @@ export default {
       detailLoading,
       detailSaving,
       detailData,
+      organizeDialogVisible,
+      organizeSourcePost,
       editForm,
       languageOptions: SUPPORTED_LANGUAGE_OPTIONS,
       postTypeOptions: POST_TYPE_OPTIONS,
@@ -713,6 +797,10 @@ export default {
       createTranslation,
       openTranslationDetail,
       goLanguageList,
+      goProperNounManager,
+      openOrganizeDialog,
+      handleSourcePostAction,
+      handleOrganizeCreated,
       goTranslationEditor,
       saveDetail,
       confirmReview
