@@ -244,6 +244,30 @@ const multilingualAdminRouteSetting = [
     controller: sourcePostProperNounController.createOrganizeJob
   },
   {
+    path: '/source/post/proper-noun/export',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.exportTerms
+  },
+  {
+    path: '/source/post/proper-noun/import',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.importTerms
+  },
+  {
+    path: '/source/post/proper-noun/import/stream',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/sourcePostProperNounImportStream')
+  },
+  {
+    path: '/source/post/proper-noun/import/preview',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: sourcePostProperNounController.previewImportTerms
+  },
+  {
     path: '/source/config/get',
     method: 'get',
     middleware: [checkAuth],

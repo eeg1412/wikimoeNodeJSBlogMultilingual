@@ -1457,7 +1457,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   const force = body.force === true
   const forceOverwriteApplied = body.forceOverwriteApplied === true || force
   const forceReason = normalizeIdentityValue(body.forceReason)
-  const publish = body.publish === true
+  let publish = body.publish === true
   // 家族级"采纳全部"会逐子任务调用本函数，为避免每个子任务都重复刷新缓存/RSS/Sitemap，
   // 调用方可置 skipContentRefresh=true，由家族层在最后按去重语言统一刷新一次。
   const skipContentRefresh = body.skipContentRefresh === true
@@ -1469,6 +1469,12 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
 
   if (!job) {
     throw new ApiError(ERROR_CODES.TRANSLATION_JOB_NOT_FOUND)
+  }
+
+  // 创建任务时勾选"保存后发布"的语言子任务（request.options.publishOnApply=true），
+  // 采纳时无论采纳页是否再次勾选发布，都按创建时的选择自动发布该语言译文。
+  if (job.request?.options?.publishOnApply === true) {
+    publish = true
   }
 
   if (!APPLY_ALLOWED_STATUSES.has(job.status)) {

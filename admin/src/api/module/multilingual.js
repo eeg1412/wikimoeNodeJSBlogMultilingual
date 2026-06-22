@@ -244,6 +244,24 @@ export default function (api) {
         noLoading
       })
     },
+    exportSourcePostProperNounTerms(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/export', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    importSourcePostProperNounTerms(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/import', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
+    previewImportSourcePostProperNounTerms(data, noLoading = false) {
+      return api.post('/source/post/proper-noun/import/preview', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     createTranslationJob(data, noLoading = false) {
       return api.post('/translation/job/create', data, {
         shouldAdminJWT: true,

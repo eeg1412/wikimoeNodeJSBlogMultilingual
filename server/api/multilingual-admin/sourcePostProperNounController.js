@@ -38,6 +38,24 @@ async function unbindTerm(req) {
   )
 }
 
+async function exportTerms(req) {
+  return await sourcePostProperNounRelationService.exportSourcePostTerms(
+    req.body || {}
+  )
+}
+
+async function importTerms(req) {
+  return await sourcePostProperNounRelationService.importSourcePostTerms(
+    req.body || {}
+  )
+}
+
+async function previewImportTerms(req) {
+  return await sourcePostProperNounRelationService.previewImportSourcePostTerms(
+    req.body || {}
+  )
+}
+
 function getOrganizeJobRecursion(body) {
   if (body.recursion && body.recursion.maxDepth !== undefined) {
     return {
@@ -97,9 +115,21 @@ module.exports = {
     createOrganizeJob,
     'source post proper noun organize job create fail'
   ),
+  exportTerms: controller(
+    exportTerms,
+    'source post proper noun term export fail'
+  ),
   getTermList: controller(
     getTermList,
     'source post proper noun term list get fail'
+  ),
+  importTerms: controller(
+    importTerms,
+    'source post proper noun term import fail'
+  ),
+  previewImportTerms: controller(
+    previewImportTerms,
+    'source post proper noun term import preview fail'
   ),
   unbindTerm: controller(unbindTerm, 'source post proper noun term unbind fail')
 }

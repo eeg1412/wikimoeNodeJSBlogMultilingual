@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="批量 AI 翻译"
+    :title="isValidateMode ? '批量 AI 校验' : '批量 AI 翻译'"
     width="min(1100px, 96vw)"
     align-center
     destroy-on-close
@@ -113,7 +113,7 @@
         />
 
         <div
-          v-if="showCoverImageTranslationOption"
+          v-if="showCoverImageTranslationOption && !isValidateMode"
           class="translation-json-group ai-cover-translation-group"
         >
           <div class="translation-json-group-header">
@@ -230,7 +230,7 @@
               sourceProperNounTermCountLoading
             "
           />
-          <el-form-item label="校验译文">
+          <el-form-item v-if="!isValidateMode" label="校验译文">
             <el-switch
               v-model="aiVerificationEnabled"
               :disabled="isBusy"
@@ -261,7 +261,7 @@
         :disabled="loading || !canSubmit"
         @click="submitBatch"
       >
-        创建后台任务
+        {{ isValidateMode ? '创建校验任务' : '创建后台任务' }}
       </el-button>
     </template>
   </el-dialog>
@@ -325,7 +325,9 @@ export default {
       default() {
         return []
       }
-    }
+    },
+    // 'translate' = 批量 AI 翻译；'validate' = 批量 AI 校验（对已有译文质检并产出修正）。
+    mode: { type: String, default: 'translate' }
   },
   emits: ['update:modelValue', 'submitted'],
   setup(props, { emit }) {
@@ -355,6 +357,8 @@ export default {
         emit('update:modelValue', value)
       }
     })
+    // 校验模式：复用本对话框，只对已有译文的所选字段做质检并产出修正（不重新翻译、不处理封面图）。
+    const isValidateMode = computed(() => props.mode === 'validate')
 
     const languageOptions = computed(() => SUPPORTED_LANGUAGE_OPTIONS)
 
@@ -785,12 +789,16 @@ export default {
               prompt: aiPrompt.value,
               baseMode: aiBaseMode.value,
               options: {
-                translateCoverImage,
+                translateCoverImage: isValidateMode.value
+                  ? false
+                  : translateCoverImage,
                 autoOrganizeOfficialTermGlossary:
                   aiAutoOrganizeOfficialTermGlossary.value === true,
                 searchOfficialTermTranslations:
                   shouldSearchOfficialTermTranslations(),
-                aiVerificationEnabled: aiVerificationEnabled.value === true
+                aiVerificationEnabled:
+                  isValidateMode.value || aiVerificationEnabled.value === true,
+                validateOnly: isValidateMode.value
               },
               selectedEntryKeys
             },
@@ -813,7 +821,11 @@ export default {
         const createdCount = Number(data.createdCount || 0)
         const failedCount = Number(data.failedCount || 0)
         if (createdCount > 0) {
-          ElMessage.success(`已创建 ${createdCount} 个后台任务`)
+          ElMessage.success(
+            isValidateMode.value
+              ? `已创建 ${createdCount} 个校验任务`
+              : `已创建 ${createdCount} 个后台任务`
+          )
           emit('submitted')
         }
         if (failedCount > 0) {
@@ -851,6 +863,7 @@ export default {
 
     return {
       visible,
+      isValidateMode,
       loading,
       submitting,
       settingsLoading,

@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="AI 翻译"
+    :title="isValidateMode ? 'AI 校验' : 'AI 翻译'"
     width="min(1100px, 96vw)"
     align-center
     destroy-on-close
@@ -102,7 +102,9 @@
           </el-form>
           <div class="translation-json-toolbar">
             <div class="translation-dialog-intro">
-              <div class="translation-dialog-intro-title">选择 AI 翻译字段</div>
+              <div class="translation-dialog-intro-title">
+                {{ isValidateMode ? '选择 AI 校验字段' : '选择 AI 翻译字段' }}
+              </div>
               <div class="translation-dialog-intro-text">
                 已选择
                 {{ selectedAiEntryIds.length }} 项。按分组检查本次会提交给 AI
@@ -135,7 +137,7 @@
           />
 
           <div
-            v-if="showAiCoverImageTranslationOption"
+            v-if="showAiCoverImageTranslationOption && !isValidateMode"
             class="translation-json-group ai-cover-translation-group"
           >
             <div class="translation-json-group-header">
@@ -331,7 +333,7 @@
                 sourceProperNounTermCountLoading
               "
             />
-            <el-form-item label="校验译文">
+            <el-form-item v-if="!isValidateMode" label="校验译文">
               <el-switch
                 v-model="aiVerificationEnabled"
                 :disabled="isAiBusy"
@@ -589,14 +591,14 @@
       <el-button
         v-if="!aiImportPreview"
         type="primary"
-        plain
+        :plain="!isValidateMode"
         :disabled="isAiBusy || !canCreateAiTranslationJob"
         @click="createAiTranslationJob"
       >
-        创建后台任务
+        {{ isValidateMode ? '创建校验任务' : '创建后台任务' }}
       </el-button>
       <el-button
-        v-if="!aiImportPreview"
+        v-if="!aiImportPreview && !isValidateMode"
         type="primary"
         :loading="aiTranslating"
         :disabled="isAiBusy || !canStartAiTranslation"
@@ -605,7 +607,7 @@
         开始翻译
       </el-button>
       <el-button
-        v-else
+        v-if="aiImportPreview"
         type="primary"
         :loading="aiApplying"
         :disabled="isAiBusy || aiImportPreviewTotalChangeCount === 0"
@@ -915,7 +917,9 @@ export default {
     postId: { type: String, default: '' },
     form: { type: Object, default: null },
     relationRecords: { type: Object, default: null },
-    originalEditorVersion: { type: Number, default: undefined }
+    originalEditorVersion: { type: Number, default: undefined },
+    // 'translate' = AI 翻译；'validate' = AI 校验（对已有译文质检并产出修正）。
+    mode: { type: String, default: 'translate' }
   },
   emits: ['update:modelValue', 'saved'],
   setup(props, { emit }) {
@@ -964,6 +968,8 @@ export default {
         emit('update:modelValue', value)
       }
     })
+    // 校验模式：复用本对话框，只对已有译文的所选字段做质检并产出修正（不重新翻译、不实时翻译、不处理封面图）。
+    const isValidateMode = computed(() => props.mode === 'validate')
     const hasExternalContext = computed(() => {
       return Boolean(props.form && props.relationRecords)
     })
@@ -2163,18 +2169,24 @@ export default {
             prompt: aiPrompt.value,
             baseMode: aiBaseMode.value,
             options: {
-              translateCoverImage: shouldTranslateAiCoverImage(),
+              translateCoverImage:
+                !isValidateMode.value && shouldTranslateAiCoverImage(),
               autoOrganizeOfficialTermGlossary:
                 shouldAutoOrganizeOfficialTermGlossary(),
               searchOfficialTermTranslations:
                 shouldSearchOfficialTermTranslations(),
-              aiVerificationEnabled: aiVerificationEnabled.value === true
+              aiVerificationEnabled:
+                isValidateMode.value || aiVerificationEnabled.value === true,
+              validateOnly: isValidateMode.value
             },
-            entries: selectedEntries,
+            // 校验模式不下发具体 entries，由服务端按源/已有译文重建带"当前译文"的条目用于质检。
+            entries: isValidateMode.value ? [] : selectedEntries,
             selectedEntryKeys: selectedEntries.map(entry => entry.id)
           }
         })
-        ElMessage.success('后台任务已创建')
+        ElMessage.success(
+          isValidateMode.value ? '校验任务已创建' : '后台任务已创建'
+        )
         visible.value = false
         resetAiTranslationState()
       } catch (error) {
@@ -2426,6 +2438,7 @@ export default {
     return {
       Document,
       VideoPlay,
+      isValidateMode,
       aiApplying,
       aiAutoOrganizeOfficialTermGlossary,
       aiBaseMode,

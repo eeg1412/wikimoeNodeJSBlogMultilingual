@@ -27,19 +27,37 @@
       </el-descriptions>
 
       <div class="mb20 translation-language-toolbar">
-        <el-button
-          type="primary"
+        <el-dropdown
+          trigger="click"
           :disabled="selectedTranslationRows.length === 0"
-          @click="openBatchAiTranslationDialog"
+          @command="handleBatchActionCommand"
         >
-          批量 AI 翻译{{
-            selectedTranslationRows.length > 0
-              ? `（${selectedTranslationRows.length}）`
-              : ''
-          }}
-        </el-button>
+          <el-button
+            type="primary"
+            :disabled="selectedTranslationRows.length === 0"
+          >
+            批量操作{{
+              selectedTranslationRows.length > 0
+                ? `（${selectedTranslationRows.length}）`
+                : ''
+            }}
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="translate">
+                <el-icon><Promotion /></el-icon>
+                <span>批量 AI 翻译</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="validate">
+                <el-icon><MagicStick /></el-icon>
+                <span>批量 AI 校验</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <span class="translation-language-toolbar-hint">
-          勾选已创建的语言版本后，可一次性对多个语言版本批量发起 AI 翻译。
+          勾选已创建的语言版本后，可一次性对多个语言版本批量发起 AI 翻译或校验。
         </span>
       </div>
 
@@ -186,39 +204,65 @@
               </span>
             </template>
           </ResponsiveTableColumn>
-          <ResponsiveTableColumn label="操作" width="460" fixed="right">
+          <ResponsiveTableColumn label="操作" width="300" fixed="right">
             <template #default="{ row }">
               <div class="translation-row-actions">
-                <el-button
-                  v-if="row.translation"
-                  type="primary"
-                  size="small"
-                  @click="goTranslationEditor(row.translation)"
-                >
-                  编辑
-                </el-button>
-                <TranslationPostAiTranslateButton
-                  v-if="row.translation"
-                  :post="row.translation"
-                  size="small"
-                  @translate="openAiTranslationDialog"
-                />
-                <el-button
-                  v-if="row.translation"
-                  type="warning"
-                  size="small"
-                  @click="openRestoreTranslationDialog(row.translation)"
-                >
-                  同步快照
-                </el-button>
-                <el-button
-                  v-if="row.translation"
-                  type="warning"
-                  size="small"
-                  @click="openSourceLinkRewriteDialog(row.translation)"
-                >
-                  检查源站链接
-                </el-button>
+                <template v-if="row.translation">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    @click="goTranslationEditor(row.translation)"
+                  >
+                    编辑
+                  </el-button>
+                  <el-dropdown
+                    trigger="click"
+                    @command="
+                      command => handleAiActionCommand(row.translation, command)
+                    "
+                  >
+                    <el-button type="success" size="small">
+                      AI 操作
+                      <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="translate">
+                          <el-icon><Promotion /></el-icon>
+                          <span>AI 翻译</span>
+                        </el-dropdown-item>
+                        <el-dropdown-item command="validate">
+                          <el-icon><MagicStick /></el-icon>
+                          <span>AI 校验</span>
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <el-dropdown
+                    trigger="click"
+                    @command="
+                      command =>
+                        handleMoreActionCommand(row.translation, command)
+                    "
+                  >
+                    <el-button type="warning" size="small">
+                      更多操作
+                      <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="syncSnapshot">
+                          <el-icon><Refresh /></el-icon>
+                          <span>同步快照</span>
+                        </el-dropdown-item>
+                        <el-dropdown-item command="checkSourceLink">
+                          <el-icon><Link /></el-icon>
+                          <span>检查源站链接</span>
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </template>
                 <el-button
                   v-else
                   type="primary"
@@ -244,6 +288,7 @@
     <TranslationPostAiTranslationDialog
       v-model="aiTranslationDialogVisible"
       :post-id="aiTranslationPostId"
+      :mode="aiTranslationDialogMode"
       @saved="handleAiTranslationSaved"
     />
     <TranslationPostBatchAiTranslationDialog
@@ -251,6 +296,7 @@
       :source-post="sourcePost"
       :source-snapshot-id="route.params.sourceSnapshotId"
       :targets="batchAiTranslationTargets"
+      :mode="batchAiTranslationDialogMode"
       @submitted="handleBatchAiTranslationSubmitted"
     />
     <TranslationPostSnapshotRestoreDialog
@@ -275,7 +321,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { multilingualApi } from '@/api'
 import PostRelationSummary from '@/components/PostRelationSummary.vue'
-import TranslationPostAiTranslateButton from '@/components/TranslationPostAiTranslateButton.vue'
 import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTranslationDialog.vue'
 import TranslationPostBatchAiTranslationDialog from '@/components/TranslationPostBatchAiTranslationDialog.vue'
 import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
@@ -291,7 +336,6 @@ export default {
   name: 'TranslationPostLanguageList',
   components: {
     PostRelationSummary,
-    TranslationPostAiTranslateButton,
     TranslationPostAiTranslationDialog,
     TranslationPostBatchAiTranslationDialog,
     TranslationPostSnapshotRestoreDialog,
@@ -305,7 +349,10 @@ export default {
     const sourceGroup = ref(null)
     const aiTranslationDialogVisible = ref(false)
     const aiTranslationPostId = ref('')
+    // 单个/批量对话框的模式：'translate' = AI 翻译；'validate' = AI 校验（复用同一对话框）。
+    const aiTranslationDialogMode = ref('translate')
     const batchAiTranslationDialogVisible = ref(false)
+    const batchAiTranslationDialogMode = ref('translate')
     const selectedTranslationRows = ref([])
     const snapshotRestoreDialogVisible = ref(false)
     const snapshotRestorePost = ref(null)
@@ -559,7 +606,41 @@ export default {
       }
 
       aiTranslationPostId.value = translation._id
+      aiTranslationDialogMode.value = 'translate'
       aiTranslationDialogVisible.value = true
+    }
+
+    // 单个校验：复用单个 AI 翻译对话框，以校验模式打开（选字段后发起校验任务）。
+    function openAiValidationDialog(translation) {
+      if (!translation || !translation._id) {
+        return
+      }
+
+      aiTranslationPostId.value = translation._id
+      aiTranslationDialogMode.value = 'validate'
+      aiTranslationDialogVisible.value = true
+    }
+
+    // 行内「AI 操作」下拉命令分发：翻译 / 校验。
+    function handleAiActionCommand(translation, command) {
+      if (command === 'translate') {
+        openAiTranslationDialog(translation)
+        return
+      }
+      if (command === 'validate') {
+        openAiValidationDialog(translation)
+      }
+    }
+
+    // 行内「更多操作」下拉命令分发：同步快照 / 检查源站链接。
+    function handleMoreActionCommand(translation, command) {
+      if (command === 'syncSnapshot') {
+        openRestoreTranslationDialog(translation)
+        return
+      }
+      if (command === 'checkSourceLink') {
+        openSourceLinkRewriteDialog(translation)
+      }
     }
 
     /**
@@ -594,7 +675,29 @@ export default {
         ElMessage.warning('请先勾选要批量翻译的语言版本')
         return
       }
+      batchAiTranslationDialogMode.value = 'translate'
       batchAiTranslationDialogVisible.value = true
+    }
+
+    // 批量校验：复用批量 AI 翻译对话框，以校验模式打开（选字段后批量发起校验任务）。
+    function openBatchAiValidationDialog() {
+      if (batchAiTranslationTargets.value.length === 0) {
+        ElMessage.warning('请先勾选要批量校验的语言版本')
+        return
+      }
+      batchAiTranslationDialogMode.value = 'validate'
+      batchAiTranslationDialogVisible.value = true
+    }
+
+    // 工具栏「批量操作」下拉命令分发：批量翻译 / 批量校验。
+    function handleBatchActionCommand(command) {
+      if (command === 'translate') {
+        openBatchAiTranslationDialog()
+        return
+      }
+      if (command === 'validate') {
+        openBatchAiValidationDialog()
+      }
     }
 
     function handleBatchAiTranslationSubmitted() {
@@ -625,7 +728,9 @@ export default {
       loading,
       aiTranslationDialogVisible,
       aiTranslationPostId,
+      aiTranslationDialogMode,
       batchAiTranslationDialogVisible,
+      batchAiTranslationDialogMode,
       selectedTranslationRows,
       batchAiTranslationTargets,
       snapshotRestoreDialogVisible,
@@ -650,9 +755,14 @@ export default {
       getPostStatusText,
       goTranslationEditor,
       openAiTranslationDialog,
+      openAiValidationDialog,
+      handleAiActionCommand,
+      handleMoreActionCommand,
       isRowSelectable,
       handleSelectionChange,
       openBatchAiTranslationDialog,
+      openBatchAiValidationDialog,
+      handleBatchActionCommand,
       handleBatchAiTranslationSubmitted,
       handleAiTranslationSaved,
       handleSnapshotRestored,

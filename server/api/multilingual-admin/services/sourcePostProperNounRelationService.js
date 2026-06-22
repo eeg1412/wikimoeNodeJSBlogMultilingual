@@ -1354,6 +1354,834 @@ async function mergeArticleLinkedCandidateCoverage({
   }
 }
 
+const SOURCE_POST_TERM_EXPORT_SCHEMA =
+  'wikimoe.proper-noun.source-post-terms.export'
+const SOURCE_POST_TERM_EXPORT_VERSION = 1
+const MAX_IMPORT_TERM_COUNT = 500
+const MAX_IMPORT_TRANSLATION_COUNT_PER_TERM = 50
+
+/**
+ * 规范化导出/模板所选的译名语言列表（至少需要一种）
+ * @param {(string[]|string)} value - 语言代码数组或以逗号分隔的字符串
+ * @returns {string[]} 去重后的合法语言代码列表
+ */
+function normalizeExportLanguageCodes(value) {
+  let rawList = []
+  if (Array.isArray(value)) {
+    rawList = value
+  } else if (typeof value === 'string') {
+    rawList = value.split(',')
+  }
+  const codeMap = new Map()
+  rawList.forEach(item => {
+    const text = normalizeString(item, 20)
+    if (!text) {
+      return
+    }
+    const languageCode = normalizeLanguageCode(text)
+    if (!languageCode) {
+      throw new ApiError(
+        ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+        `译名语言代码不受支持：${text}`,
+        'languageCodes',
+        400
+      )
+    }
+    if (!codeMap.has(languageCode)) {
+      codeMap.set(languageCode, languageCode)
+    }
+  })
+  const languageCodes = Array.from(codeMap.values())
+  if (languageCodes.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '请至少选择一种译名语言',
+      'languageCodes',
+      400
+    )
+  }
+  return languageCodes
+}
+
+/**
+ * 将单条导入译名数据规范化；译名内容为空（含模板中的 null 占位）时返回 null 以跳过
+ * @param {Object} rawTranslation - 译名原始数据
+ * @param {number} termIndex - 名词在导入列表中的序号（从 0 开始）
+ * @param {number} translationIndex - 译名在该名词下的序号（从 0 开始）
+ * @returns {({languageCode: string, translatedText: string, note: string}|null)}
+ */
+function normalizeImportTranslationEntry(
+  rawTranslation,
+  termIndex,
+  translationIndex
+) {
+  const positionText = `第 ${termIndex + 1} 个名词的第 ${
+    translationIndex + 1
+  } 个译名`
+  if (
+    !rawTranslation ||
+    typeof rawTranslation !== 'object' ||
+    Array.isArray(rawTranslation)
+  ) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${positionText}格式不正确`,
+      'terms',
+      400
+    )
+  }
+  const translatedText = normalizeString(rawTranslation.translatedText, 300)
+  if (!translatedText) {
+    // 译名内容为空（如模板中的 null 占位）时跳过，不写入空译名
+    return null
+  }
+  let languageCode = ''
+  try {
+    languageCode = normalizeOptionalLanguageCode(
+      rawTranslation.languageCode,
+      'languageCode'
+    )
+  } catch (error) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      `${positionText}的语言代码不受支持：${normalizeString(
+        rawTranslation.languageCode,
+        20
+      )}`,
+      'terms',
+      400
+    )
+  }
+  if (!languageCode) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${positionText}缺少语言代码`,
+      'terms',
+      400
+    )
+  }
+  return {
+    languageCode,
+    translatedText,
+    note: normalizeString(rawTranslation.note, 2000)
+  }
+}
+
+/**
+ * 将单条导入名词数据规范化并校验
+ * @param {Object} rawTerm - 名词原始数据
+ * @param {number} termIndex - 名词在导入列表中的序号（从 0 开始）
+ * @returns {{id: string, objectId: (mongoose.Types.ObjectId|null), sourceText: string, sourceLanguageCode: string, note: string, translations: Array}}
+ */
+function normalizeImportTermEntry(rawTerm, termIndex) {
+  const positionText = `第 ${termIndex + 1} 个名词`
+  if (!rawTerm || typeof rawTerm !== 'object' || Array.isArray(rawTerm)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${positionText}格式不正确`,
+      'terms',
+      400
+    )
+  }
+  const idText = normalizeString(rawTerm.id || rawTerm._id, 80)
+  let objectId = null
+  if (idText) {
+    if (!mongoose.Types.ObjectId.isValid(idText)) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_ID_INVALID,
+        `${positionText}的 id 格式不正确：${idText}`,
+        'terms',
+        400
+      )
+    }
+    objectId = new mongoose.Types.ObjectId(idText)
+  }
+  const sourceText = properNounTranslationService.normalizeSourceText(
+    rawTerm.sourceText
+  )
+  if (!sourceText) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${positionText}缺少原文名词`,
+      'terms',
+      400
+    )
+  }
+  let sourceLanguageCode = ''
+  try {
+    sourceLanguageCode = normalizeOptionalLanguageCode(
+      rawTerm.sourceLanguageCode,
+      'sourceLanguageCode'
+    )
+  } catch (error) {
+    throw new ApiError(
+      ERROR_CODES.LANGUAGE_CODE_UNSUPPORTED,
+      `${positionText}的原文语言代码不受支持：${normalizeString(
+        rawTerm.sourceLanguageCode,
+        20
+      )}`,
+      'terms',
+      400
+    )
+  }
+  const rawTranslations = Array.isArray(rawTerm.translations)
+    ? rawTerm.translations
+    : []
+  if (rawTranslations.length > MAX_IMPORT_TRANSLATION_COUNT_PER_TERM) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `${positionText}的译名数量超过上限 ${MAX_IMPORT_TRANSLATION_COUNT_PER_TERM}`,
+      'terms',
+      400
+    )
+  }
+  const translationMap = new Map()
+  rawTranslations.forEach((rawTranslation, translationIndex) => {
+    const translation = normalizeImportTranslationEntry(
+      rawTranslation,
+      termIndex,
+      translationIndex
+    )
+    if (!translation) {
+      return
+    }
+    translationMap.set(translation.languageCode, translation)
+  })
+  return {
+    id: idText,
+    objectId,
+    sourceText,
+    sourceLanguageCode,
+    note: normalizeString(rawTerm.note, 2000),
+    translations: Array.from(translationMap.values())
+  }
+}
+
+/**
+ * 解析并完整校验导入名词列表，并为每个条目预解析其在库中的现有名词（供导入与预览共用）
+ * @param {Object} body - 导入参数
+ * @returns {Promise<{sourceId: mongoose.Types.ObjectId, sourcePost: Object, sourceLanguageCode: string, entries: Array}>}
+ */
+async function prepareSourcePostTermImportEntries(body = {}) {
+  const sourceId = parseSourceId(body.sourceId || body.id)
+  const sourcePost = await getSourcePostSummary(sourceId)
+  const sourceLanguageCode = normalizeOptionalLanguageCode(
+    body.sourceLanguageCode || sourcePost.sourceLanguageCode,
+    'sourceLanguageCode'
+  )
+
+  const rawTerms = Array.isArray(body.terms) ? body.terms : null
+  if (!rawTerms) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '导入数据格式不正确，缺少 terms 名词列表',
+      'terms',
+      400
+    )
+  }
+  if (rawTerms.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '导入数据为空',
+      'terms',
+      400
+    )
+  }
+  if (rawTerms.length > MAX_IMPORT_TERM_COUNT) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      `单次最多导入 ${MAX_IMPORT_TERM_COUNT} 个名词`,
+      'terms',
+      400
+    )
+  }
+
+  const entries = rawTerms.map((rawTerm, termIndex) => {
+    return normalizeImportTermEntry(rawTerm, termIndex)
+  })
+
+  const TermModel = getTermModel()
+
+  // 一次性加载所有提供了 id 的名词，并校验其均存在
+  const providedObjectIdMap = new Map()
+  entries.forEach(entry => {
+    if (entry.objectId) {
+      providedObjectIdMap.set(entry.id, entry.objectId)
+    }
+  })
+  const idTermMap = new Map()
+  if (providedObjectIdMap.size > 0) {
+    const idTermRows = await TermModel.find({
+      _id: { $in: Array.from(providedObjectIdMap.values()) }
+    }).lean()
+    idTermRows.forEach(term => {
+      idTermMap.set(String(term._id), term)
+    })
+    const missingIds = Array.from(providedObjectIdMap.keys()).filter(id => {
+      return !idTermMap.has(id)
+    })
+    if (missingIds.length > 0) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_NOT_FOUND,
+        `以下名词 id 在数据库中不存在：${missingIds.join('、')}`,
+        'terms',
+        400,
+        { missingIds }
+      )
+    }
+  }
+
+  // 一次性按原文名词加载未提供 id 的名词，用于判断新增 / 匹配既有
+  const normalizedTextSet = new Set()
+  entries.forEach(entry => {
+    if (!entry.objectId) {
+      normalizedTextSet.add(
+        properNounTranslationService.buildNormalizedSourceText(entry.sourceText)
+      )
+    }
+  })
+  const normalizedTextTermMap = new Map()
+  if (normalizedTextSet.size > 0) {
+    const noIdTermRows = await TermModel.find({
+      normalizedSourceText: { $in: Array.from(normalizedTextSet) }
+    }).lean()
+    noIdTermRows.forEach(term => {
+      const key = term.normalizedSourceText
+      if (!normalizedTextTermMap.has(key)) {
+        normalizedTextTermMap.set(key, term)
+      }
+    })
+  }
+
+  entries.forEach(entry => {
+    if (entry.objectId) {
+      entry.existingTerm = idTermMap.get(entry.id) || null
+      return
+    }
+    const normalizedSourceText =
+      properNounTranslationService.buildNormalizedSourceText(entry.sourceText)
+    entry.existingTerm = normalizedTextTermMap.get(normalizedSourceText) || null
+  })
+
+  return { sourceId, sourcePost, sourceLanguageCode, entries }
+}
+
+/**
+ * 按所选语言构建一个名词的导出译名数组；缺少译名的语言输出 null 占位
+ * @param {Map<string, Object>} languageTranslationMap - 语言代码到译名的映射
+ * @param {string[]} languageCodes - 所选语言代码列表
+ * @returns {Array<{languageCode: string, translatedText: (string|null), note: (string|null)}>}
+ */
+function buildExportTranslationList(languageTranslationMap, languageCodes) {
+  return languageCodes.map(languageCode => {
+    const translation = languageTranslationMap.get(languageCode)
+    if (!translation) {
+      return {
+        languageCode,
+        translatedText: null,
+        note: null
+      }
+    }
+    return {
+      languageCode,
+      translatedText: translation.translatedText || '',
+      note: translation.note || ''
+    }
+  })
+}
+
+/**
+ * 构建源文章名词导出的空白模板
+ * @param {string[]} languageCodes - 所选译名语言代码列表
+ * @returns {Object} 模板数据
+ */
+function buildSourcePostTermExportTemplate(languageCodes) {
+  return {
+    schema: SOURCE_POST_TERM_EXPORT_SCHEMA,
+    version: SOURCE_POST_TERM_EXPORT_VERSION,
+    sourceId: '',
+    sourcePostTitle: '',
+    languageCodes,
+    terms: [
+      {
+        id: '',
+        sourceText: '示例名词（新增名词时请将 id 留空）',
+        sourceLanguageCode: 'ja-JP',
+        note: '名词注释（可选）',
+        translations: languageCodes.map((languageCode, index) => {
+          if (index === 0) {
+            return {
+              languageCode,
+              translatedText: '示例译名',
+              note: '译名注释（可选）'
+            }
+          }
+          return {
+            languageCode,
+            translatedText: null,
+            note: null
+          }
+        })
+      }
+    ]
+  }
+}
+
+/**
+ * 导出源文章关联的所有名词及译名，或仅导出空白模板
+ * @param {Object} body - 参数
+ * @param {string} body.sourceId - 源文章 id
+ * @param {(string[]|string)} body.languageCodes - 所选译名语言列表
+ * @param {boolean} [body.templateOnly] - 是否仅导出模板
+ * @returns {Promise<Object>} 导出数据
+ */
+async function exportSourcePostTerms(body = {}) {
+  const languageCodes = normalizeExportLanguageCodes(body.languageCodes)
+  const templateOnly =
+    body.templateOnly === true || body.templateOnly === 'true'
+  if (templateOnly) {
+    return buildSourcePostTermExportTemplate(languageCodes)
+  }
+
+  const sourceId = parseSourceId(body.sourceId || body.id)
+  const sourceLanguageCode = normalizeOptionalLanguageCode(
+    body.sourceLanguageCode,
+    'sourceLanguageCode'
+  )
+  const sourcePost = await getSourcePostSummary(sourceId)
+  const RelationModel = getRelationModel()
+  const TermModel = getTermModel()
+  const TranslationModel = getTranslationModel()
+  const relationMatch = buildRelationMatch({ sourceId, sourceLanguageCode })
+  const relationList = await RelationModel.find(relationMatch)
+    .sort({ updatedAt: -1, _id: -1 })
+    .lean()
+  const relationTermIdList = relationList.map(relation => relation.termId)
+
+  let terms = []
+  if (relationTermIdList.length > 0) {
+    const termRows = await TermModel.find({
+      _id: { $in: relationTermIdList },
+      enabled: true
+    }).lean()
+    const termMap = new Map()
+    termRows.forEach(term => {
+      termMap.set(String(term._id), term)
+    })
+    const translationRows = await TranslationModel.find({
+      termId: { $in: termRows.map(term => term._id) },
+      languageCode: { $in: languageCodes },
+      enabled: true
+    })
+      .sort({ languageCode: 1, updatedAt: -1 })
+      .lean()
+    const termLanguageTranslationMap = new Map()
+    translationRows.forEach(translation => {
+      const key = String(translation.termId || '')
+      if (!termLanguageTranslationMap.has(key)) {
+        termLanguageTranslationMap.set(key, new Map())
+      }
+      const languageTranslationMap = termLanguageTranslationMap.get(key)
+      if (!languageTranslationMap.has(translation.languageCode)) {
+        languageTranslationMap.set(translation.languageCode, translation)
+      }
+    })
+    terms = relationList
+      .map(relation => termMap.get(String(relation.termId || '')))
+      .filter(Boolean)
+      .map(term => {
+        const languageTranslationMap =
+          termLanguageTranslationMap.get(String(term._id)) || new Map()
+        return {
+          id: String(term._id),
+          sourceText: term.sourceText || '',
+          sourceLanguageCode: term.sourceLanguageCode || '',
+          note: term.note || '',
+          translations: buildExportTranslationList(
+            languageTranslationMap,
+            languageCodes
+          )
+        }
+      })
+  }
+
+  return {
+    schema: SOURCE_POST_TERM_EXPORT_SCHEMA,
+    version: SOURCE_POST_TERM_EXPORT_VERSION,
+    sourceId: String(sourceId),
+    sourcePostTitle: sourcePost.title || '',
+    languageCodes,
+    terms
+  }
+}
+
+/**
+ * 解析导入计划：批量读取既有名词/译名/关联，逐条计算真实变化与所需操作（供导入与预览共用）
+ * @param {Object} body - 导入参数
+ * @returns {Promise<{sourceId: mongoose.Types.ObjectId, sourcePost: Object, sourceLanguageCode: string, plans: Array}>}
+ */
+async function resolveImportPlan(body = {}) {
+  const { sourceId, sourcePost, sourceLanguageCode, entries } =
+    await prepareSourcePostTermImportEntries(body)
+
+  const TranslationModel = getTranslationModel()
+  const RelationModel = getRelationModel()
+
+  const existingTermIdList = []
+  entries.forEach(entry => {
+    if (entry.existingTerm) {
+      existingTermIdList.push(entry.existingTerm._id)
+    }
+  })
+
+  // 一次性加载所有现有名词的译名
+  const translationKeyMap = new Map()
+  if (existingTermIdList.length > 0) {
+    const translationRows = await TranslationModel.find({
+      termId: { $in: existingTermIdList }
+    }).lean()
+    translationRows.forEach(translation => {
+      const key = `${String(translation.termId)}|${translation.languageCode}`
+      translationKeyMap.set(key, translation)
+    })
+  }
+
+  // 一次性加载现有名词与当前文章的绑定关系
+  const boundTermIdSet = new Set()
+  if (existingTermIdList.length > 0) {
+    const relationRows = await RelationModel.find({
+      sourceCollection: SOURCE_COLLECTION_POSTS,
+      sourceId,
+      termId: { $in: existingTermIdList },
+      enabled: true
+    })
+      .select('termId')
+      .lean()
+    relationRows.forEach(relation => {
+      boundTermIdSet.add(String(relation.termId))
+    })
+  }
+
+  const plans = entries.map((entry, index) => {
+    const existingTerm = entry.existingTerm
+    const isIdEntry = Boolean(entry.objectId)
+    const previousSourceText = existingTerm ? existingTerm.sourceText || '' : ''
+    const previousSourceLanguageCode = existingTerm
+      ? existingTerm.sourceLanguageCode || ''
+      : ''
+    const previousNote = existingTerm ? existingTerm.note || '' : ''
+    const termIdKey = existingTerm ? String(existingTerm._id) : ''
+
+    // 计算名词字段是否真正发生变化（与导入实际写入行为保持一致）
+    let sourceTextChanged = false
+    let sourceLanguageCodeChanged = false
+    let noteChanged = false
+    if (existingTerm) {
+      noteChanged = previousNote !== entry.note
+      if (isIdEntry) {
+        // 提供 id 时执行 updateTerm，会整体覆盖原文、原文语言、备注
+        sourceTextChanged = previousSourceText !== entry.sourceText
+        sourceLanguageCodeChanged =
+          previousSourceLanguageCode !== (entry.sourceLanguageCode || '')
+      } else {
+        // 未提供 id 时按原文匹配既有名词：原文不变，原文语言仅在原为空时补充
+        sourceLanguageCodeChanged =
+          !previousSourceLanguageCode && Boolean(entry.sourceLanguageCode)
+      }
+    }
+    const termFieldsChanged =
+      sourceTextChanged || sourceLanguageCodeChanged || noteChanged
+
+    const translationPlans = entry.translations.map(translation => {
+      let existingTranslation = null
+      if (termIdKey) {
+        existingTranslation = translationKeyMap.get(
+          `${termIdKey}|${translation.languageCode}`
+        )
+      }
+      let translationAction = 'create'
+      let previousTranslatedText = null
+      let previousTranslationNote = null
+      let translationTextChanged = false
+      let translationNoteChanged = false
+      let existingTranslationId = null
+      if (existingTranslation) {
+        existingTranslationId = existingTranslation._id
+        previousTranslatedText = existingTranslation.translatedText || ''
+        previousTranslationNote = existingTranslation.note || ''
+        translationTextChanged =
+          previousTranslatedText !== translation.translatedText
+        translationNoteChanged = previousTranslationNote !== translation.note
+        if (translationTextChanged || translationNoteChanged) {
+          translationAction = 'update'
+        } else {
+          translationAction = 'unchanged'
+        }
+      } else {
+        translationTextChanged = true
+        translationNoteChanged = Boolean(translation.note)
+      }
+      return {
+        languageCode: translation.languageCode,
+        translatedText: translation.translatedText,
+        note: translation.note,
+        action: translationAction,
+        existingTranslationId,
+        textChanged: translationTextChanged,
+        noteChanged: translationNoteChanged,
+        previousTranslatedText,
+        previousNote: previousTranslationNote
+      }
+    })
+
+    const hasTranslationChange = translationPlans.some(translationPlan => {
+      return translationPlan.action !== 'unchanged'
+    })
+
+    let action = 'create'
+    if (existingTerm) {
+      if (termFieldsChanged || hasTranslationChange) {
+        action = 'update'
+      } else {
+        action = 'unchanged'
+      }
+    }
+
+    const alreadyBound = existingTerm ? boundTermIdSet.has(termIdKey) : false
+    const needsBind = !alreadyBound
+    const needsWork =
+      !existingTerm || termFieldsChanged || hasTranslationChange || needsBind
+
+    return {
+      index,
+      entry,
+      existingTerm,
+      isIdEntry,
+      action,
+      sourceTextChanged,
+      sourceLanguageCodeChanged,
+      noteChanged,
+      previousSourceText,
+      previousSourceLanguageCode,
+      previousNote,
+      termFieldsChanged,
+      hasTranslationChange,
+      alreadyBound,
+      needsBind,
+      needsWork,
+      translationPlans
+    }
+  })
+
+  return { sourceId, sourcePost, sourceLanguageCode, plans }
+}
+
+/**
+ * 导入源文章名词：有 id 则更新、无 id 则新增，并绑定到当前文章
+ * @param {Object} body - 导入参数
+ * @param {string} body.sourceId - 源文章 id
+ * @param {string} [body.sourceLanguageCode] - 源文章语言代码
+ * @param {Array} body.terms - 名词列表
+ * @param {Object} [options] - 选项
+ * @param {Function} [options.onProgress] - 进度回调，参数为 { processedCount, totalCount, createdCount, updatedCount }
+ * @param {Object} [options.cancellation] - 取消上下文，含 isCancelled
+ * @returns {Promise<Object>} 导入结果统计
+ */
+async function importSourcePostTerms(body = {}, options = {}) {
+  const onProgress =
+    typeof options.onProgress === 'function' ? options.onProgress : null
+  const cancellation = options.cancellation || null
+
+  const { sourceId, sourcePost, sourceLanguageCode, plans } =
+    await resolveImportPlan(body)
+
+  // 只处理真正需要变更的条目（内容有变化或尚未关联），跳过无变化且已关联的条目
+  const workPlans = plans.filter(plan => plan.needsWork)
+  const totalCount = workPlans.length
+  const skippedCount = plans.length - workPlans.length
+  let createdCount = 0
+  let updatedCount = 0
+  let translationUpsertCount = 0
+  let processedCount = 0
+  const boundTermIdSet = new Set()
+
+  if (onProgress) {
+    onProgress({
+      processedCount,
+      totalCount,
+      createdCount,
+      updatedCount
+    })
+  }
+
+  for (const plan of workPlans) {
+    if (cancellation && cancellation.isCancelled) {
+      break
+    }
+    const entry = plan.entry
+    let termId = null
+
+    if (!plan.existingTerm) {
+      const term =
+        await properNounTranslationService.findOrCreateTermForSourceText(
+          entry.sourceText,
+          {
+            sourceLanguageCode: entry.sourceLanguageCode,
+            note: entry.note,
+            shouldUpdateTermNote: true
+          }
+        )
+      termId = term._id
+      createdCount += 1
+    } else {
+      termId = plan.existingTerm._id
+      // 仅当名词字段确有变化时才写名词文档
+      if (plan.termFieldsChanged) {
+        if (plan.isIdEntry) {
+          await properNounTranslationService.updateTerm({
+            id: entry.id,
+            sourceText: entry.sourceText,
+            sourceLanguageCode: entry.sourceLanguageCode,
+            note: entry.note
+          })
+        } else {
+          await properNounTranslationService.findOrCreateTermForSourceText(
+            entry.sourceText,
+            {
+              sourceLanguageCode: entry.sourceLanguageCode,
+              note: entry.note,
+              shouldUpdateTermNote: true
+            }
+          )
+        }
+      }
+      if (plan.action === 'update') {
+        updatedCount += 1
+      }
+    }
+
+    // 仅写入确有变化的译名
+    for (const translationPlan of plan.translationPlans) {
+      if (translationPlan.action === 'unchanged') {
+        continue
+      }
+      if (translationPlan.existingTranslationId) {
+        await properNounTranslationService.updateTranslation({
+          id: translationPlan.existingTranslationId,
+          termId,
+          languageCode: translationPlan.languageCode,
+          translatedText: translationPlan.translatedText,
+          note: translationPlan.note,
+          translationSource: 'imported'
+        })
+      } else {
+        await properNounTranslationService.createTranslation({
+          termId,
+          languageCode: translationPlan.languageCode,
+          translatedText: translationPlan.translatedText,
+          note: translationPlan.note,
+          translationSource: 'imported'
+        })
+      }
+      translationUpsertCount += 1
+    }
+
+    // 仅在尚未关联时才创建关联
+    if (plan.needsBind) {
+      await bindTermToSourcePost({
+        sourceId,
+        sourceLanguageCode,
+        termId,
+        relationSource: 'manual',
+        sourcePost
+      })
+      boundTermIdSet.add(String(termId))
+    }
+
+    processedCount += 1
+    if (onProgress) {
+      onProgress({
+        processedCount,
+        totalCount,
+        createdCount,
+        updatedCount
+      })
+    }
+  }
+
+  return {
+    sourcePost,
+    totalCount,
+    processedCount,
+    createdCount,
+    updatedCount,
+    translationUpsertCount,
+    boundCount: boundTermIdSet.size,
+    skippedCount,
+    cancelled: Boolean(cancellation && cancellation.isCancelled)
+  }
+}
+
+/**
+ * 预览导入效果（只读，不写入）：标记新增 / 修改 / 无变化，并给出原值与新值对比
+ * @param {Object} body - 导入参数
+ * @param {string} body.sourceId - 源文章 id
+ * @param {Array} body.terms - 名词列表
+ * @returns {Promise<Object>} 预览数据
+ */
+async function previewImportSourcePostTerms(body = {}) {
+  const { sourcePost, plans } = await resolveImportPlan(body)
+
+  let createCount = 0
+  let updateCount = 0
+  let unchangedCount = 0
+  const previewTerms = plans.map(plan => {
+    if (plan.action === 'create') {
+      createCount += 1
+    } else if (plan.action === 'update') {
+      updateCount += 1
+    } else {
+      unchangedCount += 1
+    }
+    return {
+      index: plan.index,
+      action: plan.action,
+      id: plan.existingTerm ? String(plan.existingTerm._id) : null,
+      sourceText: plan.entry.sourceText,
+      previousSourceText: plan.previousSourceText,
+      sourceTextChanged: plan.sourceTextChanged,
+      sourceLanguageCode: plan.entry.sourceLanguageCode,
+      previousSourceLanguageCode: plan.previousSourceLanguageCode,
+      sourceLanguageCodeChanged: plan.sourceLanguageCodeChanged,
+      note: plan.entry.note,
+      previousNote: plan.previousNote,
+      noteChanged: plan.noteChanged,
+      alreadyBound: plan.alreadyBound,
+      translations: plan.translationPlans.map(translationPlan => {
+        return {
+          languageCode: translationPlan.languageCode,
+          action: translationPlan.action,
+          textChanged: translationPlan.textChanged,
+          noteChanged: translationPlan.noteChanged,
+          translatedText: translationPlan.translatedText,
+          previousTranslatedText: translationPlan.previousTranslatedText,
+          note: translationPlan.note,
+          previousNote: translationPlan.previousNote
+        }
+      })
+    }
+  })
+
+  return {
+    sourcePost,
+    totalCount: plans.length,
+    createCount,
+    updateCount,
+    unchangedCount,
+    terms: previewTerms
+  }
+}
+
 module.exports = {
   SOURCE_COLLECTION_POSTS,
   batchBindExistingTermsToSourcePost,
@@ -1361,6 +2189,7 @@ module.exports = {
   bindTermsToSourcePost,
   createOrBindSourcePostTerm,
   deleteRelationsByTermIds,
+  exportSourcePostTerms,
   getRelationCountMapBySourceIds,
   getSourcePostTermRelationMap,
   getSourcePostIdFromScopeKey,
@@ -1368,7 +2197,9 @@ module.exports = {
   getSourcePostSummary,
   getSourcePostTermList,
   getSourcePostTermsForInternetSearch,
+  importSourcePostTerms,
   mergeArticleLinkedCandidateCoverage,
+  previewImportSourcePostTerms,
   resolveOrganizedTermIds,
   unbindSourcePostTerm
 }

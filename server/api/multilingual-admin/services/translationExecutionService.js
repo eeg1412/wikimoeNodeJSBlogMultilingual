@@ -1177,8 +1177,89 @@ async function applyTranslationValidation({
   return result
 }
 
+// 仅校验任务标记：request.options.validateOnly=true 时只对已有译文做质检修正，不重新翻译。
+function isValidateOnlyJob(job) {
+  return job?.request?.options?.validateOnly === true
+}
+
+// 该条目是否已有目标语言译文（仅校验任务只处理已有译文的字段）。
+function hasExistingTranslationValue(entry) {
+  return Boolean(
+    entry && (entry.currentPreviewRawValue || entry.currentPreviewHtml)
+  )
+}
+
+// 仅校验：对已有译文的所选字段做质检并产出修正（不重新翻译），复用现有校验内核与审核采纳流程。
+async function executePostAiValidationOnly(job, context, entries) {
+  const targetEntries = entries
+    .filter(hasExistingTranslationValue)
+    .map(entry => {
+      return {
+        ...entry,
+        value: entry.currentValue
+      }
+    })
+  if (targetEntries.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '所选字段没有可校验的已有译文',
+      'request.selectedEntryKeys',
+      400,
+      { retryable: false }
+    )
+  }
+  await context.updateProgress({
+    currentStage: translationValidationService.VALIDATION_STAGE,
+    currentStep: '正在校验已有译文',
+    percent: 15
+  })
+  const handlers = createHandlers(
+    context,
+    translationValidationService.VALIDATION_STAGE,
+    { start: 15, end: 92 }
+  )
+  const validationPayload = {
+    schema: 'wikimoe.translation.post',
+    version: 1,
+    meta: {
+      contentId: String(job.target.postId),
+      contentType: 'post',
+      languageCode: job.target.languageCode,
+      sourceLanguageCode: job.source.languageCode
+    },
+    entries: targetEntries
+  }
+  const validationResult =
+    await translationValidationService.validateTranslationPayload({
+      job,
+      handlers,
+      sourceEntries: entries,
+      payload: validationPayload,
+      target: {
+        mode: 'post',
+        postId: String(job.target.postId),
+        sourceLanguageCode: job.source.languageCode,
+        targetLanguageCode: job.target.languageCode
+      }
+    })
+  const data = {
+    payload: validationResult.payload,
+    usage: {},
+    model: '',
+    requestId: null,
+    aiJsonLogs: validationResult.aiJsonLogs
+  }
+  const result = await buildResult(job, data)
+  result.validation = validationResult.validation
+  return result
+}
+
 async function executePostAiTranslation(job, context) {
   const entries = await resolvePostTranslationEntries(job, context)
+  // 仅校验任务：不重新翻译，直接对已有译文的所选字段做质检并产出修正。
+  if (isValidateOnlyJob(job)) {
+    return await executePostAiValidationOnly(job, context, entries)
+  }
   let data = null
   if (entries.length > 0) {
     await context.updateProgress({
@@ -1663,6 +1744,102 @@ function deduplicateAiImportEntries({
   }
 }
 
+// 是否为可跨家族文章复用的共享关联实体条目（番剧/分类/标签/电影/书籍/游戏等关联实体，
+// 以及分类父级/游戏平台等父级关联实体；不含文章自身的标题/正文，这些条目跨文章天然不会重复）。
+function isReusableDependencyEntry(entry) {
+  if (!entry) {
+    return false
+  }
+  return entry.scope === 'relation' || entry.scope === 'parentRelation'
+}
+
+// 解析家族根任务 ObjectId（共享关联实体译文缓存存放在该文档上）。非家族任务返回 null。
+function getDependencyCacheRootObjectId(job) {
+  const relation = getJobTaskRelation(job)
+  const rootId = relation.rootId || relation.parentId
+  if (!rootId) {
+    return null
+  }
+  return toObjectId(String(rootId))
+}
+
+// 读取家族根任务上某语言的共享关联实体译文缓存。
+// 返回 Map: 稳定条目键(entryKey) -> { valueType, value }。
+async function loadFamilyDependencyTranslationCache(job, languageCode) {
+  const rootObjectId = getDependencyCacheRootObjectId(job)
+  if (!rootObjectId) {
+    return new Map()
+  }
+  const JobModel = getTranslationJobModel()
+  const rootJob = await JobModel.findOne(
+    { _id: rootObjectId },
+    { dependencyTranslationCache: 1 }
+  ).lean()
+  const cacheList = Array.isArray(rootJob?.dependencyTranslationCache)
+    ? rootJob.dependencyTranslationCache
+    : []
+  const cacheMap = new Map()
+  cacheList.forEach(item => {
+    if (!item || item.languageCode !== languageCode || !item.entryKey) {
+      return
+    }
+    if (!cacheMap.has(item.entryKey)) {
+      cacheMap.set(item.entryKey, {
+        valueType: item.valueType || '',
+        value: item.value
+      })
+    }
+  })
+  return cacheMap
+}
+
+// 把本次新翻译的共享关联实体译文写入家族根任务缓存。
+// 以 (语言 + 稳定条目键) 去重，只有首个写入者生效，保证同一关联实体在家族内只翻译一次；
+// 采用条件 $push（不存在才写入），并发与失败重试均幂等，系统重启后仍可正确复用。
+async function saveFamilyDependencyTranslationCache(
+  job,
+  languageCode,
+  cacheEntries
+) {
+  if (!Array.isArray(cacheEntries) || cacheEntries.length === 0) {
+    return
+  }
+  const rootObjectId = getDependencyCacheRootObjectId(job)
+  if (!rootObjectId) {
+    return
+  }
+  const JobModel = getTranslationJobModel()
+  for (const cacheEntry of cacheEntries) {
+    if (!cacheEntry || !cacheEntry.entryKey) {
+      continue
+    }
+    await JobModel.updateOne(
+      {
+        _id: rootObjectId,
+        dependencyTranslationCache: {
+          $not: {
+            $elemMatch: {
+              languageCode,
+              entryKey: cacheEntry.entryKey
+            }
+          }
+        }
+      },
+      {
+        $push: {
+          dependencyTranslationCache: {
+            languageCode,
+            entryKey: cacheEntry.entryKey,
+            valueType: cacheEntry.valueType || '',
+            value: cacheEntry.value,
+            createdAt: new Date()
+          }
+        }
+      }
+    )
+  }
+}
+
 function buildSourcePostPreviewEntries({
   payload,
   requestEntries,
@@ -1807,6 +1984,31 @@ async function translateSourcePostForLanguage({
     hideCurrent: hideCurrentPreview
   })
   const entries = deduplicationResult.entries
+  // 家族级共享关联实体去重：同一家族内其他文章已翻译过的共享关联实体（如番剧）按
+  // (语言 + 稳定条目键) 命中缓存，则直接复用缓存译文、不再发给 AI，避免重复翻译浪费 token。
+  const familyDependencyCache = await loadFamilyDependencyTranslationCache(
+    job,
+    languageCode
+  )
+  const aiRequestEntries = []
+  const reusedDependencyEntries = []
+  entries.forEach(entry => {
+    const dependencyEntryKey = isReusableDependencyEntry(entry)
+      ? translationEntryBuildService.buildStableEntryKey(entry, {
+          sourcePostId
+        })
+      : ''
+    if (dependencyEntryKey && familyDependencyCache.has(dependencyEntryKey)) {
+      const cached = familyDependencyCache.get(dependencyEntryKey)
+      reusedDependencyEntries.push({
+        ...entry,
+        value: cached.value,
+        valueType: cached.valueType || entry.valueType
+      })
+      return
+    }
+    aiRequestEntries.push(entry)
+  })
   let data = {
     payload: {
       schema: 'wikimoe.translation.post',
@@ -1823,7 +2025,7 @@ async function translateSourcePostForLanguage({
     model: '',
     requestId: null
   }
-  if (entries.length > 0) {
+  if (aiRequestEntries.length > 0) {
     await context.updateProgress({
       currentStage: 'TranslatePost',
       currentStep: `正在执行 ${getLanguageText(languageCode)} AI 翻译`,
@@ -1854,7 +2056,7 @@ async function translateSourcePostForLanguage({
         searchOfficialTermTranslations:
           shouldSearchOfficialTermTranslations(job),
         officialTermGlossaryTaskCache,
-        entries
+        entries: aiRequestEntries
       },
       createHandlers(context, `TranslatePost:${languageCode}`, progressRange)
     )
@@ -1900,7 +2102,7 @@ async function translateSourcePostForLanguage({
       await translationValidationService.validateTranslationPayload({
         job,
         handlers: validationHandlers,
-        sourceEntries: entries,
+        sourceEntries: aiRequestEntries,
         payload,
         target: {
           mode: 'content',
@@ -1919,6 +2121,29 @@ async function translateSourcePostForLanguage({
       data.aiJsonLogs,
       nodeValidationResult.aiJsonLogs
     )
+  }
+  // 把本次新翻译（含校验后定稿）的共享关联实体译文写入家族缓存，供家族内其他文章复用。
+  const freshTranslatedEntries = Array.isArray(payload.entries)
+    ? payload.entries
+    : []
+  const newDependencyCacheEntries = freshTranslatedEntries
+    .filter(entry => isReusableDependencyEntry(entry) && !entry.aiSkipReason)
+    .map(entry => ({
+      entryKey: translationEntryBuildService.buildStableEntryKey(entry, {
+        sourcePostId
+      }),
+      valueType: entry.valueType || '',
+      value: entry.value
+    }))
+    .filter(item => Boolean(item.entryKey))
+  await saveFamilyDependencyTranslationCache(
+    job,
+    languageCode,
+    newDependencyCacheEntries
+  )
+  // 复用的共享关联实体译文条目并入最终译文产物，使本文章预览/采纳自包含（单独采纳也能落地译文）。
+  if (reusedDependencyEntries.length > 0) {
+    payload.entries = freshTranslatedEntries.concat(reusedDependencyEntries)
   }
   const translatedPreviewEntries = buildSourcePostPreviewEntries({
     payload,
@@ -3280,6 +3505,19 @@ function getFamilyLanguageCodes(job) {
   return []
 }
 
+// 读取创建任务时勾选的"保存后发布"语言集合（request.options.publishLanguageCodes）。
+function getFamilyPublishLanguageCodeSet(job) {
+  const publishLanguageCodes = job?.request?.options?.publishLanguageCodes
+  if (!Array.isArray(publishLanguageCodes)) {
+    return new Set()
+  }
+  return new Set(
+    publishLanguageCodes
+      .map(languageCode => normalizeString(languageCode))
+      .filter(languageCode => languageCode.length > 0)
+  )
+}
+
 // 是否需要为该家族创建名词整理子任务（默认创建；可由 options.organizeProperNouns=false 关闭）。
 function shouldCreateProperNounChild(job) {
   const options = job?.request?.options || {}
@@ -3565,6 +3803,7 @@ async function createFamilyParentWithChildren({
   }
 
   // 3) 逐语言翻译校验子任务（关闭内联名词整理、关闭封面图）。
+  const publishLanguageCodeSet = getFamilyPublishLanguageCodeSet(job)
   for (let i = 0; i < languageCodes.length; i += 1) {
     const languageCode = languageCodes[i]
     const request = buildFamilyChildRequest(job, {
@@ -3577,7 +3816,9 @@ async function createFamilyParentWithChildren({
     request.options = {
       ...request.options,
       coverImageTranslationMode: 'never',
-      translateCoverImage: false
+      translateCoverImage: false,
+      // 创建任务时勾选了"保存后发布"的语言，采纳时该语言译文自动发布。
+      publishOnApply: publishLanguageCodeSet.has(languageCode)
     }
     await createChild({
       jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_AI_IMPORT,
@@ -4101,6 +4342,10 @@ async function executeFamilyChild(job, context) {
   }
   if (childKind === TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE) {
     return await executeCoverImageOrganizeChild(job, context)
+  }
+  // 批量"翻译已存在文章"的单语言子任务：复用已有文章翻译执行器（针对已存在的目标语言文章）。
+  if (childKind === TRANSLATION_JOB_CHILD_KINDS.POST_LANGUAGE_TRANSLATION) {
+    return await executePostAiTranslation(job, context)
   }
   throw new ApiError(
     ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,

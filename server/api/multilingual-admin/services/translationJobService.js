@@ -811,9 +811,11 @@ async function createTranslationJob(body = {}, options = {}) {
   return job.toObject()
 }
 
-// 批量启动文章 AI 翻译：一次请求为多个目标语言版本各创建一个 post-ai-translation 任务。
-// 各任务只携带共享的 selectedEntryKeys（跨语言稳定匹配键）与翻译选项，具体翻译条目在执行时
-// 由服务端按源/目标内容重建，避免前端逐个语言版本调用建任务接口。
+// 批量启动文章 AI 翻译：把"一篇文章翻译成多种目标语言"组织成一个家族——
+// 1 个根编排任务（root） + 1 个文章父编排任务（parent） + 每种目标语言 1 个翻译子任务（child）。
+// 根/父任务不执行 AI，仅聚合状态；子任务按家族顺序逐个执行，复用既有家族编排（放行下一个/阻塞/聚合）
+// 与按语言分 Tab 的审核采纳 UI。各子任务只携带共享的 selectedEntryKeys（跨语言稳定匹配键）与翻译选项，
+// 具体翻译条目在执行时由服务端按源/目标内容重建。
 async function createTranslationJobBatch(body = {}, options = {}) {
   const source = body.source || {}
   const request = body.request || {}
@@ -827,56 +829,260 @@ async function createTranslationJobBatch(body = {}, options = {}) {
     )
   }
 
-  const results = []
-  let createdCount = 0
-  let failedCount = 0
-  for (const target of targets) {
-    const targetPostId = target && (target.postId || target.targetPostId)
-    try {
-      const job = await createTranslationJob(
-        {
-          jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
-          priority: body.priority,
-          source,
-          target: {
-            postId: targetPostId,
-            languageCode: target.languageCode,
-            title: target.title
-          },
-          request: {
-            prompt: request.prompt,
-            baseMode: request.baseMode,
-            options: request.options,
-            selectedEntryKeys: request.selectedEntryKeys
-          }
-        },
-        options
-      )
-      createdCount += 1
-      results.push({
-        targetPostId: String(targetPostId || ''),
-        languageCode: target.languageCode || '',
-        jobId: String(job._id),
-        status: 'created'
-      })
-    } catch (error) {
-      failedCount += 1
-      results.push({
-        targetPostId: String(targetPostId || ''),
-        languageCode: target.languageCode || '',
-        jobId: '',
-        status: 'failed',
-        errorMessage:
-          (error && (error.clientMessage || error.message)) ||
-          '创建后台任务失败'
-      })
+  // 归一化目标语言版本（每个目标对应一篇已存在的目标语言文章），同一语言只保留一个。
+  const normalizedTargets = []
+  const seenLanguageCodes = new Set()
+  targets.forEach((target, index) => {
+    const targetPostId = toObjectId(
+      target && (target.postId || target.targetPostId),
+      `targets.${index}.postId`,
+      true
+    )
+    const languageCode = normalizeRequiredLanguage(
+      target && target.languageCode,
+      `targets.${index}.languageCode`
+    )
+    if (seenLanguageCodes.has(languageCode)) {
+      return
     }
+    seenLanguageCodes.add(languageCode)
+    normalizedTargets.push({
+      postId: targetPostId,
+      languageCode,
+      title: toTrimmedString(target && target.title)
+    })
+  })
+  if (normalizedTargets.length === 0) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      '批量文章翻译任务没有有效的目标语言版本',
+      'targets',
+      400
+    )
   }
 
+  const priority = Number(body.priority || 0)
+  if (!Number.isInteger(priority) || priority < -100 || priority > 100) {
+    throw new ApiError(
+      ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
+      'priority 必须是 -100 到 100 的整数',
+      'priority',
+      400
+    )
+  }
+
+  const languageCodes = normalizedTargets.map(item => item.languageCode)
+  const sourcePostObjectId = toObjectId(source.postId, 'source.postId')
+  const sourceLanguageCode = normalizeOptionalLanguage(
+    source.languageCode,
+    'source.languageCode'
+  )
+  const sourceTitle = toTrimmedString(source.title)
+  const familyTitle = sourceTitle || `文章 ${source.postId || ''}`
+
+  const sharedRequest = {
+    selectedEntryKeys: normalizeStringList(
+      request.selectedEntryKeys,
+      'request.selectedEntryKeys'
+    ),
+    prompt: toTrimmedString(request.prompt),
+    baseMode: toTrimmedString(request.baseMode),
+    options: normalizeObject(request.options, 'request.options')
+  }
+
+  const JobModel = getTranslationJobModel()
+  const adminSnapshot = normalizeAdminSnapshot(options.admin)
+  const queueControl = { active: false, deferred: false, priority }
+  const orchestratorRequest = {
+    ...sharedRequest,
+    targetLanguageCodes: languageCodes,
+    recursion: { maxDepth: 1 },
+    entries: []
+  }
+
+  // 1) 根编排任务：代表"把该文章翻译成全部目标语言"这一次请求，不执行 AI。
+  const rootJob = await JobModel.create({
+    jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
+    status: TRANSLATION_JOB_STATUS.PENDING,
+    queueControl,
+    source: {
+      postId: sourcePostObjectId,
+      languageCode: sourceLanguageCode,
+      title: familyTitle
+    },
+    target: { languageCodes, title: familyTitle },
+    request: orchestratorRequest,
+    taskRelation: {
+      role: TRANSLATION_JOB_TASK_ROLES.ROOT,
+      childKind: '',
+      orderIndex: 0,
+      depth: 1,
+      sourcePostId: sourcePostObjectId,
+      articleSourceId: sourcePostObjectId,
+      childJobIds: [],
+      childStats: {}
+    },
+    progress: {
+      currentStep: '等待子任务按顺序执行',
+      currentStage: 'Orchestrating',
+      totalSteps: 0,
+      completedSteps: 0,
+      percent: 0,
+      recentLogs: [
+        buildRecentLog(
+          `批量文章翻译家族已创建（${languageCodes.length} 种语言）`,
+          'info',
+          'family'
+        )
+      ]
+    },
+    createdBy: adminSnapshot,
+    updatedBy: adminSnapshot
+  })
+  await JobModel.updateOne(
+    { _id: rootJob._id },
+    { $set: { 'taskRelation.rootId': rootJob._id } }
+  )
+
+  // 2) 文章父编排任务：聚合该文章下各语言子任务，供前端按语言分 Tab 审核采纳。
+  const parentJob = await JobModel.create({
+    jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
+    status: TRANSLATION_JOB_STATUS.PENDING,
+    queueControl,
+    source: {
+      postId: sourcePostObjectId,
+      languageCode: sourceLanguageCode,
+      title: familyTitle
+    },
+    target: { languageCodes, title: familyTitle },
+    request: orchestratorRequest,
+    taskRelation: {
+      role: TRANSLATION_JOB_TASK_ROLES.PARENT,
+      childKind: '',
+      orderIndex: 0,
+      rootId: rootJob._id,
+      parentId: rootJob._id,
+      depth: 2,
+      sourcePostId: sourcePostObjectId,
+      articleSourceId: sourcePostObjectId,
+      childJobIds: [],
+      childStats: {}
+    },
+    progress: {
+      currentStep: '等待各语言子任务按顺序执行',
+      currentStage: 'Orchestrating',
+      totalSteps: 0,
+      completedSteps: 0,
+      percent: 0,
+      recentLogs: [
+        buildRecentLog(
+          `文章「${familyTitle}」的翻译父任务已创建`,
+          'info',
+          'family'
+        )
+      ]
+    },
+    createdBy: adminSnapshot,
+    updatedBy: adminSnapshot
+  })
+
+  // 3) 逐语言翻译子任务（针对各语言已存在的目标文章），按 orderIndex 顺序执行。
+  const childJobIds = []
+  const results = []
+  for (let i = 0; i < normalizedTargets.length; i += 1) {
+    const target = normalizedTargets[i]
+    const childJob = await JobModel.create({
+      jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
+      status: TRANSLATION_JOB_STATUS.PENDING,
+      queueControl,
+      source: {
+        postId: sourcePostObjectId,
+        languageCode: sourceLanguageCode,
+        title: familyTitle
+      },
+      target: {
+        postId: target.postId,
+        languageCode: target.languageCode,
+        languageCodes: [target.languageCode],
+        title: target.title || familyTitle
+      },
+      request: {
+        ...sharedRequest,
+        targetLanguageCodes: [target.languageCode],
+        recursion: { maxDepth: 1 },
+        entries: []
+      },
+      taskRelation: {
+        role: TRANSLATION_JOB_TASK_ROLES.CHILD,
+        childKind: TRANSLATION_JOB_CHILD_KINDS.POST_LANGUAGE_TRANSLATION,
+        orderIndex: i,
+        rootId: rootJob._id,
+        parentId: parentJob._id,
+        depth: 3,
+        sourcePostId: sourcePostObjectId,
+        articleSourceId: sourcePostObjectId,
+        childLanguageCode: target.languageCode,
+        childJobIds: [],
+        childStats: {}
+      },
+      progress: {
+        currentStep: '排队中，等待前序子任务完成',
+        currentStage: 'pending',
+        totalSteps: 0,
+        completedSteps: 0,
+        percent: 0,
+        recentLogs: [
+          buildRecentLog(
+            `${target.languageCode} 翻译子任务已创建`,
+            'info',
+            'family'
+          )
+        ]
+      },
+      createdBy: adminSnapshot,
+      updatedBy: adminSnapshot
+    })
+    childJobIds.push(childJob._id)
+    results.push({
+      targetPostId: String(target.postId),
+      languageCode: target.languageCode,
+      jobId: String(childJob._id),
+      status: 'created'
+    })
+  }
+
+  await JobModel.updateOne(
+    { _id: parentJob._id },
+    { $set: { 'taskRelation.childJobIds': childJobIds } }
+  )
+  await JobModel.updateOne(
+    { _id: rootJob._id },
+    {
+      $set: {
+        'taskRelation.childJobIds': [parentJob._id],
+        'taskRelation.plan': {
+          schema: 'wikimoe.ai.translation.post.batch.plan',
+          version: 1,
+          articleCount: 1,
+          parentCount: 1,
+          childCount: childJobIds.length,
+          languageCount: languageCodes.length,
+          generatedAt: new Date()
+        }
+      }
+    }
+  )
+
+  // 放行第一个子任务进入队列，并由子任务派生根/父聚合状态。
+  await activateNextFamilyChild(String(rootJob._id))
+  await recomputeFamilyAggregateStatus(String(rootJob._id))
+
   return {
-    createdCount,
-    failedCount,
+    createdCount: normalizedTargets.length,
+    failedCount: 0,
     totalCount: targets.length,
+    rootJobId: String(rootJob._id),
+    parentJobId: String(parentJob._id),
     results
   }
 }

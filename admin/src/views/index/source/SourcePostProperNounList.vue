@@ -29,6 +29,35 @@
         <el-button type="primary" plain @click="openOrganizeDialog">
           整理名词
         </el-button>
+        <el-dropdown trigger="click" @command="handleImportExportCommand">
+          <el-button type="primary" plain>
+            导入导出
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="export">
+                <el-icon><Upload /></el-icon>
+                导出名词
+              </el-dropdown-item>
+              <el-dropdown-item command="template">
+                <el-icon><Document /></el-icon>
+                导出模板
+              </el-dropdown-item>
+              <el-dropdown-item divided command="import">
+                <el-icon><Download /></el-icon>
+                导入名词
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <input
+          ref="importFileInputRef"
+          type="file"
+          accept=".json,application/json"
+          class="source-post-term-import-input"
+          @change="handleImportFileChange"
+        />
       </div>
     </div>
 
@@ -621,6 +650,349 @@
       :source-post="sourcePost"
       @created="getTermList(false)"
     />
+
+    <el-dialog
+      v-model="exportDialogVisible"
+      :title="exportDialogTitle"
+      width="min(560px, 96vw)"
+      append-to-body
+      destroy-on-close
+    >
+      <el-form label-width="100px" class="source-post-term-export-form">
+        <el-form-item label="译名语言" required>
+          <el-select
+            v-model="exportLanguageCodes"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="请选择要导出的译名语言"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in languageOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <div class="source-post-term-export-tip">
+          未维护译名的语言会导出为 null，可作为待填写模板使用。
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="exporting" @click="confirmExport">
+          {{ exportConfirmButtonText }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="importPreviewDialogVisible"
+      title="导入预览"
+      width="min(880px, 96vw)"
+      append-to-body
+      destroy-on-close
+      :show-close="!importing"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!importing"
+      :before-close="handleImportPreviewBeforeClose"
+    >
+      <div
+        v-loading="importPreviewLoading"
+        class="source-post-term-import-preview"
+      >
+        <el-alert
+          v-if="importCrossArticleNote"
+          :title="importCrossArticleNote"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="mb10"
+        />
+        <div
+          v-if="importPreviewData"
+          class="source-post-term-import-preview-summary"
+        >
+          共 {{ importPreviewData.totalCount }} 个名词，其中新增
+          <span class="source-post-term-import-create-count">
+            {{ importPreviewData.createCount }}
+          </span>
+          个，修改
+          <span class="source-post-term-import-update-count">
+            {{ importPreviewData.updateCount }}
+          </span>
+          个，无变化
+          <span class="source-post-term-import-unchanged-count">
+            {{ importPreviewData.unchangedCount }}
+          </span>
+          个。
+        </div>
+        <div
+          v-if="importPreviewData && !importProgressVisible"
+          class="source-post-term-import-preview-toolbar"
+        >
+          <el-button size="small" @click="selectAllImport">全选</el-button>
+          <el-button size="small" @click="clearAllImport">清空</el-button>
+          <span class="source-post-term-import-selected-count">
+            已选择 {{ selectedImportCount }} 个名词将导入
+          </span>
+        </div>
+        <div
+          v-if="importPreviewData"
+          class="source-post-term-import-preview-list"
+        >
+          <div
+            v-for="term in importPreviewData.terms"
+            :key="term.index"
+            class="source-post-term-import-preview-item"
+          >
+            <div class="source-post-term-import-preview-item-head">
+              <el-checkbox
+                v-if="isImportTermSelectable(term)"
+                :model-value="getImportTermChecked(term)"
+                :indeterminate="getImportTermIndeterminate(term)"
+                @change="value => handleImportTermCheckedChange(term, value)"
+              />
+              <el-tag
+                size="small"
+                :type="getPreviewTermActionType(term.action)"
+                effect="dark"
+              >
+                {{ getPreviewTermActionText(term.action) }}
+              </el-tag>
+              <span class="source-post-term-import-preview-source-text">
+                {{ term.sourceText }}
+              </span>
+              <span
+                v-if="term.sourceLanguageCode"
+                class="source-post-term-import-preview-lang"
+              >
+                {{ getSourceLanguageText(term.sourceLanguageCode) }}
+              </span>
+              <el-tag
+                v-if="term.action !== 'create' && term.alreadyBound"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                已关联
+              </el-tag>
+              <el-tag
+                v-if="term.action !== 'create' && !term.alreadyBound"
+                size="small"
+                type="success"
+                effect="plain"
+              >
+                将关联
+              </el-tag>
+            </div>
+            <div
+              v-if="term.isNewTerm"
+              class="source-post-term-import-preview-leaf-block"
+            >
+              <el-checkbox v-model="term.createSelected">
+                新增名词并关联到本文章
+              </el-checkbox>
+              <div
+                v-if="term.note"
+                class="source-post-term-import-preview-note"
+              >
+                备注：
+                <span class="source-post-term-import-new">
+                  {{ getPreviewDisplayText(term.note) }}
+                </span>
+              </div>
+            </div>
+            <div
+              v-else-if="term.isBindOnly"
+              class="source-post-term-import-preview-leaf-block"
+            >
+              <el-checkbox v-model="term.bindSelected">
+                关联到本文章
+              </el-checkbox>
+            </div>
+            <div
+              v-else-if="term.termInfoChanged"
+              class="source-post-term-import-preview-leaf-block"
+            >
+              <el-checkbox v-model="term.termInfoSelected">
+                名词信息
+              </el-checkbox>
+              <div
+                v-if="term.sourceTextChanged"
+                class="source-post-term-import-preview-note"
+              >
+                原文：
+                <span class="source-post-term-import-old">
+                  {{ getPreviewDisplayText(term.previousSourceText) }}
+                </span>
+                →
+                <span class="source-post-term-import-new">
+                  {{ getPreviewDisplayText(term.sourceText) }}
+                </span>
+              </div>
+              <div
+                v-if="term.sourceLanguageCodeChanged"
+                class="source-post-term-import-preview-note"
+              >
+                原文语言：
+                <span class="source-post-term-import-old">
+                  {{ getSourceLanguageText(term.previousSourceLanguageCode) }}
+                </span>
+                →
+                <span class="source-post-term-import-new">
+                  {{ getSourceLanguageText(term.sourceLanguageCode) }}
+                </span>
+              </div>
+              <div
+                v-if="term.noteChanged"
+                class="source-post-term-import-preview-note"
+              >
+                备注：
+                <span class="source-post-term-import-old">
+                  {{ getPreviewDisplayText(term.previousNote) }}
+                </span>
+                →
+                <span class="source-post-term-import-new">
+                  {{ getPreviewDisplayText(term.note) }}
+                </span>
+              </div>
+            </div>
+            <div
+              v-if="term.translations.length > 0"
+              class="source-post-term-import-preview-translations"
+            >
+              <div
+                v-for="translation in term.translations"
+                :key="translation.languageCode"
+                class="source-post-term-import-preview-translation"
+              >
+                <el-tag
+                  size="small"
+                  :type="getPreviewTranslationActionType(translation.action)"
+                  effect="plain"
+                >
+                  {{ getPreviewLanguageText(translation.languageCode) }}·{{
+                    getPreviewTranslationActionText(translation.action)
+                  }}
+                </el-tag>
+                <div class="source-post-term-import-preview-translation-body">
+                  <div class="source-post-term-import-preview-translation-line">
+                    <el-checkbox
+                      v-if="translation.textChanged"
+                      v-model="translation.textSelected"
+                      class="source-post-term-import-leaf-checkbox"
+                    >
+                      译名
+                    </el-checkbox>
+                    <span
+                      v-if="
+                        translation.textChanged &&
+                        translation.action === 'update'
+                      "
+                      class="source-post-term-import-preview-translation-diff"
+                    >
+                      <span class="source-post-term-import-old">
+                        {{
+                          getPreviewDisplayText(
+                            translation.previousTranslatedText
+                          )
+                        }}
+                      </span>
+                      →
+                      <span class="source-post-term-import-new">
+                        {{ getPreviewDisplayText(translation.translatedText) }}
+                      </span>
+                    </span>
+                    <span
+                      v-else-if="translation.textChanged"
+                      class="source-post-term-import-new"
+                    >
+                      {{ getPreviewDisplayText(translation.translatedText) }}
+                    </span>
+                    <span
+                      v-else
+                      class="source-post-term-import-preview-translation-same"
+                    >
+                      {{ getPreviewDisplayText(translation.translatedText) }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="translation.noteChanged"
+                    class="source-post-term-import-preview-translation-line"
+                  >
+                    <el-checkbox
+                      v-model="translation.noteSelected"
+                      class="source-post-term-import-leaf-checkbox"
+                    >
+                      注释
+                    </el-checkbox>
+                    <span
+                      v-if="translation.action === 'update'"
+                      class="source-post-term-import-preview-translation-diff"
+                    >
+                      <span class="source-post-term-import-old">
+                        {{ getPreviewDisplayText(translation.previousNote) }}
+                      </span>
+                      →
+                      <span class="source-post-term-import-new">
+                        {{ getPreviewDisplayText(translation.note) }}
+                      </span>
+                    </span>
+                    <span v-else class="source-post-term-import-new">
+                      {{ getPreviewDisplayText(translation.note) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              v-else-if="
+                !term.isNewTerm && !term.isBindOnly && !term.termInfoChanged
+              "
+              class="source-post-term-import-preview-empty"
+            >
+              暂无译名
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="importProgressVisible"
+        class="source-post-term-import-progress"
+      >
+        <el-progress :percentage="importProgressPercent" :stroke-width="14" />
+        <div class="source-post-term-import-progress-text">
+          正在导入 {{ importProgress.processedCount }} /
+          {{ importProgress.totalCount }}（新增
+          {{ importProgress.createdCount }}，修改
+          {{ importProgress.updatedCount }}）
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          :disabled="importing"
+          @click="importPreviewDialogVisible = false"
+        >
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="importing"
+          :disabled="
+            importPreviewLoading ||
+            !importPreviewData ||
+            selectedImportCount === 0
+          "
+          @click="confirmImport"
+        >
+          确认导入
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -628,8 +1000,19 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Link as LinkIcon, Plus, Refresh } from '@element-plus/icons-vue'
+import {
+  ArrowDown,
+  Document,
+  Download,
+  Link as LinkIcon,
+  Plus,
+  Refresh,
+  Upload
+} from '@element-plus/icons-vue'
 import { multilingualApi } from '@/api'
+import store from '@/store'
+import { createApiErrorFromResponse } from '@/utils/apiError'
+import { isAbortError, readClientSseStream } from '@/utils/clientSse'
 import { formatDate } from '@/utils/utils'
 import {
   restoreListSessionParams,
@@ -694,6 +1077,10 @@ export default {
     LinkIcon,
     Plus,
     Refresh,
+    ArrowDown,
+    Document,
+    Download,
+    Upload,
     ProperNounInternetSearchButton,
     ProperNounStarButton,
     SourcePostTermOrganizeDialog
@@ -703,6 +1090,24 @@ export default {
     const router = useRouter()
     const tableRef = ref(null)
     const bindTableRef = ref(null)
+    const importFileInputRef = ref(null)
+    const importing = ref(false)
+    const importPreviewDialogVisible = ref(false)
+    const importPreviewLoading = ref(false)
+    const importPreviewData = ref(null)
+    const pendingImportTerms = ref([])
+    const importCrossArticleNote = ref('')
+    const importProgressVisible = ref(false)
+    const importProgress = ref({
+      processedCount: 0,
+      totalCount: 0,
+      createdCount: 0,
+      updatedCount: 0
+    })
+    const exportDialogVisible = ref(false)
+    const exportMode = ref('export')
+    const exportLanguageCodes = ref([])
+    const exporting = ref(false)
     const loading = ref(false)
     const termList = ref([])
     const total = ref(0)
@@ -766,6 +1171,41 @@ export default {
         return '编辑译名'
       }
       return '新增译名'
+    })
+    const exportDialogTitle = computed(() => {
+      if (exportMode.value === 'template') {
+        return '导出名词模板'
+      }
+      return '导出名词'
+    })
+    const exportConfirmButtonText = computed(() => {
+      if (exportMode.value === 'template') {
+        return '导出模板'
+      }
+      return '导出名词'
+    })
+    const importProgressPercent = computed(() => {
+      const totalCount = importProgress.value.totalCount
+      if (!totalCount) {
+        return 0
+      }
+      const percent = Math.round(
+        (importProgress.value.processedCount / totalCount) * 100
+      )
+      return Math.min(100, Math.max(0, percent))
+    })
+    const selectedImportCount = computed(() => {
+      const data = importPreviewData.value
+      if (!data || !Array.isArray(data.terms)) {
+        return 0
+      }
+      let count = 0
+      data.terms.forEach(term => {
+        if (isImportTermIncluded(term)) {
+          count += 1
+        }
+      })
+      return count
     })
     const selectedTermIds = computed(() => {
       const idList = []
@@ -1242,6 +1682,581 @@ export default {
       organizeDialogVisible.value = true
     }
 
+    function downloadJsonFile(data, fileName) {
+      const jsonText = JSON.stringify(data, null, 2)
+      const blob = new Blob([jsonText], {
+        type: 'application/json;charset=utf-8'
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    }
+
+    function buildExportFileName(templateOnly) {
+      if (templateOnly === true) {
+        return 'source-post-proper-noun-template.json'
+      }
+      const idText = sourceId.value || 'unknown'
+      return `source-post-proper-noun-${idText}.json`
+    }
+
+    function exportProperNounTerms(templateOnly, languageCodes) {
+      if (templateOnly !== true && !sourceId.value) {
+        ElMessage.warning('未找到源文章信息')
+        return
+      }
+      const requestParams = {
+        languageCodes
+      }
+      if (templateOnly === true) {
+        requestParams.templateOnly = true
+      } else {
+        requestParams.sourceId = sourceId.value
+      }
+      exporting.value = true
+      multilingualApi
+        .exportSourcePostProperNounTerms(requestParams)
+        .then(response => {
+          const data = response.data.data || {}
+          downloadJsonFile(data, buildExportFileName(templateOnly))
+          exportDialogVisible.value = false
+          if (templateOnly === true) {
+            ElMessage.success('已导出名词导入模板')
+            return
+          }
+          const exportedTermCount = Array.isArray(data.terms)
+            ? data.terms.length
+            : 0
+          ElMessage.success(`已导出 ${exportedTermCount} 个名词`)
+        })
+        .finally(() => {
+          exporting.value = false
+        })
+    }
+
+    function getDefaultExportLanguageCodes() {
+      if (params.languageCode) {
+        return [params.languageCode]
+      }
+      return languageOptions.map(item => item.value)
+    }
+
+    function openExportDialog(mode) {
+      if (mode !== 'template' && !sourceId.value) {
+        ElMessage.warning('未找到源文章信息')
+        return
+      }
+      exportMode.value = mode
+      exportLanguageCodes.value = getDefaultExportLanguageCodes()
+      exportDialogVisible.value = true
+    }
+
+    function confirmExport() {
+      if (exportLanguageCodes.value.length === 0) {
+        ElMessage.warning('请至少选择一种译名语言')
+        return
+      }
+      exportProperNounTerms(
+        exportMode.value === 'template',
+        exportLanguageCodes.value
+      )
+    }
+
+    function triggerImportFile() {
+      if (!sourceId.value) {
+        ElMessage.warning('未找到源文章信息')
+        return
+      }
+      const inputElement = importFileInputRef.value
+      if (!inputElement) {
+        return
+      }
+      inputElement.value = ''
+      inputElement.click()
+    }
+
+    function parseImportTermList(parsedContent) {
+      if (Array.isArray(parsedContent)) {
+        return parsedContent
+      }
+      if (parsedContent && Array.isArray(parsedContent.terms)) {
+        return parsedContent.terms
+      }
+      return null
+    }
+
+    function handleImportStreamEvent(eventData, resultRef) {
+      const data = eventData.data || {}
+      if (eventData.eventName === 'progress') {
+        importProgress.value = {
+          processedCount: data.processedCount || 0,
+          totalCount: data.totalCount || 0,
+          createdCount: data.createdCount || 0,
+          updatedCount: data.updatedCount || 0
+        }
+        return
+      }
+      if (eventData.eventName === 'result') {
+        resultRef.data = data
+        return
+      }
+      if (eventData.eventName === 'error') {
+        throw new Error(data.message || '导入失败')
+      }
+    }
+
+    async function requestImportStream(termList) {
+      const response = await fetch(
+        '/api/multilingual-admin/source/post/proper-noun/import/stream',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${store.getters.adminToken}`
+          },
+          body: JSON.stringify({
+            sourceId: sourceId.value,
+            terms: termList
+          })
+        }
+      )
+      if (!response.ok) {
+        throw await createApiErrorFromResponse(response, '导入请求失败')
+      }
+      const resultRef = { data: null }
+      await readClientSseStream(response, eventData => {
+        handleImportStreamEvent(eventData, resultRef)
+      })
+      return resultRef.data
+    }
+
+    async function startImport(termList) {
+      importing.value = true
+      importProgressVisible.value = true
+      importProgress.value = {
+        processedCount: 0,
+        totalCount: termList.length,
+        createdCount: 0,
+        updatedCount: 0
+      }
+      try {
+        const data = await requestImportStream(termList)
+        if (!data) {
+          throw new Error('导入没有返回结果')
+        }
+        ElMessage.success(
+          `导入完成：新增 ${data.createdCount || 0} 个，修改 ${
+            data.updatedCount || 0
+          } 个，新增关联 ${data.boundCount || 0} 个，跳过 ${
+            data.skippedCount || 0
+          } 个`
+        )
+        importPreviewDialogVisible.value = false
+        pendingImportTerms.value = []
+        getTermList(false)
+      } catch (error) {
+        if (!isAbortError(error)) {
+          ElMessage.error(error.message || '导入失败')
+        }
+      } finally {
+        importing.value = false
+        importProgressVisible.value = false
+      }
+    }
+
+    function openImportPreview(termList, parsedContent) {
+      pendingImportTerms.value = termList
+      importCrossArticleNote.value = ''
+      const fileSourceId = String(
+        (parsedContent && parsedContent.sourceId) || ''
+      ).trim()
+      if (fileSourceId && fileSourceId !== sourceId.value) {
+        const fileSourceTitle = String(
+          (parsedContent && parsedContent.sourcePostTitle) || ''
+        ).trim()
+        const fileSourceLabel = fileSourceTitle || fileSourceId
+        importCrossArticleNote.value = `该文件导出自另一篇文章「${fileSourceLabel}」，导入后将关联到当前文章。`
+      }
+      importPreviewData.value = null
+      importPreviewLoading.value = true
+      importPreviewDialogVisible.value = true
+      multilingualApi
+        .previewImportSourcePostProperNounTerms({
+          sourceId: sourceId.value,
+          terms: termList
+        })
+        .then(response => {
+          const data = response.data.data || null
+          if (data) {
+            initImportSelection(data)
+          }
+          importPreviewData.value = data
+        })
+        .catch(() => {
+          importPreviewDialogVisible.value = false
+          pendingImportTerms.value = []
+        })
+        .finally(() => {
+          importPreviewLoading.value = false
+        })
+    }
+
+    function confirmImport() {
+      const selectedTerms = buildSelectedImportTerms()
+      if (selectedTerms.length === 0) {
+        ElMessage.warning('请至少选择一项要导入的内容')
+        return
+      }
+      startImport(selectedTerms)
+    }
+
+    function handleImportPreviewBeforeClose(done) {
+      if (importing.value) {
+        return
+      }
+      done()
+    }
+
+    function initImportSelection(data) {
+      if (!data || !Array.isArray(data.terms)) {
+        return
+      }
+      data.terms.forEach(term => {
+        term.termInfoChanged = Boolean(
+          term.sourceTextChanged ||
+          term.sourceLanguageCodeChanged ||
+          term.noteChanged
+        )
+        term.isNewTerm = term.action === 'create'
+        let anyTranslationChanged = false
+        term.translations.forEach(translation => {
+          translation.changed = translation.action !== 'unchanged'
+          if (translation.changed) {
+            anyTranslationChanged = true
+          }
+          translation.textSelected = Boolean(translation.textChanged)
+          translation.noteSelected = Boolean(translation.noteChanged)
+        })
+        term.isBindOnly =
+          !term.isNewTerm &&
+          !term.alreadyBound &&
+          !term.termInfoChanged &&
+          !anyTranslationChanged
+        term.termInfoSelected = term.termInfoChanged
+        term.createSelected = term.isNewTerm
+        term.bindSelected = term.isBindOnly
+      })
+    }
+
+    function getImportTermLeafValues(term) {
+      const values = []
+      if (term.isNewTerm) {
+        values.push(term.createSelected)
+        term.translations.forEach(translation => {
+          if (translation.textChanged) {
+            values.push(translation.textSelected)
+          }
+          if (translation.noteChanged) {
+            values.push(translation.noteSelected)
+          }
+        })
+        return values
+      }
+      if (term.isBindOnly) {
+        values.push(term.bindSelected)
+        return values
+      }
+      if (term.termInfoChanged) {
+        values.push(term.termInfoSelected)
+      }
+      term.translations.forEach(translation => {
+        if (translation.textChanged) {
+          values.push(translation.textSelected)
+        }
+        if (translation.noteChanged) {
+          values.push(translation.noteSelected)
+        }
+      })
+      return values
+    }
+
+    function setImportTermLeafValues(term, selected) {
+      if (term.isNewTerm) {
+        term.createSelected = selected
+      }
+      if (term.isBindOnly) {
+        term.bindSelected = selected
+      }
+      if (!term.isNewTerm && !term.isBindOnly && term.termInfoChanged) {
+        term.termInfoSelected = selected
+      }
+      term.translations.forEach(translation => {
+        if (translation.textChanged) {
+          translation.textSelected = selected
+        }
+        if (translation.noteChanged) {
+          translation.noteSelected = selected
+        }
+      })
+    }
+
+    function isImportTermSelectable(term) {
+      return getImportTermLeafValues(term).length > 0
+    }
+
+    function getImportTermChecked(term) {
+      const values = getImportTermLeafValues(term)
+      if (values.length === 0) {
+        return false
+      }
+      return values.every(value => value === true)
+    }
+
+    function getImportTermIndeterminate(term) {
+      const values = getImportTermLeafValues(term)
+      const selectedCount = values.filter(value => value === true).length
+      return selectedCount > 0 && selectedCount < values.length
+    }
+
+    function handleImportTermCheckedChange(term, selected) {
+      setImportTermLeafValues(term, selected)
+    }
+
+    function selectAllImport() {
+      if (!importPreviewData.value) {
+        return
+      }
+      importPreviewData.value.terms.forEach(term => {
+        setImportTermLeafValues(term, true)
+      })
+    }
+
+    function clearAllImport() {
+      if (!importPreviewData.value) {
+        return
+      }
+      importPreviewData.value.terms.forEach(term => {
+        setImportTermLeafValues(term, false)
+      })
+    }
+
+    function isImportTermIncluded(term) {
+      if (term.isNewTerm) {
+        return term.createSelected === true
+      }
+      if (term.isBindOnly) {
+        return term.bindSelected === true
+      }
+      if (term.termInfoChanged && term.termInfoSelected) {
+        return true
+      }
+      return term.translations.some(translation => {
+        if (!translation.changed) {
+          return false
+        }
+        return (
+          translation.textSelected === true || translation.noteSelected === true
+        )
+      })
+    }
+
+    function buildSelectedImportTermTranslations(term) {
+      const translations = []
+      term.translations.forEach(translation => {
+        if (term.isNewTerm) {
+          if (translation.textSelected !== true) {
+            return
+          }
+          let note = ''
+          if (translation.noteSelected === true) {
+            note = translation.note
+          }
+          translations.push({
+            languageCode: translation.languageCode,
+            translatedText: translation.translatedText,
+            note
+          })
+          return
+        }
+        if (!translation.changed) {
+          return
+        }
+        const applyText = translation.textSelected === true
+        const applyNote = translation.noteSelected === true
+        if (!applyText && !applyNote) {
+          return
+        }
+        let translatedText = translation.previousTranslatedText || ''
+        if (applyText) {
+          translatedText = translation.translatedText
+        }
+        let note = translation.previousNote || ''
+        if (applyNote) {
+          note = translation.note
+        }
+        translations.push({
+          languageCode: translation.languageCode,
+          translatedText,
+          note
+        })
+      })
+      return translations
+    }
+
+    function buildSelectedImportTerms() {
+      const data = importPreviewData.value
+      const terms = []
+      if (!data || !Array.isArray(data.terms)) {
+        return terms
+      }
+      data.terms.forEach(term => {
+        if (!isImportTermIncluded(term)) {
+          return
+        }
+        const payloadTerm = {}
+        if (term.id) {
+          payloadTerm.id = term.id
+        }
+        if (term.isNewTerm) {
+          payloadTerm.sourceText = term.sourceText
+          payloadTerm.sourceLanguageCode = term.sourceLanguageCode
+          payloadTerm.note = term.note
+          payloadTerm.translations = buildSelectedImportTermTranslations(term)
+        } else if (term.isBindOnly) {
+          payloadTerm.sourceText = term.previousSourceText || term.sourceText
+          payloadTerm.sourceLanguageCode = term.previousSourceLanguageCode || ''
+          payloadTerm.note = term.previousNote || ''
+          payloadTerm.translations = []
+        } else {
+          const applyTermInfo = term.termInfoChanged && term.termInfoSelected
+          if (applyTermInfo) {
+            payloadTerm.sourceText = term.sourceText
+            payloadTerm.sourceLanguageCode = term.sourceLanguageCode
+            payloadTerm.note = term.note
+          } else {
+            payloadTerm.sourceText = term.previousSourceText || term.sourceText
+            payloadTerm.sourceLanguageCode =
+              term.previousSourceLanguageCode || ''
+            payloadTerm.note = term.previousNote || ''
+          }
+          payloadTerm.translations = buildSelectedImportTermTranslations(term)
+        }
+        terms.push(payloadTerm)
+      })
+      return terms
+    }
+
+    function getPreviewTermActionText(action) {
+      if (action === 'create') {
+        return '新增'
+      }
+      if (action === 'unchanged') {
+        return '无变化'
+      }
+      return '修改'
+    }
+
+    function getPreviewTermActionType(action) {
+      if (action === 'create') {
+        return 'success'
+      }
+      if (action === 'unchanged') {
+        return 'info'
+      }
+      return 'warning'
+    }
+
+    function getPreviewTranslationActionText(action) {
+      if (action === 'create') {
+        return '新增'
+      }
+      if (action === 'update') {
+        return '修改'
+      }
+      return '无变化'
+    }
+
+    function getPreviewTranslationActionType(action) {
+      if (action === 'create') {
+        return 'success'
+      }
+      if (action === 'update') {
+        return 'warning'
+      }
+      return 'info'
+    }
+
+    function getPreviewLanguageText(languageCode) {
+      const languageText = getLanguageText(languageCode)
+      if (!languageText || languageText === languageCode) {
+        return languageCode
+      }
+      return languageText
+    }
+
+    function getPreviewDisplayText(value) {
+      if (value === null || value === undefined || value === '') {
+        return '（空）'
+      }
+      return value
+    }
+
+    function handleImportFileChange(event) {
+      const inputElement = event.target
+      const file = inputElement.files && inputElement.files[0]
+      if (!file) {
+        return
+      }
+      const reader = new FileReader()
+      reader.onload = () => {
+        let parsedContent = null
+        try {
+          parsedContent = JSON.parse(String(reader.result || ''))
+        } catch (error) {
+          ElMessage.error('文件解析失败，请确认是合法的 JSON 文件')
+          inputElement.value = ''
+          return
+        }
+        const termList = parseImportTermList(parsedContent)
+        if (!termList) {
+          ElMessage.error('文件格式不正确，缺少 terms 名词列表')
+          inputElement.value = ''
+          return
+        }
+        if (termList.length === 0) {
+          ElMessage.warning('文件中没有可导入的名词')
+          inputElement.value = ''
+          return
+        }
+        openImportPreview(termList, parsedContent)
+        inputElement.value = ''
+      }
+      reader.onerror = () => {
+        ElMessage.error('文件读取失败')
+        inputElement.value = ''
+      }
+      reader.readAsText(file)
+    }
+
+    function handleImportExportCommand(command) {
+      if (command === 'export') {
+        openExportDialog('export')
+        return
+      }
+      if (command === 'template') {
+        openExportDialog('template')
+        return
+      }
+      if (command === 'import') {
+        triggerImportFile()
+      }
+    }
+
     function handleInternetSearchApplied() {
       preserveTableScrollForNextRefresh()
       getTermList(false)
@@ -1399,7 +2414,39 @@ export default {
       goBack,
       handleInternetSearchApplied,
       handleBindTermSelectionChange,
+      handleImportExportCommand,
+      handleImportFileChange,
       handleTermSelectionChange,
+      confirmExport,
+      exportConfirmButtonText,
+      exportDialogTitle,
+      exportDialogVisible,
+      exportLanguageCodes,
+      exporting,
+      importFileInputRef,
+      importing,
+      confirmImport,
+      handleImportPreviewBeforeClose,
+      importCrossArticleNote,
+      importPreviewData,
+      importPreviewDialogVisible,
+      importPreviewLoading,
+      importProgress,
+      importProgressPercent,
+      importProgressVisible,
+      getPreviewTermActionText,
+      getPreviewTermActionType,
+      getPreviewTranslationActionText,
+      getPreviewTranslationActionType,
+      getPreviewLanguageText,
+      getPreviewDisplayText,
+      isImportTermSelectable,
+      getImportTermChecked,
+      getImportTermIndeterminate,
+      handleImportTermCheckedChange,
+      selectAllImport,
+      clearAllImport,
+      selectedImportCount,
       internetSearchDefaultLanguageCodes,
       isBindableTermSelectable,
       isTermBoundToSourcePost,
@@ -1450,6 +2497,216 @@ export default {
 <style scoped>
 .source-post-proper-noun-page {
   min-width: 0;
+}
+
+.source-post-term-import-input {
+  display: none;
+}
+
+.source-post-term-export-tip {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  padding-left: 100px;
+}
+
+.source-post-term-import-preview {
+  max-height: 60vh;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.source-post-term-import-preview-summary {
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.source-post-term-import-create-count {
+  color: var(--el-color-success);
+  font-weight: 600;
+}
+
+.source-post-term-import-update-count {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.source-post-term-import-unchanged-count {
+  color: var(--el-text-color-secondary);
+  font-weight: 600;
+}
+
+.source-post-term-import-preview-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.source-post-term-import-selected-count {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+
+.source-post-term-import-preview-leaf-block {
+  margin-top: 8px;
+}
+
+.source-post-term-import-preview-translation-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.source-post-term-import-preview-translation-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-post-term-import-leaf-checkbox {
+  margin-right: 0;
+}
+
+@media (max-width: 767px) {
+  .source-post-term-import-preview-item-head {
+    align-items: flex-start;
+  }
+
+  .source-post-term-import-preview-source-text {
+    word-break: break-all;
+  }
+
+  .source-post-term-import-preview-note {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    word-break: break-all;
+  }
+
+  .source-post-term-import-preview-translation {
+    align-items: flex-start;
+    /* flex-direction: column; */
+  }
+
+  .source-post-term-import-preview-translation-line {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .source-post-term-import-preview-translation-diff {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    word-break: break-all;
+  }
+
+  .source-post-term-import-old,
+  .source-post-term-import-new {
+    word-break: break-all;
+  }
+
+  .source-post-term-import-preview-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+.source-post-term-import-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source-post-term-import-preview-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.source-post-term-import-preview-item-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-post-term-import-preview-source-text {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.source-post-term-import-preview-lang {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.source-post-term-import-preview-note {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.source-post-term-import-preview-translations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.source-post-term-import-preview-translation {
+  /* align-items: center; */
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.source-post-term-import-preview-translation-diff {
+  word-break: break-all;
+}
+
+.source-post-term-import-old {
+  color: var(--el-color-danger);
+  text-decoration: line-through;
+}
+
+.source-post-term-import-new {
+  color: var(--el-color-success);
+}
+
+.source-post-term-import-preview-translation-same {
+  color: var(--el-text-color-secondary);
+}
+
+.source-post-term-import-preview-translation-note {
+  color: var(--el-text-color-regular);
+  flex-basis: 100%;
+  font-size: 12px;
+  padding-left: 4px;
+  word-break: break-all;
+}
+
+.source-post-term-import-preview-empty {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.source-post-term-import-progress {
+  margin-top: 16px;
+}
+
+.source-post-term-import-progress-text {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  margin-top: 8px;
+  text-align: left;
 }
 
 .source-post-term-header,

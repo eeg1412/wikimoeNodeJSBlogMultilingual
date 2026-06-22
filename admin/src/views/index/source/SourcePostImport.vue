@@ -3782,7 +3782,11 @@ export default {
                 showSyncRelatedPostsOption.value &&
                 aiForm.syncRelatedPosts === true,
               aiVerificationEnabled: aiForm.aiVerificationEnabled === true,
-              relatedSourceFeatureScopes: buildRelatedSourceFeatureScopes()
+              relatedSourceFeatureScopes: buildRelatedSourceFeatureScopes(),
+              publishLanguageCodes: aiPublishLanguageCodes.value.filter(
+                languageCode =>
+                  aiForm.targetLanguageCodes.includes(languageCode)
+              )
             },
             targetLanguageCodes: aiForm.targetLanguageCodes,
             recursion: {

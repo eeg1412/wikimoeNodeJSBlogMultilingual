@@ -63,10 +63,12 @@ const TRANSLATION_JOB_ORCHESTRATOR_ROLE_VALUES = Object.freeze([
 // proper-noun-organize       = 名词整理（针对该文章所有目标语言一次性整理，执行即生效）
 // single-language-translation = 单语言翻译校验（每种目标语言一个子任务）
 // cover-image-organize       = 封面图整理（家族最后一步，跨该文章各语言按标题去重）
+// post-language-translation  = 已有译文文章的单语言翻译（批量"翻译已存在文章"时，每种目标语言一个子任务）
 const TRANSLATION_JOB_CHILD_KINDS = Object.freeze({
   PROPER_NOUN_ORGANIZE: 'proper-noun-organize',
   SINGLE_LANGUAGE_TRANSLATION: 'single-language-translation',
-  COVER_IMAGE_ORGANIZE: 'cover-image-organize'
+  COVER_IMAGE_ORGANIZE: 'cover-image-organize',
+  POST_LANGUAGE_TRANSLATION: 'post-language-translation'
 })
 
 const TRANSLATION_JOB_CHILD_KIND_VALUES = Object.freeze(
@@ -76,7 +78,8 @@ const TRANSLATION_JOB_CHILD_KIND_VALUES = Object.freeze(
 // 需要人工审核采纳的子任务种类（名词整理执行即生效，不参与统一采纳）。
 const TRANSLATION_JOB_ADOPTABLE_CHILD_KINDS = Object.freeze([
   TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION,
-  TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE
+  TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE,
+  TRANSLATION_JOB_CHILD_KINDS.POST_LANGUAGE_TRANSLATION
 ])
 
 module.exports = {

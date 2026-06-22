@@ -208,6 +208,35 @@ const adoptionEntrySchema = new Schema(
   { _id: false }
 )
 
+// 家族级共享关联实体（番剧/分类/标签/电影/书籍/游戏等）译文缓存条目。
+// 同一家族内多篇文章引用同一关联实体时，只 AI 翻译一次，其余文章按 (语言+稳定条目键) 复用缓存值，
+// 避免重复翻译浪费 token。缓存持久化在家族根任务上，保证翻译出错或系统重启后仍可幂等复用。
+const dependencyTranslationCacheEntrySchema = new Schema(
+  {
+    languageCode: {
+      type: String,
+      required: true
+    },
+    entryKey: {
+      type: String,
+      required: true
+    },
+    valueType: {
+      type: String,
+      default: ''
+    },
+    value: {
+      type: Schema.Types.Mixed,
+      default: null
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  { _id: false }
+)
+
 const translationJobs = new Schema(
   {
     jobType: {
@@ -686,6 +715,11 @@ const translationJobs = new Schema(
         default: false,
         index: true
       }
+    },
+    // 家族根任务上的共享关联实体译文缓存（见 dependencyTranslationCacheEntrySchema 说明）。
+    dependencyTranslationCache: {
+      type: [dependencyTranslationCacheEntrySchema],
+      default: []
     },
     createdBy: {
       type: adminSnapshotSchema,
