@@ -820,7 +820,38 @@ function buildRelationUpdateData(collectionName, payload, schema) {
   return updateData
 }
 
-function normalizeVoteOptionsForUpdate(inputOptions, existingOptions = []) {
+// 全量替换模式：翻译采纳在按源结构全量重建投票选项时使用。源有多少选项就同步多少，
+// 直接用提交的选项整组覆盖目标，结构（含票数/排序/_id）一并以源为准，不再要求与目标数量一致。
+function normalizeVoteOptionsForStructureReplace(inputOptions) {
+  return inputOptions.map((option, index) => {
+    const title = String(option?.title || '').trim()
+    if (!title) {
+      throw new ApiError(
+        ERROR_CODES.CONTENT_FIELD_INVALID,
+        `options[${index}].title is required`,
+        'options',
+        400
+      )
+    }
+
+    const normalizedOption = { title }
+    const optionId = String(option?._id || '').trim()
+    if (optionId && mongoose.Types.ObjectId.isValid(optionId)) {
+      normalizedOption._id = new mongoose.Types.ObjectId(optionId)
+    }
+    const votes = Number(option?.votes)
+    normalizedOption.votes = Number.isFinite(votes) ? votes : 0
+    const sort = Number(option?.sort)
+    normalizedOption.sort = Number.isFinite(sort) ? sort : 0
+    return normalizedOption
+  })
+}
+
+function normalizeVoteOptionsForUpdate(
+  inputOptions,
+  existingOptions = [],
+  normalizeOptions = {}
+) {
   if (!Array.isArray(inputOptions)) {
     throw new ApiError(
       ERROR_CODES.CONTENT_FIELD_INVALID,
@@ -828,6 +859,10 @@ function normalizeVoteOptionsForUpdate(inputOptions, existingOptions = []) {
       'options',
       400
     )
+  }
+
+  if (normalizeOptions.allowStructureReplace === true) {
+    return normalizeVoteOptionsForStructureReplace(inputOptions)
   }
 
   const submittedOptionMap = new Map()
@@ -923,7 +958,10 @@ async function updateRelation(body = {}, options = {}) {
   ) {
     updateData.options = normalizeVoteOptionsForUpdate(
       updateData.options,
-      record.options || []
+      record.options || [],
+      {
+        allowStructureReplace: options.allowVoteOptionStructureReplace === true
+      }
     )
   }
   if (Object.keys(updateData).length === 0) {

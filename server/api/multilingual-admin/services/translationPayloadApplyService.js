@@ -13,6 +13,7 @@ const {
 } = require('../../../utils/translationJobConstants')
 const relationService = require('./relationService')
 const translationPostService = require('./translationPostService')
+const relationArrayFieldSyncUtils = require('./relationArrayFieldSyncUtils')
 const coverImageAdoptionService = require('./coverImageAdoptionService')
 const {
   STRUCTURED_RICH_TEXT_VALUE_TYPE,
@@ -210,17 +211,6 @@ function normalizePreviewTextValue(value) {
     return value
   }
   return stableStringify(value)
-}
-
-function normalizeUrlListValue(value) {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.map(item => ({
-    text: item?.text || '',
-    url: item?.url || ''
-  }))
 }
 
 // 字符串数组字段（label [String]）目标值归一化，保持每个元素为独立字符串。
@@ -590,59 +580,34 @@ async function findTranslationRelationRecord(entry, languageCode) {
   return record
 }
 
-function getVoteOptionIndex(record, entry) {
-  const optionList = Array.isArray(record.options) ? record.options : []
-  const optionId = normalizeIdentityValue(entry.optionId)
-  if (optionId) {
-    const index = optionList.findIndex(
-      option => String(option._id || '') === optionId
-    )
-    if (index >= 0) {
-      return index
-    }
-  }
-
-  const optionIndex = Number(entry.optionIndex)
-  if (
-    Number.isInteger(optionIndex) &&
-    optionIndex >= 0 &&
-    optionList[optionIndex]
-  ) {
-    return optionIndex
-  }
-
-  throw new ApiError(
-    ERROR_CODES.CONTENT_NOT_FOUND,
-    '目标语言投票选项不存在',
-    'options',
-    404
-  )
-}
-
-function getUrlListIndex(record, entry) {
-  const urlList = Array.isArray(record.urlList) ? record.urlList : []
-  const urlIndex = Number(entry.urlIndex)
-  if (Number.isInteger(urlIndex) && urlIndex >= 0 && urlList[urlIndex]) {
-    return urlIndex
-  }
-
-  throw new ApiError(
-    ERROR_CODES.CONTENT_NOT_FOUND,
-    '目标语言关联内容链接项不存在',
-    'urlList',
-    404
-  )
-}
-
+// 读取目标记录当前值（用于采纳前的冲突哈希）。数组型字段全量重建后，目标可能尚无源新增的
+// index（如源新增了一条 URL / 投票选项），此时当前值视为空串，不再抛“目标项不存在”。
 function getCurrentEntryValue(entry, record) {
   if (entry.collectionName === 'votes' && entry.fieldName === 'options.title') {
-    const optionIndex = getVoteOptionIndex(record, entry)
-    return record.options[optionIndex]?.title || ''
+    const optionList = Array.isArray(record.options) ? record.options : []
+    const optionId = normalizeIdentityValue(entry.optionId)
+    if (optionId) {
+      const matchedOption = optionList.find(
+        option => String(option._id || '') === optionId
+      )
+      if (matchedOption) {
+        return matchedOption.title || ''
+      }
+    }
+    const optionIndex = Number(entry.optionIndex)
+    if (Number.isInteger(optionIndex) && optionList[optionIndex]) {
+      return optionList[optionIndex].title || ''
+    }
+    return ''
   }
 
   if (entry.fieldName === URL_LIST_TEXT_FIELD_NAME) {
-    const urlIndex = getUrlListIndex(record, entry)
-    return record.urlList[urlIndex]?.text || ''
+    const urlList = Array.isArray(record.urlList) ? record.urlList : []
+    const urlIndex = Number(entry.urlIndex)
+    if (Number.isInteger(urlIndex) && urlList[urlIndex]) {
+      return urlList[urlIndex].text || ''
+    }
+    return ''
   }
 
   if (Number.isInteger(Number(entry.labelIndex))) {
@@ -796,6 +761,71 @@ function buildEntryMap(entries = []) {
     }
   })
   return map
+}
+
+// 数组型字段（label / urlList / options）的“字段级分组键”（不含 index）。同一记录同一字段的
+// 全部元素共享该键，用于“整组采纳”。
+function getEntryArrayFieldGroupKey(entry = {}) {
+  const isArrayFieldEntry =
+    Number.isInteger(Number(entry.labelIndex)) ||
+    Number.isInteger(Number(entry.urlIndex)) ||
+    Number.isInteger(Number(entry.optionIndex))
+  if (!isArrayFieldEntry) {
+    return ''
+  }
+  const sourceId = normalizeIdentityValue(entry.sourceId)
+  if (entry.scope === 'relation') {
+    return [
+      'relation',
+      entry.relationField || '',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+  if (entry.scope === 'parentRelation') {
+    return [
+      'parentRelation',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+  return ''
+}
+
+// 整组采纳：用户勾选了某数组字段的任一元素，就把该字段的全部元素一并采纳，保证按源结构
+// 全量重建（源有多少同步多少），不会只采纳被勾选的那一条而留下不一致的目标数组。
+function expandArrayFieldSelection(selectedEntries, allEntries) {
+  const selectedGroupKeys = new Set()
+  selectedEntries.forEach(entry => {
+    const groupKey = getEntryArrayFieldGroupKey(entry)
+    if (groupKey) {
+      selectedGroupKeys.add(groupKey)
+    }
+  })
+  if (selectedGroupKeys.size === 0) {
+    return selectedEntries
+  }
+
+  const seenEntryKeys = new Set(
+    selectedEntries.map(entry => entry && entry.entryKey).filter(Boolean)
+  )
+  const expandedEntries = selectedEntries.slice()
+  allEntries.forEach(entry => {
+    if (!entry || !entry.entryKey || entry.aiSkipReason) {
+      return
+    }
+    if (seenEntryKeys.has(entry.entryKey)) {
+      return
+    }
+    const groupKey = getEntryArrayFieldGroupKey(entry)
+    if (groupKey && selectedGroupKeys.has(groupKey)) {
+      expandedEntries.push(entry)
+      seenEntryKeys.add(entry.entryKey)
+    }
+  })
+  return expandedEntries
 }
 
 function isSelectablePreviewEntry(entry) {
@@ -1366,25 +1396,27 @@ function buildRelationUpdateBody(entry, record, languageCode) {
   }
 
   if (entry.collectionName === 'votes' && entry.fieldName === 'options.title') {
-    const options = Array.isArray(record.options)
-      ? cloneSerializableValue(record.options)
-      : []
-    const optionIndex = getVoteOptionIndex(record, entry)
-    options[optionIndex].title = value
-    payload.options = options
+    payload.options = relationArrayFieldSyncUtils.rebuildVoteOptionsFromSource(
+      record.options,
+      entry.sourceOptionList,
+      entry.optionIndex,
+      value
+    )
   } else if (entry.fieldName === URL_LIST_TEXT_FIELD_NAME) {
-    const urlList = normalizeUrlListValue(record.urlList)
-    const urlIndex = getUrlListIndex(record, entry)
-    urlList[urlIndex].text = value
-    payload.urlList = urlList
+    payload.urlList = relationArrayFieldSyncUtils.rebuildUrlListFromSource(
+      record.urlList,
+      entry.sourceUrlList,
+      entry.urlIndex,
+      value
+    )
   } else if (Number.isInteger(Number(entry.labelIndex))) {
-    const stringList = normalizeStringListValue(record[entry.fieldName])
-    const labelIndex = Number(entry.labelIndex)
-    while (stringList.length <= labelIndex) {
-      stringList.push('')
-    }
-    stringList[labelIndex] = value
-    payload[entry.fieldName] = stringList
+    payload[entry.fieldName] =
+      relationArrayFieldSyncUtils.rebuildStringListFromSource(
+        record[entry.fieldName],
+        entry.sourceLabelList,
+        entry.labelIndex,
+        value
+      )
   } else {
     payload[entry.fieldName] = value
   }
@@ -1424,7 +1456,7 @@ async function applySingleEntry({
         recordBeforeApply,
         targetContext.languageCode
       ),
-      { skipContentRefresh: true }
+      { skipContentRefresh: true, allowVoteOptionStructureReplace: true }
     )
   }
 
@@ -1535,10 +1567,15 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
     }
     return entry
   })
-  const selectedCoverImageEntries = selectedEntries.filter(entry => {
+  // 整组采纳：把被勾选数组字段的其余元素一并纳入，保证按源结构全量重建目标数组。
+  const expandedSelectedEntries = expandArrayFieldSelection(
+    selectedEntries,
+    previewEntries
+  )
+  const selectedCoverImageEntries = expandedSelectedEntries.filter(entry => {
     return entry?.entryType === 'coverImageTranslation'
   })
-  const selectedContentEntries = selectedEntries.filter(entry => {
+  const selectedContentEntries = expandedSelectedEntries.filter(entry => {
     return entry?.entryType !== 'coverImageTranslation'
   })
 

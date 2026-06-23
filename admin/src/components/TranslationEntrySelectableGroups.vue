@@ -32,34 +32,91 @@
         </div>
       </div>
       <div class="translation-json-entry-list">
-        <el-checkbox
-          v-for="entry in group.entries"
-          :key="entry.id"
-          :model-value="isEntrySelected(entry)"
-          :disabled="disabled"
-          class="translation-json-entry"
-          @change="checked => setEntrySelected(entry, checked)"
-        >
-          <TranslationEntryMeta :entry="entry" :show-subtitle="false" />
-          <div
-            v-if="showAdoptionInfo && entry.isApplied"
-            class="translation-json-entry-adoption"
+        <template v-for="unit in getGroupDisplayUnits(group)" :key="unit.key">
+          <el-checkbox
+            v-if="!unit.merged"
+            :model-value="isEntrySelected(unit.primaryEntry)"
+            :disabled="disabled"
+            class="translation-json-entry"
+            @change="checked => setEntrySelected(unit.primaryEntry, checked)"
           >
-            <el-tag size="small" type="success" effect="plain"> 已采纳 </el-tag>
-            <span class="translation-json-entry-adoption-text">
-              采纳时间：{{ formatAdoptionTime(entry.appliedAt) }}
-            </span>
-            <span class="translation-json-entry-adoption-text">
-              采纳人：{{ getAppliedByText(entry) }}
-            </span>
+            <TranslationEntryMeta
+              :entry="unit.primaryEntry"
+              :show-subtitle="false"
+            />
+            <div
+              v-if="showAdoptionInfo && unit.primaryEntry.isApplied"
+              class="translation-json-entry-adoption"
+            >
+              <el-tag size="small" type="success" effect="plain">
+                已采纳
+              </el-tag>
+              <span class="translation-json-entry-adoption-text">
+                采纳时间：{{ formatAdoptionTime(unit.primaryEntry.appliedAt) }}
+              </span>
+              <span class="translation-json-entry-adoption-text">
+                采纳人：{{ getAppliedByText(unit.primaryEntry) }}
+              </span>
+            </div>
+            <TranslationEntryPreviewRows
+              :entry="unit.primaryEntry"
+              :current-label="currentPreviewLabel"
+              :source-label="sourcePreviewLabel"
+              :next-label="nextPreviewLabel"
+            />
+          </el-checkbox>
+          <div
+            v-else
+            class="translation-json-entry translation-json-entry-merged"
+          >
+            <el-checkbox
+              :model-value="isUnitSelected(unit)"
+              :indeterminate="isUnitIndeterminate(unit)"
+              :disabled="disabled"
+              class="translation-json-entry-merged-head"
+              @change="checked => setUnitSelected(unit, checked)"
+            >
+              <TranslationEntryMeta
+                :entry="unit.primaryEntry"
+                :show-subtitle="false"
+              />
+              <span class="translation-json-entry-merged-count">
+                共 {{ unit.entries.length }} 项 · 整组翻译
+              </span>
+            </el-checkbox>
+            <div class="translation-json-entry-merged-members">
+              <div
+                v-for="member in unit.entries"
+                :key="member.id"
+                class="translation-json-entry-member"
+              >
+                <div class="translation-json-entry-member-title">
+                  {{ member.fieldLabel || member.label }}
+                </div>
+                <div
+                  v-if="showAdoptionInfo && member.isApplied"
+                  class="translation-json-entry-adoption"
+                >
+                  <el-tag size="small" type="success" effect="plain">
+                    已采纳
+                  </el-tag>
+                  <span class="translation-json-entry-adoption-text">
+                    采纳时间：{{ formatAdoptionTime(member.appliedAt) }}
+                  </span>
+                  <span class="translation-json-entry-adoption-text">
+                    采纳人：{{ getAppliedByText(member) }}
+                  </span>
+                </div>
+                <TranslationEntryPreviewRows
+                  :entry="member"
+                  :current-label="currentPreviewLabel"
+                  :source-label="sourcePreviewLabel"
+                  :next-label="nextPreviewLabel"
+                />
+              </div>
+            </div>
           </div>
-          <TranslationEntryPreviewRows
-            :entry="entry"
-            :current-label="currentPreviewLabel"
-            :source-label="sourcePreviewLabel"
-            :next-label="nextPreviewLabel"
-          />
-        </el-checkbox>
+        </template>
       </div>
     </div>
   </div>
@@ -72,6 +129,46 @@ import TranslationEntryPreviewRows from '@/components/TranslationEntryPreviewRow
 
 function getEntryId(entry) {
   return entry?.id ? String(entry.id) : ''
+}
+
+// 判断条目是否属于“按 index 拆分的数组型字段元素”（label / urlList / options）。
+function isArrayFieldEntry(entry) {
+  return (
+    Number.isInteger(Number(entry?.labelIndex)) ||
+    Number.isInteger(Number(entry?.urlIndex)) ||
+    Number.isInteger(Number(entry?.optionIndex))
+  )
+}
+
+// 数组型字段（label / urlList / options）元素条目的“字段级分组键”（不含 index）。直接由条目自身的
+// 业务字段（scope / 关联字段 / 集合 / 记录 / 字段名）拼成，不解析 id 字符串。同一记录同一字段的
+// 全部元素共享该键，用于把它们合并成一个整组单元。
+function getEntryArrayFieldKey(entry) {
+  if (!isArrayFieldEntry(entry)) {
+    return ''
+  }
+  const recordId = String(entry?.recordId || entry?.sourceId || '')
+  return [
+    entry?.scope || '',
+    entry?.relationField || '',
+    entry?.collectionName || '',
+    recordId,
+    entry?.fieldName || ''
+  ].join('|')
+}
+
+// 去掉标签里的 “ #数字” 序号后缀，作为整组单元的字段标题（仅影响展示文案，不解析 id）。
+function stripEntryIndexSuffix(text) {
+  const value = String(text || '')
+  const markerIndex = value.lastIndexOf(' #')
+  if (markerIndex === -1) {
+    return value
+  }
+  const suffix = value.slice(markerIndex + 2)
+  if (suffix.length > 0 && Number.isInteger(Number(suffix))) {
+    return value.slice(0, markerIndex)
+  }
+  return value
 }
 
 export default {
@@ -158,6 +255,91 @@ export default {
     function isEntrySelected(entry) {
       const id = getEntryId(entry)
       return Boolean(id && selectedIdSet.value.has(id))
+    }
+
+    // 把分组内的条目转换为“显示单元”：数组型字段（label / urlList / options）的全部元素合并成
+    // 一个整组单元（一个勾选框管理整组），其它字段维持一条一个单元。顺序按首次出现保持不变。
+    function getGroupDisplayUnits(group) {
+      const units = []
+      const arrayUnitMap = new Map()
+      ;(group?.entries || []).forEach(entry => {
+        const arrayKey = getEntryArrayFieldKey(entry)
+        if (!arrayKey) {
+          units.push({
+            key: getEntryId(entry),
+            merged: false,
+            primaryEntry: entry,
+            entries: [entry],
+            entryIds: [getEntryId(entry)].filter(Boolean)
+          })
+          return
+        }
+        if (!arrayUnitMap.has(arrayKey)) {
+          const primaryEntry = {
+            ...entry,
+            label: stripEntryIndexSuffix(entry.label),
+            fieldLabel: stripEntryIndexSuffix(entry.fieldLabel)
+          }
+          const unit = {
+            key: `array:${arrayKey}`,
+            merged: true,
+            primaryEntry,
+            entries: [],
+            entryIds: []
+          }
+          arrayUnitMap.set(arrayKey, unit)
+          units.push(unit)
+        }
+        const unit = arrayUnitMap.get(arrayKey)
+        unit.entries.push(entry)
+        const id = getEntryId(entry)
+        if (id) {
+          unit.entryIds.push(id)
+        }
+      })
+      return units
+    }
+
+    function isUnitSelected(unit) {
+      if (!unit || unit.entryIds.length === 0) {
+        return false
+      }
+      return unit.entryIds.every(id => selectedIdSet.value.has(id))
+    }
+
+    function isUnitIndeterminate(unit) {
+      if (!unit || unit.entryIds.length === 0) {
+        return false
+      }
+      const selectedCount = unit.entryIds.filter(id =>
+        selectedIdSet.value.has(id)
+      ).length
+      return selectedCount > 0 && selectedCount < unit.entryIds.length
+    }
+
+    async function setUnitSelected(unit, checked) {
+      if (!unit || unit.entryIds.length === 0) {
+        return
+      }
+      if (
+        checked &&
+        typeof props.beforeEntrySelect === 'function' &&
+        (await props.beforeEntrySelect({
+          entry: unit.primaryEntry,
+          checked
+        })) === false
+      ) {
+        return
+      }
+      const nextIdSet = new Set(selectedIdSet.value)
+      unit.entryIds.forEach(id => {
+        if (checked) {
+          nextIdSet.add(id)
+          return
+        }
+        nextIdSet.delete(id)
+      })
+      updateSelectedIds(nextIdSet)
     }
 
     async function setEntrySelected(entry, checked) {
@@ -259,6 +441,7 @@ export default {
     return {
       formatAdoptionTime,
       getAppliedByText,
+      getGroupDisplayUnits,
       getGroupEntryIds,
       getGroupSelectionState,
       getGroupTitle,
@@ -266,9 +449,12 @@ export default {
       isEntrySelected,
       isGroupAllSelected,
       isGroupIndeterminate,
+      isUnitIndeterminate,
+      isUnitSelected,
       nextPreviewLabel: props.nextPreviewLabel,
       setEntrySelected,
       setGroupSelected,
+      setUnitSelected,
       showAdoptionInfo: props.showAdoptionInfo,
       sourcePreviewLabel: props.sourcePreviewLabel
     }
@@ -368,6 +554,61 @@ export default {
 
 .translation-json-entry :deep(.el-checkbox__input) {
   margin-top: 4px;
+}
+
+/* 数组型字段整组单元：一个勾选框管理整组，组内各元素只读展示。 */
+.translation-json-entry-merged {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.translation-json-entry-merged-head {
+  width: 100%;
+  margin-right: 0;
+  align-items: flex-start;
+}
+
+.translation-json-entry-merged-head :deep(.el-checkbox__label) {
+  width: 100%;
+  padding-left: 12px;
+}
+
+.translation-json-entry-merged-head :deep(.el-checkbox__input) {
+  margin-top: 4px;
+}
+
+.translation-json-entry-merged-count {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.translation-json-entry-merged-members {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 24px;
+}
+
+.translation-json-entry-member {
+  padding: 8px 0;
+}
+
+.translation-json-entry-member + .translation-json-entry-member {
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.translation-json-entry-member-title {
+  margin-bottom: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .translation-json-entry-adoption {

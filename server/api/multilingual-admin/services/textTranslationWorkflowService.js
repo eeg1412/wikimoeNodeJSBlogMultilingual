@@ -4468,6 +4468,17 @@ function buildTranslatedEntries(preparedInput, resultData) {
     if (Number.isInteger(entry.labelIndex)) {
       outputEntry.labelIndex = entry.labelIndex
     }
+    // 数组型字段（label / urlList / options）携带源记录完整数组，供采纳回填时按源结构
+    // 全量重建目标数组（源有多少同步多少、结构以源为准、截断目标多余项）。
+    if (Array.isArray(entry.sourceLabelList)) {
+      outputEntry.sourceLabelList = entry.sourceLabelList
+    }
+    if (Array.isArray(entry.sourceUrlList)) {
+      outputEntry.sourceUrlList = entry.sourceUrlList
+    }
+    if (Array.isArray(entry.sourceOptionList)) {
+      outputEntry.sourceOptionList = entry.sourceOptionList
+    }
     if (entry.sourceId) {
       outputEntry.sourceId = entry.sourceId
     }

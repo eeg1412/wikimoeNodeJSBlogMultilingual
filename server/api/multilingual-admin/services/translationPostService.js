@@ -18,6 +18,7 @@ const {
   COVER_IMAGE_ENTRY_TYPE
 } = require('../utils/coverImageTranslationUtils')
 const { renderRichTextDocumentNode } = require('../utils/richTextDocumentUtils')
+const relationArrayFieldSyncUtils = require('./relationArrayFieldSyncUtils')
 
 const AUTHOR_SNAPSHOT_PASSWORD = '__AUTHOR_SNAPSHOT_NO_LOGIN__'
 const SOURCE_POST_COLLECTION = 'posts'
@@ -4532,25 +4533,14 @@ async function findTranslationRecordBySourceEntry(entry, languageCode) {
 }
 
 function applyVoteOptionTitlePatch(optionList, optionPatch) {
-  const optionId = String(optionPatch.optionId || '').trim()
-  let optionIndex = -1
-  if (optionId) {
-    optionIndex = optionList.findIndex(option => {
-      return String(option._id || '') === optionId
-    })
-  }
-  if (optionIndex < 0 && Number.isInteger(Number(optionPatch.optionIndex))) {
-    optionIndex = Number(optionPatch.optionIndex)
-  }
-  if (optionIndex < 0 || !optionList[optionIndex]) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_NOT_FOUND,
-      '目标语言投票选项不存在',
-      'options',
-      404
-    )
-  }
-  optionList[optionIndex].title = optionPatch.title
+  const rebuilt = relationArrayFieldSyncUtils.rebuildVoteOptionsFromSource(
+    optionList,
+    optionPatch.sourceOptionList,
+    optionPatch.optionIndex,
+    optionPatch.title
+  )
+  optionList.length = 0
+  rebuilt.forEach(option => optionList.push(option))
 }
 
 function normalizeUrlListValue(value) {
@@ -4565,16 +4555,14 @@ function normalizeUrlListValue(value) {
 }
 
 function applyUrlListTextPatch(urlList, urlListPatch) {
-  const urlIndex = Number(urlListPatch.urlIndex)
-  if (!Number.isInteger(urlIndex) || urlIndex < 0 || !urlList[urlIndex]) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_NOT_FOUND,
-      '目标语言关联内容链接项不存在',
-      'urlList',
-      404
-    )
-  }
-  urlList[urlIndex].text = urlListPatch.text
+  const rebuilt = relationArrayFieldSyncUtils.rebuildUrlListFromSource(
+    urlList,
+    urlListPatch.sourceUrlList,
+    urlListPatch.urlIndex,
+    urlListPatch.text
+  )
+  urlList.length = 0
+  rebuilt.forEach(item => urlList.push(item))
 }
 
 // 字符串数组字段（label [String]）的目标值归一化与按 index 回填。
@@ -4594,19 +4582,14 @@ function normalizeStringListValue(value) {
 }
 
 function applyStringListTextPatch(stringList, stringListPatch) {
-  const labelIndex = Number(stringListPatch.labelIndex)
-  if (!Number.isInteger(labelIndex) || labelIndex < 0) {
-    throw new ApiError(
-      ERROR_CODES.CONTENT_FIELD_INVALID,
-      '目标语言标签项索引无效',
-      'label',
-      400
-    )
-  }
-  while (stringList.length <= labelIndex) {
-    stringList.push('')
-  }
-  stringList[labelIndex] = stringListPatch.text
+  const rebuilt = relationArrayFieldSyncUtils.rebuildStringListFromSource(
+    stringList,
+    stringListPatch.sourceLabelList,
+    stringListPatch.labelIndex,
+    stringListPatch.text
+  )
+  stringList.length = 0
+  rebuilt.forEach(item => stringList.push(item))
 }
 
 async function buildRelationUpdatePayload(entry, languageCode) {
@@ -4624,6 +4607,9 @@ async function buildRelationUpdatePayload(entry, languageCode) {
       optionTitlePatch: {
         optionId: entry.optionId,
         optionIndex: entry.optionIndex,
+        sourceOptionList: Array.isArray(entry.sourceOptionList)
+          ? entry.sourceOptionList
+          : [],
         title: value
       }
     }
@@ -4638,6 +4624,9 @@ async function buildRelationUpdatePayload(entry, languageCode) {
       urlList: normalizeUrlListValue(record.urlList),
       urlListPatch: {
         urlIndex: entry.urlIndex,
+        sourceUrlList: Array.isArray(entry.sourceUrlList)
+          ? entry.sourceUrlList
+          : [],
         text: value
       }
     }
@@ -4653,6 +4642,9 @@ async function buildRelationUpdatePayload(entry, languageCode) {
       stringList: normalizeStringListValue(record[entry.fieldName]),
       stringListPatch: {
         labelIndex: Number(entry.labelIndex),
+        sourceLabelList: Array.isArray(entry.sourceLabelList)
+          ? entry.sourceLabelList
+          : [],
         text: value
       }
     }
@@ -4785,7 +4777,8 @@ async function applyAiTranslationPayload({
 
   for (const updateItem of relationUpdateMap.values()) {
     await relationService.updateRelation(updateItem, {
-      skipContentRefresh: true
+      skipContentRefresh: true,
+      allowVoteOptionStructureReplace: true
     })
   }
 

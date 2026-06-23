@@ -928,6 +928,33 @@ function normalizeMappedEntryOptions(options = {}) {
   }
 }
 
+// 数组型字段（label / urlList / options）：把“源记录的完整数组”随条目携带到翻译结果里，
+// 供采纳回填时按源结构全量重建目标数组（源有多少同步多少、结构以源为准、截断目标多余项）。
+// 注意 buildMappedSourceEntry 会展开“目标条目”，其 labelList/urlList/optionList 是目标侧数据，
+// 不能当作源结构，因此必须用 source 前缀键显式保存源侧数组。
+function attachSourceListStructure(targetEntry, sourceEntry) {
+  if (Array.isArray(sourceEntry.labelList)) {
+    targetEntry.sourceLabelList = cloneSerializableValue(sourceEntry.labelList)
+  }
+  if (Array.isArray(sourceEntry.urlList)) {
+    targetEntry.sourceUrlList = cloneSerializableValue(sourceEntry.urlList)
+  }
+  if (Array.isArray(sourceEntry.optionList)) {
+    targetEntry.sourceOptionList = cloneSerializableValue(
+      sourceEntry.optionList
+    )
+  }
+}
+
+// 判断源条目是否属于“按 index 拆分的数组型字段元素”（label / urlList / options）。
+function isArrayFieldSourceEntry(sourceEntry = {}) {
+  return (
+    Number.isInteger(sourceEntry.labelIndex) ||
+    Number.isInteger(sourceEntry.urlIndex) ||
+    Number.isInteger(sourceEntry.optionIndex)
+  )
+}
+
 function buildMappedSourceEntry(sourceEntry, targetEntry, options = {}) {
   const normalizedOptions = normalizeMappedEntryOptions(options)
   const value = cloneSerializableValue(sourceEntry.value)
@@ -951,6 +978,37 @@ function buildMappedSourceEntry(sourceEntry, targetEntry, options = {}) {
   ) {
     mappedEntry.skipAllowed = true
   }
+  attachSourceListStructure(mappedEntry, sourceEntry)
+  return mappedEntry
+}
+// 数组型字段（label / urlList / options）的源条目在目标语言里可能尚无对应 index（目标数组为空、
+// 较短、被旧 bug 损坏成单元素，或源新增了元素）。此时目标记录本身存在，采纳时会按源结构全量
+// 重建数组补齐，因此仍需翻译该源元素，不能当作 missingTarget 丢弃（否则会漏翻译源新增/源更长
+// 的元素）。以源条目身份为基础构造映射条目，当前译文置空（待翻译）。
+function buildUnmappedArrayFieldSourceEntry(sourceEntry, options = {}) {
+  const normalizedOptions = normalizeMappedEntryOptions(options)
+  const value = cloneSerializableValue(sourceEntry.value)
+  const mappedEntry = {
+    ...sourceEntry,
+    currentValue: undefined,
+    value,
+    previewText: sourceEntry.previewText,
+    previewRawValue: sourceEntry.previewRawValue,
+    currentPreviewText: '',
+    currentPreviewRawValue: '',
+    currentPreviewHtml: '',
+    sourcePreviewText: sourceEntry.previewText,
+    sourcePreviewRawValue: sourceEntry.previewRawValue,
+    sourcePreviewHtml: sourceEntry.previewHtml || ''
+  }
+  if (
+    normalizedOptions.allowAiKeepOriginalJudgement &&
+    sourceEntry.scope !== 'post' &&
+    sourceEntry.valueType !== 'richTextDocument'
+  ) {
+    mappedEntry.skipAllowed = true
+  }
+  attachSourceListStructure(mappedEntry, sourceEntry)
   return mappedEntry
 }
 
@@ -979,6 +1037,14 @@ function buildMappedEntries(sourceEntries, targetEntries, options = {}) {
       .map(key => targetEntryMap.get(key))
       .find(Boolean)
     if (!targetEntry) {
+      // 数组型字段（label / urlList / options）：目标缺该 index 不丢弃，照常翻译，
+      // 采纳时按源结构全量重建目标数组补齐。
+      if (isArrayFieldSourceEntry(sourceEntry)) {
+        entries.push(
+          buildUnmappedArrayFieldSourceEntry(sourceEntry, normalizedOptions)
+        )
+        return
+      }
       skippedEntries.push({
         reason: 'missingTarget',
         entry: sourceEntry
@@ -1003,6 +1069,34 @@ function buildMappedEntries(sourceEntries, targetEntries, options = {}) {
   return { entries, skippedEntries }
 }
 
+// 数组型字段（label / urlList / options）的“字段级分组键”（不含 index）。同一记录同一字段的
+// 所有元素共享该键，用于“整组翻译”：只要勾选了其中任一元素，就把该字段全部元素一起翻译，
+// 不再细化到逐个元素，减少维护负担。
+function getArrayFieldGroupKey(entry = {}) {
+  if (!isArrayFieldSourceEntry(entry)) {
+    return ''
+  }
+  const sourceId = normalizeString(entry.sourceId)
+  if (entry.scope === 'relation') {
+    return [
+      'relation',
+      entry.relationField || '',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+  if (entry.scope === 'parentRelation') {
+    return [
+      'parentRelation',
+      entry.collectionName || '',
+      sourceId,
+      entry.fieldName || ''
+    ].join(':')
+  }
+  return ''
+}
+
 function filterRequestedEntries(entries, selectedEntryKeys, context = {}) {
   if (!Array.isArray(selectedEntryKeys) || selectedEntryKeys.length === 0) {
     return entries
@@ -1011,7 +1105,8 @@ function filterRequestedEntries(entries, selectedEntryKeys, context = {}) {
   const selectedSet = new Set(
     selectedEntryKeys.map(normalizeString).filter(Boolean)
   )
-  return entries.filter(entry => {
+
+  function isEntryDirectlySelected(entry) {
     const matchKeys = buildTranslationEntryMatchKeys(entry)
     const stableEntryKey = buildStableEntryKey(entry, context)
     return (
@@ -1019,6 +1114,27 @@ function filterRequestedEntries(entries, selectedEntryKeys, context = {}) {
       selectedSet.has(stableEntryKey) ||
       matchKeys.some(key => selectedSet.has(key))
     )
+  }
+
+  // 数组型字段整组翻译：先收集被直接勾选的数组字段分组键，再把同组其余元素一并纳入，
+  // 保证“源有多少元素就翻译多少”，不会只翻译被勾选的那一条。
+  const selectedArrayFieldGroups = new Set()
+  entries.forEach(entry => {
+    if (!isEntryDirectlySelected(entry)) {
+      return
+    }
+    const groupKey = getArrayFieldGroupKey(entry)
+    if (groupKey) {
+      selectedArrayFieldGroups.add(groupKey)
+    }
+  })
+
+  return entries.filter(entry => {
+    if (isEntryDirectlySelected(entry)) {
+      return true
+    }
+    const groupKey = getArrayFieldGroupKey(entry)
+    return Boolean(groupKey) && selectedArrayFieldGroups.has(groupKey)
   })
 }
 
