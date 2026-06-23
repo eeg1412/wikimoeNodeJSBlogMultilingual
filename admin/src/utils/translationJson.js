@@ -139,6 +139,18 @@ function isUrlListTextEntry(entry = {}) {
   return entry.fieldName === URL_LIST_TEXT_FIELD_NAME
 }
 
+function getStringListEntryIndex(entry = {}) {
+  const index = Number(entry.labelIndex)
+  if (!Number.isInteger(index) || index < 0) {
+    return -1
+  }
+  return index
+}
+
+function isStringListEntry(entry = {}) {
+  return getStringListEntryIndex(entry) >= 0
+}
+
 function isRichTextValueType(valueType) {
   return (
     valueType === LEGACY_RICH_TEXT_VALUE_TYPE ||
@@ -1409,6 +1421,55 @@ function createUrlListRelationEntries(
     .filter(Boolean)
 }
 
+function createStringListRelationEntries(
+  relationField,
+  record,
+  editField,
+  options = {}
+) {
+  const rawList = record[editField.name]
+  const valueList = Array.isArray(rawList) ? rawList : []
+  const recordLabel = getRelationRecordDisplayName(record, relationField)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
+
+  return valueList
+    .map((item, index) => {
+      return buildTextEntry(
+        {
+          id: `relation.${relationField.field}.${record._id}.${editField.name}.${index}`,
+          scope: 'relation',
+          relationField: relationField.field,
+          collectionName: relationField.collectionName,
+          recordId: record._id,
+          recordKind: record.recordKind,
+          postType: Number(record.type || relationField.postType || 0),
+          sourceRecordId: normalizeStringValue(record._id),
+          sourceId: normalizeStringValue(record.sourceId),
+          sourceSnapshotId: normalizeStringValue(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
+          relationTypeLabel: relationField.label,
+          recordLabel,
+          fieldName: editField.name,
+          fieldLabel: `${editField.label} #${index + 1}`,
+          labelIndex: index,
+          labelList: cloneSerializableValue(valueList),
+          label: `${recordLabel} / ${editField.label} #${index + 1}`,
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
+          groupTitle: relationField.label,
+          valueType: 'plainText',
+          value: item,
+          defaultSelected: !editField.translationOptional,
+          aiTranslationSkip: record.aiTranslationSkip === true,
+          optional: Boolean(editField.translationOptional)
+        },
+        options
+      )
+    })
+    .filter(Boolean)
+}
+
 function createRelationEntry(relationField, record, editField, options = {}) {
   const recordLabel = getRelationRecordDisplayName(record, relationField)
   const relationScopeMeta = getRelationScopeMeta(relationField)
@@ -1621,6 +1682,17 @@ export function buildTranslationExportEntries({
           )
           return
         }
+        if (editField.type === 'stringList') {
+          entryList.push(
+            ...createStringListRelationEntries(
+              relationField,
+              record,
+              editField,
+              buildOptions
+            )
+          )
+          return
+        }
         if (editField.type === 'urlList') {
           entryList.push(
             ...createUrlListRelationEntries(
@@ -1696,6 +1768,27 @@ export function buildRecordTranslationEntries({
     if (editField.type === 'urlList') {
       entryList.push(
         ...createUrlListRelationEntries(
+          {
+            field: 'record',
+            label: groupLabel,
+            collectionName
+          },
+          record,
+          editField,
+          buildOptions
+        ).map(entry => ({
+          ...entry,
+          groupLabel,
+          groupCategory: '内容字段',
+          groupTitle: groupLabel
+        }))
+      )
+      return
+    }
+
+    if (editField.type === 'stringList') {
+      entryList.push(
+        ...createStringListRelationEntries(
           {
             field: 'record',
             label: groupLabel,
@@ -2186,6 +2279,8 @@ function buildRelationEntryMatchKey(entry, sourceId) {
       fieldName = `${entry.fieldName}.${entry.optionIndex}`
     } else if (isUrlListTextEntry(entry)) {
       fieldName = `${entry.fieldName}.${getUrlListEntryIndex(entry)}`
+    } else if (isStringListEntry(entry)) {
+      fieldName = `${entry.fieldName}.${getStringListEntryIndex(entry)}`
     }
     return [
       'relation',
