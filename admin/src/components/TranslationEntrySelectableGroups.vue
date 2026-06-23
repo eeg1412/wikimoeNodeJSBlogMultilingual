@@ -592,6 +592,7 @@ export default {
   flex-direction: column;
   gap: 10px;
   padding-left: 24px;
+  width: 100%;
 }
 
 .translation-json-entry-member {
