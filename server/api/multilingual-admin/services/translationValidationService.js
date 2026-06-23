@@ -1248,6 +1248,18 @@ function buildCorrectionDiff(beforeText, afterText) {
   }
 }
 
+// 单批次直接精校（跳过全局速览）时的占位指南：报告结构保持完整，没有跨批次速览产出，
+// 总结改为确定性说明，真正的修正内容仍由下方 corrections 逐条体现。
+function buildSingleBatchGuideline() {
+  return {
+    summary:
+      '本次校验内容在单批次内完成，未单独执行全局速览，已由精校 AI 一次性逐条审查并修正；具体修正见下方清单。',
+    termGlossary: [],
+    styleNotes: '',
+    confirmedIssues: []
+  }
+}
+
 // 对比精校前后译文，生成校验报告。
 function buildValidationReport({
   guideline,
@@ -1454,19 +1466,42 @@ async function validateTranslationPayload({
     })
 
   // 阶段 A：全局速览，产出全局校验指南。
-  const guidelineResult = await buildGlobalGuideline({
-    job,
-    pairs,
-    settings: verificationSettings,
-    handlers,
-    sourceLanguageCode,
-    targetLanguageCode,
-    officialTermGlossaryMarkdown
+  // 双轨：全局速览的核心价值是“跨批次统一术语/风格/问题”，仅当内容需要分成多块时才有意义。
+  // buildOverviewBlocks 按“原文+译文”合并体量分块，而精校只按“源文 v”计量、体量更小，二者共用
+  // 同一套 getTranslationChunkTextLimit。因此“源文+译文”能装进单块时，精校必然单批次完成，精校 AI
+  // 一次就能看到全部条目、自行逐条审查并修正，单独再跑一次全局速览只会多花一次 AI 调用，故跳过。
+  const overviewBlocks = buildOverviewBlocks(pairs, {
+    segmentTextLimit:
+      textTranslationWorkflowService.getRichTextSegmentTextLimit(
+        verificationSettings
+      ),
+    blockCharLimit:
+      textTranslationWorkflowService.getTranslationChunkTextLimit(
+        verificationSettings
+      )
   })
-  const guideline = guidelineResult.guideline
-  const guidelineAiJsonLogs = Array.isArray(guidelineResult.aiJsonLogs)
-    ? guidelineResult.aiJsonLogs
-    : []
+  const shouldRunGlobalOverview = overviewBlocks.length > 1
+  let guideline = null
+  let guidelineAiJsonLogs = []
+  if (shouldRunGlobalOverview) {
+    const guidelineResult = await buildGlobalGuideline({
+      job,
+      pairs,
+      settings: verificationSettings,
+      handlers,
+      sourceLanguageCode,
+      targetLanguageCode,
+      officialTermGlossaryMarkdown
+    })
+    guideline = guidelineResult.guideline
+    guidelineAiJsonLogs = Array.isArray(guidelineResult.aiJsonLogs)
+      ? guidelineResult.aiJsonLogs
+      : []
+  } else if (handlers?.onStatus) {
+    handlers.onStatus({
+      message: '内容为单批次，跳过全局校验速览，直接逐条校验修正'
+    })
+  }
 
   // 阶段 B：分批精校，复用翻译内核保证富文本结构安全。
   const correctionEntries = buildCorrectionEntries(
@@ -1539,7 +1574,7 @@ async function validateTranslationPayload({
     : []
 
   const validation = buildValidationReport({
-    guideline,
+    guideline: guideline || buildSingleBatchGuideline(),
     sourceEntries: safeSourceEntries,
     beforeEntries: targetEntries,
     afterEntries: correctedEntries,

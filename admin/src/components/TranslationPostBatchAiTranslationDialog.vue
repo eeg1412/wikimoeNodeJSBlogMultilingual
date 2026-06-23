@@ -68,7 +68,7 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="翻译用文章">
+          <el-form-item v-if="!isValidateMode" label="翻译用文章">
             <el-radio-group v-model="aiBaseMode" :disabled="isBusy">
               <el-radio value="source">源文章</el-radio>
               <el-radio value="current">当前文章</el-radio>

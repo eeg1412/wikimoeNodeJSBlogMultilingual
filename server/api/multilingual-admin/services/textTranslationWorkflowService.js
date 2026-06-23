@@ -689,20 +689,26 @@ function buildSystemPrompt() {
 function buildOutputContractPrompt(input = {}) {
   const lines = [
     `必须只返回 JSON 对象，schema 必须为 ${AI_RESULT_SCHEMA}，version 必须为 1。`,
-    '顶层 JSON 对象必须包含 schema、version 和 entries。',
-    '输入中的每个条目 i，都必须在顶层 entries 中返回且只返回一个结果。',
-    '每个 i 必须保持不变，禁止遗漏、合并、拆分或新增条目。',
-    'plainText 和 richTextLite 的 v 必须是字符串。'
+    '顶层 JSON 对象必须包含 schema、version 和 entries。'
   ]
   if (input.verificationMode === true) {
-    // 校验任务：每条都要输出 r 作为校验结论/修改理由，供人工在报告里看懂“为什么这样改”。
+    // 校验任务：只回传你实际修正过的条目，无需修改的条目一律省略，避免无意义的全量回传浪费输出 token。
     lines.push(
-      '本次为校验任务：每个条目都必须包含 r，用一句面向用户的简体中文说明本条校验结论——若修改了译文，简述改了什么、为什么；若保持不变，简述为何无需修改。'
+      '本次为校验任务：entries 中只返回你实际修正过的条目，每个被修正的条目只返回一个结果。',
+      '对你判断无需修改、保持原译文不变的条目，禁止输出；不要为了凑齐数量而回传未改动的条目。',
+      '禁止合并、拆分或新增条目；返回的每个条目都必须能对应到输入中的某个 i。',
+      '每个被返回的条目都必须包含 r，用一句面向用户的简体中文说明本条的修正内容与原因。',
+      '若本次没有任何条目需要修正，entries 返回空数组 []。'
     )
   } else {
-    lines.push('翻译了条目时不要包含 r。')
+    lines.push(
+      '输入中的每个条目 i，都必须在顶层 entries 中返回且只返回一个结果。',
+      '每个 i 必须保持不变，禁止遗漏、合并、拆分或新增条目。',
+      '翻译了条目时不要包含 r。'
+    )
   }
   lines.push(
+    'plainText 和 richTextLite 的 v 必须是字符串。',
     '不要返回请求对象、提示词、解释、注释、Markdown 或规定字段之外的额外内容。'
   )
   return buildPromptLayer('输出契约层', lines)
@@ -833,12 +839,14 @@ function buildVerificationModePrompt(input) {
   return buildPromptLayer('翻译校验层', [
     '本次为翻译质检校验任务。v 是源语言原文，c 是已有的目标语言译文。',
     '你必须逐条审查 c 是否准确、完整地翻译了 v，并保持术语一致、语气恰当、表达通顺。',
-    '当 c 存在翻译错误、漏译、多译、术语不一致、语义偏差、语气不当或不通顺时，必须输出修正后的目标语言译文作为该条目的 v 翻译结果。',
-    '当 c 已经是准确且高质量的译文时，保持其表达不变，直接输出与 c 相同的译文。',
+    '当 c 存在翻译错误、漏译、多译、术语不一致、语义偏差、语气不当或不通顺时，必须输出修正后的目标语言译文作为该条目的 v 翻译结果，并在 r 中说明本条改了什么、为什么。',
+    '当 c 已经是准确且高质量的译文、无需任何修改时，不要输出该条目；只回传你实际修正过的条目。',
     '不要因为这是校验任务就保留源语言原文；输出必须是目标语言译文。',
     '不要增删事实，不要解释，不要输出译文以外的注释。',
-    '无论是否修改，都要在该条目的 r 中用一句面向用户的简体中文说明本条校验结论（改了什么、为什么；或为何保持不变）；r 是校验说明，不是译文内容。',
-    'richTextDocument 仍然遵守 indexedRichText 规则：只修改 text，保持每个 index 与结构不变。'
+    'r 是面向用户的简体中文校验说明（改了什么、为什么），不是译文内容。',
+    'richTextDocument 仍然遵守 indexedRichText 规则：只修改 text，保持每个 index 与结构不变。',
+    '输入条目上的 ps=1 表示该 richTextDocument 条目允许只回传被修正的 segment：未改动的 index 不要输出，服务端会按 index 用 c 中对应译文自动补齐。',
+    '不带 ps 的 richTextDocument 条目只要其中任意 index 需要修正，就必须完整返回该条目的全部 segment（未改动的 index 也原样带上 c 中对应译文）；若整段都无需修改，则整条不要输出。'
   ])
 }
 
@@ -847,10 +855,17 @@ function buildRichTextPolicyPrompt(input) {
     return ''
   }
 
+  let segmentReturnLine =
+    '每个输入 segment 必须返回且只返回一个翻译后的 segment。'
+  if (input.verificationMode === true) {
+    segmentReturnLine =
+      '每个被返回的 segment 只能返回一个结果；带 ps=1 的条目可只回传被修正的 segment，不带 ps 的条目若有修正必须回传全部 segment（详见翻译校验层）。'
+  }
+
   return buildPromptLayer('富文本结构层', [
     'richTextDocument 的输入值会被转换为 indexedRichText，结构为 segments: [{ index, text }]。',
     'indexedRichText 值必须返回 v: { type: "indexedRichText", segments: [{ index, text }] }。',
-    '每个输入 segment 必须返回且只返回一个翻译后的 segment。',
+    segmentReturnLine,
     '只能翻译 text 字段，并且必须保持每个 index 不变。',
     'segment 可能包含 contextBefore/contextAfter，它们只能用于理解边界上下文，不要翻译，也不要输出。',
     '服务端会按 index 把译文写回原 HTML。不要创造 HTML、属性、标签或额外 index。',
@@ -992,7 +1007,7 @@ function buildRequestDataPrompt(input) {
             v: '翻译后的值；plainText/richTextLite 返回字符串，richTextDocument 返回 indexedRichText 对象',
             r:
               input.verificationMode === true
-                ? '本条校验结论：用一句面向用户的简体中文说明改了什么、为什么；未改动则说明为何保持不变'
+                ? '本条修正说明：用一句面向用户的简体中文说明改了什么、为什么（只回传被修正的条目，未改动条目不要输出）'
                 : '仅当 k=true 且 v 被合法保留原值时才需要'
           }
         ]
@@ -1021,6 +1036,14 @@ function buildRequestDataPrompt(input) {
           (entry.skipAllowed === true || input.verificationMode === true)
         ) {
           promptEntry.c = currentValue
+        }
+        // 校验任务且该富文本条目源/译文 segment 逐位对齐时，标记 ps=1，允许只回传被修正的 segment。
+        if (
+          input.verificationMode === true &&
+          entry.valueType === 'richTextDocument' &&
+          entry.richTextSegmentPartialSafe === true
+        ) {
+          promptEntry.ps = 1
         }
         return promptEntry
       })
@@ -1280,6 +1303,37 @@ function buildIndexedRichTextValue(segments) {
   }
 }
 
+// 判定某富文本条目的源 segment 与当前译文 segment 是否“逐位对齐”，只有对齐时才能安全地
+// 让校验 AI 只回传被修正的 segment（缺失的按 index 用当前译文补齐）。
+// 对齐条件：两侧 segment 数量相同、均无长文本裁切（不存在 contextBefore/contextAfter）、
+// 且每个位置的 index 完全一致。任一不满足都返回 false，回退到“整段返回”方案。
+function computeRichTextSegmentPartialSafe(sourceSegments, currentSegments) {
+  if (!Array.isArray(sourceSegments) || sourceSegments.length === 0) {
+    return false
+  }
+  if (!Array.isArray(currentSegments) || currentSegments.length === 0) {
+    return false
+  }
+  if (sourceSegments.length !== currentSegments.length) {
+    return false
+  }
+  const hasSplitContext = segment => {
+    return Boolean(segment?.contextBefore) || Boolean(segment?.contextAfter)
+  }
+  if (
+    sourceSegments.some(hasSplitContext) ||
+    currentSegments.some(hasSplitContext)
+  ) {
+    return false
+  }
+  for (let index = 0; index < sourceSegments.length; index += 1) {
+    if (sourceSegments[index].index !== currentSegments[index].index) {
+      return false
+    }
+  }
+  return true
+}
+
 function getAiPromptValue(entry) {
   if (entry.aiValue) {
     return entry.aiValue
@@ -1333,7 +1387,13 @@ function prepareAiInput(input, options = {}) {
       ...indexedEntry,
       richTextSegments,
       aiValue: buildIndexedRichTextValue(richTextSegments),
-      aiCurrentValue
+      aiCurrentValue,
+      // 校验任务用：源与当前译文 segment 完全对齐（数量相同、全程无长文本裁切、index 一一对应）时，
+      // 才允许“只回传被修正 segment”的省 token 方案；否则必须整段返回，避免位置索引错位写错译文。
+      richTextSegmentPartialSafe: computeRichTextSegmentPartialSafe(
+        richTextSegments,
+        currentRichTextSegments
+      )
     }
   })
 
@@ -4146,17 +4206,31 @@ function getRichTextSegmentsForTranslation(entry) {
   })
 }
 
-function applyIndexedRichTextTranslation(entry, value) {
+function applyIndexedRichTextTranslation(
+  entry,
+  value,
+  allowSegmentFallback = false
+) {
   const richTextSegments = getRichTextSegmentsForTranslation(entry)
   if (richTextSegments.length === 0) {
     return cloneSerializableValue(entry.value)
   }
 
   const translatedSegmentMap = normalizeIndexedRichTextSegments(entry, value)
+  // 校验任务且条目对齐安全时：AI 未回传的 segment 视为未改动，按 index 用当前译文 c 补齐。
+  let currentSegmentMap = null
+  if (allowSegmentFallback === true) {
+    currentSegmentMap = buildCurrentRichTextSegmentMap(entry)
+  }
   const mergedValue = cloneSerializableValue(entry.value)
   const translatedPathMap = new Map()
   for (const segment of richTextSegments) {
-    if (!translatedSegmentMap.has(segment.index)) {
+    let segmentText
+    if (translatedSegmentMap.has(segment.index)) {
+      segmentText = translatedSegmentMap.get(segment.index)
+    } else if (currentSegmentMap && currentSegmentMap.has(segment.index)) {
+      segmentText = currentSegmentMap.get(segment.index)
+    } else {
       throw new ApiError(
         ERROR_CODES.AI_TRANSLATION_FAILED,
         `AI 返回结果缺少富文本片段：${entry.label || entry.id} / ${segment.index}`,
@@ -4172,7 +4246,7 @@ function applyIndexedRichTextTranslation(entry, value) {
       })
     }
     const pathItem = translatedPathMap.get(pathKey)
-    pathItem.text += translatedSegmentMap.get(segment.index)
+    pathItem.text += segmentText
   }
 
   for (const pathItem of translatedPathMap.values()) {
@@ -4204,10 +4278,46 @@ function applyIndexedRichTextTranslation(entry, value) {
   return mergedValue
 }
 
-function normalizeTranslatedValue(entry, value) {
+// 校验任务中 AI 未回传的条目视为“无需修改”，沿用该条目当前译文 c 作为结果值。
+function getVerificationUnchangedValue(entry) {
+  if (entry.valueType === 'richTextDocument') {
+    if (
+      entry.currentValue &&
+      typeof entry.currentValue === 'object' &&
+      !Array.isArray(entry.currentValue)
+    ) {
+      return cloneSerializableValue(entry.currentValue)
+    }
+    return cloneSerializableValue(entry.value)
+  }
+  if (typeof entry.currentValue === 'string') {
+    return entry.currentValue
+  }
+  return entry.value
+}
+
+// 由当前译文索引值 aiCurrentValue 构造 index→text 映射，供校验任务补齐未回传的 segment。
+function buildCurrentRichTextSegmentMap(entry) {
+  const segmentMap = new Map()
+  const segments = entry.aiCurrentValue?.segments
+  if (!Array.isArray(segments)) {
+    return segmentMap
+  }
+  segments.forEach(segment => {
+    const segmentIndex = normalizeString(segment?.index).trim()
+    if (segmentIndex && typeof segment?.text === 'string') {
+      segmentMap.set(segmentIndex, segment.text)
+    }
+  })
+  return segmentMap
+}
+
+function normalizeTranslatedValue(entry, value, verificationMode = false) {
   if (entry.valueType === 'richTextDocument') {
     if (value?.type === RICH_TEXT_INDEXED_VALUE_TYPE) {
-      return applyIndexedRichTextTranslation(entry, value)
+      const allowSegmentFallback =
+        verificationMode === true && entry.richTextSegmentPartialSafe === true
+      return applyIndexedRichTextTranslation(entry, value, allowSegmentFallback)
     }
 
     const mergedValue = mergeTranslatedRichTextNode(entry.value, value)
@@ -4261,36 +4371,50 @@ function buildTranslatedEntries(preparedInput, resultData) {
       resultCandidateMap,
       inputCandidateMap
     )
-    if (!translatedEntry) {
-      const actualKeys = resultEntries
-        .map(item => getResultEntryKey(item) || item.n || item.label || '')
-        .filter(Boolean)
-        .join(', ')
-      throw new ApiError(
-        ERROR_CODES.AI_TRANSLATION_FAILED,
-        `AI 返回结果缺少条目：${entry.label || entry.id}，期望 i=${entry.aiIndex}，实际返回：${actualKeys || '无'}`,
-        AI_TRANSLATION_ERROR_FIELD,
-        502
-      )
-    }
-    const normalizedValue = normalizeTranslatedValue(
-      entry,
-      getResultEntryValue(translatedEntry)
-    )
-    const skipReason = getResultEntrySkipReason(translatedEntry)
-    const keptOriginal =
-      entry.skipAllowed === true &&
-      entry.valueType !== 'richTextDocument' &&
-      normalizeString(normalizedValue).trim() ===
-        normalizeString(entry.value).trim()
 
-    if (keptOriginal && !skipReason) {
-      throw new ApiError(
-        ERROR_CODES.AI_TRANSLATION_FAILED,
-        `AI 跳过内容缺少原因：${entry.label || entry.id}`,
-        AI_TRANSLATION_ERROR_FIELD,
-        502
+    let normalizedValue
+    let skipReason = ''
+    let keptOriginal = false
+    let verificationUnchanged = false
+
+    if (!translatedEntry) {
+      // 校验任务允许只回传被修正的条目；未回传的条目视为校验通过、无需修改，沿用当前译文 c。
+      if (preparedInput.verificationMode === true) {
+        normalizedValue = getVerificationUnchangedValue(entry)
+        verificationUnchanged = true
+      } else {
+        const actualKeys = resultEntries
+          .map(item => getResultEntryKey(item) || item.n || item.label || '')
+          .filter(Boolean)
+          .join(', ')
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          `AI 返回结果缺少条目：${entry.label || entry.id}，期望 i=${entry.aiIndex}，实际返回：${actualKeys || '无'}`,
+          AI_TRANSLATION_ERROR_FIELD,
+          502
+        )
+      }
+    } else {
+      normalizedValue = normalizeTranslatedValue(
+        entry,
+        getResultEntryValue(translatedEntry),
+        preparedInput.verificationMode === true
       )
+      skipReason = getResultEntrySkipReason(translatedEntry)
+      keptOriginal =
+        entry.skipAllowed === true &&
+        entry.valueType !== 'richTextDocument' &&
+        normalizeString(normalizedValue).trim() ===
+          normalizeString(entry.value).trim()
+
+      if (keptOriginal && !skipReason) {
+        throw new ApiError(
+          ERROR_CODES.AI_TRANSLATION_FAILED,
+          `AI 跳过内容缺少原因：${entry.label || entry.id}`,
+          AI_TRANSLATION_ERROR_FIELD,
+          502
+        )
+      }
     }
 
     const outputEntry = {
@@ -4305,8 +4429,13 @@ function buildTranslatedEntries(preparedInput, resultData) {
     if (keptOriginal) {
       outputEntry.aiSkipReason = skipReason
     }
-    // 校验任务：把 AI 返回的 r 作为本条“校验/修改理由”透传，供校验报告展示“为什么这样改”。
-    if (preparedInput.verificationMode === true && skipReason) {
+    // 校验任务：把 AI 返回的 r 作为本条“修正理由”透传，供校验报告展示“为什么这样改”。
+    // 未回传的条目属于“无需修改”，不带修正理由。
+    if (
+      preparedInput.verificationMode === true &&
+      !verificationUnchanged &&
+      skipReason
+    ) {
       outputEntry.correctionReason = skipReason
     }
     if (entry.collectionName) {
