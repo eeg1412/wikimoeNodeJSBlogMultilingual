@@ -223,6 +223,22 @@ function normalizeUrlListValue(value) {
   }))
 }
 
+// 字符串数组字段（label [String]）目标值归一化，保持每个元素为独立字符串。
+function normalizeStringListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.map(item => {
+    if (typeof item === 'string') {
+      return item
+    }
+    if (item === null || typeof item === 'undefined') {
+      return ''
+    }
+    return String(item)
+  })
+}
+
 function buildSourceIdCandidates(sourceId) {
   const text = normalizeIdentityValue(sourceId)
   if (!text) {
@@ -350,6 +366,10 @@ function buildEntryFieldKey(entry = {}) {
       return ''
     }
     return `${fieldName}.${urlIndex}`
+  }
+
+  if (Number.isInteger(Number(entry.labelIndex))) {
+    return `${fieldName}.${Number(entry.labelIndex)}`
   }
 
   return fieldName
@@ -623,6 +643,11 @@ function getCurrentEntryValue(entry, record) {
   if (entry.fieldName === URL_LIST_TEXT_FIELD_NAME) {
     const urlIndex = getUrlListIndex(record, entry)
     return record.urlList[urlIndex]?.text || ''
+  }
+
+  if (Number.isInteger(Number(entry.labelIndex))) {
+    const stringList = normalizeStringListValue(record[entry.fieldName])
+    return stringList[Number(entry.labelIndex)] || ''
   }
 
   return record[entry.fieldName]
@@ -1352,6 +1377,14 @@ function buildRelationUpdateBody(entry, record, languageCode) {
     const urlIndex = getUrlListIndex(record, entry)
     urlList[urlIndex].text = value
     payload.urlList = urlList
+  } else if (Number.isInteger(Number(entry.labelIndex))) {
+    const stringList = normalizeStringListValue(record[entry.fieldName])
+    const labelIndex = Number(entry.labelIndex)
+    while (stringList.length <= labelIndex) {
+      stringList.push('')
+    }
+    stringList[labelIndex] = value
+    payload[entry.fieldName] = stringList
   } else {
     payload[entry.fieldName] = value
   }

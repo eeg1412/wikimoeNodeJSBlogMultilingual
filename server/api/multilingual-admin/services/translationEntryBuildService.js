@@ -123,26 +123,26 @@ const RELATION_TRANSLATION_FIELDS = {
     { name: 'title', label: '番剧标题' },
     { name: 'summary', label: '简介' },
     { name: 'urlList', label: '自定义链接', type: 'urlList' },
-    { name: 'label', label: '标签' }
+    { name: 'label', label: '标签', type: 'stringList' }
   ],
   movies: [
     { name: 'title', label: '电影标题' },
     { name: 'summary', label: '简介' },
     { name: 'urlList', label: '自定义链接', type: 'urlList' },
-    { name: 'label', label: '标签' }
+    { name: 'label', label: '标签', type: 'stringList' }
   ],
   games: [
     { name: 'title', label: '游戏标题' },
     { name: 'summary', label: '简介' },
     { name: 'urlList', label: '自定义链接', type: 'urlList' },
-    { name: 'label', label: '标签' }
+    { name: 'label', label: '标签', type: 'stringList' }
   ],
   gamePlatforms: [{ name: 'name', label: '平台名' }],
   books: [
     { name: 'title', label: '书籍标题' },
     { name: 'summary', label: '简介' },
     { name: 'urlList', label: '自定义链接', type: 'urlList' },
-    { name: 'label', label: '标签' }
+    { name: 'label', label: '标签', type: 'stringList' }
   ],
   booktypes: [{ name: 'name', label: '类型名' }],
   events: [
@@ -516,6 +516,54 @@ function normalizeUrlListValue(value) {
   }))
 }
 
+// 字符串数组字段（如番剧/电影/书籍/游戏的 label [String]）：按元素逐个生成翻译条目，
+// 每个条目带 labelIndex 与字段名，回填时按 index 重建为数组，避免被当作单串合并成逗号。
+function createStringListEntries(
+  relationField,
+  record,
+  editField,
+  includeEmpty
+) {
+  const rawList = record[editField.name]
+  const valueList = Array.isArray(rawList) ? rawList : []
+  const recordLabel = buildDisplayName(record, relationField.collectionName)
+  const relationScopeMeta = getRelationScopeMeta(relationField)
+  return valueList
+    .map((item, index) => {
+      return buildEntry(
+        {
+          id: `relation.${relationField.field}.${record._id}.${editField.name}.${index}`,
+          scope: 'relation',
+          relationField: relationField.field,
+          collectionName: relationField.collectionName,
+          recordId: normalizeString(record._id),
+          recordKind: record.recordKind,
+          postType: Number(record.type || relationField.postType || 0),
+          sourceRecordId: normalizeString(record._id),
+          sourceId: normalizeSourceIdentity(record),
+          sourceSnapshotId: normalizeString(record.sourceSnapshotId),
+          relationScope: relationScopeMeta.relationScope,
+          relationScopeLabel: relationScopeMeta.relationScopeLabel,
+          relationTypeLabel: relationField.label,
+          recordLabel,
+          fieldName: editField.name,
+          fieldLabel: `${editField.label} #${index + 1}`,
+          labelIndex: index,
+          labelList: cloneSerializableValue(valueList),
+          label: `${recordLabel} / ${editField.label} #${index + 1}`,
+          groupLabel: relationScopeMeta.groupLabel,
+          groupCategory: relationScopeMeta.groupCategory,
+          groupTitle: relationField.label,
+          valueType: 'plainText',
+          value: item,
+          aiTranslationSkip: record.aiTranslationSkip === true
+        },
+        includeEmpty
+      )
+    })
+    .filter(Boolean)
+}
+
 function createUrlListEntries(relationField, record, editField, includeEmpty) {
   const urlList = normalizeUrlListValue(record[editField.name])
   const recordLabel = buildDisplayName(record, relationField.collectionName)
@@ -605,6 +653,17 @@ function createRelationEntriesForRecord(relationField, record, includeEmpty) {
     if (editField.type === 'voteOptions') {
       entries.push(
         ...createVoteOptionEntries(
+          relationField,
+          record,
+          editField,
+          includeEmpty
+        )
+      )
+      return
+    }
+    if (editField.type === 'stringList') {
+      entries.push(
+        ...createStringListEntries(
           relationField,
           record,
           editField,
@@ -789,6 +848,9 @@ function getEntryFieldKey(entry = {}) {
   }
   if (entry.fieldName === URL_LIST_TEXT_FIELD_NAME) {
     return `${entry.fieldName}.${entry.urlIndex}`
+  }
+  if (Number.isInteger(entry.labelIndex)) {
+    return `${entry.fieldName}.${entry.labelIndex}`
   }
   return entry.fieldName || ''
 }

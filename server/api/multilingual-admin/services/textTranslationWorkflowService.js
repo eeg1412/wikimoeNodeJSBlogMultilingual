@@ -4465,6 +4465,9 @@ function buildTranslatedEntries(preparedInput, resultData) {
     if (Number.isInteger(entry.urlIndex)) {
       outputEntry.urlIndex = entry.urlIndex
     }
+    if (Number.isInteger(entry.labelIndex)) {
+      outputEntry.labelIndex = entry.labelIndex
+    }
     if (entry.sourceId) {
       outputEntry.sourceId = entry.sourceId
     }

@@ -57,11 +57,7 @@
         :key="index"
         class="url-list-editor-item"
       >
-        <el-input
-          v-model="item.text"
-          placeholder="链接文字"
-          clearable
-        />
+        <el-input v-model="item.text" placeholder="链接文字" clearable />
         <el-input v-model="item.url" placeholder="URL" clearable />
         <el-button
           :icon="Delete"
@@ -80,6 +76,37 @@
           @click="addUrlListItem(field.name)"
         >
           添加链接
+        </el-button>
+      </div>
+    </div>
+    <div v-else-if="field.type === 'stringList'" class="string-list-editor">
+      <div
+        v-for="(item, index) in getStringListField(field.name)"
+        :key="index"
+        class="string-list-editor-item"
+      >
+        <el-input
+          v-model="form[field.name][index]"
+          :placeholder="`标签 ${index + 1}`"
+          clearable
+        />
+        <el-button
+          :icon="Delete"
+          circle
+          @click="removeStringListItem(field.name, index)"
+        />
+      </div>
+      <div class="string-list-editor-footer">
+        <span v-if="!getStringListField(field.name).length" class="cGray666">
+          未设置标签
+        </span>
+        <el-button
+          size="small"
+          type="primary"
+          :icon="Plus"
+          @click="addStringListItem(field.name)"
+        >
+          添加标签
         </el-button>
       </div>
     </div>
@@ -234,6 +261,21 @@ export default {
 
     function removeUrlListItem(fieldName, index) {
       getUrlListField(fieldName).splice(index, 1)
+    }
+
+    function getStringListField(fieldName) {
+      if (!Array.isArray(props.form[fieldName])) {
+        props.form[fieldName] = []
+      }
+      return props.form[fieldName]
+    }
+
+    function addStringListItem(fieldName) {
+      getStringListField(fieldName).push('')
+    }
+
+    function removeStringListItem(fieldName, index) {
+      getStringListField(fieldName).splice(index, 1)
     }
 
     const parentEditFields = computed(() => {
@@ -421,6 +463,9 @@ export default {
       getParentRelationName,
       getParentRelationState,
       getUrlListField,
+      addStringListItem,
+      removeStringListItem,
+      getStringListField,
       openParentEditor,
       parentEditFields,
       parentEditForm,
@@ -500,6 +545,26 @@ export default {
 }
 
 .url-list-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.string-list-editor {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.string-list-editor-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.string-list-editor-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;

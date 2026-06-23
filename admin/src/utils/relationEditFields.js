@@ -75,7 +75,12 @@ export const RELATION_EDIT_FIELD_MAP = {
     { name: 'rating', label: '评分', type: 'number' },
     { name: 'year', label: '年份', type: 'number' },
     { name: 'season', label: '季度', type: 'number' },
-    { name: 'label', label: '标签', translationExport: true },
+    {
+      name: 'label',
+      label: '标签',
+      type: 'stringList',
+      translationExport: true
+    },
     { name: 'giveUp', label: '弃番', type: 'boolean' },
     { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
     { name: 'status', label: '状态', type: 'number' }
@@ -98,7 +103,12 @@ export const RELATION_EDIT_FIELD_MAP = {
     { name: 'year', label: '年份', type: 'number' },
     { name: 'month', label: '月份', type: 'number' },
     { name: 'day', label: '日期', type: 'number' },
-    { name: 'label', label: '标签', translationExport: true },
+    {
+      name: 'label',
+      label: '标签',
+      type: 'stringList',
+      translationExport: true
+    },
     { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
     { name: 'status', label: '状态', type: 'number' }
   ],
@@ -124,7 +134,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       translationExport: true
     },
     { name: 'rating', label: '评分', type: 'number' },
-    { name: 'label', label: '标签', translationExport: true },
+    {
+      name: 'label',
+      label: '标签',
+      type: 'stringList',
+      translationExport: true
+    },
     { name: 'giveUp', label: '弃坑', type: 'boolean' },
     { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
     { name: 'status', label: '状态', type: 'number' }
@@ -156,7 +171,12 @@ export const RELATION_EDIT_FIELD_MAP = {
       translationExport: true
     },
     { name: 'rating', label: '评分', type: 'number' },
-    { name: 'label', label: '标签', translationExport: true },
+    {
+      name: 'label',
+      label: '标签',
+      type: 'stringList',
+      translationExport: true
+    },
     { name: 'giveUp', label: '弃坑', type: 'boolean' },
     { name: 'postLinkOpen', label: '开放关联', type: 'boolean' },
     { name: 'status', label: '状态', type: 'number' }
@@ -309,6 +329,20 @@ export function getRelationFieldInitialValue(field, record) {
   }
   if (field.type === 'urlList') {
     return normalizeUrlListValue(value)
+  }
+  if (field.type === 'stringList') {
+    if (!Array.isArray(value)) {
+      return []
+    }
+    return value.map(item => {
+      if (typeof item === 'string') {
+        return item
+      }
+      if (item === null || typeof item === 'undefined') {
+        return ''
+      }
+      return String(item)
+    })
   }
 
   return value

@@ -4319,6 +4319,9 @@ function buildAiEntryFieldDedupeKey(entry) {
     }
     return `${fieldName}.${urlIndex}`
   }
+  if (Number.isInteger(Number(entry.labelIndex))) {
+    return `${fieldName}.${Number(entry.labelIndex)}`
+  }
   return fieldName
 }
 
@@ -4574,6 +4577,38 @@ function applyUrlListTextPatch(urlList, urlListPatch) {
   urlList[urlIndex].text = urlListPatch.text
 }
 
+// 字符串数组字段（label [String]）的目标值归一化与按 index 回填。
+function normalizeStringListValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.map(item => {
+    if (typeof item === 'string') {
+      return item
+    }
+    if (item === null || typeof item === 'undefined') {
+      return ''
+    }
+    return String(item)
+  })
+}
+
+function applyStringListTextPatch(stringList, stringListPatch) {
+  const labelIndex = Number(stringListPatch.labelIndex)
+  if (!Number.isInteger(labelIndex) || labelIndex < 0) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      '目标语言标签项索引无效',
+      'label',
+      400
+    )
+  }
+  while (stringList.length <= labelIndex) {
+    stringList.push('')
+  }
+  stringList[labelIndex] = stringListPatch.text
+}
+
 async function buildRelationUpdatePayload(entry, languageCode) {
   const record = await findTranslationRecordBySourceEntry(entry, languageCode)
   const value = normalizeAiEntryValue(entry)
@@ -4603,6 +4638,21 @@ async function buildRelationUpdatePayload(entry, languageCode) {
       urlList: normalizeUrlListValue(record.urlList),
       urlListPatch: {
         urlIndex: entry.urlIndex,
+        text: value
+      }
+    }
+  }
+
+  if (Number.isInteger(Number(entry.labelIndex))) {
+    return {
+      collectionName: entry.collectionName,
+      id: record._id,
+      languageCode,
+      payload: {},
+      stringListFieldName: entry.fieldName,
+      stringList: normalizeStringListValue(record[entry.fieldName]),
+      stringListPatch: {
+        labelIndex: Number(entry.labelIndex),
         text: value
       }
     }
@@ -4684,6 +4734,17 @@ async function applyAiTranslationPayload({
         delete updateItem.urlList
         delete updateItem.urlListPatch
       }
+      if (updateItem.stringListPatch) {
+        updateItem.payload[updateItem.stringListFieldName] =
+          updateItem.stringList
+        applyStringListTextPatch(
+          updateItem.payload[updateItem.stringListFieldName],
+          updateItem.stringListPatch
+        )
+        delete updateItem.stringList
+        delete updateItem.stringListPatch
+        delete updateItem.stringListFieldName
+      }
       relationUpdateMap.set(updateKey, updateItem)
       continue
     }
@@ -4705,6 +4766,17 @@ async function applyAiTranslationPayload({
       applyUrlListTextPatch(
         existingUpdateItem.payload.urlList,
         updateItem.urlListPatch
+      )
+      continue
+    }
+    if (updateItem.stringListPatch) {
+      const fieldName = updateItem.stringListFieldName
+      if (!Array.isArray(existingUpdateItem.payload[fieldName])) {
+        existingUpdateItem.payload[fieldName] = updateItem.stringList
+      }
+      applyStringListTextPatch(
+        existingUpdateItem.payload[fieldName],
+        updateItem.stringListPatch
       )
       continue
     }
