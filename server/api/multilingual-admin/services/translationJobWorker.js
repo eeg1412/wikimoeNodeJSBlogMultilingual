@@ -173,9 +173,10 @@ function cancelRunningTranslationJob(jobId, reason) {
   if (!cancellation) {
     return false
   }
-  // 用户主动停止：标记为需要手动重试，使任务进入“可重试的失败终态”，而不是不可重试。
+  // 用户主动停止：标记不自动重试。是否允许“手动重试”由 failRunningTranslationJob
+  // 依据任务状态（queueControl.active=false）统一判定，避免依赖各 provider 取消错误的标志。
   cancellation.cancel(reason || '用户停止了 AI 翻译任务', {
-    retryable: true,
+    retryable: false,
     manualRetryRequired: true
   })
   return true

@@ -2510,11 +2510,12 @@ async function retryTranslationJob(body = {}, options = {}) {
   job.updatedBy = adminSnapshot
   appendLog(job, '用户已请求重试，任务重新进入队列', 'info', 'retry')
   await job.save()
-  // 若重试的是家族中的子任务，重算 parent/root 聚合状态（被阻塞子任务会在该子任务
-  // 成功完成后由 activateNextFamilyChild 自动放行）。
+  // 若重试的是家族中的子任务：先解除“由本子任务阻塞”的兄弟子任务，让它们回到待执行队列
+  // （按顺序在本子任务完成后由 activateNextFamilyChild 逐个放行），再重算 parent/root 聚合状态。
   if (isFamilyChildJob(job)) {
     const rootId = getJobFamilyRootId(job)
     if (rootId) {
+      await unblockFamilyChildren(rootId, String(job._id))
       await recomputeFamilyAggregateStatus(rootId)
     }
   }
@@ -3273,10 +3274,25 @@ async function failRunningTranslationJob(options = {}) {
   const now = new Date()
   const maxAttempts = Number(options.maxAttempts || 3)
   const currentAttemptNo = Number(options.attemptNo || 0)
+  const JobModel = getTranslationJobModel()
+  const jobObjectId = toObjectId(options.id, 'id', true)
+  // 用户主动停止时，stop 接口已先把 queueControl.active 置为 false。据此可靠判定“用户停止”，
+  // 不依赖各 provider 取消错误是否携带标志，避免误判为可自动重试导致“停不下来”。
+  const jobBeforeFail = await JobModel.findById(jobObjectId)
+    .select('queueControl.active')
+    .lean()
+  const userStopped =
+    errorSummary.code === ERROR_CODES.AI_TRANSLATION_CANCELLED &&
+    jobBeforeFail?.queueControl?.active === false
+
   const manualRetryRequired = isManualRetryRequiredError(options.error)
   let retryable = isRetryableError(options.error)
   let autoRetry = retryable
-  if (manualRetryRequired) {
+  if (userStopped) {
+    // 用户主动停止：终态失败，允许手动重试，但绝不自动重试/恢复。
+    retryable = true
+    autoRetry = false
+  } else if (manualRetryRequired) {
     retryable = true
     autoRetry = false
   } else if (!retryable) {
@@ -3286,10 +3302,6 @@ async function failRunningTranslationJob(options = {}) {
     autoRetry = false
   }
   const manualRetryAvailable = retryable && !autoRetry
-  // 用户主动停止：以"已停止、可重新发起"的清晰文案呈现，而不是看似仍在断开连接。
-  const userStopped =
-    errorSummary.code === ERROR_CODES.AI_TRANSLATION_CANCELLED &&
-    manualRetryRequired
   const failedStep = getFailedStep(options)
   const progressStep = buildFailureProgressStep({
     errorMessage: errorSummary.message,
@@ -3299,10 +3311,9 @@ async function failRunningTranslationJob(options = {}) {
     userStopped
   })
 
-  const JobModel = getTranslationJobModel()
   await JobModel.updateOne(
     {
-      _id: toObjectId(options.id, 'id', true),
+      _id: jobObjectId,
       status: TRANSLATION_JOB_STATUS.RUNNING,
       'runtime.workerId': options.workerId,
       'runtime.attempts': currentAttemptNo
@@ -3728,6 +3739,49 @@ async function blockPendingFamilyChildren(rootId, blockedByJobId, reason) {
   return { blockedCount: result.modifiedCount || 0 }
 }
 
+// 某子任务被重试：解除“由该子任务阻塞”的兄弟子任务（BLOCKED→PENDING，清除阻塞标记，
+// active=false 等待按顺序放行），使家族在重试后立即恢复一致状态，而不是仍显示“已被阻塞”。
+async function unblockFamilyChildren(rootId, blockedByJobId) {
+  const JobModel = getTranslationJobModel()
+  const rootObjectId = toObjectId(rootId, 'rootId')
+  const blockedByObjectId = toObjectId(blockedByJobId, 'blockedByJobId')
+  if (!rootObjectId || !blockedByObjectId) {
+    return { unblockedCount: 0 }
+  }
+  const result = await JobModel.updateMany(
+    {
+      'taskRelation.rootId': rootObjectId,
+      'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.CHILD,
+      status: TRANSLATION_JOB_STATUS.BLOCKED,
+      'taskRelation.blockedByJobId': blockedByObjectId
+    },
+    {
+      $set: {
+        status: TRANSLATION_JOB_STATUS.PENDING,
+        'queueControl.active': false,
+        'taskRelation.blockedByJobId': null,
+        'taskRelation.blockedReason': '',
+        'taskRelation.blockedAt': null,
+        'progress.currentStep': '前序子任务已重试，等待按顺序执行',
+        'progress.currentStage': 'pending'
+      },
+      $push: {
+        'progress.recentLogs': {
+          $each: [
+            buildRecentLog(
+              '前序子任务已重试，本子任务解除阻塞，等待按顺序执行',
+              'info',
+              'family'
+            )
+          ],
+          $slice: -MAX_RECENT_LOGS
+        }
+      }
+    }
+  )
+  return { unblockedCount: result.modifiedCount || 0 }
+}
+
 // 由一组“子任务状态”派生编排节点（parent/root）的聚合状态。
 function deriveOrchestratorStatus(childStates) {
   if (!Array.isArray(childStates) || childStates.length === 0) {
@@ -3825,13 +3879,13 @@ function buildChildStatsSummary(childJobs) {
 // 由聚合状态与子任务统计，构建编排节点（root/parent）的进度展示文案与百分比。
 function buildOrchestratorProgress(derivedStatus, childStats) {
   const total = Number(childStats.total || 0)
+  // 只把"真正完成工作"的子任务计入进度（待审核/不采纳/部分采纳/已采纳）。失败、被阻塞、
+  // 被用户停止的子任务并未完成，不能计入进度，否则会出现"1 停 2 阻塞却显示 99%"的误导。
   const settled =
     Number(childStats.waitingReview || 0) +
     Number(childStats.rejected || 0) +
     Number(childStats.partialAdopted || 0) +
-    Number(childStats.fullyAdopted || 0) +
-    Number(childStats.failed || 0) +
-    Number(childStats.blocked || 0)
+    Number(childStats.fullyAdopted || 0)
   let percent = 0
   if (total > 0) {
     // 单调进度：把"规划完成"算作 1 个已完成单元（settled+1）/（total+1），保证规划完成后是
