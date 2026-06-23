@@ -69,6 +69,7 @@ function createCancellationContext() {
   let cancelled = false
   let reason = ''
   let retryable = true
+  let manualRetryRequired = false
   const listeners = new Set()
 
   return {
@@ -81,6 +82,9 @@ function createCancellationContext() {
     get retryable() {
       return retryable
     },
+    get manualRetryRequired() {
+      return manualRetryRequired
+    },
     cancel(nextReason, options = {}) {
       if (cancelled) {
         return
@@ -89,6 +93,9 @@ function createCancellationContext() {
       reason = String(nextReason || '').trim() || '后台任务已停止'
       if (typeof options.retryable === 'boolean') {
         retryable = options.retryable
+      }
+      if (typeof options.manualRetryRequired === 'boolean') {
+        manualRetryRequired = options.manualRetryRequired
       }
       listeners.forEach(listener => listener(reason))
       listeners.clear()
@@ -143,7 +150,10 @@ function createCancelledError(cancellation) {
     cancellation.reason,
     'translationJob',
     499,
-    { retryable: cancellation.retryable !== false }
+    {
+      retryable: cancellation.retryable !== false,
+      manualRetryRequired: cancellation.manualRetryRequired === true
+    }
   )
 }
 
@@ -163,8 +173,10 @@ function cancelRunningTranslationJob(jobId, reason) {
   if (!cancellation) {
     return false
   }
+  // 用户主动停止：标记为需要手动重试，使任务进入“可重试的失败终态”，而不是不可重试。
   cancellation.cancel(reason || '用户停止了 AI 翻译任务', {
-    retryable: false
+    retryable: true,
+    manualRetryRequired: true
   })
   return true
 }

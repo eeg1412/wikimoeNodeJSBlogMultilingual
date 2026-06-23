@@ -2056,8 +2056,7 @@ async function requestStopRunningTranslationJob(body = {}, options = {}) {
   }
 
   const adminSnapshot = normalizeAdminSnapshot(options.admin)
-  const reason =
-    toTrimmedString(body.reason) || '用户停止了 AI 翻译任务，正在断开 AI 连接'
+  const reason = toTrimmedString(body.reason) || '任务已被用户停止'
   job.queueControl.active = false
   job.runtime.interruptReason = reason
   job.updatedBy = adminSnapshot
@@ -2599,8 +2598,12 @@ function buildFailureProgressStep({
   errorMessage,
   autoRetry,
   manualRetryRequired,
-  manualRetryAvailable
+  manualRetryAvailable,
+  userStopped
 }) {
+  if (userStopped) {
+    return '任务已被用户停止，可重新发起'
+  }
   if (manualRetryRequired) {
     return `当前 AI 步骤连续重试失败，等待用户决定是否重试：${errorMessage}`
   }
@@ -3283,12 +3286,17 @@ async function failRunningTranslationJob(options = {}) {
     autoRetry = false
   }
   const manualRetryAvailable = retryable && !autoRetry
+  // 用户主动停止：以"已停止、可重新发起"的清晰文案呈现，而不是看似仍在断开连接。
+  const userStopped =
+    errorSummary.code === ERROR_CODES.AI_TRANSLATION_CANCELLED &&
+    manualRetryRequired
   const failedStep = getFailedStep(options)
   const progressStep = buildFailureProgressStep({
     errorMessage: errorSummary.message,
     autoRetry,
     manualRetryRequired,
-    manualRetryAvailable
+    manualRetryAvailable,
+    userStopped
   })
 
   const JobModel = getTranslationJobModel()
@@ -3394,20 +3402,20 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
         'runtime.leaseExpiresAt': null,
         'runtime.recovering': false,
         'runtime.lastInterruptedAt': now,
-        'runtime.interruptReason': '停止请求在服务重启后确认完成',
+        'runtime.interruptReason': '任务已被用户停止',
         'failure.failedStep': 'stop',
         'failure.errorCode': ERROR_CODES.AI_TRANSLATION_CANCELLED,
-        'failure.errorMessage': '任务已停止，后台不会继续执行',
+        'failure.errorMessage': '任务已被用户停止，可重新发起',
         'failure.stackSummary': '',
-        'failure.retryable': false,
+        'failure.retryable': true,
         'failure.lastFailedAt': now,
         'progress.currentStage': 'Failure',
-        'progress.currentStep': '任务已停止，后台不会继续执行',
+        'progress.currentStep': '任务已被用户停止，可重新发起',
         'attempts.$[attempt].status': 'interrupted',
         'attempts.$[attempt].finishedAt': now,
         'attempts.$[attempt].error': {
           code: ERROR_CODES.AI_TRANSLATION_CANCELLED,
-          message: '任务已停止，后台不会继续执行',
+          message: '任务已被用户停止，可重新发起',
           stackSummary: ''
         }
       },
@@ -3415,7 +3423,7 @@ async function markExpiredRunningTranslationJobsRecovering(options = {}) {
         'progress.recentLogs': {
           $each: [
             buildRecentLog(
-              '停止请求在服务重启后确认完成，任务不会继续执行',
+              '停止请求在服务重启后确认完成，任务已停止，可重新发起',
               'warn',
               'stop'
             )

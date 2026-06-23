@@ -51,7 +51,10 @@ function createCancelledError(cancellation) {
     normalizeText(cancellation?.reason) || 'AI 翻译已停止',
     'translation',
     499,
-    { retryable: cancellation?.retryable !== false }
+    {
+      retryable: cancellation?.retryable !== false,
+      manualRetryRequired: cancellation?.manualRetryRequired === true
+    }
   )
 }
 
@@ -190,29 +193,21 @@ async function runAiStepWithRetry(operation, options = {}) {
   while (attemptNo <= maxAttempts) {
     throwIfCancellationRequested(options.cancellation)
     const currentAttemptText = formatAiAttemptText(attemptNo, maxAttempts)
-    notifyStatus(
-      options,
-      `正在执行${stepLabel}（${currentAttemptText}）`,
-      {
+    notifyStatus(options, `正在执行${stepLabel}（${currentAttemptText}）`, {
+      stepKey: getStepKey(options),
+      stepLabel,
+      status: 'running',
+      attemptNo,
+      maxAttempts
+    })
+    if (attemptNo > 1) {
+      notifyStatus(options, `正在重试${stepLabel}（${currentAttemptText}）`, {
         stepKey: getStepKey(options),
         stepLabel,
-        status: 'running',
+        status: 'retrying',
         attemptNo,
         maxAttempts
-      }
-    )
-    if (attemptNo > 1) {
-      notifyStatus(
-        options,
-        `正在重试${stepLabel}（${currentAttemptText}）`,
-        {
-          stepKey: getStepKey(options),
-          stepLabel,
-          status: 'retrying',
-          attemptNo,
-          maxAttempts
-        }
-      )
+      })
     }
 
     try {
