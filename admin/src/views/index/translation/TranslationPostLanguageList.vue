@@ -295,7 +295,7 @@
       v-model="batchAiTranslationDialogVisible"
       :source-post="sourcePost"
       :source-snapshot-id="route.params.sourceSnapshotId"
-      :targets="batchAiTranslationTargets"
+      :targets="batchAiTranslationDialogTargets"
       :mode="batchAiTranslationDialogMode"
       @submitted="handleBatchAiTranslationSubmitted"
     />
@@ -353,6 +353,7 @@ export default {
     const aiTranslationDialogMode = ref('translate')
     const batchAiTranslationDialogVisible = ref(false)
     const batchAiTranslationDialogMode = ref('translate')
+    const batchAiTranslationDialogTargets = ref([])
     const selectedTranslationRows = ref([])
     const snapshotRestoreDialogVisible = ref(false)
     const snapshotRestorePost = ref(null)
@@ -508,6 +509,7 @@ export default {
     }
 
     function getLanguageList() {
+      clearSelectedTranslationRows()
       loading.value = true
       multilingualApi
         .getTranslationPostListBySource({
@@ -658,6 +660,11 @@ export default {
         : []
     }
 
+    function clearSelectedTranslationRows() {
+      selectedTranslationRows.value = []
+      tableRef.value?.clearSelection()
+    }
+
     const batchAiTranslationTargets = computed(() => {
       return selectedTranslationRows.value.filter(isRowSelectable).map(row => {
         const translation = row.translation
@@ -671,20 +678,24 @@ export default {
     })
 
     function openBatchAiTranslationDialog() {
-      if (batchAiTranslationTargets.value.length === 0) {
+      const targets = batchAiTranslationTargets.value
+      if (targets.length === 0) {
         ElMessage.warning('请先勾选要批量翻译的语言版本')
         return
       }
+      batchAiTranslationDialogTargets.value = [...targets]
       batchAiTranslationDialogMode.value = 'translate'
       batchAiTranslationDialogVisible.value = true
     }
 
     // 批量校验：复用批量 AI 翻译对话框，以校验模式打开（选字段后批量发起校验任务）。
     function openBatchAiValidationDialog() {
-      if (batchAiTranslationTargets.value.length === 0) {
+      const targets = batchAiTranslationTargets.value
+      if (targets.length === 0) {
         ElMessage.warning('请先勾选要批量校验的语言版本')
         return
       }
+      batchAiTranslationDialogTargets.value = [...targets]
       batchAiTranslationDialogMode.value = 'validate'
       batchAiTranslationDialogVisible.value = true
     }
@@ -731,6 +742,7 @@ export default {
       aiTranslationDialogMode,
       batchAiTranslationDialogVisible,
       batchAiTranslationDialogMode,
+      batchAiTranslationDialogTargets,
       selectedTranslationRows,
       batchAiTranslationTargets,
       snapshotRestoreDialogVisible,
