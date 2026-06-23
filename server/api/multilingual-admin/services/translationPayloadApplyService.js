@@ -1516,6 +1516,25 @@ async function updateJobStatusAfterApply(jobId) {
   }
 }
 
+// 子任务采纳成功后重算其所属家族的 parent/root 聚合状态。单独采纳一个子任务（非“家族采纳全部”）
+// 时也要让父级/祖父级跟着更新，否则会出现“子任务已完全采纳、父级仍待审核”。家族级“采纳全部”
+// 会在末尾统一重算，因此通过 skipFamilyRecompute 跳过逐子任务重复重算。
+async function recomputeFamilyAfterChildApply(job, skipFamilyRecompute) {
+  if (skipFamilyRecompute === true) {
+    return
+  }
+  const taskRelation = job.taskRelation || {}
+  if (taskRelation.role !== TRANSLATION_JOB_TASK_ROLES.CHILD) {
+    return
+  }
+  const rootId = taskRelation.rootId
+  if (!rootId) {
+    return
+  }
+  const translationJobService = require('./translationJobService')
+  await translationJobService.recomputeFamilyAggregateStatus(String(rootId))
+}
+
 async function applyTranslationJobPayload(body = {}, options = {}) {
   const jobId = toObjectId(body.id || body.jobId, 'id', true)
   const selectedEntryKeys = normalizeSelectedEntryKeys(body.selectedEntryKeys)
@@ -1526,6 +1545,9 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   // 家族级"采纳全部"会逐子任务调用本函数，为避免每个子任务都重复刷新缓存/RSS/Sitemap，
   // 调用方可置 skipContentRefresh=true，由家族层在最后按去重语言统一刷新一次。
   const skipContentRefresh = body.skipContentRefresh === true
+  // 家族级"采纳全部"在末尾统一重算家族聚合状态，逐子任务调用时可置 skipFamilyRecompute=true
+  // 跳过重复重算；单独采纳单个子任务时不置该标志，由本函数在采纳后重算家族，保证父级跟随更新。
+  const skipFamilyRecompute = body.skipFamilyRecompute === true
   const applyBatchId =
     normalizeIdentityValue(body.applyBatchId) || crypto.randomUUID()
   const adminSnapshot = normalizeAdminSnapshot(options.admin)
@@ -1641,6 +1663,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
       }
     }
     const statusResult = await updateJobStatusAfterApply(job._id)
+    await recomputeFamilyAfterChildApply(job, skipFamilyRecompute)
     return {
       applied: true,
       applyBatchId,
@@ -1738,6 +1761,7 @@ async function applyTranslationJobPayload(body = {}, options = {}) {
   }
 
   const statusResult = await updateJobStatusAfterApply(job._id)
+  await recomputeFamilyAfterChildApply(job, skipFamilyRecompute)
 
   return {
     applied: true,
@@ -1827,7 +1851,8 @@ async function applyTranslationFamilyPayload(body = {}, options = {}) {
           force: body.force === true,
           publish: body.publish === true,
           applyBatchId,
-          skipContentRefresh: true
+          skipContentRefresh: true,
+          skipFamilyRecompute: true
         },
         options
       )
