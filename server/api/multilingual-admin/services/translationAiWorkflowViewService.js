@@ -901,6 +901,23 @@ function buildSourcePostAiImportPlannedSteps(job) {
 function buildSourcePostProperNounOrganizePlannedSteps(job) {
   const steps = []
   const targetLanguageCodes = getWorkflowTargetLanguageCodes(job)
+  // 带关联文章：本任务升级为纯调度 root，只负责拆解子任务；根文章与各相关文章的名词整理
+  // （抽取/匹配/官方译名/绑定）都在各自的子任务里进行，故顶层任务的计划步骤只展示编排，
+  // 具体名词整理步骤到各子任务的工作流里查看。
+  if (shouldCreateProperNounOrganizeChildJobsForWorkflow(job)) {
+    appendPlannedWorkflowStep(steps, {
+      key: 'proper-noun.analyze-related-posts',
+      majorKey: 'source-post.analyze-related-posts',
+      title: '拆解名词整理子任务',
+      description:
+        '分析根文章与相关文章关系，为根文章及每篇相关文章各创建一个名词整理子任务，按顺序执行。',
+      stage: 'AnalyzeRelatedPosts',
+      stageKeys: ['AnalyzeRelatedPosts'],
+      targetLanguageCodes,
+      dynamicDetailText: '子任务数量需要读取源文章关联关系后才能确定。'
+    })
+    return steps
+  }
   appendPlannedWorkflowStep(steps, {
     key: 'proper-noun.build-entries',
     majorKey: 'translation.build-entries',

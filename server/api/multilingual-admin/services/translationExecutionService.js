@@ -2685,60 +2685,119 @@ async function createSourcePostImportChildJobs({
   return childTaskResults
 }
 
-function buildProperNounOrganizeChildTaskRequest(job, planItem) {
-  const request = job.request || {}
+// 名词整理子任务（根文章 / 相关文章各一个）的 request：关闭递归与相关文章同步，
+// 复用执行选项（名词词库整理、官方译名检索），全语言一次性整理。
+function buildProperNounOrganizeChildRequest(job, languageCodes) {
+  const requestOptions = job.request?.options || {}
   return {
     selectedEntryKeys: [],
     prompt: '',
     baseMode: '',
-    targetLanguageCodes: planItem.languageCodes || [],
+    targetLanguageCodes: languageCodes,
     recursion: {
       maxDepth: 1
     },
     entries: [],
     options: {
-      ...(request.options || {}),
+      ...requestOptions,
+      autoOrganizeOfficialTermGlossary: true,
+      searchOfficialTermTranslations:
+        requestOptions.searchOfficialTermTranslations === true,
       syncRelatedPosts: false,
       organizeRelatedPosts: false
     }
   }
 }
 
-function buildProperNounOrganizeChildTaskRelation({ job, planItem, rootId }) {
-  return {
-    role: 'child',
-    rootId,
-    parentId: job._id,
-    depth: planItem.minDepth,
-    sourcePostId: toObjectId(planItem.sourceId),
-    childJobIds: [],
-    plannedRelatedSourceIdsByLanguage:
-      planItem.plannedRelatedSourceIdsByLanguage || {},
-    plan: {
-      parentSourceIds: planItem.parentSourceIds || [],
-      languageCodes: planItem.languageCodes || []
-    }
-  }
+// 创建一个名词整理子任务（role=child，childKind=PROPER_NOUN_ORGANIZE，active=false 由家族
+// 编排逐个放行）。复用现有的 executeProperNounOrganizeChild 执行器与家族状态聚合机制。
+async function createProperNounOrganizeChildJob({
+  job,
+  rootId,
+  articleSourceId,
+  articleTitle,
+  orderIndex,
+  languageCodes
+}) {
+  const JobModel = getTranslationJobModel()
+  const sourcePostObjectId = toObjectId(articleSourceId)
+  const title = articleTitle || `源文章 ${articleSourceId}`
+  const priority = job.queueControl?.priority || 0
+  return await JobModel.create({
+    jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
+    status: TRANSLATION_JOB_STATUS.PENDING,
+    queueControl: { active: false, deferred: false, priority },
+    source: {
+      postId: sourcePostObjectId,
+      languageCode: job.source.languageCode,
+      title,
+      meta: {
+        parentJobId: getJobId(job),
+        rootJobId: String(rootId)
+      }
+    },
+    target: {
+      languageCodes,
+      title
+    },
+    request: buildProperNounOrganizeChildRequest(job, languageCodes),
+    taskRelation: {
+      role: TRANSLATION_JOB_TASK_ROLES.CHILD,
+      childKind: TRANSLATION_JOB_CHILD_KINDS.PROPER_NOUN_ORGANIZE,
+      orderIndex,
+      rootId: toObjectId(rootId),
+      parentId: toObjectId(rootId),
+      depth: 2,
+      sourcePostId: sourcePostObjectId,
+      articleSourceId: sourcePostObjectId,
+      childLanguageCode: '',
+      childJobIds: [],
+      childStats: {}
+    },
+    progress: {
+      currentStep: '排队中，等待前序子任务完成',
+      currentStage: 'pending',
+      totalSteps: 0,
+      completedSteps: 0,
+      percent: 0,
+      recentLogs: [
+        buildExecutionLog(
+          `文章「${title}」名词整理子任务已创建`,
+          'info',
+          'family'
+        )
+      ]
+    },
+    createdBy: job.createdBy || null,
+    updatedBy: job.updatedBy || job.createdBy || null
+  })
 }
 
-async function createSourcePostProperNounOrganizeChildJobs({
+// 名词整理"带关联文章"编排：把根文章 + 相关文章各自的名词整理拆成 role=child 子任务
+// （childKind=PROPER_NOUN_ORGANIZE），协调任务自身升级为纯调度 root（不再内联干活）。
+// 之后完全复用家族编排：worker 据 marker 调 finalizeOrchestratorPlanning 把 root 转编排态、
+// 放行首个子任务；每个子任务完成触发 advanceFamilyAfterChildSettled 放行下一个并重算 root 状态；
+// root 详情可下钻查看各子任务（含各自的 AI 工作流）。没有相关文章时返回 isFamily=false，
+// 调用方回退为 standalone 内联整理（不组建家族）。重复执行（恢复重试）时按 parentId+源 去重，
+// 避免重复创建子任务。
+async function planProperNounOrganizeFamily({
   job,
+  context,
   languageCodes,
-  maxDepth,
-  context
+  maxDepth
 }) {
   await context.updateProgress({
     currentStage: 'AnalyzeRelatedPosts',
     currentStep: '正在分析相关文章并拆解名词整理子任务',
     percent: 1
   })
-  const childPlan = await buildSourcePostImportChildPlan({
+  const relatedPlan = await buildSourcePostImportChildPlan({
     job,
     languageCodes,
     maxDepth,
     context
   })
-  if (childPlan.length === 0) {
+  if (relatedPlan.length === 0) {
     await context.saveCheckpoint({
       stage: 'AnalyzeRelatedPosts',
       stateSummary: {
@@ -2746,108 +2805,74 @@ async function createSourcePostProperNounOrganizeChildJobs({
         message: '没有需要同步整理名词的相关文章'
       }
     })
-    return []
+    return { isFamily: false }
   }
 
+  const rootSourceId = String(job.source.postId)
+  const articles = [
+    {
+      sourceId: rootSourceId,
+      title: job.source.title || '',
+      languageCodes
+    }
+  ]
+  relatedPlan.forEach(planItem => {
+    articles.push({
+      sourceId: planItem.sourceId,
+      title: planItem.title || '',
+      languageCodes:
+        Array.isArray(planItem.languageCodes) && planItem.languageCodes.length
+          ? planItem.languageCodes
+          : languageCodes
+    })
+  })
+
   const JobModel = getTranslationJobModel()
-  const rootId = getJobTaskRelation(job).rootId || job._id
+  const rootId = job._id
   const childJobIds = []
-  const childTaskResults = []
-  for (const planItem of childPlan) {
-    const sourcePostId = toObjectId(planItem.sourceId)
-    if (!sourcePostId) {
+  for (let i = 0; i < articles.length; i += 1) {
+    const article = articles[i]
+    const sourcePostObjectId = toObjectId(article.sourceId)
+    if (!sourcePostObjectId) {
       continue
     }
+    // 恢复重试幂等：同一 root 下同一源文章只建一个名词整理子任务。
     const existingChild = await JobModel.findOne({
       jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
-      'taskRelation.parentId': job._id,
-      'source.postId': sourcePostId
+      'taskRelation.parentId': rootId,
+      'source.postId': sourcePostObjectId
     }).lean()
     if (existingChild) {
       childJobIds.push(existingChild._id)
-      childTaskResults.push({
-        sourceId: planItem.sourceId,
-        title: planItem.title || '',
-        depth: planItem.minDepth,
-        languageCodes: planItem.languageCodes,
-        childJobId: existingChild._id
-      })
       continue
     }
-
-    const title = planItem.title || `源文章 ${planItem.sourceId}`
-    const childJob = await JobModel.create({
-      jobType: TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE,
-      status: TRANSLATION_JOB_STATUS.PENDING,
-      queueControl: {
-        active: true,
-        deferred: false,
-        priority: job.queueControl?.priority || 0
-      },
-      source: {
-        postId: sourcePostId,
-        languageCode: job.source.languageCode,
-        title,
-        meta: {
-          parentJobId: getJobId(job),
-          rootJobId: String(rootId)
-        }
-      },
-      target: {
-        languageCodes: planItem.languageCodes,
-        title
-      },
-      request: buildProperNounOrganizeChildTaskRequest(job, planItem),
-      taskRelation: buildProperNounOrganizeChildTaskRelation({
-        job,
-        planItem,
-        rootId
-      }),
-      progress: {
-        currentStep: '等待后台 worker 领取相关文章名词整理子任务',
-        currentStage: 'pending',
-        totalSteps: 0,
-        completedSteps: 0,
-        percent: 0,
-        recentLogs: [
-          buildExecutionLog(
-            `由父任务 ${getJobId(job)} 拆解创建`,
-            'info',
-            'createChildTask'
-          )
-        ]
-      },
-      createdBy: job.createdBy || null,
-      updatedBy: job.updatedBy || job.createdBy || null
+    const childJob = await createProperNounOrganizeChildJob({
+      job,
+      rootId,
+      articleSourceId: article.sourceId,
+      articleTitle: article.title,
+      orderIndex: i,
+      languageCodes: article.languageCodes
     })
     childJobIds.push(childJob._id)
-    childTaskResults.push({
-      sourceId: planItem.sourceId,
-      title: planItem.title || '',
-      depth: planItem.minDepth,
-      languageCodes: planItem.languageCodes,
-      childJobId: childJob._id
-    })
   }
 
   await JobModel.updateOne(
     { _id: job._id },
     {
       $set: {
-        // 名词整理协调任务是这个家族的顶层节点（自身整理根文章 + 拆解相关文章子任务），
-        // 必须用 root 角色，才能在任务列表中保持可见并支持下钻；用 parent 会被顶层列表
-        // 过滤掉（列表只展示 standalone/root/无 role），导致任务“消失”。相关文章子任务
-        // 直接作为 root 的 child（二级家族，无 parent 层），由 recomputeFamilyAggregateStatus
-        // 的无 parent 分支按 child 聚合 root 状态。
+        // 协调任务升级为纯调度 root：不再内联干活，根文章的名词整理也作为一个子任务。
+        // 列表只展示 standalone/root/无 role，root 可见且可下钻；子任务带 childKind，
+        // 完成时触发家族状态聚合，root 状态如实反映全部子任务进度。
         'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.ROOT,
         'taskRelation.rootId': rootId,
         'taskRelation.sourcePostId': job.source.postId,
         'taskRelation.childJobIds': childJobIds,
         'taskRelation.plan': {
-          schema: 'wikimoe.ai.proper_noun.organize.child-plan',
+          schema: 'wikimoe.ai.proper_noun.organize.family-plan',
           version: 1,
           childTaskCount: childJobIds.length,
-          sourceCount: childPlan.length,
+          articleCount: articles.length,
           maxDepth,
           generatedAt: new Date()
         }
@@ -2856,7 +2881,7 @@ async function createSourcePostProperNounOrganizeChildJobs({
         'progress.recentLogs': {
           $each: [
             buildExecutionLog(
-              `已拆解 ${childJobIds.length} 个相关文章名词整理子任务`,
+              `已拆解根文章 + ${articles.length - 1} 篇相关文章，共 ${childJobIds.length} 个名词整理子任务`,
               'info',
               'AnalyzeRelatedPosts'
             )
@@ -2871,12 +2896,18 @@ async function createSourcePostProperNounOrganizeChildJobs({
     stage: 'AnalyzeRelatedPosts',
     stateSummary: {
       childTaskCount: childJobIds.length,
-      sourceCount: childPlan.length,
+      articleCount: articles.length,
       maxDepth
     }
   })
 
-  return childTaskResults
+  return {
+    isFamily: true,
+    childStats: {
+      childTaskCount: childJobIds.length,
+      articleCount: articles.length
+    }
+  }
 }
 
 async function overwriteSourceSnapshotForAiImportJob(job, context) {
@@ -3404,6 +3435,25 @@ async function executeSourcePostProperNounOrganize(job, context) {
 
   const organizeRelatedPosts = shouldOrganizeRelatedPosts(job)
   const maxDepth = getProperNounOrganizeMaxDepth(job)
+
+  // 带关联文章：协调任务升级为纯调度 root，把根文章 + 相关文章各自的名词整理拆成 role=child
+  // 子任务（自身不再内联干活），返回编排 marker 交给家族编排机制。没有相关文章时回退为
+  // standalone 内联整理（不组建家族）。
+  if (shouldCreateProperNounOrganizeChildJobs(job)) {
+    const planResult = await planProperNounOrganizeFamily({
+      job,
+      context,
+      languageCodes,
+      maxDepth
+    })
+    if (planResult.isFamily) {
+      return {
+        [FAMILY_ORCHESTRATOR_PLANNING_MARKER]: true,
+        childStats: planResult.childStats
+      }
+    }
+  }
+
   const officialTermGlossaryTaskCache = new Map()
   const rootSourceResult = await organizeOneSourcePostProperNouns({
     job,
@@ -3416,15 +3466,7 @@ async function executeSourcePostProperNounOrganize(job, context) {
     officialTermGlossaryTaskCache
   })
   const sourceResults = [rootSourceResult]
-  let childTaskResults = []
-  if (shouldCreateProperNounOrganizeChildJobs(job)) {
-    childTaskResults = await createSourcePostProperNounOrganizeChildJobs({
-      job,
-      languageCodes,
-      maxDepth,
-      context
-    })
-  }
+  const childTaskResults = []
 
   const rootResult = sourceResults.find(item => item.isRoot === true)
   const rootSourceId = rootResult?.sourceId || sourcePostId
@@ -4491,6 +4533,15 @@ async function executeTranslationJob(job, context) {
   // 其余（独立任务、以及旧的相关文章 child——无 childKind）走原有 jobType 分发。
   const relation = getJobTaskRelation(job)
   if (relation.role === TRANSLATION_JOB_TASK_ROLES.ROOT) {
+    // 名词整理"带关联文章"的 root 由 executeSourcePostProperNounOrganize 自己规划（升级 root +
+    // 拆解子任务，恢复重试时按源去重幂等）。仅当 worker 在"已写入 role=root"与"编排态写入"之间
+    // 崩溃、任务以 role=root 被恢复重领时会走到这里，必须按 jobType 路由到正确的规划器，
+    // 不能误用翻译家族的 executeFamilyRootPlanning。
+    if (
+      job.jobType === TRANSLATION_JOB_TYPES.SOURCE_POST_PROPER_NOUN_ORGANIZE
+    ) {
+      return await executeSourcePostProperNounOrganize(job, context)
+    }
     return await executeFamilyRootPlanning(job, context)
   }
   if (
