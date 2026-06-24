@@ -33,6 +33,14 @@ const AI_RESULT_SCHEMA = 'wikimoe.ai.translation.result'
 const TERM_EXTRACTION_RESULT_SCHEMA = 'wikimoe.ai.proper_noun.term_extract'
 const TERM_EXISTING_FILTER_RESULT_SCHEMA =
   'wikimoe.ai.proper_noun.existing_filter'
+// 既有名词库候选消歧分批参数：候选过多时，AI 一次性返回的 matchedTerms 会超出最大输出 token
+// 被截断，导致 JSON 解析失败、整任务报错。改为按“当前模型配置的最大输出 token”动态推算每批
+// 可容纳的候选数，并按抽取词为单元打包（同一抽取词的全部同名候选始终在同一批，避免跨批重复
+// 匹配）。预算按“最坏情况：AI 把本批每个候选都判为匹配”估算输出，从而对 AI 过度输出也有界。
+const EXISTING_TERM_FILTER_TOKENS_PER_MATCH = 64
+const EXISTING_TERM_FILTER_OUTPUT_SAFETY_RATIO = 0.6
+const EXISTING_TERM_FILTER_MIN_CANDIDATES_PER_BATCH = 8
+const EXISTING_TERM_FILTER_MAX_CANDIDATES_PER_BATCH = 120
 const SUPPORTED_ENTRY_VALUE_TYPES = new Set([
   'plainText',
   'richTextLite',
@@ -3219,6 +3227,68 @@ async function filterExistingTermCandidatesWithAi({
   )
 }
 
+// 根据当前模型配置的最大输出 token，动态推算单批消歧可容纳的“候选数”预算。
+// 预算按最坏情况估算：AI 把本批每个候选都判为匹配 → 输出 matchedTerms 数 ≈ 候选数，
+// 每条约 EXISTING_TERM_FILTER_TOKENS_PER_MATCH 个 token。扣除 JSON 包裹与思考预留后乘安全系数，
+// 再用上下限收敛。未配置最大 token 时 getConfiguredMaxTokens 回退到 AI_FALLBACK_MAX_OUTPUT_TOKENS。
+function computeExistingTermFilterCandidateBudget(settings) {
+  const maxOutputTokens = getConfiguredMaxTokens(settings)
+  const reserveTokens =
+    AI_RESPONSE_JSON_TOKEN_RESERVE + getAiThinkingTokenReserve(settings)
+  const usableOutputTokens = Math.max(maxOutputTokens - reserveTokens, 0)
+  const matchBudgetTokens = Math.floor(
+    usableOutputTokens * EXISTING_TERM_FILTER_OUTPUT_SAFETY_RATIO
+  )
+  const rawBudget = Math.floor(
+    matchBudgetTokens / EXISTING_TERM_FILTER_TOKENS_PER_MATCH
+  )
+  if (
+    !Number.isFinite(rawBudget) ||
+    rawBudget < EXISTING_TERM_FILTER_MIN_CANDIDATES_PER_BATCH
+  ) {
+    return EXISTING_TERM_FILTER_MIN_CANDIDATES_PER_BATCH
+  }
+  return Math.min(rawBudget, EXISTING_TERM_FILTER_MAX_CANDIDATES_PER_BATCH)
+}
+
+// 按抽取词为单元，把待消歧的抽取词贪心打包成多批，使每批去重后的候选数不超过预算；
+// 同一抽取词的全部同名候选始终在同一批；单个抽取词的候选数即便超过预算也独立成批以保证推进。
+function buildExistingTermFilterBatches(
+  filterSourceTextItems,
+  filterCandidateMap,
+  candidateBudget
+) {
+  const batches = []
+  let currentItems = []
+  let currentCandidateIds = new Set()
+  filterSourceTextItems.forEach(item => {
+    const termList = filterCandidateMap.get(item.normalizedSourceText) || []
+    const projectedIds = new Set(currentCandidateIds)
+    termList.forEach(term => {
+      const termId = String(term._id || '')
+      if (termId) {
+        projectedIds.add(termId)
+      }
+    })
+    if (currentItems.length > 0 && projectedIds.size > candidateBudget) {
+      batches.push(currentItems)
+      currentItems = []
+      currentCandidateIds = new Set()
+    }
+    currentItems.push(item)
+    termList.forEach(term => {
+      const termId = String(term._id || '')
+      if (termId) {
+        currentCandidateIds.add(termId)
+      }
+    })
+  })
+  if (currentItems.length > 0) {
+    batches.push(currentItems)
+  }
+  return batches
+}
+
 async function resolveExistingTermMatches({
   input,
   settings,
@@ -3241,7 +3311,7 @@ async function resolveExistingTermMatches({
       matchedTermIds: splitResult.autoMatchedTermIds,
       matchedTermLinks: splitResult.autoMatchedTermLinks,
       matchedCandidateTerms,
-      aiJsonLog: null
+      aiJsonLogs: []
     }
   }
 
@@ -3250,17 +3320,63 @@ async function resolveExistingTermMatches({
       message: `正在判断 ${splitResult.filterCandidateTerms.length} 条同名专有名词候选`
     })
   }
-  const filterResult = await filterExistingTermCandidatesWithAi({
-    input,
-    settings,
-    url,
-    sourceTextItems: splitResult.filterSourceTextItems,
-    candidateTerms: splitResult.filterCandidateTerms,
-    contextSummary,
-    handlers
-  })
+
+  // 分批消歧：候选过多时，AI 一次性返回的 matchedTerms 会超出最大输出 token 被截断（报
+  // “DeepSeek 返回内容被最大输出 Token 截断”）。按当前模型配置的最大输出 token 动态推算每批
+  // 候选预算，并按抽取词为单元打包——同一抽取词的全部同名候选始终在同一批，既保证每批输出
+  // 有界，又不会因把同名候选拆到不同批而重复匹配。
+  const candidateBudget = computeExistingTermFilterCandidateBudget(settings)
+  const filterCandidateMap = groupCandidateTermsByNormalizedSourceText(
+    splitResult.filterCandidateTerms
+  )
+  const sourceTextItemBatches = buildExistingTermFilterBatches(
+    splitResult.filterSourceTextItems,
+    filterCandidateMap,
+    candidateBudget
+  )
+
+  const filterMatchedTermLinks = []
+  const filterAiJsonLogs = []
+  for (let i = 0; i < sourceTextItemBatches.length; i += 1) {
+    const batchSourceTextItems = sourceTextItemBatches[i]
+    const batchCandidateTermIdSet = new Set()
+    const batchCandidateTerms = []
+    batchSourceTextItems.forEach(item => {
+      const termList = filterCandidateMap.get(item.normalizedSourceText) || []
+      termList.forEach(term => {
+        const termId = String(term._id || '')
+        if (!termId || batchCandidateTermIdSet.has(termId)) {
+          return
+        }
+        batchCandidateTermIdSet.add(termId)
+        batchCandidateTerms.push(term)
+      })
+    })
+    if (batchCandidateTerms.length === 0) {
+      continue
+    }
+    if (handlers.onStatus && sourceTextItemBatches.length > 1) {
+      handlers.onStatus({
+        message: `正在判断同名专有名词候选（第 ${i + 1}/${sourceTextItemBatches.length} 批，共 ${batchCandidateTerms.length} 条）`
+      })
+    }
+    const filterResult = await filterExistingTermCandidatesWithAi({
+      input,
+      settings,
+      url,
+      sourceTextItems: batchSourceTextItems,
+      candidateTerms: batchCandidateTerms,
+      contextSummary,
+      handlers
+    })
+    filterMatchedTermLinks.push(...(filterResult.matchedTermLinks || []))
+    if (filterResult.aiJsonLog) {
+      filterAiJsonLogs.push(filterResult.aiJsonLog)
+    }
+  }
+
   const matchedTermLinks = splitResult.autoMatchedTermLinks.concat(
-    filterResult.matchedTermLinks
+    filterMatchedTermLinks
   )
   const matchedTermIds = getMatchedTermIdsFromLinks(matchedTermLinks)
   const matchedCandidateTerms = buildMatchedCandidateTerms(
@@ -3271,7 +3387,7 @@ async function resolveExistingTermMatches({
     matchedTermIds,
     matchedTermLinks,
     matchedCandidateTerms,
-    aiJsonLog: filterResult.aiJsonLog
+    aiJsonLogs: filterAiJsonLogs
   }
 }
 
@@ -3372,8 +3488,12 @@ async function resolveOfficialTermGlossaryCacheData({
     contextSummary: officialTermContextSummary,
     handlers
   })
-  if (matchResult.aiJsonLog) {
-    aiJsonLogs.push(matchResult.aiJsonLog)
+  if (Array.isArray(matchResult.aiJsonLogs)) {
+    matchResult.aiJsonLogs.forEach(aiJsonLog => {
+      if (aiJsonLog) {
+        aiJsonLogs.push(aiJsonLog)
+      }
+    })
   }
   let matchedTermIds = matchResult.matchedTermIds
   let matchedTermLinks = matchResult.matchedTermLinks
