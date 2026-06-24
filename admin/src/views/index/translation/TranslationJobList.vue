@@ -1028,6 +1028,7 @@ const STRUCTURED_RICH_TEXT_VALUE_TYPE = 'richTextDocument'
 const statusOptions = [
   { label: '未开始', value: '未开始' },
   { label: '执行中', value: '执行中' },
+  { label: '进行中', value: '进行中' },
   { label: '执行失败', value: '执行失败' },
   { label: '已阻塞', value: '已阻塞' },
   { label: '等待审核', value: '等待审核' },
@@ -3213,6 +3214,10 @@ export default {
 
     const getStatusTagType = status => {
       if (status === '执行中') {
+        return 'warning'
+      }
+      // 编排型任务（root/parent）在子任务执行期间的聚合状态，与“执行中”一样用进行中色调。
+      if (status === '进行中') {
         return 'warning'
       }
       if (status === '执行失败') {

@@ -3901,13 +3901,16 @@ function deriveOrchestratorStatus(childStates) {
   if (statuses.includes(TRANSLATION_JOB_STATUS.FAILED)) {
     return TRANSLATION_JOB_STATUS.FAILED
   }
-  // 只要还有子任务在进行中（待领取/执行中），家族整体视为进行中，
-  // 优先于 BLOCKED（重试失败子任务后，被阻塞子任务会随之被放行）。
+  // 只要还有子任务在进行中（待领取/执行中），或下层编排节点本身仍在进行中（进行中），家族整体
+  // 视为进行中，优先于 BLOCKED（重试失败子任务后，被阻塞子任务会随之被放行）。返回独立的
+  // ORCHESTRATING（进行中），而不是 PENDING（未开始）——否则正在执行子任务的上级任务会被错误
+  // 显示成“未开始”。注意不能返回 RUNNING（执行中），那会被租约恢复逻辑误判为已停止。
   if (
     statuses.includes(TRANSLATION_JOB_STATUS.PENDING) ||
-    statuses.includes(TRANSLATION_JOB_STATUS.RUNNING)
+    statuses.includes(TRANSLATION_JOB_STATUS.RUNNING) ||
+    statuses.includes(TRANSLATION_JOB_STATUS.ORCHESTRATING)
   ) {
-    return TRANSLATION_JOB_STATUS.PENDING
+    return TRANSLATION_JOB_STATUS.ORCHESTRATING
   }
   if (statuses.includes(TRANSLATION_JOB_STATUS.BLOCKED)) {
     return TRANSLATION_JOB_STATUS.BLOCKED
@@ -4107,14 +4110,21 @@ async function recomputeFamilyAggregateStatus(rootId) {
     const rootStatus = deriveOrchestratorStatus(rootChildStates)
     const rootStats = buildChildStatsSummary(children)
     const rootProgress = buildOrchestratorProgress(rootStatus, rootStats)
+    // 仅当家族整体仍未结束（未开始 / 进行中）时，finishedAt 保持为空；进入任何终态后写入完成时间。
+    const rootNotFinished =
+      rootStatus === TRANSLATION_JOB_STATUS.PENDING ||
+      rootStatus === TRANSLATION_JOB_STATUS.ORCHESTRATING
+    let rootFinishedAt = now
+    if (rootNotFinished) {
+      rootFinishedAt = null
+    }
     await JobModel.updateOne(
       { _id: root._id },
       {
         $set: {
           status: rootStatus,
           'queueControl.active': false,
-          'runtime.finishedAt':
-            rootStatus === TRANSLATION_JOB_STATUS.PENDING ? null : now,
+          'runtime.finishedAt': rootFinishedAt,
           'taskRelation.childStats': rootStats,
           'progress.currentStage': rootProgress.currentStage,
           'progress.currentStep': rootProgress.currentStep,

@@ -12,6 +12,12 @@ const TRANSLATION_JOB_TYPE_VALUES = Object.freeze(
 const TRANSLATION_JOB_STATUS = Object.freeze({
   PENDING: '未开始',
   RUNNING: '执行中',
+  // 编排型任务（root/parent）在子任务执行期间的聚合显示状态。与 RUNNING（叶子任务被 worker
+  // 实际执行、持有租约）区分开：编排节点本身不被 worker 领取（active=false、无租约），因此绝不能
+  // 复用 RUNNING——否则会被 markExpiredRunningTranslationJobsRecovering（status=RUNNING & active=false
+  // & 租约为空）误判为“已被用户停止”而置为失败。单独用此状态既能让上级任务正确显示“进行中”，
+  // 又不会触发 worker 租约/恢复/停止逻辑。
+  ORCHESTRATING: '进行中',
   FAILED: '执行失败',
   BLOCKED: '已阻塞',
   WAITING_REVIEW: '等待审核',
