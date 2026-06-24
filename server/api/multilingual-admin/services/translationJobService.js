@@ -1619,11 +1619,19 @@ async function buildParentReviewResponse(parent) {
   children.forEach(child => {
     const childId = String(child._id)
     const childKind = child.taskRelation && child.taskRelation.childKind
+    // 子任务的目标语言，用于给聚合后的条目打上语言标签，前端据此按语言分 tab 展示。
+    const childLanguageCode =
+      (child.taskRelation && child.taskRelation.childLanguageCode) || ''
     const childPreview = Array.isArray(child.result?.previewEntries)
       ? child.result.previewEntries
       : []
     childPreview.forEach(entry => {
-      previewEntries.push({ ...entry, childJobId: childId, childKind })
+      previewEntries.push({
+        ...entry,
+        childJobId: childId,
+        childKind,
+        languageCode: entry.languageCode || childLanguageCode
+      })
     })
     const childAdoption = Array.isArray(child.adoption?.entries)
       ? child.adoption.entries
@@ -1637,8 +1645,6 @@ async function buildParentReviewResponse(parent) {
     if (Array.isArray(child.result?.aiSkipList)) {
       aiSkipList.push(...child.result.aiSkipList)
     }
-    const childLanguageCode =
-      (child.taskRelation && child.taskRelation.childLanguageCode) || ''
     if (child.result?.validation && childLanguageCode) {
       const childValidation = unwrapChildValidationForLanguage(
         child.result.validation,
