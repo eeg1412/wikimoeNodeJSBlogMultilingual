@@ -33,11 +33,12 @@ const AI_RESULT_SCHEMA = 'wikimoe.ai.translation.result'
 const TERM_EXTRACTION_RESULT_SCHEMA = 'wikimoe.ai.proper_noun.term_extract'
 const TERM_EXISTING_FILTER_RESULT_SCHEMA =
   'wikimoe.ai.proper_noun.existing_filter'
-// 既有名词库候选消歧分批参数：候选过多时，AI 一次性返回的 matchedTerms 会超出最大输出 token
-// 被截断，导致 JSON 解析失败、整任务报错。改为按“当前模型配置的最大输出 token”动态推算每批
-// 可容纳的候选数，并按抽取词为单元打包（同一抽取词的全部同名候选始终在同一批，避免跨批重复
-// 匹配）。预算按“最坏情况：AI 把本批每个候选都判为匹配”估算输出，从而对 AI 过度输出也有界。
-const EXISTING_TERM_FILTER_TOKENS_PER_MATCH = 64
+// 既有名词库候选消歧分批安全网参数：消歧调用跟随“专有名词预处理 AI”配置的最大输出 token
+// （不再硬编码上限）。当命中候选/同名词极多时，单次返回的 matchedTerms 仍可能逼近该上限，
+// 故按“当前配置的可用输出 token”动态推算每批可容纳的候选数，并按抽取词为单元打包（同一抽取词
+// 的全部同名候选始终在同一批，避免跨批重复匹配）。预算按最坏情况估算：AI 把本批每个候选都判为
+// 匹配 → 输出条数 ≈ 候选数，从而对 AI 过度输出也有界。
+const EXISTING_TERM_FILTER_TOKENS_PER_MATCH = 80
 const EXISTING_TERM_FILTER_OUTPUT_SAFETY_RATIO = 0.6
 const EXISTING_TERM_FILTER_MIN_CANDIDATES_PER_BATCH = 8
 const EXISTING_TERM_FILTER_MAX_CANDIDATES_PER_BATCH = 120
@@ -74,9 +75,6 @@ const MAX_EXTRACTED_TERM_COUNT = 100
 const MAX_TERM_CONTEXT_SUMMARY_LENGTH = 800
 const MAX_EXTRACTED_TERM_NOTE_LENGTH = 120
 const MAX_TERM_SEARCH_KEYWORD_COUNT = 6
-const MAX_TERM_FILTER_TOKENS = 2048
-const MAX_TERM_FILTER_THINKING_TOKENS = 4096
-const MAX_TERM_FILTER_MAX_EFFORT_TOKENS = 6144
 const MIN_TERM_IMPORTANCE = 1
 const MAX_TERM_IMPORTANCE = 100
 const MAX_AI_PARSE_ERROR_PREVIEW_LENGTH = 220
@@ -2849,41 +2847,6 @@ function buildExistingTermFilterMessages({
   })
 }
 
-function getTermFilterMaxTokens(settings) {
-  const configuredMaxTokens = Number(
-    settings.maxTokens || settings.deepSeekMaxTokens || 0
-  )
-
-  if (isAiThinkingModeEnabled(settings)) {
-    let thinkingMaxTokens = MAX_TERM_FILTER_THINKING_TOKENS
-    const reasoningEffort = normalizeString(
-      settings.reasoningEffort || settings.deepSeekReasoningEffort
-    )
-      .trim()
-      .toLowerCase()
-    if (reasoningEffort === 'max') {
-      thinkingMaxTokens = MAX_TERM_FILTER_MAX_EFFORT_TOKENS
-    }
-    if (
-      Number.isFinite(configuredMaxTokens) &&
-      configuredMaxTokens > 0 &&
-      configuredMaxTokens < thinkingMaxTokens
-    ) {
-      return configuredMaxTokens
-    }
-    return thinkingMaxTokens
-  }
-
-  if (
-    Number.isFinite(configuredMaxTokens) &&
-    configuredMaxTokens > 0 &&
-    configuredMaxTokens < MAX_TERM_FILTER_TOKENS
-  ) {
-    return configuredMaxTokens
-  }
-  return MAX_TERM_FILTER_TOKENS
-}
-
 function buildExistingTermFilterRequestConfig({
   settings,
   input,
@@ -2901,8 +2864,10 @@ function buildExistingTermFilterRequestConfig({
       contextSummary
     }),
     {
-      stream: false,
-      maxTokens: getTermFilterMaxTokens(settings)
+      // 不覆盖 maxTokens：既有名词消歧与抽词、主翻译一致，跟随“专有名词预处理 AI”设置里配置的
+      // 最大输出 token（settings.maxTokens）。曾经在这里硬编码上限（getTermFilterMaxTokens 封顶到
+      // 2048）会无视用户配置导致大输出被截断，已删除。分批逻辑会按同一配置上限做安全兜底。
+      stream: false
     }
   )
 }
@@ -3232,6 +3197,9 @@ async function filterExistingTermCandidatesWithAi({
 // 每条约 EXISTING_TERM_FILTER_TOKENS_PER_MATCH 个 token。扣除 JSON 包裹与思考预留后乘安全系数，
 // 再用上下限收敛。未配置最大 token 时 getConfiguredMaxTokens 回退到 AI_FALLBACK_MAX_OUTPUT_TOKENS。
 function computeExistingTermFilterCandidateBudget(settings) {
+  // 既有名词消歧不再硬编码上限，跟随“专有名词预处理 AI”配置的最大输出 token（getConfiguredMaxTokens）。
+  // 分批安全网按同一配置上限计算：扣除 JSON 结构预留与思考模式推理预留后的可用输出 token，按最坏
+  // 情况（AI 把本批每个候选都判为匹配 → 输出条数≈候选数）折算每批可容纳的候选数。
   const maxOutputTokens = getConfiguredMaxTokens(settings)
   const reserveTokens =
     AI_RESPONSE_JSON_TOKEN_RESERVE + getAiThinkingTokenReserve(settings)
@@ -3321,10 +3289,11 @@ async function resolveExistingTermMatches({
     })
   }
 
-  // 分批消歧：候选过多时，AI 一次性返回的 matchedTerms 会超出最大输出 token 被截断（报
-  // “DeepSeek 返回内容被最大输出 Token 截断”）。按当前模型配置的最大输出 token 动态推算每批
-  // 候选预算，并按抽取词为单元打包——同一抽取词的全部同名候选始终在同一批，既保证每批输出
-  // 有界，又不会因把同名候选拆到不同批而重复匹配。
+  // 分批消歧：候选/同名词极多时，AI 一次性返回的 matchedTerms 仍可能逼近本次调用的最大输出
+  // token 被截断（报“DeepSeek 返回内容被最大输出 Token 截断”）。消歧已跟随“专有名词预处理 AI”
+  // 配置的最大输出 token，这里按同一配置上限（computeExistingTermFilterCandidateBudget）动态推算
+  // 每批候选预算作为安全兜底，并按抽取词为单元打包——同一抽取词的全部同名候选始终在同一批，
+  // 既保证每批输出有界，又不会因把同名候选拆到不同批而重复匹配。
   const candidateBudget = computeExistingTermFilterCandidateBudget(settings)
   const filterCandidateMap = groupCandidateTermsByNormalizedSourceText(
     splitResult.filterCandidateTerms
