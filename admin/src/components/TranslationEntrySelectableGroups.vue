@@ -63,6 +63,7 @@
               :current-label="currentPreviewLabel"
               :source-label="sourcePreviewLabel"
               :next-label="nextPreviewLabel"
+              :show-next="showNextPreview"
             />
           </el-checkbox>
           <div
@@ -112,6 +113,7 @@
                   :current-label="currentPreviewLabel"
                   :source-label="sourcePreviewLabel"
                   :next-label="nextPreviewLabel"
+                  :show-next="showNextPreview"
                 />
               </div>
             </div>
@@ -205,6 +207,10 @@ export default {
     nextPreviewLabel: {
       type: String,
       default: '新内容'
+    },
+    showNextPreview: {
+      type: Boolean,
+      default: true
     },
     showAdoptionInfo: {
       type: Boolean,

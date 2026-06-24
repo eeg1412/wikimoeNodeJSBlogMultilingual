@@ -100,6 +100,7 @@
             :groups="entryGroups"
             class="w_10"
             :disabled="isBusy"
+            :show-next-preview="false"
           />
 
           <el-form class="ai-translation-prompt-form" label-width="110px">

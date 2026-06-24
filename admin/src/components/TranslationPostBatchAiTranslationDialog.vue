@@ -109,6 +109,7 @@
           v-model="selectedAiEntryIds"
           :groups="fieldEntryGroups"
           :disabled="isBusy"
+          :show-next-preview="false"
           class="w_10"
         />
 

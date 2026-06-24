@@ -172,6 +172,10 @@ export default {
     nextLabel: {
       type: String,
       default: '新内容'
+    },
+    showNext: {
+      type: Boolean,
+      default: true
     }
   },
   setup(props) {
@@ -228,6 +232,9 @@ export default {
       return sourceText.value !== ''
     })
     const hasNextContent = computed(() => {
+      if (!props.showNext) {
+        return false
+      }
       if (nextHtml.value) {
         return true
       }

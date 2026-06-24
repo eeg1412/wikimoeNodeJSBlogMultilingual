@@ -823,6 +823,7 @@
               v-model="selectedAiEntryIds"
               :groups="aiEntryGroups"
               :disabled="isAiBusy"
+              :show-next-preview="false"
               class="w_10"
             />
 
