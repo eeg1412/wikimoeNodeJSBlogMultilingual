@@ -2834,7 +2834,12 @@ async function createSourcePostProperNounOrganizeChildJobs({
     { _id: job._id },
     {
       $set: {
-        'taskRelation.role': 'parent',
+        // 名词整理协调任务是这个家族的顶层节点（自身整理根文章 + 拆解相关文章子任务），
+        // 必须用 root 角色，才能在任务列表中保持可见并支持下钻；用 parent 会被顶层列表
+        // 过滤掉（列表只展示 standalone/root/无 role），导致任务“消失”。相关文章子任务
+        // 直接作为 root 的 child（二级家族，无 parent 层），由 recomputeFamilyAggregateStatus
+        // 的无 parent 分支按 child 聚合 root 状态。
+        'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.ROOT,
         'taskRelation.rootId': rootId,
         'taskRelation.sourcePostId': job.source.postId,
         'taskRelation.childJobIds': childJobIds,

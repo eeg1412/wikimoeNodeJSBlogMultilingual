@@ -32,6 +32,8 @@ const MAX_RECENT_LOGS = 20
 const MAX_BATCH_DELETE_COUNT = 100
 const AI_CHUNK_CACHE_SCHEMA = 'wikimoe.translation.ai.chunk.cache'
 const AI_CHUNK_CACHE_VERSION = 1
+// 命令式搜索关键词：精确输入该词时，列表只返回孤儿任务（供管理员排查历史 bug 残留）。
+const ORPHAN_QUERY_KEYWORD = ':孤儿任务'
 
 function buildRecentLog(message, level = 'info', stage = '') {
   return {
@@ -1397,6 +1399,21 @@ async function listTranslationJobs(query = {}) {
   const JobModel = getTranslationJobModel()
   const page = parsePage(query.page)
   const limit = parseLimit(query.limit)
+
+  // 孤儿任务专用命令式关键词：仅当搜索关键词精确等于 ":孤儿任务" 时才检测并返回孤儿，
+  // 让正常浏览/搜索完全不产生孤儿检测查询。检索结果只返回孤儿（前端置顶标红）。
+  const keyword = String(query.keyword || '').trim()
+  if (keyword === ORPHAN_QUERY_KEYWORD) {
+    const orphanJobs = await findOrphanJobSummaries()
+    return {
+      list: [],
+      total: orphanJobs.length,
+      page: 1,
+      limit,
+      orphanJobs
+    }
+  }
+
   const params = buildListParams(query)
   const total = await JobModel.countDocuments(params)
   const list = await JobModel.find(params, getListProjection())
@@ -1418,8 +1435,64 @@ async function listTranslationJobs(query = {}) {
     list: flatList,
     total,
     page,
-    limit
+    limit,
+    orphanJobs: []
   }
+}
+
+// 查询孤儿任务（一次聚合）：role 为 parent/child 但其 rootId 未指向一个 role=root 的有效任务。
+// 健康系统下结果为空、立即返回；用于在列表里标红暴露历史 bug 产生的孤儿数据。
+async function findOrphanJobSummaries() {
+  const JobModel = getTranslationJobModel()
+  const collectionName = JobModel.collection.name
+  const orphans = await JobModel.aggregate([
+    {
+      $match: {
+        'taskRelation.role': {
+          $in: [
+            TRANSLATION_JOB_TASK_ROLES.PARENT,
+            TRANSLATION_JOB_TASK_ROLES.CHILD
+          ]
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: collectionName,
+        localField: 'taskRelation.rootId',
+        foreignField: '_id',
+        as: 'rootJob'
+      }
+    },
+    {
+      $addFields: {
+        rootRole: { $arrayElemAt: ['$rootJob.taskRelation.role', 0] }
+      }
+    },
+    {
+      // root 缺失（rootRole 为 null）或 root 角色是 parent/child（被历史 bug 写错），都判定为孤儿。
+      // rootId 指向 standalone 的情况是家族创建中的瞬时态（协调任务尚未升级为 root），给予豁免，
+      // 避免在正常创建过程中误报。
+      $match: {
+        rootRole: {
+          $nin: [
+            TRANSLATION_JOB_TASK_ROLES.ROOT,
+            TRANSLATION_JOB_TASK_ROLES.STANDALONE
+          ]
+        }
+      }
+    },
+    {
+      $project: getListProjection()
+    },
+    {
+      $sort: { createdAt: -1, _id: -1 }
+    }
+  ])
+  return orphans.map(item => ({
+    ...buildListItemSummary(item, {}),
+    isOrphan: true
+  }))
 }
 
 // 按家族关系把 parent/child 子任务平铺插入到列表中对应 root 之后（一次批量查询完成）。
@@ -1489,6 +1562,14 @@ async function attachFamilyMembersToList(topLevelSummaries) {
       children.forEach(child => {
         flatList.push(child)
       })
+    })
+    // 二级家族（如名词整理：root 直接挂 child、无 parent 层）：把 parentId 直接指向 root 的
+    // 直属 child 平铺到 root 之后。复用上面同一批已查到的数据，不额外多查。
+    const directChildren = (childrenByParent.get(String(item._id)) || [])
+      .slice()
+      .sort((a, b) => a.taskRelation.orderIndex - b.taskRelation.orderIndex)
+    directChildren.forEach(child => {
+      flatList.push(child)
     })
   })
   return flatList
@@ -1709,16 +1790,39 @@ async function buildParentReviewResponse(parent) {
 // 根任务详情：返回其下各文章父任务的摘要卡片，供前端下钻打开父任务抽屉。
 async function buildRootOverviewResponse(root) {
   const JobModel = getTranslationJobModel()
-  const parents = await JobModel.find(
+  // 二级家族（如名词整理：root + 相关文章 child，无 parent 层）也通过这里：当没有 parent 时
+  // 直接展示直属 child 卡片。一次查询同时覆盖 parent 与 child，不额外多查。
+  const familyMembers = await JobModel.find(
     {
       'taskRelation.rootId': root._id,
-      'taskRelation.role': TRANSLATION_JOB_TASK_ROLES.PARENT
+      'taskRelation.role': {
+        $in: [
+          TRANSLATION_JOB_TASK_ROLES.PARENT,
+          TRANSLATION_JOB_TASK_ROLES.CHILD
+        ]
+      }
     },
     getListProjection()
   )
-    .sort({ 'taskRelation.orderIndex': 1 })
+    .sort({ 'taskRelation.orderIndex': 1, createdAt: 1 })
     .lean()
-  const familyParents = parents.map(parent => buildListItemSummary(parent, {}))
+  const parents = familyMembers.filter(
+    member =>
+      member.taskRelation &&
+      member.taskRelation.role === TRANSLATION_JOB_TASK_ROLES.PARENT
+  )
+  // 有 parent 层（翻译家族）展示 parent 卡片；无 parent 层（名词整理）回退展示直属 child 卡片。
+  const cardJobs =
+    parents.length > 0
+      ? parents
+      : familyMembers.filter(
+          member =>
+            member.taskRelation &&
+            member.taskRelation.role === TRANSLATION_JOB_TASK_ROLES.CHILD
+        )
+  const familyParents = cardJobs.map(cardJob =>
+    buildListItemSummary(cardJob, {})
+  )
 
   return attachRuntimeDisplay(
     {

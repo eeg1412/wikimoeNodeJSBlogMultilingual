@@ -159,6 +159,21 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="orphanJobs.length > 0"
+      class="orphan-job-alert mb20"
+      type="error"
+      :closable="false"
+      show-icon
+    >
+      <template #title>
+        检测到 {{ orphanJobs.length }} 个孤儿任务（其 rootId 未指向有效的 root
+        任务，可能由历史 bug
+        产生）。它们已在下方列表顶部以红色标出，请确认后删除，或运行
+        server/tools/cleanupOrphanTranslationJobs.js 统一清理。
+      </template>
+    </el-alert>
+
     <div class="mb20 list-table-body">
       <ResponsiveTable
         ref="tableRef"
@@ -1901,6 +1916,9 @@ export default {
     const route = useRoute()
     const tableRef = ref(null)
     const jobList = ref([])
+    // 孤儿任务（rootId 未指向有效 root 的 parent/child）：后端在默认列表里单独返回，
+    // 前端在列表顶部以红色标出，让管理员能感知到“出现 bug、产生孤儿任务”。
+    const orphanJobs = ref([])
     const total = ref(0)
     const selectedJobRows = ref([])
     const batchDeleting = ref(false)
@@ -2564,7 +2582,10 @@ export default {
         .then(response => {
           const responseData = response.data.data || {}
           // 列表接口已在后端把家族子任务平铺返回，前端无需再为每个 root 单独请求。
-          jobList.value = responseData.list || []
+          const normalList = responseData.list || []
+          orphanJobs.value = responseData.orphanJobs || []
+          // 孤儿任务置顶并以红色标出，正常任务紧随其后。
+          jobList.value = orphanJobs.value.concat(normalList)
           total.value = responseData.total || 0
           saveListSessionParams(route, params)
         })
@@ -2575,6 +2596,9 @@ export default {
 
     // 按家族角色返回行样式类，用行底色 + 左色条体现层级深度。
     const getJobRowClassName = ({ row }) => {
+      if (row?.isOrphan === true) {
+        return 'translation-job-row--orphan'
+      }
       const role = row?.taskRelation?.role
       if (role === 'root') {
         return 'translation-job-row--root'
@@ -3542,6 +3566,7 @@ export default {
       hasExecutionWorkflow,
       isJobSelectable,
       jobList,
+      orphanJobs,
       jobStorageFileCaches,
       jobStorageTables,
       jobStorageTotals,
@@ -3789,6 +3814,20 @@ html.dark .translation-job-storage-panel {
 /* 家族 parent/child 子任务不参与勾选删除，隐藏其选择框（仅顶层任务可勾选）。 */
 :deep(.el-table__row.translation-job-row--parent > td:first-child .el-checkbox),
 :deep(.el-table__row.translation-job-row--child > td:first-child .el-checkbox) {
+  display: none;
+}
+
+/* 孤儿任务（rootId 未指向有效 root，可能由历史 bug 产生）：整行红色高亮 + 红色左色条，
+   置于列表顶部，让管理员一眼感知到出现了孤儿数据，便于排查与清理。 */
+:deep(.el-table__row.translation-job-row--orphan > td) {
+  background-color: var(--el-color-danger-light-9);
+}
+:deep(.el-table__row.translation-job-row--orphan > td:first-child) {
+  box-shadow: inset 4px 0 0 0 var(--el-color-danger);
+}
+:deep(
+  .el-table__row.translation-job-row--orphan > td:first-child .el-checkbox
+) {
   display: none;
 }
 
