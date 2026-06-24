@@ -1056,18 +1056,47 @@ async function applySourcePostTranslationJob({
   }
 }
 
-function getSourcePostImportCoverSourceSnapshotId(entry) {
+function getSourcePostImportCoverSourceSnapshotId(job, entry) {
   const entrySourceSnapshotId = toOptionalObjectId(entry?.sourceSnapshotId)
   if (entrySourceSnapshotId) {
     return String(entrySourceSnapshotId)
   }
 
-  throw new ApiError(
-    ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
-    '封面图条目缺少源快照 ID，不能创建目标翻译文章',
-    'entry.sourceSnapshotId',
-    400
+  // 源文章 AI 导入时，封面图预览条目（尤其是根文章封面）本身往往不携带 sourceSnapshotId
+  // （快照在任务执行中才生成/确定）。此时回退到任务级源快照 job.source.snapshotId /
+  // job.result.sourceSnapshotId，并按源身份匹配，避免在“采纳全部”时因缺少 ID 直接报错。
+  const rootSourceSnapshotId = toOptionalObjectId(
+    job?.source?.snapshotId || job?.result?.sourceSnapshotId
   )
+  if (!rootSourceSnapshotId) {
+    return ''
+  }
+
+  const rootSourceId = toOptionalObjectId(job?.source?.postId)
+  const entrySourceId = toOptionalObjectId(entry?.sourceId)
+  const entrySourcePostId = toOptionalObjectId(entry?.sourcePostId)
+  const entrySourceCandidates = [entrySourceId, entrySourcePostId].filter(
+    Boolean
+  )
+  // 条目没有任何源身份信息时，默认归属根源文章，使用任务级源快照。
+  if (entrySourceCandidates.length === 0) {
+    return String(rootSourceSnapshotId)
+  }
+
+  const rootIdentitySet = new Set()
+  if (rootSourceId) {
+    rootIdentitySet.add(String(rootSourceId))
+  }
+  rootIdentitySet.add(String(rootSourceSnapshotId))
+
+  const matchesRootSource = entrySourceCandidates.some(candidate => {
+    return rootIdentitySet.has(String(candidate))
+  })
+  if (matchesRootSource) {
+    return String(rootSourceSnapshotId)
+  }
+
+  return ''
 }
 
 async function createOrGetSourcePostImportCoverTargetPost(job, entry) {
@@ -1088,7 +1117,7 @@ async function createOrGetSourcePostImportCoverTargetPost(job, entry) {
     )
   }
 
-  const sourceSnapshotId = getSourcePostImportCoverSourceSnapshotId(entry)
+  const sourceSnapshotId = getSourcePostImportCoverSourceSnapshotId(job, entry)
   if (!sourceSnapshotId) {
     return ''
   }
