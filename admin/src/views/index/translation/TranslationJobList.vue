@@ -3352,6 +3352,11 @@ export default {
     }
 
     const canDelete = row => {
+      // 孤儿任务（rootId 未指向有效 root，bug 残留）允许在前端直接删除以便清理；后端按角色
+      // 级联（parent 连子任务）或单删（child），并仍做执行中状态的安全校验。
+      if (row?.isOrphan === true) {
+        return true
+      }
       // 家族 parent/child 子任务不单独删除；删除根任务会级联清理其下全部子任务。
       const role = row?.taskRelation?.role
       if (role === 'parent' || role === 'child') {
