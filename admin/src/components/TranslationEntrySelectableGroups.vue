@@ -567,6 +567,7 @@ export default {
   width: 100%;
   margin-right: 0;
   align-items: flex-start;
+  height: auto;
 }
 
 .translation-json-entry-merged-head :deep(.el-checkbox__label) {
@@ -592,6 +593,7 @@ export default {
   flex-direction: column;
   gap: 10px;
   padding-left: 24px;
+  box-sizing: border-box;
   width: 100%;
 }
 

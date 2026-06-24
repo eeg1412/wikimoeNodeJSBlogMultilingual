@@ -2338,6 +2338,42 @@ function buildMappedSourceEntry(sourceEntry, targetEntry) {
   }
 }
 
+// 判断源条目是否属于“按 index 拆分的数组型字段元素”（label / urlList / options）。
+// 与后端 translationEntryBuildService.isArrayFieldSourceEntry 保持一致。
+function isArrayFieldSourceEntry(entry = {}) {
+  if (isStringListEntry(entry)) {
+    return true
+  }
+  if (isUrlListTextEntry(entry) && getUrlListEntryIndex(entry) >= 0) {
+    return true
+  }
+  return (
+    entry.fieldName === 'options.title' &&
+    Number.isInteger(Number(entry.optionIndex))
+  )
+}
+
+// 数组型字段（label / urlList / options）的源条目在目标语言里可能尚无对应 index：
+// 目标数组为空、较短，或被旧 bug 损坏成单元素，或源新增了元素。此时目标记录本身存在，
+// 采纳时会按源结构全量重建数组补齐，因此仍需把该源元素纳入预览与翻译，不能当作 missingTarget
+// 丢弃（否则预览只显示当前语言已有的数组数量，源新增/源更长的元素会被漏掉，无法补译）。
+// 与后端 translationEntryBuildService.buildUnmappedArrayFieldSourceEntry 保持一致：
+// 以源条目身份为基础构造条目，当前译文置空（待翻译）。
+function buildUnmappedArrayFieldSourceEntry(sourceEntry) {
+  const value = cloneSerializableValue(sourceEntry.value)
+  return {
+    ...sourceEntry,
+    currentValue: undefined,
+    value,
+    previewText: buildPreviewText(value, sourceEntry.valueType),
+    previewRawValue: buildPreviewRawValue(value, sourceEntry.valueType),
+    currentPreviewText: '',
+    currentPreviewRawValue: '',
+    sourcePreviewText: sourceEntry.previewText,
+    sourcePreviewRawValue: sourceEntry.previewRawValue
+  }
+}
+
 function getSkippedEntryDisplayName(entry) {
   const recordLabel = normalizeStringValue(entry.recordLabel)
   if (recordLabel) {
@@ -2577,6 +2613,13 @@ export function buildSourceToTargetTranslationEntries({
       .map(key => targetEntryMap.get(key))
       .find(Boolean)
     if (!targetEntry) {
+      // 数组型字段（label / urlList / options）：目标缺该 index 时不丢弃，照常纳入预览与翻译，
+      // 采纳时按源结构全量重建目标数组补齐。这样预览的源内容会完整展示源数组的全部元素，
+      // 不再被当前语言已有的数组数量截断。
+      if (isArrayFieldSourceEntry(sourceEntry)) {
+        entries.push(buildUnmappedArrayFieldSourceEntry(sourceEntry))
+        return
+      }
       addSkippedEntry(
         skippedEntries,
         skippedEntryMap,
