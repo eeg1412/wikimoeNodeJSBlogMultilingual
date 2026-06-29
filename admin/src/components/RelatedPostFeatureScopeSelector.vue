@@ -178,6 +178,18 @@ export default {
   gap: 8px;
 }
 
+.related-post-feature-scope-list :deep(.el-checkbox__label) {
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+  white-space: normal;
+}
+
+.related-post-feature-scope-list :deep(.el-checkbox) {
+  align-items: flex-start;
+  white-space: normal;
+}
+
 .related-post-feature-scope-header {
   justify-content: space-between;
   margin-bottom: 8px;
@@ -218,6 +230,7 @@ export default {
   min-width: 0;
   padding: 8px;
   width: 100%;
+  height: auto;
 }
 
 .related-post-feature-scope-item-title {
