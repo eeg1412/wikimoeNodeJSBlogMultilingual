@@ -437,6 +437,7 @@
                   v-if="showAutoOrganizeRelatedPostScopeSelector"
                   v-model="selectedAutoOrganizeRelatedSourceIds"
                   title="自动整理词库的相关文章"
+                  handled-label="已跳过翻译"
                   :options="relatedPostScopeOptions"
                   :loading="relatedPostScopeLoading"
                   :disabled="isAiImportBusy"
@@ -447,6 +448,7 @@
                   v-if="showSearchRelatedPostScopeSelector"
                   v-model="selectedSearchRelatedSourceIds"
                   title="名词检索的相关文章"
+                  handled-label="已跳过翻译"
                   :options="relatedPostScopeOptions"
                   :loading="relatedPostScopeLoading"
                   :disabled="isAiImportBusy"
@@ -505,6 +507,7 @@
                 v-model="selectedCoverImageRelatedSourceIds"
                 title="翻译封面图的相关文章"
                 empty-text="没有可翻译封面图的相关文章"
+                handled-label="已跳过翻译"
                 :options="coverImageRelatedPostScopeOptions"
                 :loading="relatedPostScopeLoading"
                 :disabled="isAiImportBusy"
@@ -1314,6 +1317,7 @@ export default {
     let officialTermSearchDefaultRequestId = 0
     let sourceProperNounTermCountRequestId = 0
     let relatedPostScopeRequestId = 0
+    let suppressAiRelatedScopeReload = false
     const languageForm = reactive({
       sourceLanguageCode: 'zh-CN'
     })
@@ -1806,9 +1810,13 @@ export default {
       relatedPostScopeRequestId += 1
       aiSettingsAvailability.value = createAiSettingsAvailability()
       aiDialogVisible.value = true
+      suppressAiRelatedScopeReload = true
       applyOfficialTermSearchDefault()
       refreshSourceProperNounTermCount({ applyDefault: true })
       loadAiRelatedPostScopeOptions()
+      nextTick(() => {
+        suppressAiRelatedScopeReload = false
+      })
     }
 
     const openOrganizeDialog = row => {
@@ -2985,14 +2993,21 @@ export default {
     }
 
     function resetRelatedPostScopeSelections(options) {
-      const allSourceIds = options.map(item => {
-        return item.sourceId
-      })
-      selectedAutoOrganizeRelatedSourceIds.value = allSourceIds
-      selectedSearchRelatedSourceIds.value = allSourceIds
+      const pendingSourceIds = options
+        .filter(item => {
+          return item.alreadyHandled !== true
+        })
+        .map(item => {
+          return item.sourceId
+        })
+      selectedAutoOrganizeRelatedSourceIds.value = pendingSourceIds
+      selectedSearchRelatedSourceIds.value = pendingSourceIds
       selectedCoverImageRelatedSourceIds.value = options
         .filter(item => {
-          return isCoverImageTranslationSupportedPostType(item.type)
+          return (
+            item.alreadyHandled !== true &&
+            isCoverImageTranslationSupportedPostType(item.type)
+          )
         })
         .map(item => {
           return item.sourceId
@@ -3053,6 +3068,7 @@ export default {
               getRelatedPostTypeLabel({ type: typeValue }),
             depth: item.depth,
             relatedDepth: item.relatedDepth,
+            alreadyHandled: item.alreadyHandled === true,
             parentSourceIds: Array.isArray(item.parentSourceIds)
               ? item.parentSourceIds
               : []
@@ -4099,6 +4115,9 @@ export default {
         () => aiRow.value?.sourceId || ''
       ],
       () => {
+        if (suppressAiRelatedScopeReload) {
+          return
+        }
         loadAiRelatedPostScopeOptions()
       }
     )

@@ -4430,6 +4430,50 @@ function isFamilyOrchestratorPlanningResult(result) {
 
 // 服务端一次性遍历源文章的关联文章图，返回"相关文章特性范围"选项树。供创建"生成并 AI 翻译"
 // 任务的弹窗使用，替代浏览器逐文章逐语言调用预览上下文接口的 N+1 加载方式。
+// 标记“整理过的文章”：相关文章在所有目标语言里都有译文且 aiTranslationSkip=true 时，
+// 默认不勾选（前端默认排除），但仍要展示在可选列表里，绝不剔除。
+async function markRelatedScopeOptionsHandledState(options, languageCodes) {
+  if (options.length === 0) {
+    return
+  }
+  const optionIds = options
+    .map(item => item.sourceId)
+    .filter(id => isValidObjectId(id))
+  if (optionIds.length === 0) {
+    return
+  }
+  const PostModel = getPostModel()
+  const records = await PostModel.find({
+    sourceId: { $in: optionIds.map(id => new mongoose.Types.ObjectId(id)) },
+    languageCode: { $in: languageCodes },
+    recordKind: 'translation'
+  })
+    .select('sourceId languageCode aiTranslationSkip')
+    .lean()
+  const skippedLanguageMap = new Map()
+  records.forEach(record => {
+    if (record.aiTranslationSkip !== true) {
+      return
+    }
+    const sourceId = normalizeString(record.sourceId)
+    if (!sourceId) {
+      return
+    }
+    if (!skippedLanguageMap.has(sourceId)) {
+      skippedLanguageMap.set(sourceId, new Set())
+    }
+    skippedLanguageMap.get(sourceId).add(record.languageCode)
+  })
+  options.forEach(option => {
+    const skippedLanguages = skippedLanguageMap.get(option.sourceId)
+    option.alreadyHandled =
+      Boolean(skippedLanguages) &&
+      languageCodes.every(languageCode => {
+        return skippedLanguages.has(languageCode)
+      })
+  })
+}
+
 async function buildSourcePostRelatedScopeOptions({
   sourceId,
   sourceLanguageCode,
@@ -4451,84 +4495,83 @@ async function buildSourcePostRelatedScopeOptions({
     depthLimit = 3
   }
 
+  // 相关文章拓扑与目标语言无关，只取一次源文章详情即可，无需按每个目标语言重复 BFS，
+  // 也无需构建完整译文预览（aiTranslationSkip 仅用于默认勾选状态，由译文记录单独标记）。
   const optionMap = new Map()
-  for (const languageCode of languageCodes) {
-    const queue = [{ sourceId: rootSourceId, parentSourceId: '', depth: 1 }]
-    const visited = new Set()
-    while (queue.length > 0) {
-      const task = queue.shift()
-      const currentId = normalizeString(task.sourceId)
-      if (!currentId || visited.has(currentId)) {
-        continue
-      }
-      visited.add(currentId)
-      let previewContext
-      try {
-        previewContext =
-          await translationPostService.getSourcePostAiImportPreviewContext({
-            sourceId: currentId,
-            sourceLanguageCode,
-            targetLanguageCode: languageCode
-          })
-      } catch (error) {
-        continue
-      }
-      const sourcePost = previewContext.sourcePost
-      const normalizedId = getSourcePostId(sourcePost) || currentId
-      if (normalizedId !== rootSourceId) {
-        const relatedDepth = Math.max(Number(task.depth || 1) - 1, 1)
-        const existing = optionMap.get(normalizedId)
-        if (existing) {
-          if (relatedDepth < existing.relatedDepth) {
-            existing.relatedDepth = relatedDepth
-            existing.depth = task.depth
-          }
-          if (
-            task.parentSourceId &&
-            !existing.parentSourceIds.includes(task.parentSourceId)
-          ) {
-            existing.parentSourceIds.push(task.parentSourceId)
-          }
-        } else {
-          optionMap.set(normalizedId, {
-            sourceId: normalizedId,
-            title: getSourcePostDisplayTitle(sourcePost) || normalizedId,
-            type: Number(sourcePost?.type || 0),
-            depth: task.depth,
-            relatedDepth,
-            parentSourceIds: task.parentSourceId ? [task.parentSourceId] : []
-          })
-        }
-      }
-      if (task.depth >= depthLimit) {
-        continue
-      }
-      const relatedIds = collectRelatedSourceIds(
-        previewContext.sourcePost,
-        previewContext.targetPost
-      )
-      relatedIds.forEach(relatedSourceId => {
-        const relatedId = normalizeString(relatedSourceId)
-        if (!relatedId || relatedId === rootSourceId) {
-          return
-        }
-        if (!visited.has(relatedId)) {
-          queue.push({
-            sourceId: relatedId,
-            parentSourceId: normalizedId,
-            depth: task.depth + 1
-          })
-        }
-      })
+  const queue = [{ sourceId: rootSourceId, parentSourceId: '', depth: 1 }]
+  const visited = new Set()
+  while (queue.length > 0) {
+    const task = queue.shift()
+    const currentId = normalizeString(task.sourceId)
+    if (!currentId || visited.has(currentId)) {
+      continue
     }
+    visited.add(currentId)
+    let sourceDetail
+    try {
+      sourceDetail = await importPostSourceService.getSourceDatabasePostDetail({
+        id: currentId,
+        sourceLanguageCode
+      })
+    } catch (error) {
+      continue
+    }
+    const sourcePost = sourceDetail.post
+    const normalizedId = getSourcePostId(sourcePost) || currentId
+    if (normalizedId !== rootSourceId) {
+      const relatedDepth = Math.max(Number(task.depth || 1) - 1, 1)
+      const existing = optionMap.get(normalizedId)
+      if (existing) {
+        if (relatedDepth < existing.relatedDepth) {
+          existing.relatedDepth = relatedDepth
+          existing.depth = task.depth
+        }
+        if (
+          task.parentSourceId &&
+          !existing.parentSourceIds.includes(task.parentSourceId)
+        ) {
+          existing.parentSourceIds.push(task.parentSourceId)
+        }
+      } else {
+        optionMap.set(normalizedId, {
+          sourceId: normalizedId,
+          title: getSourcePostDisplayTitle(sourcePost) || normalizedId,
+          type: Number(sourcePost?.type || 0),
+          depth: task.depth,
+          relatedDepth,
+          alreadyHandled: false,
+          parentSourceIds: task.parentSourceId ? [task.parentSourceId] : []
+        })
+      }
+    }
+    if (task.depth >= depthLimit) {
+      continue
+    }
+    // 整理过/已跳过的相关文章不再剔除，仍要纳入展示与遍历，仅默认不勾选。
+    const relatedIds = collectRelatedSourceIds(sourcePost, null)
+    relatedIds.forEach(relatedSourceId => {
+      const relatedId = normalizeString(relatedSourceId)
+      if (!relatedId || relatedId === rootSourceId) {
+        return
+      }
+      if (!visited.has(relatedId)) {
+        queue.push({
+          sourceId: relatedId,
+          parentSourceId: normalizedId,
+          depth: task.depth + 1
+        })
+      }
+    })
   }
 
-  return Array.from(optionMap.values()).sort((leftItem, rightItem) => {
+  const options = Array.from(optionMap.values()).sort((leftItem, rightItem) => {
     if (leftItem.relatedDepth !== rightItem.relatedDepth) {
       return leftItem.relatedDepth - rightItem.relatedDepth
     }
     return String(leftItem.title).localeCompare(String(rightItem.title))
   })
+  await markRelatedScopeOptionsHandledState(options, languageCodes)
+  return options
 }
 
 async function executeTranslationJob(job, context) {

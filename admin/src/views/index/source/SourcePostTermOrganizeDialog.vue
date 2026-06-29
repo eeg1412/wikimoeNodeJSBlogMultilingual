@@ -68,6 +68,7 @@
           v-model="selectedRelatedSourceIds"
           title="一起整理名词的相关文章"
           empty-text="没有可一起整理名词的相关文章"
+          handled-label="已整理"
           :options="relatedPostScopeOptions"
           :loading="relatedPostScopeLoading"
         />
@@ -83,7 +84,7 @@
 </template>
 
 <script>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
@@ -188,6 +189,7 @@ export default {
     const relatedPostScopeOptions = ref([])
     const selectedRelatedSourceIds = ref([])
     let relatedPostScopeRequestId = 0
+    let suppressRelatedPostScopeReload = false
     const form = reactive({
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
       targetLanguageCodes: getDefaultTargetLanguageCodes(DEFAULT_LANGUAGE_CODE),
@@ -345,13 +347,16 @@ export default {
             typeLabel: getPostTypeText(typeValue) || '相关文章',
             depth: item.depth,
             relatedDepth: item.relatedDepth,
+            alreadyHandled: item.alreadyHandled === true,
             parentSourceIds: Array.isArray(item.parentSourceIds)
               ? item.parentSourceIds
               : []
           }
         })
         relatedPostScopeOptions.value = options
-        selectedRelatedSourceIds.value = options.map(item => item.sourceId)
+        selectedRelatedSourceIds.value = options
+          .filter(item => item.alreadyHandled !== true)
+          .map(item => item.sourceId)
       } catch (error) {
         if (requestId === relatedPostScopeRequestId) {
           relatedPostScopeOptions.value = []
@@ -423,9 +428,13 @@ export default {
         if (!value) {
           return
         }
+        suppressRelatedPostScopeReload = true
         resetForm()
         applyDefaultSearchValue()
         loadRelatedPostScopeOptions()
+        nextTick(() => {
+          suppressRelatedPostScopeReload = false
+        })
       }
     )
 
@@ -444,6 +453,9 @@ export default {
       ],
       () => {
         if (!dialogVisible.value) {
+          return
+        }
+        if (suppressRelatedPostScopeReload) {
           return
         }
         loadRelatedPostScopeOptions()

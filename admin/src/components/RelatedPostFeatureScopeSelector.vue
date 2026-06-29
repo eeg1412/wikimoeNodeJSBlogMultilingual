@@ -51,6 +51,14 @@
         <el-tag size="small" effect="plain">
           {{ item.typeLabel }}
         </el-tag>
+        <el-tag
+          v-if="item.alreadyHandled"
+          size="small"
+          type="info"
+          effect="plain"
+        >
+          {{ handledLabel }}
+        </el-tag>
         <span class="related-post-feature-scope-item-depth">
           第 {{ item.relatedDepth }} 层
         </span>
@@ -72,6 +80,10 @@ export default {
     emptyText: {
       type: String,
       default: '没有可设置的相关文章'
+    },
+    handledLabel: {
+      type: String,
+      default: '已处理'
     },
     loading: {
       type: Boolean,
