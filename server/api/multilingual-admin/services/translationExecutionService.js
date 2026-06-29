@@ -4242,6 +4242,36 @@ async function executeSingleLanguageTranslationChild(job, context) {
 }
 
 // 封面图整理子任务执行器：读取同父任务下各单语言翻译子任务译文，跨语言按标题去重统一处理封面图。
+// 封面图整理子任务：取本语言最终译文标题（优先本次翻译 previewEntry，其次库内译文），
+// 用于与源标题、各语言译文相互去重，避免相同标题重复绘制封面图。
+async function resolveFinalTranslatedTitle({
+  sourceId,
+  languageCode,
+  previewEntries
+}) {
+  const titleEntry = (previewEntries || []).find(entry => {
+    return entry && entry.scope === 'post' && entry.fieldName === 'title'
+  })
+  const previewTitle = normalizeString(
+    titleEntry?.nextValue || titleEntry?.value || titleEntry?.nextPreviewText
+  )
+  if (previewTitle) {
+    return previewTitle
+  }
+  if (!isValidObjectId(sourceId) || !languageCode) {
+    return ''
+  }
+  const PostModel = getPostModel()
+  const translationPost = await PostModel.findOne({
+    sourceId: new mongoose.Types.ObjectId(sourceId),
+    languageCode,
+    recordKind: 'translation'
+  })
+    .select('title')
+    .lean()
+  return normalizeString(translationPost?.title)
+}
+
 async function executeCoverImageOrganizeChild(job, context) {
   const parentId = getJobTaskRelation(job).parentId
   if (!parentId) {
@@ -4291,11 +4321,23 @@ async function executeCoverImageOrganizeChild(job, context) {
         targetLanguageCode: languageCode,
         sourceSnapshotId
       })
+    // 预览 targetPost 在缺译文时会回退成源标题，会让封面图比对误判“与源一致”。
+    // 封面图整理必须以本语言的最终译文标题为准：优先本次翻译子任务的标题 previewEntry，
+    // 否则取库内已有译文标题；都没有则视为该语言无译文，标题为空。
+    const finalTargetTitle = await resolveFinalTranslatedTitle({
+      sourceId: articleSourceId,
+      languageCode,
+      previewEntries
+    })
+    // 预览 targetPost.title 在缺译文时等于源标题，必须用最终译文标题覆盖，
+    // 否则封面图比对会把“无译文/未导入”误判成“与源一致”。
+    previewContext.targetPost.title = finalTargetTitle
     coverImageTasks.push({
       job,
       sourcePost: previewContext.sourcePost,
       targetPost: previewContext.targetPost,
       previewEntries,
+      targetTitle: finalTargetTitle,
       sourceLanguageCode: job.source.languageCode,
       targetLanguageCode: languageCode,
       skipRecognition: shouldSkipCoverImageRecognition(job),

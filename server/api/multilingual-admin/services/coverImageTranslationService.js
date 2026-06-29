@@ -1428,12 +1428,9 @@ function resolveTargetTitle(targetTitle, previewEntries, targetPost) {
     return previewTitle
   }
 
-  const normalizedTargetTitle = normalizeTitleValue(targetTitle)
-  if (normalizedTargetTitle) {
-    return normalizedTargetTitle
-  }
-
-  return normalizeTitleValue(targetPost?.title)
+  // 封面图标题只能来自“当前文章/译文标题”，绝不回退源标题（预览态 targetPost.title 等于源标题，
+  // 一旦回退就会误判“与源一致”而跳过/重复绘制），无译文标题则返回空，交上层按“未译”跳过。
+  return normalizeTitleValue(targetTitle)
 }
 
 async function processCoverImageTranslation(options = {}) {
