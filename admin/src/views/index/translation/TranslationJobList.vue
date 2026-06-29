@@ -197,7 +197,7 @@
             </div>
             <div class="source-meta">{{ row._id }}</div>
             <div class="source-meta">
-              {{ getJobTypeText(row.jobType) }}
+              {{ getJobTypeText(row.jobType, row) }}
             </div>
             <div
               v-if="getTaskRelationText(row.taskRelation)"
@@ -411,7 +411,7 @@
           <el-tag :type="getStatusTagType(currentJob.status)" effect="plain">
             {{ currentJob.status }}
           </el-tag>
-          <span>{{ getJobTypeText(currentJob.jobType) }}</span>
+          <span>{{ getJobTypeText(currentJob.jobType, currentJob) }}</span>
           <span>{{ formatDate(currentJob.createdAt) }}</span>
           <span v-if="currentJob.result?.previewEntries?.length">
             {{ currentJob.result.previewEntries.length }} 项
@@ -3110,10 +3110,18 @@ export default {
       return await confirmAppliedEntrySelection(entries || [])
     }
 
-    const getJobTypeText = jobType => {
-      return (
+    const getJobTypeText = (jobType, job = null) => {
+      const baseLabel =
         jobTypeOptions.find(item => item.value === jobType)?.label || jobType
-      )
+      if (job && job.request?.options?.validateOnly === true) {
+        if (jobType === 'post-ai-translation') {
+          return '文章 AI 校验'
+        }
+        if (jobType === 'content-ai-translation') {
+          return '通用内容 AI 校验'
+        }
+      }
+      return baseLabel
     }
 
     const getTaskRelationText = taskRelation => {

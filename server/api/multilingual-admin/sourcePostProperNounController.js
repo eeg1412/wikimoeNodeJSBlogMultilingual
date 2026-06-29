@@ -92,7 +92,9 @@ async function createOrganizeJob(req) {
         options: {
           searchOfficialTermTranslations:
             body.searchOfficialTermTranslations === true,
-          syncRelatedPosts: body.syncRelatedPosts === true
+          syncRelatedPosts: body.syncRelatedPosts === true,
+          relatedSourceFeatureScopes:
+            body.relatedSourceFeatureScopes || undefined
         }
       }
     },

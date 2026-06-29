@@ -3867,7 +3867,7 @@ export default {
             snapshotId: form.sourceSnapshotId,
             snapshotVersion: form.snapshotVersion,
             languageCode: aiSourceLanguageCode.value,
-            title: form.title
+            title: sourceReferencePost.value?.title || form.title
           },
           target: {
             postId: form.id,

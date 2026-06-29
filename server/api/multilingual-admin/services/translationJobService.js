@@ -989,6 +989,8 @@ async function createTranslationJobBatch(body = {}, options = {}) {
   })
 
   // 3) 逐语言翻译子任务（针对各语言已存在的目标文章），按 orderIndex 顺序执行。
+  // 封面图统一放到最后的"封面图整理"子任务，按各语言最终标题去重，避免相同标题重复绘制。
+  const coverImageEnabled = sharedRequest.options.translateCoverImage === true
   const childJobIds = []
   const results = []
   for (let i = 0; i < normalizedTargets.length; i += 1) {
@@ -1012,7 +1014,12 @@ async function createTranslationJobBatch(body = {}, options = {}) {
         ...sharedRequest,
         targetLanguageCodes: [target.languageCode],
         recursion: { maxDepth: 1 },
-        entries: []
+        entries: [],
+        options: {
+          ...sharedRequest.options,
+          translateCoverImage: false,
+          coverImageTranslationMode: 'never'
+        }
       },
       taskRelation: {
         role: TRANSLATION_JOB_TASK_ROLES.CHILD,
@@ -1051,6 +1058,55 @@ async function createTranslationJobBatch(body = {}, options = {}) {
       jobId: String(childJob._id),
       status: 'created'
     })
+  }
+
+  // 4) 封面图整理子任务（最后一步，跨各语言按最终标题去重，标题一致只生成一张图片）。
+  if (coverImageEnabled) {
+    const coverImageChild = await JobModel.create({
+      jobType: TRANSLATION_JOB_TYPES.POST_AI_TRANSLATION,
+      status: TRANSLATION_JOB_STATUS.PENDING,
+      queueControl,
+      source: {
+        postId: sourcePostObjectId,
+        languageCode: sourceLanguageCode,
+        title: familyTitle
+      },
+      target: { languageCodes, title: familyTitle },
+      request: {
+        ...sharedRequest,
+        targetLanguageCodes: languageCodes,
+        recursion: { maxDepth: 1 },
+        entries: [],
+        options: {
+          ...sharedRequest.options,
+          translateCoverImage: true
+        }
+      },
+      taskRelation: {
+        role: TRANSLATION_JOB_TASK_ROLES.CHILD,
+        childKind: TRANSLATION_JOB_CHILD_KINDS.COVER_IMAGE_ORGANIZE,
+        orderIndex: normalizedTargets.length,
+        rootId: rootJob._id,
+        parentId: parentJob._id,
+        depth: 3,
+        sourcePostId: sourcePostObjectId,
+        articleSourceId: sourcePostObjectId,
+        childLanguageCode: '',
+        childJobIds: [],
+        childStats: {}
+      },
+      progress: {
+        currentStep: '排队中，等待前序子任务完成',
+        currentStage: 'pending',
+        totalSteps: 0,
+        completedSteps: 0,
+        percent: 0,
+        recentLogs: [buildRecentLog('封面图整理子任务已创建', 'info', 'family')]
+      },
+      createdBy: adminSnapshot,
+      updatedBy: adminSnapshot
+    })
+    childJobIds.push(coverImageChild._id)
   }
 
   await JobModel.updateOne(
@@ -1224,6 +1280,7 @@ function getListProjection() {
     'target.title': 1,
     'target.languageCode': 1,
     'target.languageCodes': 1,
+    'request.options.validateOnly': 1,
     'taskRelation.role': 1,
     'taskRelation.rootId': 1,
     'taskRelation.parentId': 1,
@@ -1356,6 +1413,11 @@ function buildListItemSummary(item, queuePositionMap) {
     _id: item._id,
     jobType: item.jobType,
     status: item.status,
+    request: {
+      options: {
+        validateOnly: item.request?.options?.validateOnly === true
+      }
+    },
     source: {
       title: source.title || ''
     },

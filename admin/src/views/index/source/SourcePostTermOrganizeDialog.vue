@@ -63,6 +63,14 @@
           v-model="form.syncRelatedPosts"
           active-text="同步整理相关文章"
         />
+        <RelatedPostFeatureScopeSelector
+          v-if="showRelatedPostScopeSelector"
+          v-model="selectedRelatedSourceIds"
+          title="一起整理名词的相关文章"
+          empty-text="没有可一起整理名词的相关文章"
+          :options="relatedPostScopeOptions"
+          :loading="relatedPostScopeLoading"
+        />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -79,10 +87,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { multilingualApi } from '@/api'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
+import RelatedPostFeatureScopeSelector from '@/components/RelatedPostFeatureScopeSelector.vue'
 import {
   DEFAULT_LANGUAGE_CODE,
   SUPPORTED_LANGUAGE_OPTIONS,
-  getPostDisplayTitle
+  getPostDisplayTitle,
+  getPostTypeText
 } from '@/utils/multilingual'
 import { extractApiErrorMessages } from '@/utils/apiError'
 import {
@@ -133,8 +143,7 @@ function getStoredTargetLanguageCodes(sourceLanguageCode) {
   const storedList = parseStoredTargetLanguageCodes()
   const targetList = storedList.filter(languageCode => {
     return (
-      supportedCodeSet.has(languageCode) &&
-      languageCode !== sourceLanguageCode
+      supportedCodeSet.has(languageCode) && languageCode !== sourceLanguageCode
     )
   })
   if (targetList.length > 0) {
@@ -156,7 +165,8 @@ function rememberTargetLanguageCodes(targetLanguageCodes) {
 export default {
   name: 'SourcePostTermOrganizeDialog',
   components: {
-    AiFeatureUnavailableTip
+    AiFeatureUnavailableTip,
+    RelatedPostFeatureScopeSelector
   },
   props: {
     modelValue: {
@@ -174,6 +184,10 @@ export default {
     const defaultLoading = ref(false)
     const aiSettingsAvailability = ref(createAiSettingsAvailability())
     let defaultRequestId = 0
+    const relatedPostScopeLoading = ref(false)
+    const relatedPostScopeOptions = ref([])
+    const selectedRelatedSourceIds = ref([])
+    let relatedPostScopeRequestId = 0
     const form = reactive({
       sourceLanguageCode: DEFAULT_LANGUAGE_CODE,
       targetLanguageCodes: getDefaultTargetLanguageCodes(DEFAULT_LANGUAGE_CODE),
@@ -206,6 +220,13 @@ export default {
     const showSyncRelatedPostsOption = computed(() => {
       return hasPostRelatedSourcePosts(props.sourcePost)
     })
+    const showRelatedPostScopeSelector = computed(() => {
+      return (
+        showSyncRelatedPostsOption.value &&
+        form.syncRelatedPosts === true &&
+        form.targetLanguageCodes.length > 0
+      )
+    })
     const officialTermSearchUnavailableReason = computed(() => {
       return getInternetSearchUnavailableReason(aiSettingsAvailability.value)
     })
@@ -233,6 +254,10 @@ export default {
       form.syncRelatedPosts = true
       defaultLoading.value = false
       defaultRequestId += 1
+      relatedPostScopeOptions.value = []
+      selectedRelatedSourceIds.value = []
+      relatedPostScopeLoading.value = false
+      relatedPostScopeRequestId += 1
     }
 
     function handleSourceLanguageChange() {
@@ -277,6 +302,71 @@ export default {
       }
     }
 
+    async function loadRelatedPostScopeOptions() {
+      const requestId = relatedPostScopeRequestId + 1
+      relatedPostScopeRequestId = requestId
+      if (!showRelatedPostScopeSelector.value) {
+        relatedPostScopeOptions.value = []
+        selectedRelatedSourceIds.value = []
+        relatedPostScopeLoading.value = false
+        return
+      }
+      const rootSourceId = getSourcePostId(props.sourcePost)
+      if (!rootSourceId) {
+        relatedPostScopeOptions.value = []
+        selectedRelatedSourceIds.value = []
+        relatedPostScopeLoading.value = false
+        return
+      }
+      relatedPostScopeLoading.value = true
+      try {
+        const response = await multilingualApi.getSourcePostRelatedScope(
+          {
+            sourceId: rootSourceId,
+            sourceLanguageCode: form.sourceLanguageCode,
+            targetLanguageCodes: form.targetLanguageCodes,
+            maxDepth: 3
+          },
+          true
+        )
+        if (requestId !== relatedPostScopeRequestId) {
+          return
+        }
+        const responseData = response.data.data || {}
+        const rawOptions = Array.isArray(responseData.options)
+          ? responseData.options
+          : []
+        const options = rawOptions.map(item => {
+          const typeValue = Number(item.type || 0)
+          return {
+            sourceId: item.sourceId,
+            title: item.title || item.sourceId,
+            type: typeValue,
+            typeLabel: getPostTypeText(typeValue) || '相关文章',
+            depth: item.depth,
+            relatedDepth: item.relatedDepth,
+            parentSourceIds: Array.isArray(item.parentSourceIds)
+              ? item.parentSourceIds
+              : []
+          }
+        })
+        relatedPostScopeOptions.value = options
+        selectedRelatedSourceIds.value = options.map(item => item.sourceId)
+      } catch (error) {
+        if (requestId === relatedPostScopeRequestId) {
+          relatedPostScopeOptions.value = []
+          selectedRelatedSourceIds.value = []
+          extractApiErrorMessages(error).forEach(message => {
+            ElMessage.error(message)
+          })
+        }
+      } finally {
+        if (requestId === relatedPostScopeRequestId) {
+          relatedPostScopeLoading.value = false
+        }
+      }
+    }
+
     async function submit() {
       const sourceId = getSourcePostId(props.sourcePost)
       if (!sourceId) {
@@ -293,21 +383,28 @@ export default {
       }
       rememberTargetLanguageCodes(form.targetLanguageCodes)
       submitting.value = true
+      const syncRelatedPosts =
+        showSyncRelatedPostsOption.value && form.syncRelatedPosts === true
+      const requestBody = {
+        sourceId,
+        sourceLanguageCode: form.sourceLanguageCode,
+        targetLanguageCodes: form.targetLanguageCodes,
+        title: sourcePostTitle.value,
+        recursion: {
+          maxDepth: 3
+        },
+        searchOfficialTermTranslations: shouldSearchOfficialTermTranslations(),
+        syncRelatedPosts
+      }
+      if (syncRelatedPosts) {
+        requestBody.relatedSourceFeatureScopes = {
+          autoOrganizeOfficialTermGlossary:
+            selectedRelatedSourceIds.value.slice()
+        }
+      }
       try {
         await multilingualApi.createSourcePostProperNounOrganizeJob(
-          {
-            sourceId,
-            sourceLanguageCode: form.sourceLanguageCode,
-            targetLanguageCodes: form.targetLanguageCodes,
-            title: sourcePostTitle.value,
-            recursion: {
-              maxDepth: 3
-            },
-            searchOfficialTermTranslations:
-              shouldSearchOfficialTermTranslations(),
-            syncRelatedPosts:
-              showSyncRelatedPostsOption.value && form.syncRelatedPosts === true
-          },
+          requestBody,
           true
         )
         ElMessage.success('文章名词整理后台任务已创建')
@@ -328,6 +425,7 @@ export default {
         }
         resetForm()
         applyDefaultSearchValue()
+        loadRelatedPostScopeOptions()
       }
     )
 
@@ -337,6 +435,20 @@ export default {
       }
       form.searchOfficialTermTranslations = false
     })
+
+    watch(
+      () => [
+        form.syncRelatedPosts,
+        form.sourceLanguageCode,
+        form.targetLanguageCodes.join(',')
+      ],
+      () => {
+        if (!dialogVisible.value) {
+          return
+        }
+        loadRelatedPostScopeOptions()
+      }
+    )
 
     watch(
       () => form.targetLanguageCodes.join(','),
@@ -356,6 +468,10 @@ export default {
       isOfficialTermSearchDisabled,
       languageOptions,
       officialTermSearchUnavailableReason,
+      relatedPostScopeLoading,
+      relatedPostScopeOptions,
+      selectedRelatedSourceIds,
+      showRelatedPostScopeSelector,
       showSyncRelatedPostsOption,
       sourcePostTitle,
       submit,

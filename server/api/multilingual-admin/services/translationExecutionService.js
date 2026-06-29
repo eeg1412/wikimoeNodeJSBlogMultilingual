@@ -2797,7 +2797,19 @@ async function planProperNounOrganizeFamily({
     maxDepth,
     context
   })
-  if (relatedPlan.length === 0) {
+  // 用户在“整理名词”弹窗里勾选了相关文章范围时，仅整理被选中的相关文章，其余相关文章不建子任务。
+  const organizeScopes = getRelatedSourceFeatureScopes(job)
+  const organizeRelatedSourceIds = organizeScopes
+    ? organizeScopes.autoOrganizeOfficialTermGlossary
+    : null
+  const scopedRelatedPlan = Array.isArray(organizeRelatedSourceIds)
+    ? relatedPlan.filter(planItem => {
+        return organizeRelatedSourceIds.includes(
+          normalizeString(planItem.sourceId)
+        )
+      })
+    : relatedPlan
+  if (scopedRelatedPlan.length === 0) {
     await context.saveCheckpoint({
       stage: 'AnalyzeRelatedPosts',
       stateSummary: {
@@ -2816,7 +2828,7 @@ async function planProperNounOrganizeFamily({
       languageCodes
     }
   ]
-  relatedPlan.forEach(planItem => {
+  scopedRelatedPlan.forEach(planItem => {
     articles.push({
       sourceId: planItem.sourceId,
       title: planItem.title || '',
@@ -4241,8 +4253,12 @@ async function executeCoverImageOrganizeChild(job, context) {
   const JobModel = getTranslationJobModel()
   const siblingChildren = await JobModel.find({
     'taskRelation.parentId': toObjectId(parentId),
-    'taskRelation.childKind':
-      TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION
+    'taskRelation.childKind': {
+      $in: [
+        TRANSLATION_JOB_CHILD_KINDS.SINGLE_LANGUAGE_TRANSLATION,
+        TRANSLATION_JOB_CHILD_KINDS.POST_LANGUAGE_TRANSLATION
+      ]
+    }
   })
     .sort({ 'taskRelation.orderIndex': 1 })
     .lean()
