@@ -1290,7 +1290,12 @@ async function executePostAiTranslation(job, context) {
       createHandlers(context, 'TranslatePost', { start: 20, end: 85 })
     )
   } else {
-    if (!shouldTranslateCoverImage(job, false)) {
+    // 家族子任务不内联画封面图（统一交给"封面图整理"子任务去重处理），
+    // 因此只选封面图、未选正文条目时不应报错，跳过正文翻译即可。
+    if (
+      !shouldTranslateCoverImage(job, false) &&
+      !isTaskRelationChildJob(job)
+    ) {
       throw new ApiError(
         ERROR_CODES.TRANSLATION_JOB_FIELD_INVALID,
         '文章翻译后台任务没有选择正文条目，也未启用封面图翻译',
