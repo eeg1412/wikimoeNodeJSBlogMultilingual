@@ -1200,6 +1200,15 @@ function getTranslationChunkTextLimit(settings = {}) {
 
 // 单个富文本条目切片上限随单批裁切量等比缩放（取其 RICH_TEXT_SEGMENT_TEXT_RATIO 比例），
 // 因此天花板调大时富文本切片也随之放宽，无需再单独受固定上限钳制。
+// 专有名词抽取单包文本上限：配置了最大输出 Token 时按翻译同一套 token→字符推导（取更大值，
+// token 越大单包越大、分包越少）；未配置时回退到内置抽词常量。fallbackChars 为内置安全保底。
+function getTermExtractionTextLimit(settings = {}, fallbackChars) {
+  if (!hasConfiguredMaxOutputTokens(settings)) {
+    return fallbackChars
+  }
+  return Math.max(fallbackChars, getTranslationChunkTextLimit(settings))
+}
+
 function getRichTextSegmentTextLimit(settings = {}) {
   const chunkTextLimit = getTranslationChunkTextLimit(settings)
   const segmentTextLimit = Math.floor(
@@ -1771,7 +1780,7 @@ function pushTermExtractionPackage(packages, packageData) {
   })
 }
 
-function pushOverviewTermPackages(packages, overviewItems) {
+function pushOverviewTermPackages(packages, overviewItems, packageTextLimit) {
   let currentTextList = []
   let currentLength = 0
 
@@ -1790,9 +1799,9 @@ function pushOverviewTermPackages(packages, overviewItems) {
 
   overviewItems.forEach(item => {
     const blockText = [`【${item.label}】`, item.text].join('\n')
-    if (blockText.length > MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH) {
+    if (blockText.length > packageTextLimit) {
       flushCurrentPackage()
-      splitLongText(blockText, MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH).forEach(
+      splitLongText(blockText, packageTextLimit).forEach(
         (partText, partIndex) => {
           pushTermExtractionPackage(packages, {
             packageType: 'overview',
@@ -1806,7 +1815,7 @@ function pushOverviewTermPackages(packages, overviewItems) {
 
     if (
       currentTextList.length > 0 &&
-      currentLength + blockText.length > MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH
+      currentLength + blockText.length > packageTextLimit
     ) {
       flushCurrentPackage()
     }
@@ -1817,10 +1826,20 @@ function pushOverviewTermPackages(packages, overviewItems) {
   flushCurrentPackage()
 }
 
-function buildTermExtractionPackages(input) {
+function buildTermExtractionPackages(input, settings = {}) {
   const packages = []
   const contentPackages = []
   const overviewItems = []
+  // 抽词分包上限随“专有名词预处理 AI”配置的最大输出 Token 动态推导，token 越大切片越大、分包越少；
+  // 未配置最大输出 Token 时回退到内置常量。
+  const sliceTextLimit = getTermExtractionTextLimit(
+    settings,
+    MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH
+  )
+  const packageTextLimit = getTermExtractionTextLimit(
+    settings,
+    MAX_TERM_EXTRACTION_PACKAGE_TEXT_LENGTH
+  )
   input.entries.forEach((entry, index) => {
     const text = getEntryTermExtractionText(entry)
     if (!text.trim()) {
@@ -1832,10 +1851,7 @@ function buildTermExtractionPackages(input) {
       return
     }
 
-    const textSlices = splitLongText(
-      text,
-      MAX_TERM_EXTRACTION_TEXT_SLICE_LENGTH
-    )
+    const textSlices = splitLongText(text, sliceTextLimit)
     textSlices.forEach((partText, partIndex) => {
       pushTermExtractionPackage(contentPackages, {
         packageType: 'articleContent',
@@ -1845,7 +1861,7 @@ function buildTermExtractionPackages(input) {
     })
   })
 
-  pushOverviewTermPackages(packages, overviewItems)
+  pushOverviewTermPackages(packages, overviewItems, packageTextLimit)
   return packages.concat(contentPackages)
 }
 
@@ -2407,7 +2423,7 @@ async function extractTermsFromPackage({
 }
 
 async function extractProperNounKeywords({ input, settings, url, handlers }) {
-  const packages = buildTermExtractionPackages(input)
+  const packages = buildTermExtractionPackages(input, settings)
   if (packages.length === 0) {
     return {
       keywordArray: [],
