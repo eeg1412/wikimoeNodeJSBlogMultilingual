@@ -143,11 +143,6 @@
             <div class="media-path">
               {{ row.filepath || row.remoteFilepath || '-' }}
             </div>
-            <div v-if="isImageMedia(row)" class="media-subtitle">
-              全景：{{ row.is360Panorama ? '是' : '否' }}，HDR：{{
-                row.isHDR ? '是' : '否'
-              }}
-            </div>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="语言" width="150">
@@ -185,6 +180,12 @@
             <el-tag v-if="row.is360Panorama" type="success" effect="plain">
               是
             </el-tag>
+            <span v-else>-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="HDR" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.isHDR" type="success" effect="plain"> 是 </el-tag>
             <span v-else>-</span>
           </template>
         </ResponsiveTableColumn>

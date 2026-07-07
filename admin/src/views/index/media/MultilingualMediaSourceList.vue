@@ -151,11 +151,26 @@
             <div class="source-meta">
               源 ID：{{ row.sourceRecord.sourceId }}
             </div>
-            <div v-if="isImageMedia(row.sourceRecord)" class="source-meta">
-              全景：{{ row.sourceRecord.is360Panorama ? '是' : '否' }}，HDR：{{
-                row.sourceRecord.isHDR ? '是' : '否'
-              }}
-            </div>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="360 全景" width="100">
+          <template #default="{ row }">
+            <el-tag
+              v-if="row.sourceRecord.is360Panorama"
+              type="success"
+              effect="plain"
+            >
+              是
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </ResponsiveTableColumn>
+        <ResponsiveTableColumn label="HDR" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.sourceRecord.isHDR" type="success" effect="plain">
+              是
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </ResponsiveTableColumn>
         <ResponsiveTableColumn label="媒体模式" width="120">
