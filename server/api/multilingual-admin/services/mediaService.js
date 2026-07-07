@@ -623,6 +623,7 @@ async function buildImageStorageData(
               gainMapQuality: config.imgSettingThumbnailHDRGainMapQuality,
               width: thumbnailDimensions.width,
               height: thumbnailDimensions.height,
+              speed: 9,
               jobs: 'all'
             })
             createdFiles.push(thumbnailPath)
@@ -709,6 +710,7 @@ async function buildImageStorageData(
       const convertOptions = {
         quality: config.imgSettingHDRQuality,
         gainMapQuality: config.imgSettingHDRGainMapQuality,
+        speed: 9,
         jobs: 'all'
       }
       const resizedDimensions = calculateResizeDimensions(
