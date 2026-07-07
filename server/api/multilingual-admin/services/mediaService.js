@@ -622,7 +622,8 @@ async function buildImageStorageData(
               quality: config.imgSettingThumbnailHDRQuality,
               gainMapQuality: config.imgSettingThumbnailHDRGainMapQuality,
               width: thumbnailDimensions.width,
-              height: thumbnailDimensions.height
+              height: thumbnailDimensions.height,
+              jobs: 'all'
             })
             createdFiles.push(thumbnailPath)
             updateData.thumfor = toPublicPath(thumbnailPath)
@@ -707,7 +708,8 @@ async function buildImageStorageData(
       updateData.mimetype = 'image/avif'
       const convertOptions = {
         quality: config.imgSettingHDRQuality,
-        gainMapQuality: config.imgSettingHDRGainMapQuality
+        gainMapQuality: config.imgSettingHDRGainMapQuality,
+        jobs: 'all'
       }
       const resizedDimensions = calculateResizeDimensions(
         dimensions.width,
