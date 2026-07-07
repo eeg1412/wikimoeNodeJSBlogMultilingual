@@ -56,6 +56,50 @@ const MEDIA_SETTING_FIELDS = [
     min: 1
   },
   {
+    name: 'imgSettingKeepHDR',
+    label: '保留HDR',
+    type: 'boolean',
+    defaultValue: false
+  },
+  {
+    name: 'imgSettingThumbnailKeepHDR',
+    label: '缩略图保留HDR',
+    type: 'boolean',
+    defaultValue: false
+  },
+  {
+    name: 'imgSettingHDRQuality',
+    label: '主图HDR图片质量',
+    type: 'number',
+    defaultValue: 80,
+    min: 1,
+    max: 100
+  },
+  {
+    name: 'imgSettingHDRGainMapQuality',
+    label: '主图HDR GainMap质量',
+    type: 'number',
+    defaultValue: 70,
+    min: 1,
+    max: 100
+  },
+  {
+    name: 'imgSettingThumbnailHDRQuality',
+    label: '缩略图HDR图片质量',
+    type: 'number',
+    defaultValue: 40,
+    min: 1,
+    max: 100
+  },
+  {
+    name: 'imgSettingThumbnailHDRGainMapQuality',
+    label: '缩略图HDR GainMap质量',
+    type: 'number',
+    defaultValue: 70,
+    min: 1,
+    max: 100
+  },
+  {
     name: 'videoSettingCompressMaxSize',
     label: '视频最长边',
     type: 'number',

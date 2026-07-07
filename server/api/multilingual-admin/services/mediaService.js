@@ -564,12 +564,109 @@ async function buildImageStorageData(
     thumWidth: 0,
     thumHeight: 0,
     is360Panorama: options.is360Panorama,
+    isHDR: false,
     status: 1
   }
   const createdFiles = []
+  let tempJpgPath = ''
 
   try {
-    if (config.imgSettingEnableImgThumbnail && !options.noThumbnail) {
+    // 判断是否为HDR图片：仅当开启保留HDR、开启图片压缩、非跳过压缩、且为JPG时检测
+    let isHDR = false
+    const isJpegImage =
+      file.mimetype === 'image/jpeg' || /\.jpe?g$/i.test(originalExtname)
+    if (
+      config.imgSettingKeepHDR &&
+      config.imgSettingEnableImgCompress &&
+      !options.noCompress &&
+      isJpegImage
+    ) {
+      // libavif-with-gainmap 需要文件路径，需先将buffer写入临时文件
+      const hdrTempDir = path.join(SERVER_ROOT, 'cache', 'hdrtemp')
+      await fs.promises.mkdir(hdrTempDir, { recursive: true })
+      tempJpgPath = path.join(
+        hdrTempDir,
+        `hdr-src-${attachmentId}-${suffix}.jpg`
+      )
+      await fs.promises.writeFile(tempJpgPath, file.buffer)
+      try {
+        const probeResult = await utils.probeJpegGainMap(tempJpgPath)
+        isHDR = Boolean(probeResult && probeResult.hasGainMap)
+      } catch (probeErr) {
+        console.error(`probeJpegGainMap失败: ${probeErr.message}`)
+        isHDR = false
+      }
+    }
+    updateData.isHDR = isHDR
+
+    // ===== 缩略图处理 =====
+    if (isHDR) {
+      if (config.imgSettingThumbnailKeepHDR) {
+        // 缩略图保留HDR：使用libavif-with-gainmap生成缩小的HDR AVIF缩略图
+        if (config.imgSettingEnableImgThumbnail && !options.noThumbnail) {
+          const thumbnailDimensions = calculateResizeDimensions(
+            dimensions.width,
+            dimensions.height,
+            config.imgSettingThumbnailMaxSize
+          )
+          if (
+            thumbnailDimensions.width &&
+            thumbnailDimensions.height &&
+            config.imgSettingThumbnailMaxSize < config.imgSettingCompressMaxSize
+          ) {
+            const thumbnailPath = path.join(
+              yearMonthPath,
+              `thum-${attachmentId}-${suffix}.avif`
+            )
+            await utils.convertJpegGainMap(tempJpgPath, thumbnailPath, {
+              quality: config.imgSettingThumbnailHDRQuality,
+              gainMapQuality: config.imgSettingThumbnailHDRGainMapQuality,
+              width: thumbnailDimensions.width,
+              height: thumbnailDimensions.height
+            })
+            createdFiles.push(thumbnailPath)
+            updateData.thumfor = toPublicPath(thumbnailPath)
+            updateData.thumWidth = thumbnailDimensions.width
+            updateData.thumHeight = thumbnailDimensions.height
+          }
+        }
+      } else {
+        // 缩略图保留HDR关闭：强制生成SDR webp缩略图（除非额外设置不生成缩略图）
+        // 即使图像尺寸不满足缩略图要求，也生成一张当前分辨率的无HDR缩略图
+        if (!options.noThumbnail) {
+          const max = Math.max(dimensions.width, dimensions.height)
+          let thumbWidth = dimensions.width
+          let thumbHeight = dimensions.height
+          let resizeWidth = null
+          let resizeHeight = null
+          if (max > config.imgSettingThumbnailMaxSize) {
+            const scale = config.imgSettingThumbnailMaxSize / max
+            thumbWidth = Math.round(dimensions.width * scale)
+            thumbHeight = Math.round(dimensions.height * scale)
+            resizeWidth = thumbWidth
+            resizeHeight = thumbHeight
+          }
+          const thumbnailPath = path.join(
+            yearMonthPath,
+            `thum-${attachmentId}-${suffix}.webp`
+          )
+          await utils.imageCompress(
+            '.webp',
+            file.buffer,
+            animated,
+            resizeWidth,
+            resizeHeight,
+            config.imgSettingThumbnailQuality,
+            thumbnailPath
+          )
+          createdFiles.push(thumbnailPath)
+          updateData.thumfor = toPublicPath(thumbnailPath)
+          updateData.thumWidth = thumbWidth
+          updateData.thumHeight = thumbHeight
+        }
+      }
+    } else if (config.imgSettingEnableImgThumbnail && !options.noThumbnail) {
+      // 非HDR：原有缩略图流程
       const thumbnailDimensions = calculateResizeDimensions(
         dimensions.width,
         dimensions.height,
@@ -597,6 +694,41 @@ async function buildImageStorageData(
         updateData.thumfor = toPublicPath(thumbnailPath)
         updateData.thumWidth = thumbnailDimensions.width
         updateData.thumHeight = thumbnailDimensions.height
+      }
+    }
+
+    // ===== 主图处理 =====
+    if (isHDR) {
+      // HDR图片：转换为HDR AVIF，尺寸与既存压缩逻辑保持一致
+      const localFilePath = path.join(
+        yearMonthPath,
+        `${attachmentId}-${suffix}.avif`
+      )
+      updateData.mimetype = 'image/avif'
+      const convertOptions = {
+        quality: config.imgSettingHDRQuality,
+        gainMapQuality: config.imgSettingHDRGainMapQuality
+      }
+      const resizedDimensions = calculateResizeDimensions(
+        dimensions.width,
+        dimensions.height,
+        config.imgSettingCompressMaxSize
+      )
+      if (resizedDimensions.width && resizedDimensions.height) {
+        updateData.width = resizedDimensions.width
+        updateData.height = resizedDimensions.height
+        convertOptions.width = resizedDimensions.width
+        convertOptions.height = resizedDimensions.height
+      }
+      await utils.convertJpegGainMap(tempJpgPath, localFilePath, convertOptions)
+      createdFiles.push(localFilePath)
+      const stats = await fs.promises.stat(localFilePath)
+      updateData.filesize = stats.size
+      updateData.filepath = toPublicPath(localFilePath)
+
+      return {
+        updateData,
+        createdFiles
       }
     }
 
@@ -650,6 +782,15 @@ async function buildImageStorageData(
   } catch (error) {
     await cleanupCreatedFiles(createdFiles)
     throw error
+  } finally {
+    // 清理HDR临时文件
+    if (tempJpgPath) {
+      try {
+        await fs.promises.unlink(tempJpgPath)
+      } catch (unlinkErr) {
+        // 临时文件可能不存在，忽略
+      }
+    }
   }
 }
 
