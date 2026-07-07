@@ -4,7 +4,7 @@ function buildSourcePostPopulate() {
     'languageCode sourceLanguageCode sourceId sourceCollection sourceSnapshotId translationGroupId recordKind snapshotVersion sourceSnapshotAt sourceUpdatedAt sourceHash'
   const postCoverPopulate = {
     path: 'coverImages',
-    select: `filename filesize filepath thumfor width height thumWidth thumHeight mimetype album description is360Panorama status createdAt updatedAt ${sourceIdentitySelect}`
+    select: `filename filesize filepath thumfor width height thumWidth thumHeight mimetype album description is360Panorama isHDR status createdAt updatedAt ${sourceIdentitySelect}`
   }
 
   return [

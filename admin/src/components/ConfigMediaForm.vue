@@ -3,7 +3,7 @@
     :model="mediaForm"
     :rules="mediaRules"
     ref="mediaFormRef"
-    label-width="150px"
+    label-width="200px"
     v-if="inited"
   >
     <el-form-item label="开启图片压缩" prop="imgSettingEnableImgCompress">
