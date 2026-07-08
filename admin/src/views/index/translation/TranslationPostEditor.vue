@@ -1388,59 +1388,7 @@
           <el-icon class="el-icon--upload"><Picture /></el-icon>
           <div class="el-upload__text">拖动文件或点击上传</div>
           <div class="mt5">
-            <el-popover placement="bottom" :width="200" trigger="click">
-              <div>
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="articleMediaReplaceOptions.noCompress"
-                  label="不压缩图片"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="articleMediaReplaceOptions.noThumbnail"
-                  label="不生成缩略图"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="articleMediaReplaceOptions.is360Panorama"
-                  label="是360°全景图片"
-                />
-                <div class="accactment-options-filed">
-                  <div class="accactment-options-label">最长边:</div>
-                  <div class="accactment-options-value">
-                    <el-input-number
-                      v-model="
-                        articleMediaReplaceOptions.imgSettingCompressMaxSize
-                      "
-                      :step="10"
-                      :precision="0"
-                      :min="1"
-                      size="small"
-                      placeholder="设置最长边"
-                      clearable
-                    />
-                  </div>
-                </div>
-              </div>
-              <template #reference>
-                <el-button
-                  size="small"
-                  :type="articleMediaReplaceOptionsCount > 0 ? 'primary' : ''"
-                  :plain="articleMediaReplaceOptionsCount <= 0"
-                  @click.stop
-                >
-                  <el-icon><Setting /></el-icon>
-                  <span class="pl3">
-                    设置<template v-if="articleMediaReplaceOptionsCount > 0">
-                      （已设置 {{ articleMediaReplaceOptionsCount }} 项）
-                    </template>
-                  </span>
-                </el-button>
-              </template>
-            </el-popover>
+            <MediaUploadOptions :options="articleMediaReplaceOptions" />
           </div>
         </el-upload>
         <VideoUploader
@@ -1484,7 +1432,6 @@ import {
   EditPen,
   Picture,
   Refresh,
-  Setting,
   VideoPlay
 } from '@element-plus/icons-vue'
 import RichEditor4 from '@/components/RichEditor4.vue'
@@ -1498,6 +1445,7 @@ import TranslationPostAiTranslationDialog from '@/components/TranslationPostAiTr
 import TranslationPostSnapshotRestoreDialog from '@/components/TranslationPostSnapshotRestoreDialog.vue'
 import TranslationPostSourceLinkRewriteDialog from '@/components/TranslationPostSourceLinkRewriteDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
+import MediaUploadOptions from '@/components/MediaUploadOptions.vue'
 import AiFeatureUnavailableTip from '@/components/AiFeatureUnavailableTip.vue'
 import AiFeatureHintTip from '@/components/AiFeatureHintTip.vue'
 import { multilingualApi } from '@/api'
@@ -1517,6 +1465,12 @@ import {
   extractApiErrorMessages
 } from '@/utils/apiError'
 import { groupTranslationEntryList } from '@/utils/translationEntryDisplay'
+import {
+  createMediaUploadOptions,
+  resetMediaUploadOptions,
+  buildMediaUploadOptionHeaders,
+  getMediaUploadOptionsCount
+} from '@/utils/mediaUploadOptions'
 import {
   createAiSettingsAvailability,
   createAiSettingsLoadErrorAvailability,
@@ -1809,7 +1763,7 @@ export default {
     EditPen,
     Picture,
     Refresh,
-    Setting,
+    MediaUploadOptions,
     EmojiTextarea,
     RelationSelectedList,
     RichEditor5,
@@ -1905,12 +1859,7 @@ export default {
     const articleMediaReplaceRecord = ref(null)
     const articleMediaReplaceFileList = ref([])
     const articleMediaReplaceSubmitting = ref(false)
-    const articleMediaReplaceOptions = reactive({
-      noCompress: false,
-      noThumbnail: false,
-      is360Panorama: false,
-      imgSettingCompressMaxSize: null
-    })
+    const articleMediaReplaceOptions = reactive(createMediaUploadOptions())
     const exportDialogVisible = ref(false)
     const exportEntryList = ref([])
     const selectedExportIds = ref([])
@@ -2115,20 +2064,7 @@ export default {
       return Boolean(officialTermSearchUnavailableReason.value)
     })
     const articleMediaReplaceOptionsCount = computed(() => {
-      let count = 0
-      if (articleMediaReplaceOptions.noCompress) {
-        count++
-      }
-      if (articleMediaReplaceOptions.noThumbnail) {
-        count++
-      }
-      if (articleMediaReplaceOptions.is360Panorama) {
-        count++
-      }
-      if (articleMediaReplaceOptions.imgSettingCompressMaxSize) {
-        count++
-      }
-      return count
+      return getMediaUploadOptionsCount(articleMediaReplaceOptions)
     })
 
     function getDefaultAiSourceLanguageCode() {
@@ -2585,10 +2521,7 @@ export default {
     function resetArticleMediaReplaceForm() {
       articleMediaReplaceFileList.value = []
       articleMediaReplaceSubmitting.value = false
-      articleMediaReplaceOptions.noCompress = false
-      articleMediaReplaceOptions.noThumbnail = false
-      articleMediaReplaceOptions.is360Panorama = false
-      articleMediaReplaceOptions.imgSettingCompressMaxSize = null
+      resetMediaUploadOptions(articleMediaReplaceOptions)
       articleMediaReplaceRecord.value = null
     }
 
@@ -2644,27 +2577,6 @@ export default {
       )
     }
 
-    function appendArticleImageReplaceOptions(formData) {
-      formData.append(
-        'noCompress',
-        articleMediaReplaceOptions.noCompress ? '1' : '0'
-      )
-      formData.append(
-        'noThumbnail',
-        articleMediaReplaceOptions.noThumbnail ? '1' : '0'
-      )
-      formData.append(
-        'is360Panorama',
-        articleMediaReplaceOptions.is360Panorama ? '1' : '0'
-      )
-      if (articleMediaReplaceOptions.imgSettingCompressMaxSize) {
-        formData.append(
-          'imgSettingCompressMaxSize',
-          String(articleMediaReplaceOptions.imgSettingCompressMaxSize)
-        )
-      }
-    }
-
     function handleArticleMediaReplaceSuccess(updatedRecord) {
       replaceRecordInList('coverImages', updatedRecord)
       articleMediaReplaceVisible.value = false
@@ -2693,12 +2605,14 @@ export default {
 
       const formData = new FormData()
       appendArticleMediaReplaceBaseFormData(formData)
-      appendArticleImageReplaceOptions(formData)
       formData.append('file', file, file.name)
 
       articleMediaReplaceSubmitting.value = true
       return multilingualApi
-        .replaceLocalMedia(formData)
+        .replaceLocalMedia(
+          formData,
+          buildMediaUploadOptionHeaders(articleMediaReplaceOptions)
+        )
         .then(response => {
           ElMessage.success('替换成功')
           handleArticleMediaReplaceSuccess(response.data.data)

@@ -410,20 +410,31 @@ async function findAttachment(input) {
   return attachment
 }
 
-function parseBooleanOption(value) {
-  return value === true || value === 'true' || value === '1'
+// 解析HDR单独设置选项，仅接受 keep / notKeep，其余一律归一为 default（按照后台设置）
+function normalizeHDROption(value) {
+  if (value === 'keep') {
+    return 'keep'
+  }
+  if (value === 'notKeep') {
+    return 'notKeep'
+  }
+  return 'default'
 }
 
-function parseImageReplacementOptions(body = {}) {
+function parseImageOptionsFromHeaders(headers = {}) {
   let imgSettingCompressMaxSize = null
-  if (/^[1-9]\d*$/.test(String(body.imgSettingCompressMaxSize || ''))) {
-    imgSettingCompressMaxSize = Number(body.imgSettingCompressMaxSize)
+  const maxSizeRaw = headers['x-compress-max-size']
+  if (/^[1-9]\d*$/.test(String(maxSizeRaw || ''))) {
+    imgSettingCompressMaxSize = Number(maxSizeRaw)
   }
 
   return {
-    noCompress: parseBooleanOption(body.noCompress),
-    noThumbnail: parseBooleanOption(body.noThumbnail),
-    is360Panorama: parseBooleanOption(body.is360Panorama),
+    noCompress: headers['x-no-compress'] === '1',
+    noThumbnail: headers['x-no-thumbnail'] === '1',
+    is360Panorama: headers['x-is-360-panorama'] === '1',
+    keepHDR: normalizeHDROption(headers['x-keep-hdr']),
+    thumbnailKeepHDR: normalizeHDROption(headers['x-thumbnail-keep-hdr']),
+    markAsHDR: headers['x-mark-as-hdr'] === '1',
     imgSettingCompressMaxSize
   }
 }
@@ -571,16 +582,24 @@ async function buildImageStorageData(
   let tempJpgPath = ''
 
   try {
-    // 判断是否为HDR图片：仅当开启保留HDR、开启图片压缩、非跳过压缩、且为JPG时检测
+    // 判断是否需要进行HDR转换：
+    // keepHDR='keep' 显式保留，忽略是否开启图片压缩；'notKeep' 强制不保留；'default' 按后台设置
     let isHDR = false
     const isJpegImage =
       file.mimetype === 'image/jpeg' || /\.jpe?g$/i.test(originalExtname)
-    if (
-      config.imgSettingKeepHDR &&
-      config.imgSettingEnableImgCompress &&
-      !options.noCompress &&
-      isJpegImage
-    ) {
+    let shouldDetectHDR = false
+    if (options.keepHDR === 'keep') {
+      shouldDetectHDR = isJpegImage
+    } else if (options.keepHDR === 'notKeep') {
+      shouldDetectHDR = false
+    } else {
+      shouldDetectHDR =
+        config.imgSettingKeepHDR &&
+        config.imgSettingEnableImgCompress &&
+        !options.noCompress &&
+        isJpegImage
+    }
+    if (shouldDetectHDR) {
       // libavif-with-gainmap 需要文件路径，需先将buffer写入临时文件
       const hdrTempDir = path.join(SERVER_ROOT, 'cache', 'hdrtemp')
       await fs.promises.mkdir(hdrTempDir, { recursive: true })
@@ -597,13 +616,29 @@ async function buildImageStorageData(
         isHDR = false
       }
     }
-    updateData.isHDR = isHDR
+    // 记录是否为HDR图片（转换为HDR AVIF 或 手动标记为HDR）
+    updateData.isHDR = isHDR || options.markAsHDR
+
+    // 解析缩略图是否保留HDR：keep 强制保留（忽略后台缩略图开关），notKeep 强制不保留，default 按后台设置
+    let thumbnailKeepHDR = false
+    if (options.thumbnailKeepHDR === 'keep') {
+      thumbnailKeepHDR = true
+    } else if (options.thumbnailKeepHDR === 'notKeep') {
+      thumbnailKeepHDR = false
+    } else {
+      thumbnailKeepHDR = config.imgSettingThumbnailKeepHDR
+    }
+    // HDR缩略图是否启用：显式保留时忽略后台「开启图片缩略图」开关
+    let thumbnailEnabledForHDR = config.imgSettingEnableImgThumbnail
+    if (options.thumbnailKeepHDR === 'keep') {
+      thumbnailEnabledForHDR = true
+    }
 
     // ===== 缩略图处理 =====
     if (isHDR) {
-      if (config.imgSettingThumbnailKeepHDR) {
+      if (thumbnailKeepHDR) {
         // 缩略图保留HDR：使用libavif-with-gainmap生成缩小的HDR AVIF缩略图
-        if (config.imgSettingEnableImgThumbnail && !options.noThumbnail) {
+        if (thumbnailEnabledForHDR && !options.noThumbnail) {
           const thumbnailDimensions = calculateResizeDimensions(
             dimensions.width,
             dimensions.height,
@@ -623,7 +658,7 @@ async function buildImageStorageData(
               gainMapQuality: config.imgSettingThumbnailHDRGainMapQuality,
               width: thumbnailDimensions.width,
               height: thumbnailDimensions.height,
-              speed: 9,
+              speed: config.imgSettingHDRAvifSpeed,
               jobs: 'all'
             })
             createdFiles.push(thumbnailPath)
@@ -710,7 +745,7 @@ async function buildImageStorageData(
       const convertOptions = {
         quality: config.imgSettingHDRQuality,
         gainMapQuality: config.imgSettingHDRGainMapQuality,
-        speed: 9,
+        speed: config.imgSettingHDRAvifSpeed,
         jobs: 'all'
       }
       const resizedDimensions = calculateResizeDimensions(
@@ -1150,7 +1185,12 @@ function validateReplacementFileType(attachment, file) {
   )
 }
 
-async function replaceLocalAttachment(body = {}, file, coverFile) {
+async function replaceLocalAttachment(
+  body = {},
+  file,
+  coverFile,
+  headers = {}
+) {
   if (!file || !file.buffer) {
     throw new ApiError(
       ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
@@ -1167,7 +1207,7 @@ async function replaceLocalAttachment(body = {}, file, coverFile) {
   const storageData = await saveLocalFile(file, String(attachment._id), {
     body,
     coverFile,
-    imageOptions: parseImageReplacementOptions(body)
+    imageOptions: parseImageOptionsFromHeaders(headers)
   })
   const updateData = {
     ...storageData.updateData,
@@ -1205,7 +1245,7 @@ async function replaceLocalAttachment(body = {}, file, coverFile) {
   return updatedAttachment
 }
 
-function parseLocalAttachmentInput(body = {}) {
+function parseLocalAttachmentInput(body = {}, headers = {}) {
   const languageCode = normalizeLanguageCode(body.languageCode)
   if (!languageCode) {
     throw new ApiError(
@@ -1220,7 +1260,7 @@ function parseLocalAttachmentInput(body = {}) {
     languageCode,
     name: String(body.name || '').trim(),
     description: String(body.description || '').trim(),
-    imageOptions: parseImageReplacementOptions(body)
+    imageOptions: parseImageOptionsFromHeaders(headers)
   }
 }
 
@@ -1251,7 +1291,7 @@ function isPureLocalAttachment(attachment) {
   return !hasRemoteOrigin(attachment)
 }
 
-async function createLocalAttachment(body = {}, file, coverFile) {
+async function createLocalAttachment(body = {}, file, coverFile, headers = {}) {
   if (!file || !file.buffer) {
     throw new ApiError(
       ERROR_CODES.UPLOAD_INVALID,
@@ -1261,7 +1301,7 @@ async function createLocalAttachment(body = {}, file, coverFile) {
     )
   }
 
-  const input = parseLocalAttachmentInput(body)
+  const input = parseLocalAttachmentInput(body, headers)
   const AttachmentModel = getAttachmentModel()
   const attachmentId = new mongoose.Types.ObjectId()
   const storageData = await saveLocalFile(file, String(attachmentId), {

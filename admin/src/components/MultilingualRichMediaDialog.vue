@@ -112,54 +112,7 @@
           <el-icon class="el-icon--upload"><Picture /></el-icon>
           <div class="el-upload__text">拖动文件或点击上传</div>
           <div class="mt5">
-            <el-popover placement="bottom" :width="200" trigger="click">
-              <div>
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="uploadOptions.noCompress"
-                  label="不压缩图片"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="uploadOptions.noThumbnail"
-                  label="不生成缩略图"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="uploadOptions.is360Panorama"
-                  label="是360°全景图片"
-                />
-                <div class="rich-media-option-field">
-                  <div class="rich-media-option-label">最长边</div>
-                  <el-input-number
-                    v-model="uploadOptions.imgSettingCompressMaxSize"
-                    :step="10"
-                    :precision="0"
-                    :min="1"
-                    size="small"
-                    controls-position="right"
-                  />
-                </div>
-              </div>
-              <template #reference>
-                <el-button
-                  size="small"
-                  :type="uploadOptionsCount > 0 ? 'primary' : ''"
-                  :plain="uploadOptionsCount <= 0"
-                  @click.stop
-                >
-                  <el-icon><Setting /></el-icon>
-                  <span class="pl3">
-                    设置<template v-if="uploadOptionsCount > 0"
-                      >（已设置 {{ uploadOptionsCount }} 项）</template
-                    >
-                  </span>
-                </el-button>
-              </template>
-            </el-popover>
+            <MediaUploadOptions :options="uploadOptions" />
           </div>
         </el-upload>
         <VideoUploader
@@ -320,21 +273,27 @@ import {
   Remove,
   Search,
   Select,
-  Setting,
   Sort,
   VideoPlay
 } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import { multilingualApi } from '@/api'
 import VideoUploader from '@/components/VideoUploader.vue'
+import MediaUploadOptions from '@/components/MediaUploadOptions.vue'
 import CheckDialogService from '@/services/CheckDialogService'
 import { loadAndOpenImg } from '@/utils/utils'
 import { getLanguageText } from '@/utils/multilingual'
+import {
+  createMediaUploadOptions,
+  resetMediaUploadOptions,
+  buildMediaUploadOptionHeaders
+} from '@/utils/mediaUploadOptions'
 
 export default {
   name: 'MultilingualRichMediaDialog',
   components: {
     VideoUploader,
+    MediaUploadOptions,
     draggable
   },
   props: {
@@ -387,12 +346,7 @@ export default {
       return props.selectLimit > params.limit
     })
 
-    const uploadOptions = reactive({
-      noCompress: false,
-      noThumbnail: false,
-      is360Panorama: false,
-      imgSettingCompressMaxSize: null
-    })
+    const uploadOptions = reactive(createMediaUploadOptions())
 
     const languageLabel = computed(() => {
       return getLanguageText(props.languageCode)
@@ -409,17 +363,9 @@ export default {
       return props.typeList.includes('video')
     })
 
-    const uploadOptionsCount = computed(() => {
-      return Object.keys(uploadOptions).filter(key => {
-        return uploadOptions[key] !== null && uploadOptions[key] !== false
-      }).length
-    })
-
     const resetUploadState = () => {
       fileList.value = []
-      uploadOptions.noCompress = false
-      uploadOptions.noThumbnail = false
-      uploadOptions.imgSettingCompressMaxSize = null
+      resetMediaUploadOptions(uploadOptions)
       uploadOptions.is360Panorama = props.is360Panorama === true
     }
 
@@ -686,18 +632,6 @@ export default {
       formData.append('description', '')
     }
 
-    const appendImageOptions = formData => {
-      formData.append('noCompress', uploadOptions.noCompress ? '1' : '0')
-      formData.append('noThumbnail', uploadOptions.noThumbnail ? '1' : '0')
-      formData.append('is360Panorama', uploadOptions.is360Panorama ? '1' : '0')
-      if (uploadOptions.imgSettingCompressMaxSize) {
-        formData.append(
-          'imgSettingCompressMaxSize',
-          String(uploadOptions.imgSettingCompressMaxSize)
-        )
-      }
-    }
-
     const handleCreateSuccess = () => {
       getMediaList(true)
     }
@@ -732,11 +666,13 @@ export default {
       const { uploadRequest, resolve, reject } = uploadQueue.value.shift()
       const formData = new FormData()
       appendBaseCreateFormData(formData)
-      appendImageOptions(formData)
       formData.append('file', uploadRequest.file, uploadRequest.file.name)
 
       multilingualApi
-        .createLocalMedia(formData)
+        .createLocalMedia(
+          formData,
+          buildMediaUploadOptionHeaders(uploadOptions)
+        )
         .then(response => {
           resolve(response)
         })
@@ -937,7 +873,6 @@ export default {
       total,
       params,
       uploadOptions,
-      uploadOptionsCount,
       fileList,
       selectedMediaList,
       selectedMediaListCopy,

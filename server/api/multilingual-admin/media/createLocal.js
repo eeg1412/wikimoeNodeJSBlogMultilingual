@@ -22,7 +22,8 @@ module.exports = async function createLocal(req, res) {
     const data = await mediaService.createLocalAttachment(
       req.body,
       file,
-      coverFile
+      coverFile,
+      req.headers
     )
     res.send({ data })
   } catch (error) {

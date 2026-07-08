@@ -100,6 +100,14 @@ const MEDIA_SETTING_FIELDS = [
     max: 100
   },
   {
+    name: 'imgSettingHDRAvifSpeed',
+    label: 'HDR AVIF 编码速度',
+    type: 'number',
+    defaultValue: 6,
+    min: 0,
+    max: 10
+  },
+  {
     name: 'videoSettingCompressMaxSize',
     label: '视频最长边',
     type: 'number',

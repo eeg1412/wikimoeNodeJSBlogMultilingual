@@ -488,9 +488,10 @@ export default function (api) {
         noLoading
       })
     },
-    createLocalMedia(data) {
+    createLocalMedia(data, headers = {}) {
       return api.post('/media/create-local', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        headers
       })
     },
     deleteLocalMedia(data) {
@@ -499,9 +500,10 @@ export default function (api) {
         shouldAdminJWT: true
       })
     },
-    replaceLocalMedia(data) {
+    replaceLocalMedia(data, headers = {}) {
       return api.post('/media/replace-local', data, {
-        shouldAdminJWT: true
+        shouldAdminJWT: true,
+        headers
       })
     },
     convertRemoteMedia(data) {

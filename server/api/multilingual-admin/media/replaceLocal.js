@@ -21,7 +21,8 @@ module.exports = async function replaceLocal(req, res) {
     const data = await mediaService.replaceLocalAttachment(
       req.body,
       file,
-      coverFile
+      coverFile,
+      req.headers
     )
     res.send({ data })
   } catch (error) {

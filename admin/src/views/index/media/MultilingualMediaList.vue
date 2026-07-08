@@ -461,57 +461,7 @@
           <el-icon class="el-icon--upload"><Picture /></el-icon>
           <div class="el-upload__text">拖动文件或点击上传</div>
           <div class="mt5">
-            <el-popover placement="bottom" :width="200" trigger="click">
-              <div>
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="replaceOptions.noCompress"
-                  label="不压缩图片"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="replaceOptions.noThumbnail"
-                  label="不生成缩略图"
-                />
-                <el-checkbox
-                  @click.stop
-                  size="small"
-                  v-model="replaceOptions.is360Panorama"
-                  label="是360°全景图片"
-                />
-                <div class="accactment-options-filed">
-                  <div class="accactment-options-label">最长边:</div>
-                  <div class="accactment-options-value">
-                    <el-input-number
-                      v-model="replaceOptions.imgSettingCompressMaxSize"
-                      :step="10"
-                      :precision="0"
-                      :min="1"
-                      size="small"
-                      placeholder="设置最长边"
-                      clearable
-                    />
-                  </div>
-                </div>
-              </div>
-              <template #reference>
-                <el-button
-                  size="small"
-                  :type="replaceOptionsCount > 0 ? 'primary' : ''"
-                  :plain="replaceOptionsCount <= 0"
-                  @click.stop
-                >
-                  <el-icon><Setting /></el-icon>
-                  <span class="pl3">
-                    设置<template v-if="replaceOptionsCount > 0">
-                      （已设置 {{ replaceOptionsCount }} 项）
-                    </template>
-                  </span>
-                </el-button>
-              </template>
-            </el-popover>
+            <MediaUploadOptions :options="replaceOptions" />
           </div>
         </el-upload>
         <VideoUploader
@@ -551,7 +501,13 @@ import { multilingualApi } from '@/api'
 import CheckDialogService from '@/services/CheckDialogService'
 import ContentAiTranslationDialog from '@/components/ContentAiTranslationDialog.vue'
 import VideoUploader from '@/components/VideoUploader.vue'
+import MediaUploadOptions from '@/components/MediaUploadOptions.vue'
 import { loadAndOpenImg } from '@/utils/utils'
+import {
+  createMediaUploadOptions,
+  resetMediaUploadOptions,
+  buildMediaUploadOptionHeaders
+} from '@/utils/mediaUploadOptions'
 import {
   restoreListSessionParams,
   saveListSessionParams
@@ -573,6 +529,7 @@ export default {
     Delete,
     EditPen,
     MagicStick,
+    MediaUploadOptions,
     Picture,
     Refresh,
     Setting,
@@ -613,18 +570,7 @@ export default {
     const currentAiSnapshotVersion = computed(() => {
       return Number(currentRow.value?.snapshotVersion || 1)
     })
-    const replaceOptions = reactive({
-      noCompress: false,
-      noThumbnail: false,
-      is360Panorama: false,
-      imgSettingCompressMaxSize: null
-    })
-
-    const replaceOptionsCount = computed(() => {
-      return Object.keys(replaceOptions).filter(key => {
-        return replaceOptions[key] !== null && replaceOptions[key] !== false
-      }).length
-    })
+    const replaceOptions = reactive(createMediaUploadOptions())
 
     const getDefaultParams = scope => {
       const defaultParams = {
@@ -1276,27 +1222,12 @@ export default {
 
     const resetReplaceForm = () => {
       imageFileList.value = []
-      replaceOptions.noCompress = false
-      replaceOptions.noThumbnail = false
-      replaceOptions.is360Panorama = false
-      replaceOptions.imgSettingCompressMaxSize = null
+      resetMediaUploadOptions(replaceOptions)
     }
 
     const appendBaseReplaceFormData = formData => {
       formData.append('id', currentRow.value._id)
       formData.append('languageCode', currentRow.value.languageCode)
-    }
-
-    const appendImageReplaceOptions = formData => {
-      formData.append('noCompress', replaceOptions.noCompress ? '1' : '0')
-      formData.append('noThumbnail', replaceOptions.noThumbnail ? '1' : '0')
-      formData.append('is360Panorama', replaceOptions.is360Panorama ? '1' : '0')
-      if (replaceOptions.imgSettingCompressMaxSize) {
-        formData.append(
-          'imgSettingCompressMaxSize',
-          String(replaceOptions.imgSettingCompressMaxSize)
-        )
-      }
     }
 
     const handleReplaceSuccess = () => {
@@ -1328,12 +1259,14 @@ export default {
 
       const formData = new FormData()
       appendBaseReplaceFormData(formData)
-      appendImageReplaceOptions(formData)
       formData.append('file', file, file.name)
 
       replaceSubmitting.value = true
       return multilingualApi
-        .replaceLocalMedia(formData)
+        .replaceLocalMedia(
+          formData,
+          buildMediaUploadOptionHeaders(replaceOptions)
+        )
         .then(() => {
           ElMessage.success('替换成功')
           handleReplaceSuccess()
@@ -1468,7 +1401,6 @@ export default {
       currentAiSourceLanguageCode,
       currentAiTargetLanguageCode,
       replaceOptions,
-      replaceOptionsCount,
       isSourceScope,
       breadcrumbGroup,
       pageTitle,
