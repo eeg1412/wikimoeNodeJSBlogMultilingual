@@ -568,6 +568,12 @@ const multilingualAdminRouteSetting = [
     controller: require('../api/multilingual-admin/source/relation/syncAuthorMedia')
   },
   {
+    path: '/source/relation/refresh-snapshot',
+    method: 'post',
+    middleware: [checkAuth],
+    controller: require('../api/multilingual-admin/source/relation/refreshSnapshot')
+  },
+  {
     path: '/translation/post/create',
     method: 'post',
     middleware: [checkAuth],

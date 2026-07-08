@@ -214,7 +214,7 @@
         </ResponsiveTableColumn>
         <ResponsiveTableColumn
           label="操作"
-          :width="isSourceScope ? 90 : 140"
+          :width="isSourceScope ? 160 : 140"
           fixed="right"
         >
           <template #default="{ row }">
@@ -224,6 +224,15 @@
               @click="openDetail(row)"
             >
               详情
+            </el-button>
+            <el-button
+              v-if="isSourceScope"
+              type="warning"
+              size="small"
+              :loading="isSourceSnapshotSyncing(row)"
+              @click="syncSourceSnapshot(row)"
+            >
+              同步
             </el-button>
             <el-dropdown
               v-else
@@ -554,6 +563,7 @@ export default {
     const replaceSubmitting = ref(false)
     const editSubmitting = ref(false)
     const aiSkipLoadingMap = reactive({})
+    const sourceSnapshotSyncLoadingMap = reactive({})
     const editForm = reactive({
       name: '',
       description: '',
@@ -910,6 +920,74 @@ export default {
     const openDetail = row => {
       currentRow.value = row
       detailDialogVisible.value = true
+    }
+
+    const getSourceSnapshotSyncActionKey = row => {
+      if (!row || !row._id) {
+        return ''
+      }
+      return `sourceMediaSnapshotSync:${row._id}`
+    }
+
+    const isSourceSnapshotSyncing = row => {
+      const actionKey = getSourceSnapshotSyncActionKey(row)
+      return Boolean(actionKey && sourceSnapshotSyncLoadingMap[actionKey])
+    }
+
+    const syncSourceSnapshot = row => {
+      if (!row || !isSourceScope.value || isSourceSnapshotSyncing(row)) {
+        return
+      }
+
+      const actionKey = getSourceSnapshotSyncActionKey(row)
+      if (!actionKey) {
+        return
+      }
+
+      ElMessageBox.confirm(
+        '确认从源站重新拉取该媒体的最新信息并更新源快照？如源内容有变化，关联的多语言媒体译文会被标记为“源已变更”，需要重新校对。',
+        '同步源媒体快照',
+        {
+          type: 'warning',
+          confirmButtonText: '同步',
+          cancelButtonText: '取消'
+        }
+      )
+        .then(() => {
+          sourceSnapshotSyncLoadingMap[actionKey] = true
+          return multilingualApi.refreshSourceRelationSnapshot(
+            {
+              collectionName: 'attachments',
+              sourceSnapshotId: row._id
+            },
+            true
+          )
+        })
+        .then(response => {
+          const result = response.data.data || {}
+          preserveTableScrollForNextRefresh()
+          getMediaList(false)
+          if (result.sourceHashChanged) {
+            const changedCount = Number(result.sourceChangedTranslations || 0)
+            if (changedCount > 0) {
+              ElMessage.success(
+                `已同步最新源信息，并标记 ${changedCount} 条多语言媒体译文为源已变更`
+              )
+              return
+            }
+            ElMessage.success('已同步最新源信息')
+            return
+          }
+          ElMessage.info('源信息没有变化，源快照已是最新')
+        })
+        .catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+        .finally(() => {
+          sourceSnapshotSyncLoadingMap[actionKey] = false
+        })
     }
 
     const openEdit = row => {
@@ -1424,6 +1502,8 @@ export default {
       handleMediaActionCommand,
       getMediaList,
       openDetail,
+      isSourceSnapshotSyncing,
+      syncSourceSnapshot,
       toggleAiSkip,
       openEdit,
       openTranslationDialog,

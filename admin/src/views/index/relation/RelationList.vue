@@ -171,7 +171,7 @@
             />
           </template>
         </ResponsiveTableColumn>
-        <ResponsiveTableColumn label="操作" width="200" fixed="right">
+        <ResponsiveTableColumn label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <div
               v-if="canUseAuthorActionGroup(row)"
@@ -203,6 +203,15 @@
             </div>
             <template v-else>
               <el-button size="small" @click="openDetail(row)">详情</el-button>
+              <el-button
+                v-if="isSourceScope"
+                type="warning"
+                size="small"
+                :loading="isSourceSnapshotSyncing(row)"
+                @click="syncSourceSnapshot(row)"
+              >
+                同步
+              </el-button>
               <el-button
                 v-if="!isSourceScope"
                 type="primary"
@@ -461,7 +470,7 @@ export default {
     const aiSkipLoadingMap = reactive({})
     const editForm = reactive({})
     const sourceAuthorMediaSyncLoadingMap = reactive({})
-
+    const sourceSnapshotSyncLoadingMap = reactive({})
     const getDefaultParams = () => {
       const defaultParams = {
         page: 1,
@@ -909,6 +918,79 @@ export default {
         })
     }
 
+    const getSourceSnapshotSyncActionKey = row => {
+      if (!row || !row._id) {
+        return ''
+      }
+      return `sourceSnapshotSync:${row._id}`
+    }
+
+    const isSourceSnapshotSyncing = row => {
+      const actionKey = getSourceSnapshotSyncActionKey(row)
+      return Boolean(actionKey && sourceSnapshotSyncLoadingMap[actionKey])
+    }
+
+    const syncSourceSnapshot = row => {
+      if (!row || !isSourceScope.value || isSourceSnapshotSyncing(row)) {
+        return
+      }
+
+      const actionKey = getSourceSnapshotSyncActionKey(row)
+      if (!actionKey) {
+        return
+      }
+
+      const collectionName = getRowCollectionName(row)
+      if (!collectionName) {
+        return
+      }
+
+      ElMessageBox.confirm(
+        '确认从源站重新拉取该记录的最新信息并更新源快照？如源内容有变化，关联的多语言译文会被标记为“源已变更”，需要重新校对。',
+        '同步源快照',
+        {
+          type: 'warning',
+          confirmButtonText: '同步',
+          cancelButtonText: '取消'
+        }
+      )
+        .then(() => {
+          sourceSnapshotSyncLoadingMap[actionKey] = true
+          return multilingualApi.refreshSourceRelationSnapshot(
+            {
+              collectionName,
+              sourceSnapshotId: row._id
+            },
+            true
+          )
+        })
+        .then(response => {
+          const result = response.data.data || {}
+          preserveTableScrollForNextRefresh()
+          getRelationList(false)
+          if (result.sourceHashChanged) {
+            const changedCount = Number(result.sourceChangedTranslations || 0)
+            if (changedCount > 0) {
+              ElMessage.success(
+                `已同步最新源信息，并标记 ${changedCount} 条多语言译文为源已变更`
+              )
+              return
+            }
+            ElMessage.success('已同步最新源信息')
+            return
+          }
+          ElMessage.info('源信息没有变化，源快照已是最新')
+        })
+        .catch(error => {
+          if (error !== 'cancel' && error !== 'close') {
+            console.log(error)
+          }
+        })
+        .finally(() => {
+          sourceSnapshotSyncLoadingMap[actionKey] = false
+        })
+    }
+
     const handleAuthorAction = (row, command) => {
       if (command === 'edit') {
         openEdit(row)
@@ -1176,6 +1258,7 @@ export default {
       canSyncSourceAuthorMedia,
       canUseAuthorActionGroup,
       isSourceAuthorMediaSyncing,
+      isSourceSnapshotSyncing,
       getRelationList,
       handlePageChange,
       handleAuthorAction,
@@ -1188,6 +1271,7 @@ export default {
       openDetail,
       openEdit,
       syncSourceAuthorMedia,
+      syncSourceSnapshot,
       restoreSnapshot,
       submitUpdate
     }

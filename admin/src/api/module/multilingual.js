@@ -65,6 +65,12 @@ export default function (api) {
         noLoading
       })
     },
+    refreshSourceRelationSnapshot(data, noLoading = false) {
+      return api.post('/source/relation/refresh-snapshot', data, {
+        shouldAdminJWT: true,
+        noLoading
+      })
+    },
     getSourcePostDetail(data, noLoading = false) {
       return api.get('/source/post/detail', {
         params: data,

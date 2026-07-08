@@ -18,7 +18,26 @@ const SOURCE_POST_COLLECTION = 'posts'
 const SOURCE_RECORD_KIND = 'source'
 const TRANSLATION_RECORD_KIND = 'translation'
 const RELATION_COPY_CONCURRENCY = 4
-const REFRESHABLE_SOURCE_RELATION_COLLECTIONS = new Set(['users'])
+const REFRESHABLE_SOURCE_RELATION_COLLECTIONS = new Set([
+  'users',
+  'sorts',
+  'tags',
+  'mappoints',
+  'bangumis',
+  'movies',
+  'games',
+  'gamePlatforms',
+  'books',
+  'booktypes',
+  'events',
+  'eventtypes',
+  'votes',
+  'attachments'
+])
+const SYNCABLE_SOURCE_SNAPSHOT_COLLECTIONS = new Set([
+  ...REFRESHABLE_SOURCE_RELATION_COLLECTIONS,
+  'posts'
+])
 
 const SYSTEM_FIELDS = new Set([
   '_id',
@@ -1262,6 +1281,135 @@ async function refreshSourceRelationSnapshot(body = {}) {
   }
 }
 
+async function markRelationTranslationsPendingReview(
+  collectionName,
+  translationGroupId,
+  now
+) {
+  if (!translationGroupId) {
+    return 0
+  }
+
+  const Model = getMultilingualModel(collectionName)
+  const result = await Model.updateMany(
+    {
+      translationGroupId,
+      recordKind: TRANSLATION_RECORD_KIND
+    },
+    {
+      $set: {
+        sourceChanged: true,
+        pendingReview: true,
+        sourceChangedAt: now
+      }
+    }
+  )
+
+  return result.modifiedCount || 0
+}
+
+function parseSourceSnapshotSyncInput(body = {}) {
+  const collectionName = String(body.collectionName || '').trim()
+  if (!SYNCABLE_SOURCE_SNAPSHOT_COLLECTIONS.has(collectionName)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_FIELD_INVALID,
+      'collectionName is not supported',
+      'collectionName',
+      400
+    )
+  }
+
+  const sourceSnapshotId = String(body.sourceSnapshotId || body.id || '').trim()
+  if (!mongoose.Types.ObjectId.isValid(sourceSnapshotId)) {
+    throw new ApiError(
+      ERROR_CODES.CONTENT_ID_INVALID,
+      undefined,
+      'sourceSnapshotId',
+      400
+    )
+  }
+
+  return {
+    collectionName,
+    sourceSnapshotId
+  }
+}
+
+async function syncSourcePostSnapshotFromSource(sourceSnapshotId) {
+  const snapshot = await findExistingSourceRelationSnapshot(
+    'posts',
+    sourceSnapshotId
+  )
+  if (!snapshot) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source post snapshot not found',
+      'sourceSnapshotId',
+      404
+    )
+  }
+
+  const sourceId = toObjectId(snapshot.sourceId)
+  if (!sourceId) {
+    throw new ApiError(
+      ERROR_CODES.SOURCE_SNAPSHOT_NOT_FOUND,
+      'source post identity not found',
+      'sourceId',
+      404
+    )
+  }
+
+  const previousSnapshotVersion = snapshot.snapshotVersion || 1
+  const result = await importOrOverwriteSourcePost(
+    {
+      sourceId: String(sourceId),
+      sourceLanguageCode: snapshot.sourceLanguageCode,
+      overwrite: true
+    },
+    true
+  )
+
+  return {
+    collectionName: 'posts',
+    sourceSnapshotId: result.sourceSnapshotId,
+    snapshotVersion: result.snapshotVersion,
+    sourceHashChanged: result.snapshotVersion > previousSnapshotVersion,
+    sourceChangedTranslations: result.sourceChangedTranslations || 0,
+    copiedCounts: result.copiedCounts
+  }
+}
+
+async function syncSourceRelationSnapshot(body = {}) {
+  const input = parseSourceSnapshotSyncInput(body)
+
+  if (input.collectionName === 'posts') {
+    return await syncSourcePostSnapshotFromSource(input.sourceSnapshotId)
+  }
+
+  const refreshResult = await refreshSourceRelationSnapshot({
+    collectionName: input.collectionName,
+    sourceSnapshotId: input.sourceSnapshotId
+  })
+
+  let sourceChangedTranslations = 0
+  if (refreshResult.sourceHashChanged) {
+    sourceChangedTranslations = await markRelationTranslationsPendingReview(
+      input.collectionName,
+      refreshResult.translationGroupId,
+      new Date()
+    )
+  }
+
+  return {
+    collectionName: input.collectionName,
+    sourceSnapshotId: refreshResult.sourceSnapshotId,
+    snapshotVersion: refreshResult.snapshotVersion,
+    sourceHashChanged: refreshResult.sourceHashChanged,
+    sourceChangedTranslations,
+    copiedCounts: refreshResult.copiedCounts
+  }
+}
+
 async function findSourcePostSnapshotById(id) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return null
@@ -1878,6 +2026,7 @@ module.exports = {
   createSourceHash,
   copySourceRecord,
   refreshSourceRelationSnapshot,
+  syncSourceRelationSnapshot,
   repairSourcePostSnapshotRelations,
   importOrOverwriteSourcePost,
   getSourceDatabasePostList,
