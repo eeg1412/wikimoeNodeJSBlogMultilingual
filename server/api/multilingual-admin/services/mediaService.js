@@ -1412,6 +1412,12 @@ function buildRemoteUpdateData(attachment) {
       'thumHeight',
       attachment.thumHeight || 0
     ),
+    is360Panorama: getSnapshotValue(
+      remoteSnapshot,
+      'is360Panorama',
+      Boolean(attachment.is360Panorama)
+    ),
+    isHDR: getSnapshotValue(remoteSnapshot, 'isHDR', Boolean(attachment.isHDR)),
     localFilepath: '',
     localThumbnailPath: '',
     localStorageStatus: 'none'

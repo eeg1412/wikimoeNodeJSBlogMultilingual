@@ -445,6 +445,7 @@ const POST_DETAIL_ATTACHMENT_SELECT_FIELDS = [
   'album',
   'description',
   'is360Panorama',
+  'isHDR',
   'status',
   'mediaMode',
   'remoteSourceId',
@@ -470,7 +471,8 @@ const POST_RELATED_ATTACHMENT_PREVIEW_SELECT_FIELDS = [
   'thumHeight',
   'mimetype',
   'mediaMode',
-  'is360Panorama'
+  'is360Panorama',
+  'isHDR'
 ].join(' ')
 
 function getPostModel() {
@@ -967,6 +969,8 @@ function buildRemoteSnapshot(sourceObject) {
     thumfor: sourceObject.thumfor || '',
     thumWidth: sourceObject.thumWidth || null,
     thumHeight: sourceObject.thumHeight || null,
+    is360Panorama: Boolean(sourceObject.is360Panorama),
+    isHDR: Boolean(sourceObject.isHDR),
     createdAt: sourceObject.createdAt || null,
     updatedAt: sourceObject.updatedAt || null
   }

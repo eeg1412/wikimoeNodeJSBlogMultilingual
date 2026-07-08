@@ -577,6 +577,8 @@ function buildRemoteSnapshot(sourceObject) {
     thumfor: sourceObject.thumfor || '',
     thumWidth: sourceObject.thumWidth || null,
     thumHeight: sourceObject.thumHeight || null,
+    is360Panorama: Boolean(sourceObject.is360Panorama),
+    isHDR: Boolean(sourceObject.isHDR),
     createdAt: sourceObject.createdAt || null,
     updatedAt: sourceObject.updatedAt || null
   }

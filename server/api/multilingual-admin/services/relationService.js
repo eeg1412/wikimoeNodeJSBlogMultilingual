@@ -180,7 +180,7 @@ const BUSINESS_FIELDS = {
     'endTime',
     'status'
   ]),
-  attachments: new Set(['name', 'description', 'album', 'is360Panorama'])
+  attachments: new Set(['name', 'description', 'album', 'is360Panorama', 'isHDR'])
 }
 
 function getMultilingualModel(collectionName) {
