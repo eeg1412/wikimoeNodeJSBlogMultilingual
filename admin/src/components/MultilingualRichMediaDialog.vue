@@ -288,6 +288,7 @@ import {
   resetMediaUploadOptions,
   buildMediaUploadOptionHeaders
 } from '@/utils/mediaUploadOptions'
+import { requestScreenWakeLock, releaseScreenWakeLock } from '@/utils/wakeLock'
 
 export default {
   name: 'MultilingualRichMediaDialog',
@@ -645,6 +646,8 @@ export default {
         return Promise.reject(new Error('请先选择语言'))
       }
       return new Promise((resolve, reject) => {
+        // 图片上传期间保持屏幕常亮（全部上传完毕后释放）
+        requestScreenWakeLock()
         uploadQueue.value.push({
           uploadRequest,
           resolve,
@@ -682,6 +685,7 @@ export default {
         .finally(() => {
           uploading.value--
           processUploadQueue()
+          releaseScreenWakeLock()
         })
     }
 

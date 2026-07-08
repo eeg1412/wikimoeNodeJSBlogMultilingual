@@ -1471,6 +1471,7 @@ import {
   buildMediaUploadOptionHeaders,
   getMediaUploadOptionsCount
 } from '@/utils/mediaUploadOptions'
+import { requestScreenWakeLock, releaseScreenWakeLock } from '@/utils/wakeLock'
 import {
   createAiSettingsAvailability,
   createAiSettingsLoadErrorAvailability,
@@ -2608,6 +2609,8 @@ export default {
       formData.append('file', file, file.name)
 
       articleMediaReplaceSubmitting.value = true
+      // 图片替换上传期间保持屏幕常亮
+      requestScreenWakeLock()
       return multilingualApi
         .replaceLocalMedia(
           formData,
@@ -2620,6 +2623,7 @@ export default {
         })
         .finally(() => {
           articleMediaReplaceSubmitting.value = false
+          releaseScreenWakeLock()
         })
     }
 
