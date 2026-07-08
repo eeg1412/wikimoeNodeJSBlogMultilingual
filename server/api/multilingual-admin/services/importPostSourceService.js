@@ -1283,17 +1283,18 @@ async function refreshSourceRelationSnapshot(body = {}) {
 
 async function markRelationTranslationsPendingReview(
   collectionName,
-  translationGroupId,
+  sourceId,
   now
 ) {
-  if (!translationGroupId) {
+  if (!sourceId) {
     return 0
   }
 
   const Model = getMultilingualModel(collectionName)
   const result = await Model.updateMany(
     {
-      translationGroupId,
+      sourceCollection: collectionName,
+      sourceId,
       recordKind: TRANSLATION_RECORD_KIND
     },
     {
@@ -1395,7 +1396,7 @@ async function syncSourceRelationSnapshot(body = {}) {
   if (refreshResult.sourceHashChanged) {
     sourceChangedTranslations = await markRelationTranslationsPendingReview(
       input.collectionName,
-      refreshResult.translationGroupId,
+      refreshResult.sourceId,
       new Date()
     )
   }
